@@ -16,7 +16,7 @@ AEGIS_CLUSTER_ID ?= dev-1
 AEGIS_REGION ?= us-local
 AEGIS_PROVIDER ?= DEV
 
-.PHONY: all proto tidy build test run-api run-agent
+.PHONY: all proto tidy build test verify run-api run-agent stop
 
 all: proto tidy build
 
@@ -52,6 +52,14 @@ else
 	@echo "ALLOW_NET=0: skipping test"
 endif
 
+verify:
+	@PATH="$(BIN_DIR):$$PATH" BUF_CACHE_DIR="$(BUF_CACHE_DIR)" $(MAKE) proto
+	@$(MAKE) tidy ALLOW_NET=1
+	@$(MAKE) build ALLOW_NET=1
+	@$(MAKE) test ALLOW_NET=1
+	@(cd $(API_MOD) && go list ./...)
+	@(cd $(AGENT_MOD) && go list ./...)
+
 run-api:
 ifeq ($(ALLOW_SOCKETS),1)
 	@cd $(API_MOD) && GRPC_ADDR=$(GRPC_ADDR) HTTP_ADDR=$(HTTP_ADDR) go run ./...
@@ -65,3 +73,7 @@ ifeq ($(ALLOW_SOCKETS),1)
 else
 	@echo "ALLOW_SOCKETS=0: disabled here"
 endif
+
+stop:
+	@pkill -f services/platform-api || true
+	@pkill -f k8s-agent/cmd/agent || true

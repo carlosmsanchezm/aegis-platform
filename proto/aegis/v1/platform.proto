@@ -40,6 +40,24 @@ message GetWorkloadRequest { string id = 1; }
 message ListWorkloadsRequest { string project_id = 1; }
 message ListWorkloadsResponse { repeated Workload items = 1; }
 
+message LeaseWorkloadRequest {
+  string cluster_id = 1;
+  int32 max = 2;
+}
+
+message LeaseWorkloadResponse {
+  repeated Workload items = 1;
+}
+
+message AckWorkloadRequest {
+  string id = 1;
+  string status = 2;
+}
+
+message AckWorkloadResponse {
+  Workload workload = 1;
+}
+
 // Service
 service AegisPlatform {
   rpc CreateProject(CreateProjectRequest) returns (Project);
@@ -50,6 +68,9 @@ service AegisPlatform {
   rpc SubmitWorkload(SubmitWorkloadRequest) returns (Workload);
   rpc GetWorkload(GetWorkloadRequest) returns (Workload);
   rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
+
+  rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse);
+  rpc AckWorkload(AckWorkloadRequest) returns (AckWorkloadResponse);
 
   rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse);
   rpc Heartbeat(ClusterHeartbeat) returns (ClusterHeartbeatAck);

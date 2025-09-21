@@ -1215,6 +1215,198 @@ func (x *ListWorkloadsResponse) GetItems() []*Workload {
 	return nil
 }
 
+type LeaseWorkloadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Max           int32                  `protobuf:"varint,2,opt,name=max,proto3" json:"max,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaseWorkloadRequest) Reset() {
+	*x = LeaseWorkloadRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaseWorkloadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaseWorkloadRequest) ProtoMessage() {}
+
+func (x *LeaseWorkloadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaseWorkloadRequest.ProtoReflect.Descriptor instead.
+func (*LeaseWorkloadRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *LeaseWorkloadRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *LeaseWorkloadRequest) GetMax() int32 {
+	if x != nil {
+		return x.Max
+	}
+	return 0
+}
+
+type LeaseWorkloadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*Workload            `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaseWorkloadResponse) Reset() {
+	*x = LeaseWorkloadResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaseWorkloadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaseWorkloadResponse) ProtoMessage() {}
+
+func (x *LeaseWorkloadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaseWorkloadResponse.ProtoReflect.Descriptor instead.
+func (*LeaseWorkloadResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *LeaseWorkloadResponse) GetItems() []*Workload {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type AckWorkloadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckWorkloadRequest) Reset() {
+	*x = AckWorkloadRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckWorkloadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckWorkloadRequest) ProtoMessage() {}
+
+func (x *AckWorkloadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckWorkloadRequest.ProtoReflect.Descriptor instead.
+func (*AckWorkloadRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AckWorkloadRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AckWorkloadRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type AckWorkloadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workload      *Workload              `protobuf:"bytes,1,opt,name=workload,proto3" json:"workload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckWorkloadResponse) Reset() {
+	*x = AckWorkloadResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckWorkloadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckWorkloadResponse) ProtoMessage() {}
+
+func (x *AckWorkloadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckWorkloadResponse.ProtoReflect.Descriptor instead.
+func (*AckWorkloadResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *AckWorkloadResponse) GetWorkload() *Workload {
+	if x != nil {
+		return x.Workload
+	}
+	return nil
+}
+
 var File_aegis_v1_platform_proto protoreflect.FileDescriptor
 
 const file_aegis_v1_platform_proto_rawDesc = "" +
@@ -1312,7 +1504,18 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"A\n" +
 	"\x15ListWorkloadsResponse\x12(\n" +
-	"\x05items\x18\x01 \x03(\v2\x12.aegis.v1.WorkloadR\x05items2\x8d\x05\n" +
+	"\x05items\x18\x01 \x03(\v2\x12.aegis.v1.WorkloadR\x05items\"G\n" +
+	"\x14LeaseWorkloadRequest\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x10\n" +
+	"\x03max\x18\x02 \x01(\x05R\x03max\"A\n" +
+	"\x15LeaseWorkloadResponse\x12(\n" +
+	"\x05items\x18\x01 \x03(\v2\x12.aegis.v1.WorkloadR\x05items\"<\n" +
+	"\x12AckWorkloadRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"E\n" +
+	"\x13AckWorkloadResponse\x12.\n" +
+	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload2\xab\x06\n" +
 	"\rAegisPlatform\x12B\n" +
 	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\x12?\n" +
 	"\fUpsertBudget\x12\x1d.aegis.v1.UpsertBudgetRequest\x1a\x10.aegis.v1.Budget\x12?\n" +
@@ -1320,7 +1523,9 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\vUpsertQueue\x12\x1c.aegis.v1.UpsertQueueRequest\x1a\x0f.aegis.v1.Queue\x12E\n" +
 	"\x0eSubmitWorkload\x12\x1f.aegis.v1.SubmitWorkloadRequest\x1a\x12.aegis.v1.Workload\x12?\n" +
 	"\vGetWorkload\x12\x1c.aegis.v1.GetWorkloadRequest\x1a\x12.aegis.v1.Workload\x12P\n" +
-	"\rListWorkloads\x12\x1e.aegis.v1.ListWorkloadsRequest\x1a\x1f.aegis.v1.ListWorkloadsResponse\x12V\n" +
+	"\rListWorkloads\x12\x1e.aegis.v1.ListWorkloadsRequest\x1a\x1f.aegis.v1.ListWorkloadsResponse\x12P\n" +
+	"\rLeaseWorkload\x12\x1e.aegis.v1.LeaseWorkloadRequest\x1a\x1f.aegis.v1.LeaseWorkloadResponse\x12J\n" +
+	"\vAckWorkload\x12\x1c.aegis.v1.AckWorkloadRequest\x1a\x1d.aegis.v1.AckWorkloadResponse\x12V\n" +
 	"\x0fRegisterCluster\x12 .aegis.v1.ClusterRegisterRequest\x1a!.aegis.v1.ClusterRegisterResponse\x12F\n" +
 	"\tHeartbeat\x12\x1a.aegis.v1.ClusterHeartbeat\x1a\x1d.aegis.v1.ClusterHeartbeatAckB\x8f\x01\n" +
 	"\fcom.aegis.v1B\rPlatformProtoP\x01Z/github.com/yourorg/aegis/proto/aegis/v1;aegisv1\xa2\x02\x03AXX\xaa\x02\bAegis.V1\xca\x02\bAegis\\V1\xe2\x02\x14Aegis\\V1\\GPBMetadata\xea\x02\tAegis::V1b\x06proto3"
@@ -1337,7 +1542,7 @@ func file_aegis_v1_platform_proto_rawDescGZIP() []byte {
 	return file_aegis_v1_platform_proto_rawDescData
 }
 
-var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Project)(nil),                 // 0: aegis.v1.Project
 	(*PolicyDomain)(nil),            // 1: aegis.v1.PolicyDomain
@@ -1359,15 +1564,19 @@ var file_aegis_v1_platform_proto_goTypes = []any{
 	(*GetWorkloadRequest)(nil),      // 17: aegis.v1.GetWorkloadRequest
 	(*ListWorkloadsRequest)(nil),    // 18: aegis.v1.ListWorkloadsRequest
 	(*ListWorkloadsResponse)(nil),   // 19: aegis.v1.ListWorkloadsResponse
-	nil,                             // 20: aegis.v1.WorkspaceSpec.EnvEntry
-	nil,                             // 21: aegis.v1.ClusterRegisterRequest.LabelsEntry
+	(*LeaseWorkloadRequest)(nil),    // 20: aegis.v1.LeaseWorkloadRequest
+	(*LeaseWorkloadResponse)(nil),   // 21: aegis.v1.LeaseWorkloadResponse
+	(*AckWorkloadRequest)(nil),      // 22: aegis.v1.AckWorkloadRequest
+	(*AckWorkloadResponse)(nil),     // 23: aegis.v1.AckWorkloadResponse
+	nil,                             // 24: aegis.v1.WorkspaceSpec.EnvEntry
+	nil,                             // 25: aegis.v1.ClusterRegisterRequest.LabelsEntry
 }
 var file_aegis_v1_platform_proto_depIdxs = []int32{
 	1,  // 0: aegis.v1.Project.policy:type_name -> aegis.v1.PolicyDomain
-	20, // 1: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
+	24, // 1: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
 	5,  // 2: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
 	6,  // 3: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
-	21, // 4: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
+	25, // 4: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
 	3,  // 5: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
 	0,  // 6: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
 	2,  // 7: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
@@ -1375,29 +1584,35 @@ var file_aegis_v1_platform_proto_depIdxs = []int32{
 	4,  // 9: aegis.v1.UpsertQueueRequest.queue:type_name -> aegis.v1.Queue
 	7,  // 10: aegis.v1.SubmitWorkloadRequest.workload:type_name -> aegis.v1.Workload
 	7,  // 11: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
-	12, // 12: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
-	13, // 13: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
-	14, // 14: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
-	15, // 15: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
-	16, // 16: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
-	17, // 17: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
-	18, // 18: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
-	8,  // 19: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
-	10, // 20: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
-	0,  // 21: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
-	2,  // 22: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
-	3,  // 23: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
-	4,  // 24: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
-	7,  // 25: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
-	7,  // 26: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
-	19, // 27: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
-	9,  // 28: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
-	11, // 29: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
-	21, // [21:30] is the sub-list for method output_type
-	12, // [12:21] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	7,  // 12: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
+	7,  // 13: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	12, // 14: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
+	13, // 15: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
+	14, // 16: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
+	15, // 17: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
+	16, // 18: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
+	17, // 19: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
+	18, // 20: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
+	20, // 21: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
+	22, // 22: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
+	8,  // 23: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
+	10, // 24: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
+	0,  // 25: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
+	2,  // 26: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
+	3,  // 27: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
+	4,  // 28: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
+	7,  // 29: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
+	7,  // 30: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
+	19, // 31: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
+	21, // 32: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
+	23, // 33: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
+	9,  // 34: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
+	11, // 35: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
+	25, // [25:36] is the sub-list for method output_type
+	14, // [14:25] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_aegis_v1_platform_proto_init() }
@@ -1415,7 +1630,7 @@ func file_aegis_v1_platform_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aegis_v1_platform_proto_rawDesc), len(file_aegis_v1_platform_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

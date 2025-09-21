@@ -1,10 +1,21 @@
-# Tool caches
-.bufcache/
-.gocache/
-.gomodcache/
+
+# Tool caches (match anywhere; entire dirs)
+**/.bufcache/
+**/.gocache/
+**/.gomodcache/
+
+# Also catch top-level variants just in case
+/.bufcache/
+/.gocache/
+/.gomodcache/
 
 # Local tooling binaries
-bin/
+/bin/
+
+/.tools/
+/.tools/**
 
 # Editor / OS files
 .DS_Store
+.idea/
+.vscode/

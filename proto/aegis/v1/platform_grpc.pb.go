@@ -26,6 +26,8 @@ const (
 	AegisPlatform_SubmitWorkload_FullMethodName  = "/aegis.v1.AegisPlatform/SubmitWorkload"
 	AegisPlatform_GetWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/GetWorkload"
 	AegisPlatform_ListWorkloads_FullMethodName   = "/aegis.v1.AegisPlatform/ListWorkloads"
+	AegisPlatform_LeaseWorkload_FullMethodName   = "/aegis.v1.AegisPlatform/LeaseWorkload"
+	AegisPlatform_AckWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/AckWorkload"
 	AegisPlatform_RegisterCluster_FullMethodName = "/aegis.v1.AegisPlatform/RegisterCluster"
 	AegisPlatform_Heartbeat_FullMethodName       = "/aegis.v1.AegisPlatform/Heartbeat"
 )
@@ -43,6 +45,8 @@ type AegisPlatformClient interface {
 	SubmitWorkload(ctx context.Context, in *SubmitWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
+	LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error)
+	AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error)
 	RegisterCluster(ctx context.Context, in *ClusterRegisterRequest, opts ...grpc.CallOption) (*ClusterRegisterResponse, error)
 	Heartbeat(ctx context.Context, in *ClusterHeartbeat, opts ...grpc.CallOption) (*ClusterHeartbeatAck, error)
 }
@@ -125,6 +129,26 @@ func (c *aegisPlatformClient) ListWorkloads(ctx context.Context, in *ListWorkloa
 	return out, nil
 }
 
+func (c *aegisPlatformClient) LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaseWorkloadResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_LeaseWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AckWorkloadResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_AckWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aegisPlatformClient) RegisterCluster(ctx context.Context, in *ClusterRegisterRequest, opts ...grpc.CallOption) (*ClusterRegisterResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClusterRegisterResponse)
@@ -158,6 +182,8 @@ type AegisPlatformServer interface {
 	SubmitWorkload(context.Context, *SubmitWorkloadRequest) (*Workload, error)
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
+	LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error)
+	AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error)
 	RegisterCluster(context.Context, *ClusterRegisterRequest) (*ClusterRegisterResponse, error)
 	Heartbeat(context.Context, *ClusterHeartbeat) (*ClusterHeartbeatAck, error)
 	mustEmbedUnimplementedAegisPlatformServer()
@@ -190,6 +216,12 @@ func (UnimplementedAegisPlatformServer) GetWorkload(context.Context, *GetWorkloa
 }
 func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkloads not implemented")
+}
+func (UnimplementedAegisPlatformServer) LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LeaseWorkload not implemented")
+}
+func (UnimplementedAegisPlatformServer) AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AckWorkload not implemented")
 }
 func (UnimplementedAegisPlatformServer) RegisterCluster(context.Context, *ClusterRegisterRequest) (*ClusterRegisterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterCluster not implemented")
@@ -344,6 +376,42 @@ func _AegisPlatform_ListWorkloads_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_LeaseWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeaseWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).LeaseWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_LeaseWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).LeaseWorkload(ctx, req.(*LeaseWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_AckWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AckWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).AckWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_AckWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).AckWorkload(ctx, req.(*AckWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_RegisterCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ClusterRegisterRequest)
 	if err := dec(in); err != nil {
@@ -414,6 +482,14 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkloads",
 			Handler:    _AegisPlatform_ListWorkloads_Handler,
+		},
+		{
+			MethodName: "LeaseWorkload",
+			Handler:    _AegisPlatform_LeaseWorkload_Handler,
+		},
+		{
+			MethodName: "AckWorkload",
+			Handler:    _AegisPlatform_AckWorkload_Handler,
 		},
 		{
 			MethodName: "RegisterCluster",

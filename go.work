@@ -1,0 +1,6 @@
+go 1.22
+
+use (
+	./agents/k8s-agent
+	./services/platform-api
+)

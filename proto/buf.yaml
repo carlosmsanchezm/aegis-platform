@@ -1,0 +1,8 @@
+version: v1
+name: buf.build/yourorg/aegis
+lint:
+  use:
+    - DEFAULT
+breaking:
+  use:
+    - FILE

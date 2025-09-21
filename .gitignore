@@ -1,0 +1,10 @@
+# Tool caches
+.bufcache/
+.gocache/
+.gomodcache/
+
+# Local tooling binaries
+bin/
+
+# Editor / OS files
+.DS_Store

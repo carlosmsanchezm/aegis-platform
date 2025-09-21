@@ -1,0 +1,56 @@
+syntax = "proto3";
+package aegis.v1;
+option go_package = "github.com/yourorg/aegis/proto/aegis/v1;aegisv1";
+
+// ---- Core resource messages ----
+message Project { string id = 1; string display_name = 2; string owner_group = 3; PolicyDomain policy = 4; }
+message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
+
+message Budget { string project_id = 1; double gpu_hours_cap = 2; double warn_threshold_pct = 3; double consumed_gpu_hours = 4; }
+
+message Flavor { string name = 1; string chip = 2; string mig_profile = 3; bool rdma_required = 4; }
+
+message Queue {
+  string name = 1; string project_id = 2; string priority_tier = 3; // "prod"|"research"|"background"
+  repeated string allowed_flavors = 4;
+}
+
+// Workload
+message WorkspaceSpec { string flavor = 1; string image = 2; map<string,string> env = 3; }
+message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; }
+
+message Workload {
+  string id = 1; string project_id = 2; string queue = 3; string cluster_id = 4; string status = 5; string url = 6;
+  oneof kind { WorkspaceSpec workspace = 10; TrainingSpec training = 11; }
+}
+
+// Cluster handshake
+message ClusterRegisterRequest { string cluster_id = 1; string provider = 2; string region = 3; string il_level = 4; map<string,string> labels = 5; }
+message ClusterRegisterResponse { bool ok = 1; string message = 2; }
+message ClusterHeartbeat { string cluster_id = 1; double ttf_gpu_seconds_p50 = 2; repeated Flavor available_flavors = 3; }
+message ClusterHeartbeatAck { bool ok = 1; }
+
+// Requests
+message CreateProjectRequest { Project project = 1; }
+message UpsertBudgetRequest { Budget budget = 1; }
+message UpsertFlavorRequest { Flavor flavor = 1; }
+message UpsertQueueRequest  { Queue queue = 1; }
+message SubmitWorkloadRequest { Workload workload = 1; }
+message GetWorkloadRequest { string id = 1; }
+message ListWorkloadsRequest { string project_id = 1; }
+message ListWorkloadsResponse { repeated Workload items = 1; }
+
+// Service
+service AegisPlatform {
+  rpc CreateProject(CreateProjectRequest) returns (Project);
+  rpc UpsertBudget(UpsertBudgetRequest) returns (Budget);
+  rpc UpsertFlavor(UpsertFlavorRequest) returns (Flavor);
+  rpc UpsertQueue(UpsertQueueRequest) returns (Queue);
+
+  rpc SubmitWorkload(SubmitWorkloadRequest) returns (Workload);
+  rpc GetWorkload(GetWorkloadRequest) returns (Workload);
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
+
+  rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse);
+  rpc Heartbeat(ClusterHeartbeat) returns (ClusterHeartbeatAck);
+}

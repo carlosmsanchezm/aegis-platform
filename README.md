@@ -9,7 +9,7 @@ the current proto definitions.
 > available in `./bin` (or on your `PATH`). The `bin/` directory is ignored in
 > git so you can manage tool versions locally.
 
-## Week 0 Validation Steps
+## Prompt 1 Validation Steps
 
 These steps assume you are running locally (network-restricted sandboxes should
 only execute the non-network commands).
@@ -160,3 +160,143 @@ grpcurl -plaintext -d '{
   ```bash
   pkill -f 'k8s-agent.*AEGIS_CLUSTER_ID=dev-1' || true
   ```
+
+---
+
+## Prompt 2 Validation — Real K8s executor (DRY-RUN)
+
+Use a local Kubernetes cluster (Docker Desktop works). `AEGIS_DRY_RUN=1` omits GPU requests so no GPU is required.
+
+- **Terminal A**
+  ```bash
+  make run-api ALLOW_SOCKETS=1
+  ```
+- **Terminal B**
+  ```bash
+  AEGIS_EXECUTOR=job \
+  AEGIS_DRY_RUN=1 \
+  AEGIS_NAMESPACE=default \
+  AEGIS_TTFG_P50=15 \
+  make run-agent ALLOW_SOCKETS=1 \
+    AEGIS_CLUSTER_ID=dev-gke \
+    AEGIS_REGION=us-central
+  ```
+- **Terminal C**
+  ```bash
+  grpcurl -plaintext -d '{
+    "project": {
+      "id": "p-demo",
+      "displayName": "Demo",
+      "policy": {"regions": ["us-central"]}
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+  grpcurl -plaintext -d '{
+    "workload": {
+      "projectId": "p-demo",
+      "queue": "default",
+      "workspace": {
+        "flavor": "a10-mig-1g",
+        "image": "alpine:3.19"
+      }
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  ```
+- **Verify** the workload reaches `SUCCEEDED` via `ListWorkloads`.
+- **Optional logs**
+  ```bash
+  kubectl logs -f -l aegis.workload/id=<WORKLOAD_ID> -n default --timestamps
+  ```
+  The Job prologue prints workload/pod/namespace/node for quick correlation.
+
+
+---
+
+## What’s new in Prompt 3 vs Prompt 2
+
+**Prompt 2 ** proved the control-plane/agent contract:
+- Placement chose a cluster by **regions + flavor + lowest TTFG**.
+- Agent **leased** and immediately **acked** (simulated completion). No Kubernetes integration.
+
+**Prompt 3 ** turns that into **real execution on Kubernetes**:
+- Agent creates a **Kubernetes Job** for `workspace` workloads, **watches** it to completion, then **acks**.
+- Pods print a **prologue** (workload id, pod, namespace, node, image) for easy correlation.
+- Control plane **skips stale clusters** (no heartbeat within TTL) to avoid black-hole placements.
+- **DRY-RUN** (`AEGIS_DRY_RUN=1`) omits GPU requests, so the same code path runs on Docker Desktop/Kind. In production, unset DRY-RUN and optionally set `AEGIS_GPU_RESOURCE_NAME` (e.g., `nvidia.com/mig-1g.10gb`).
+
+### Demo: Stale heartbeat filter (place when fresh, refuse when stale)
+> Shows that CP won’t place onto clusters that aren’t heartbeating.
+
+- **Terminal A (CP)**
+  ```bash
+  make run-api ALLOW_SOCKETS=1
+  ```
+
+- **Terminal B (agent registers once, then stop)**
+  ```bash
+  AEGIS_EXECUTOR=none AEGIS_TTFG_P50=15 \
+  make run-agent ALLOW_SOCKETS=1 \
+    AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
+  # Ctrl-C after you see "cluster registered" in Terminal A
+  ```
+
+- **Terminal C (create project, wait past TTL, submit)**
+  ```bash
+  grpcurl -plaintext -d '{
+    "project":{"id":"p-demo","displayName":"Demo",
+               "policy":{"regions":["us-central"]}}
+  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+  sleep 50   # TTL is 45s
+  grpcurl -plaintext -d '{
+    "workload":{"projectId":"p-demo","queue":"default",
+                "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19"}}
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  # Expect: FailedPrecondition; CP logs "skipping stale cluster ..."
+  ```
+
+### Demo: Failure path (Job fails → FAILED)
+> Shows Job executor drives the final status based on Pod outcome.
+
+- **Terminal A (CP)**
+  ```bash
+  make run-api ALLOW_SOCKETS=1
+  ```
+
+- **Terminal B (agent, failing command)**
+  ```bash
+  AEGIS_EXECUTOR=job AEGIS_DRY_RUN=1 AEGIS_NAMESPACE=default AEGIS_TTFG_P50=15 \
+  AEGIS_WORKSPACE_COMMAND='echo "[AEGIS] failing"; exit 1' \
+  make run-agent ALLOW_SOCKETS=1 \
+    AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
+  ```
+
+- **Terminal C (create + submit)**
+  ```bash
+  grpcurl -plaintext -d '{
+    "project":{"id":"p-demo","displayName":"Demo",
+               "policy":{"regions":["us-central"]}}
+  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+  grpcurl -plaintext -d '{
+    "workload":{"projectId":"p-demo","queue":"default",
+                "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19"}}
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+
+  sleep 8
+  grpcurl -plaintext -d '{"projectId":"p-demo"}' \
+    localhost:8081 aegis.v1.AegisPlatform/ListWorkloads
+  # Expect: "status":"FAILED"
+  ```
+
+- **Optional: Pod logs**
+  ```bash
+  kubectl logs -f -l aegis.workload/id=<WORKLOAD_ID> -n default --timestamps
+  ```
+
+> **Tip:** If you see a stray `cluster_id:"dev-1"` heartbeat, kill leftover agents:
+>
+> ```bash
+> pkill -f 'k8s-agent.*AEGIS_CLUSTER_ID=dev-1' || true
+> ```
+

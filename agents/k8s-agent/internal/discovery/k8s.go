@@ -15,35 +15,30 @@ import (
 
 type flavorKey struct {
 	name string
+	chip string
+	mig  string
+	rdma bool
 }
 
-const (
-	labelGPUProduct   = "nvidia.com/gpu.product"
-	labelMIGProfile   = "nvidia.com/mig.profile"
-	labelRDMA         = "nvidia.com/rdma.present"
-	resourceGPUPrefix = "nvidia.com/mig-"
-)
-
-// DiscoverFlavors inspects the Kubernetes node inventory and derives a list of
-// advertised flavors. It falls back to the static defaults if no GPU metadata
-// is present so that sandbox environments with fake nodes still return
-// reasonable values.
+// DiscoverFlavors queries Nodes and infers available flavors from allocatable resources.
+// - MIG: resource like "nvidia.com/mig-1g.10gb" => flavor with MigProfile set.
+// - Non-MIG: if "nvidia.com/gpu" > 0 => add a generic flavor with best-effort chip hint.
+// Falls back to StaticFlavors() if discovery yields nothing.
 func DiscoverFlavors(ctx context.Context, cs *kubernetes.Clientset) ([]*aegis.Flavor, error) {
 	if cs == nil {
 		return StaticFlavors(), nil
 	}
 
-	nodeList, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{
-		LabelSelector: labels.Everything().String(),
-	})
+	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: labels.Everything().String()})
 	if err != nil {
 		return nil, err
 	}
 
-	seen := map[flavorKey]*aegis.Flavor{}
+	seen := map[flavorKey]struct{}{}
 
-	for _, node := range nodeList.Items {
-		captureNodeFlavors(seen, &node)
+	for i := range nodes.Items {
+		n := &nodes.Items[i]
+		captureNodeFlavors(seen, n)
 	}
 
 	if len(seen) == 0 {
@@ -51,66 +46,43 @@ func DiscoverFlavors(ctx context.Context, cs *kubernetes.Clientset) ([]*aegis.Fl
 	}
 
 	flavors := make([]*aegis.Flavor, 0, len(seen))
-	for _, fl := range seen {
-		flavors = append(flavors, fl)
+	for k := range seen {
+		flavors = append(flavors, &aegis.Flavor{
+			Name:         k.name,
+			Chip:         k.chip,
+			MigProfile:   k.mig,
+			RdmaRequired: k.rdma,
+		})
 	}
 	sort.Slice(flavors, func(i, j int) bool { return flavors[i].GetName() < flavors[j].GetName() })
 	return flavors, nil
 }
 
-func captureNodeFlavors(acc map[flavorKey]*aegis.Flavor, node *corev1.Node) {
+func captureNodeFlavors(acc map[flavorKey]struct{}, node *corev1.Node) {
 	if node == nil {
 		return
 	}
 
-	chip := normalizeName(node.Labels[labelGPUProduct])
-	migProfile := normalizeProfile(node.Labels[labelMIGProfile])
-	rdma := strings.EqualFold(node.Labels[labelRDMA], "true")
+	alloc := node.Status.Allocatable
 
-	if migProfile != "" {
-		name := chip
-		if name != "" && migProfile != "" {
-			name = name + "-" + migProfile
-		} else if migProfile != "" {
-			name = migProfile
+	// MIG profiles
+	for resName, qty := range alloc {
+		rn := string(resName)
+		if !strings.HasPrefix(rn, "nvidia.com/") || qty.Value() <= 0 {
+			continue
 		}
-		acc[flavorKey{name: name}] = &aegis.Flavor{Name: name, Chip: chip, MigProfile: migProfile, RdmaRequired: rdma}
-	}
-
-	for resName := range node.Status.Capacity {
-		res := string(resName)
-		if strings.HasPrefix(res, resourceGPUPrefix) {
-			profile := strings.TrimPrefix(res, resourceGPUPrefix)
-			normalized := normalizeProfile(profile)
-			name := normalized
-			if chip != "" {
-				name = chip + "-" + normalized
+		if strings.HasPrefix(rn, "nvidia.com/mig-") {
+			profile := strings.TrimPrefix(rn, "nvidia.com/mig-")
+			name := "mig-" + profile
+			acc[flavorKey{name: name, mig: profile}] = struct{}{}
+			continue
+		}
+		if rn == "nvidia.com/gpu" {
+			chip := node.Labels["nvidia.com/gpu.product"]
+			if chip == "" {
+				chip = node.Labels["feature.node.kubernetes.io/pci-10de.present"]
 			}
-			acc[flavorKey{name: name}] = &aegis.Flavor{Name: name, Chip: chip, MigProfile: profile, RdmaRequired: rdma}
+			acc[flavorKey{name: "gpu-1x", chip: chip}] = struct{}{}
 		}
 	}
-
-}
-
-func normalizeName(in string) string {
-	if in == "" {
-		return ""
-	}
-	cleaned := strings.ToLower(in)
-	cleaned = strings.ReplaceAll(cleaned, "nvidia-", "")
-	cleaned = strings.ReplaceAll(cleaned, "nvidia ", "")
-	cleaned = strings.ReplaceAll(cleaned, " ", "-")
-	cleaned = strings.ReplaceAll(cleaned, "_", "-")
-	return cleaned
-}
-
-func normalizeProfile(in string) string {
-	if in == "" {
-		return ""
-	}
-	cleaned := strings.ToLower(in)
-	cleaned = strings.ReplaceAll(cleaned, ".", "-")
-	cleaned = strings.ReplaceAll(cleaned, "_", "-")
-	cleaned = strings.TrimPrefix(cleaned, "mig-")
-	return cleaned
 }

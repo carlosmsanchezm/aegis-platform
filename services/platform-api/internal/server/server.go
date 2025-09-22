@@ -32,6 +32,8 @@ type Server struct {
 const (
 	statusPlaced  = "PLACED"
 	statusRunning = "RUNNING"
+
+	heartbeatTTL = 45 * time.Second
 )
 
 func New(log *zap.Logger, st *store.MemStore) *Server { return &Server{log: log, store: st} }
@@ -139,7 +141,15 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	// Build candidates from current cluster snapshots
 	infos := s.store.ListClusterInfos()
 	cands := make([]placement.Candidate, 0, len(infos))
+	now := time.Now()
 	for _, ci := range infos {
+		if ci.LastHeartbeat.IsZero() || now.Sub(ci.LastHeartbeat) > heartbeatTTL {
+			s.log.Debug("skipping stale cluster",
+				zap.String("cluster_id", ci.ID),
+				zap.Time("last_heartbeat", ci.LastHeartbeat),
+			)
+			continue
+		}
 		cands = append(cands, placement.Candidate{
 			ClusterID:   ci.ID,
 			Region:      ci.Region,

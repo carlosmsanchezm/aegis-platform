@@ -13,16 +13,12 @@ import (
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 )
 
-const (
-	statusSucceeded = "SUCCEEDED"
-)
-
 type Client struct {
 	api aegis.AegisPlatformClient
 }
 
 func New(endpoint string) (*Client, error) {
-	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials())) // TLS later
+	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
@@ -34,12 +30,10 @@ func (c *Client) Register(ctx context.Context, req *aegis.ClusterRegisterRequest
 	return err
 }
 
+// HeartbeatLoop continuously reports cluster health and advertised flavors.
 func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterID string, flavors []*aegis.Flavor) {
-	t := time.NewTicker(10 * time.Second)
-	defer t.Stop()
-
-	leaseTicker := time.NewTicker(5 * time.Second)
-	defer leaseTicker.Stop()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 
 	ttf := 60.0
 	if v := os.Getenv("AEGIS_TTFG_P50"); v != "" {
@@ -55,7 +49,7 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 		case <-ctx.Done():
 			logger.Info("heartbeat loop context canceled", zap.String("cluster_id", clusterID))
 			return
-		case <-t.C:
+		case <-ticker.C:
 			logger.Info("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)))
 			if _, err := c.api.Heartbeat(ctx, &aegis.ClusterHeartbeat{
 				ClusterId:        clusterID,
@@ -66,24 +60,19 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 				continue
 			}
 			logger.Info("heartbeat acknowledged", zap.String("cluster_id", clusterID))
-		case <-leaseTicker.C:
-			resp, err := c.api.LeaseWorkload(ctx, &aegis.LeaseWorkloadRequest{ClusterId: clusterID, Max: 1})
-			if err != nil {
-				logger.Warn("lease workload failed", zap.String("cluster_id", clusterID), zap.Error(err))
-				continue
-			}
-			if resp == nil || len(resp.GetItems()) == 0 {
-				logger.Debug("no workloads leased", zap.String("cluster_id", clusterID))
-				continue
-			}
-			for _, w := range resp.GetItems() {
-				logger.Info("leased workload", zap.String("cluster_id", clusterID), zap.String("workload_id", w.GetId()))
-				if _, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: w.GetId(), Status: statusSucceeded}); err != nil {
-					logger.Warn("ack workload failed", zap.String("cluster_id", clusterID), zap.String("workload_id", w.GetId()), zap.Error(err))
-					continue
-				}
-				logger.Info("acked workload", zap.String("cluster_id", clusterID), zap.String("workload_id", w.GetId()), zap.String("status", statusSucceeded))
-			}
 		}
 	}
+}
+
+func (c *Client) Lease(ctx context.Context, clusterID string, max int32) ([]*aegis.Workload, error) {
+	resp, err := c.api.LeaseWorkload(ctx, &aegis.LeaseWorkloadRequest{ClusterId: clusterID, Max: max})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetItems(), nil
+}
+
+func (c *Client) Ack(ctx context.Context, id, status string) error {
+	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status})
+	return err
 }

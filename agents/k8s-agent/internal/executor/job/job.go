@@ -54,7 +54,7 @@ func New(log *zap.Logger) (*Executor, error) {
 func (e *Executor) RunWorkspace(ctx context.Context, w *aegis.Workload) execiface.Result {
 	ws := w.GetWorkspace()
 	if ws == nil {
-		return execiface.Result{Status: "FAILED", Err: fmt.Errorf("workspace spec missing")}
+		return execiface.Result{Status: "FAILED", Backend: "workspace", Err: fmt.Errorf("workspace spec missing")}
 	}
 
 	image := ws.GetImage()
@@ -68,6 +68,7 @@ func (e *Executor) RunWorkspace(ctx context.Context, w *aegis.Workload) execifac
 	}
 
 	jobName := sanitizeName("aegis-" + w.GetId())
+	url := fmt.Sprintf("k8s://%s/job/%s", e.namespace, jobName)
 
 	env := toEnvVars(ws.GetEnv())
 	env = append(env,
@@ -84,17 +85,22 @@ echo "[AEGIS] running task...";
 sleep 3;
 echo "[AEGIS] done";`
 
+	cmd := ws.GetCommand()
 	container := corev1.Container{
-		Name:    "workspace",
-		Image:   image,
-		Command: []string{"/bin/sh", "-c"},
-		Args:    []string{getenv("AEGIS_WORKSPACE_COMMAND", defaultCmd)},
+		Name:  "workspace",
+		Image: image,
 		Resources: corev1.ResourceRequirements{
 			Requests: e.gpuRequests(ws.GetFlavor()),
 			Limits:   e.gpuRequests(ws.GetFlavor()),
 		},
 		Env:                      env,
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+	}
+	if len(cmd) > 0 {
+		container.Command = cmd
+	} else {
+		container.Command = []string{"/bin/sh", "-c"}
+		container.Args = []string{getenv("AEGIS_WORKSPACE_COMMAND", defaultCmd)}
 	}
 
 	if e.dryRun {
@@ -137,11 +143,11 @@ echo "[AEGIS] done";`
 	if err != nil {
 		if !kerrors.IsAlreadyExists(err) {
 			e.log.Warn("job create failed", zap.String("job", jobName), zap.Error(err))
-			return execiface.Result{Status: "FAILED", Err: err}
+			return execiface.Result{Status: "FAILED", URL: url, Backend: "workspace", Err: err}
 		}
 		created, err = jobs.Get(ctx, jobName, metav1.GetOptions{})
 		if err != nil {
-			return execiface.Result{Status: "FAILED", Err: err}
+			return execiface.Result{Status: "FAILED", URL: url, Backend: "workspace", Err: err}
 		}
 	}
 
@@ -150,6 +156,7 @@ echo "[AEGIS] done";`
 		zap.String("namespace", e.namespace),
 		zap.String("workload_id", w.GetId()),
 		zap.String("flavor", flavor),
+		zap.String("url", url),
 	)
 
 	status := e.waitForCompletion(ctx, jobName)
@@ -163,18 +170,14 @@ echo "[AEGIS] done";`
 
 	switch status {
 	case "SUCCEEDED":
-		e.log.Info("job completed successfully", zap.String("job", jobName), zap.String("workload_id", w.GetId()))
-		return execiface.Result{Status: "SUCCEEDED"}
+		e.log.Info("job completed successfully", zap.String("job", jobName), zap.String("workload_id", w.GetId()), zap.String("url", url))
+		return execiface.Result{Status: "SUCCEEDED", URL: url, Backend: "workspace"}
 	case "FAILED":
-		e.log.Warn("job completed with failure", zap.String("job", jobName), zap.String("workload_id", w.GetId()))
-		return execiface.Result{Status: "FAILED"}
+		e.log.Warn("job completed with failure", zap.String("job", jobName), zap.String("workload_id", w.GetId()), zap.String("url", url))
+		return execiface.Result{Status: "FAILED", URL: url, Backend: "workspace"}
 	default:
-		return execiface.Result{Status: "FAILED", Err: fmt.Errorf("unknown job outcome")}
+		return execiface.Result{Status: "FAILED", URL: url, Backend: "workspace", Err: fmt.Errorf("unknown job outcome")}
 	}
-}
-
-func (e *Executor) RunTraining(ctx context.Context, w *aegis.Workload) execiface.Result {
-	return execiface.Result{Status: "FAILED", Err: fmt.Errorf("training executor not implemented in this MVP")}
 }
 
 func (e *Executor) waitForCompletion(ctx context.Context, name string) string {
@@ -248,7 +251,14 @@ func (e *Executor) gpuRequests(flavor string) corev1.ResourceList {
 	if e.dryRun {
 		return corev1.ResourceList{}
 	}
-	resourceName := getenv("AEGIS_GPU_RESOURCE_NAME", "nvidia.com/gpu")
+	resourceName := getenv("AEGIS_GPU_RESOURCE_NAME", "")
+	if resourceName == "" {
+		if strings.HasPrefix(flavor, "mig-") {
+			resourceName = "nvidia.com/" + strings.TrimPrefix(flavor, "mig-")
+		} else {
+			resourceName = "nvidia.com/gpu"
+		}
+	}
 	quantity := resource.MustParse("1")
 	return corev1.ResourceList{corev1.ResourceName(resourceName): quantity}
 }

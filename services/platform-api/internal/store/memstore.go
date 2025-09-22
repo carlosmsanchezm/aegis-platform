@@ -136,8 +136,8 @@ func (s *MemStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 	return leased
 }
 
-// AckWorkload updates the workload status if currently RUNNING.
-func (s *MemStore) AckWorkload(id string, nextStatus string) (*aegis.Workload, error) {
+// AckWorkload updates the workload status if currently RUNNING and stamps optional URL.
+func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis.Workload, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, ok := s.workloads[id]
@@ -148,5 +148,8 @@ func (s *MemStore) AckWorkload(id string, nextStatus string) (*aegis.Workload, e
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 	w.Status = nextStatus
+	if url != "" {
+		w.Url = url
+	}
 	return w, nil
 }

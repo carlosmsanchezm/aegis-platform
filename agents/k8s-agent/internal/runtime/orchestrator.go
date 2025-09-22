@@ -96,16 +96,23 @@ func (o *Orchestrator) execute(ctx context.Context, wl *aegis.Workload, free cha
 	if status == "" {
 		status = "FAILED"
 	}
+	backend := res.Backend
+	if backend == "" {
+		backend = kind
+	}
+	url := res.URL
 	maxRetries := 6
 	backoff := time.Second
 	var lastErr error
 	acked := false
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if err := o.client.Ack(ctx, wl.GetId(), status); err != nil {
+		if err := o.client.Ack(ctx, wl.GetId(), status, backend, url); err != nil {
 			lastErr = err
 			o.log.Warn("ack failed (retrying)",
 				zap.String("workload_id", wl.GetId()),
 				zap.String("status", status),
+				zap.String("backend", backend),
+				zap.String("url", url),
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", backoff),
 				zap.Error(err),
@@ -114,12 +121,12 @@ func (o *Orchestrator) execute(ctx context.Context, wl *aegis.Workload, free cha
 			backoff *= 2
 			continue
 		}
-		o.log.Info("ack succeeded", zap.String("workload_id", wl.GetId()), zap.String("status", status), zap.Int("attempt", attempt))
+		o.log.Info("ack succeeded", zap.String("workload_id", wl.GetId()), zap.String("status", status), zap.String("backend", backend), zap.String("url", url), zap.Int("attempt", attempt))
 		acked = true
 		break
 	}
 	if !acked && lastErr != nil {
-		o.log.Error("ack exhausted retries", zap.String("workload_id", wl.GetId()), zap.String("status", status), zap.Error(lastErr))
+		o.log.Error("ack exhausted retries", zap.String("workload_id", wl.GetId()), zap.String("status", status), zap.String("backend", backend), zap.String("url", url), zap.Error(lastErr))
 	}
 }
 

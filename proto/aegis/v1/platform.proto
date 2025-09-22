@@ -8,7 +8,15 @@ message PolicyDomain { repeated string regions = 1; string data_level = 2; bool 
 
 message Budget { string project_id = 1; double gpu_hours_cap = 2; double warn_threshold_pct = 3; double consumed_gpu_hours = 4; }
 
-message Flavor { string name = 1; string chip = 2; string mig_profile = 3; bool rdma_required = 4; }
+message Flavor {
+  string name = 1;
+  string chip = 2;
+  string mig_profile = 3;
+  bool rdma_required = 4;
+  string resource_name = 5;
+  int32 gpu_count = 6;
+  double memory_gib = 7;
+}
 
 message Queue {
   string name = 1; string project_id = 2; string priority_tier = 3; // "prod"|"research"|"background"
@@ -16,7 +24,12 @@ message Queue {
 }
 
 // Workload
-message WorkspaceSpec { string flavor = 1; string image = 2; map<string,string> env = 3; }
+message WorkspaceSpec {
+  string flavor = 1;
+  string image = 2;
+  map<string,string> env = 3;
+  repeated string command = 4;
+}
 message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; }
 
 message Workload {
@@ -52,6 +65,8 @@ message LeaseWorkloadResponse {
 message AckWorkloadRequest {
   string id = 1;
   string status = 2;
+  string url = 3;
+  string backend = 4;
 }
 
 message AckWorkloadResponse {

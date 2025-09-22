@@ -72,7 +72,7 @@ func (c *Client) Lease(ctx context.Context, clusterID string, max int32) ([]*aeg
 	return resp.GetItems(), nil
 }
 
-func (c *Client) Ack(ctx context.Context, id, status string) error {
-	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status})
+func (c *Client) Ack(ctx context.Context, id, status, backend, url string) error {
+	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status, Backend: backend, Url: url})
 	return err
 }

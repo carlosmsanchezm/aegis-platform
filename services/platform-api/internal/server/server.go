@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -34,6 +37,20 @@ const (
 	statusRunning = "RUNNING"
 
 	heartbeatTTL = 45 * time.Second
+)
+
+var (
+	mPlaced = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "aegis_workload_placed_total", Help: "Workloads placed"},
+		[]string{"flavor"},
+	)
+	mLeased = promauto.NewCounter(
+		prometheus.CounterOpts{Name: "aegis_workload_leased_total", Help: "Workloads leased"},
+	)
+	mAcked = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "aegis_workload_acked_total", Help: "Workloads acked by final status"},
+		[]string{"status", "backend"},
+	)
 )
 
 func New(log *zap.Logger, st *store.MemStore) *Server { return &Server{log: log, store: st} }
@@ -179,6 +196,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	w.ClusterId = chosen
 	w.Status = statusPlaced
 	s.store.PutWorkload(w)
+	mPlaced.WithLabelValues(reqFlavor).Inc()
 	s.log.Info("workload placed",
 		zap.String("workload_id", w.GetId()),
 		zap.String("project_id", w.GetProjectId()),
@@ -238,6 +256,7 @@ func (s *Server) LeaseWorkload(ctx context.Context, req *aegis.LeaseWorkloadRequ
 			zap.Strings("workload_ids", ids),
 			zap.Int("count", len(items)),
 		)
+		mLeased.Add(float64(len(items)))
 	} else {
 		s.log.Debug("no workloads leased", zap.String("cluster_id", req.GetClusterId()))
 	}
@@ -270,7 +289,7 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		)
 		return nil, err
 	}
-	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus())
+	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus(), req.GetUrl())
 	if err != nil {
 		s.log.Error("ack workload store update failed",
 			zap.Error(err),
@@ -278,10 +297,24 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		)
 		return nil, status.Error(codes.Internal, "failed to update workload status")
 	}
+	backend := req.GetBackend()
+	if backend == "" {
+		switch w.GetKind().(type) {
+		case *aegis.Workload_Workspace:
+			backend = "workspace"
+		case *aegis.Workload_Training:
+			backend = "trainer_v2"
+		default:
+			backend = "unknown"
+		}
+	}
+	mAcked.WithLabelValues(req.GetStatus(), backend).Inc()
 	s.log.Info("workload acknowledged",
 		zap.String("workload_id", updated.GetId()),
 		zap.String("cluster_id", updated.GetClusterId()),
 		zap.String("status", updated.GetStatus()),
+		zap.String("backend", backend),
+		zap.String("url", updated.GetUrl()),
 	)
 	return &aegis.AckWorkloadResponse{Workload: updated}, nil
 }
@@ -297,9 +330,12 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 
 	log.Info("gRPC server listening", zap.String("addr", addrGRPC))
 
-	// HTTP gateway mux (will be wired in a later step with generated handlers)
+	// HTTP gateway mux with Prometheus metrics exposed.
 	mux := runtime.NewServeMux()
-	httpSrv := &http.Server{Addr: addrHTTP, Handler: mux}
+	root := http.NewServeMux()
+	root.Handle("/", mux)
+	root.Handle("/metrics", promhttp.Handler())
+	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}
 
 	go func() {
 		log.Info("HTTP gateway listening", zap.String("addr", addrHTTP))

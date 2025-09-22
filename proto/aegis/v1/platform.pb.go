@@ -224,6 +224,9 @@ type Flavor struct {
 	Chip          string                 `protobuf:"bytes,2,opt,name=chip,proto3" json:"chip,omitempty"`
 	MigProfile    string                 `protobuf:"bytes,3,opt,name=mig_profile,json=migProfile,proto3" json:"mig_profile,omitempty"`
 	RdmaRequired  bool                   `protobuf:"varint,4,opt,name=rdma_required,json=rdmaRequired,proto3" json:"rdma_required,omitempty"`
+	ResourceName  string                 `protobuf:"bytes,5,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	GpuCount      int32                  `protobuf:"varint,6,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`
+	MemoryGib     float64                `protobuf:"fixed64,7,opt,name=memory_gib,json=memoryGib,proto3" json:"memory_gib,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -284,6 +287,27 @@ func (x *Flavor) GetRdmaRequired() bool {
 		return x.RdmaRequired
 	}
 	return false
+}
+
+func (x *Flavor) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *Flavor) GetGpuCount() int32 {
+	if x != nil {
+		return x.GpuCount
+	}
+	return 0
+}
+
+func (x *Flavor) GetMemoryGib() float64 {
+	if x != nil {
+		return x.MemoryGib
+	}
+	return 0
 }
 
 type Queue struct {
@@ -360,6 +384,7 @@ type WorkspaceSpec struct {
 	Flavor        string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
 	Image         string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
 	Env           map[string]string      `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Command       []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -411,6 +436,13 @@ func (x *WorkspaceSpec) GetImage() string {
 func (x *WorkspaceSpec) GetEnv() map[string]string {
 	if x != nil {
 		return x.Env
+	}
+	return nil
+}
+
+func (x *WorkspaceSpec) GetCommand() []string {
+	if x != nil {
+		return x.Command
 	}
 	return nil
 }
@@ -1315,6 +1347,8 @@ type AckWorkloadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	Backend       string                 `protobuf:"bytes,4,opt,name=backend,proto3" json:"backend,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1359,6 +1393,20 @@ func (x *AckWorkloadRequest) GetId() string {
 func (x *AckWorkloadRequest) GetStatus() string {
 	if x != nil {
 		return x.Status
+	}
+	return ""
+}
+
+func (x *AckWorkloadRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *AckWorkloadRequest) GetBackend() string {
+	if x != nil {
+		return x.Backend
 	}
 	return ""
 }
@@ -1428,23 +1476,28 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\"\n" +
 	"\rgpu_hours_cap\x18\x02 \x01(\x01R\vgpuHoursCap\x12,\n" +
 	"\x12warn_threshold_pct\x18\x03 \x01(\x01R\x10warnThresholdPct\x12,\n" +
-	"\x12consumed_gpu_hours\x18\x04 \x01(\x01R\x10consumedGpuHours\"v\n" +
+	"\x12consumed_gpu_hours\x18\x04 \x01(\x01R\x10consumedGpuHours\"\xd7\x01\n" +
 	"\x06Flavor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04chip\x18\x02 \x01(\tR\x04chip\x12\x1f\n" +
 	"\vmig_profile\x18\x03 \x01(\tR\n" +
 	"migProfile\x12#\n" +
-	"\rrdma_required\x18\x04 \x01(\bR\frdmaRequired\"\x88\x01\n" +
+	"\rrdma_required\x18\x04 \x01(\bR\frdmaRequired\x12#\n" +
+	"\rresource_name\x18\x05 \x01(\tR\fresourceName\x12\x1b\n" +
+	"\tgpu_count\x18\x06 \x01(\x05R\bgpuCount\x12\x1d\n" +
+	"\n" +
+	"memory_gib\x18\a \x01(\x01R\tmemoryGib\"\x88\x01\n" +
 	"\x05Queue\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\x12#\n" +
 	"\rpriority_tier\x18\x03 \x01(\tR\fpriorityTier\x12'\n" +
-	"\x0fallowed_flavors\x18\x04 \x03(\tR\x0eallowedFlavors\"\xa9\x01\n" +
+	"\x0fallowed_flavors\x18\x04 \x03(\tR\x0eallowedFlavors\"\xc3\x01\n" +
 	"\rWorkspaceSpec\x12\x16\n" +
 	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x122\n" +
-	"\x03env\x18\x03 \x03(\v2 .aegis.v1.WorkspaceSpec.EnvEntryR\x03env\x1a6\n" +
+	"\x03env\x18\x03 \x03(\v2 .aegis.v1.WorkspaceSpec.EnvEntryR\x03env\x12\x18\n" +
+	"\acommand\x18\x04 \x03(\tR\acommand\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xac\x01\n" +
@@ -1510,10 +1563,12 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x10\n" +
 	"\x03max\x18\x02 \x01(\x05R\x03max\"A\n" +
 	"\x15LeaseWorkloadResponse\x12(\n" +
-	"\x05items\x18\x01 \x03(\v2\x12.aegis.v1.WorkloadR\x05items\"<\n" +
+	"\x05items\x18\x01 \x03(\v2\x12.aegis.v1.WorkloadR\x05items\"h\n" +
 	"\x12AckWorkloadRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"E\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x18\n" +
+	"\abackend\x18\x04 \x01(\tR\abackend\"E\n" +
 	"\x13AckWorkloadResponse\x12.\n" +
 	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload2\xab\x06\n" +
 	"\rAegisPlatform\x12B\n" +

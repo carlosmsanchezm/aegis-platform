@@ -208,6 +208,25 @@ Use a local Kubernetes cluster (Docker Desktop works). `AEGIS_DRY_RUN=1` omits G
   kubectl logs -f -l aegis.workload/id=<WORKLOAD_ID> -n default --timestamps
   ```
   The Job prologue prints workload/pod/namespace/node for quick correlation.
+- **Optional training test** (requires Kubeflow Trainer v1 **or** v2)
+  ```bash
+  grpcurl -plaintext -d '{
+    "workload": {
+      "projectId": "p-demo",
+      "queue": "default",
+      "training": {
+        "flavor": "gpu-1x",
+        "workers": 2,
+        "gpusPerWorker": 1,
+        "image": "pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime",
+        "command": ["python", "-c", "print('hello aegis training')"]
+      }
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  ```
+  *If you are on Trainer v2*, apply a runtime once (example in `docs/runtime-torch-distributed.yaml`), then the agent will submit
+  `TrainJob` resources and the workload URL will look like `k8s://<ns>/trainjob/<name>`. Trainer v1 clusters continue to use
+  `PyTorchJob` and the URL reflects that.
 
 
 ---
@@ -300,3 +319,112 @@ Use a local Kubernetes cluster (Docker Desktop works). `AEGIS_DRY_RUN=1` omits G
 > pkill -f 'k8s-agent.*AEGIS_CLUSTER_ID=dev-1' || true
 > ```
 
+## Prompt 4 Validation — URLs, Metrics & Trainer v2
+
+This scenario proves the Prompt 4 additions:
+
+1. Workspaces respect custom commands, emit a prologue, and ack with `backend=workspace` plus a Job URL.
+2. Training workloads run end-to-end on **Trainer v2** (`TrainJob`) with the canonical runtime and ack with `backend=trainer_v2` and a TrainJob URL.
+3. Prometheus metrics count placed/leased/acked workloads with the new backend label.
+4. Failure and validation paths respond with clear errors.
+
+> One-time prep (Trainer v2):
+> ```bash
+> kubectl apply -f docs/runtime-torch-distributed.yaml
+> ```
+
+- **Terminal A – Control plane**
+  ```bash
+  make run-api ALLOW_SOCKETS=1
+  ```
+  Logs include:
+  ```text
+  … starting platform API grpc_addr=:8081 http_addr=:8080
+  … gRPC server listening addr=:8081
+  … HTTP gateway listening addr=:8080
+  ```
+
+- **Terminal B – Agent (DRY-RUN for workspaces)**
+  ```bash
+  AEGIS_EXECUTOR=job \
+  AEGIS_DRY_RUN=1 \
+  AEGIS_CLUSTER_ID=dev-gke \
+  AEGIS_REGION=us-central \
+  make run-agent ALLOW_SOCKETS=1
+  ```
+  You should see:
+  ```text
+  … starting k8s agent …
+  … cluster registered … flavors=a10-mig-1g,a100-8x
+  … orchestrator started … parallel=4
+  ```
+
+- **Terminal C – Seed project and queue**
+  ```bash
+  grpcurl -plaintext -d '{
+    "project":{"id":"p-demo","displayName":"Demo","ownerGroup":"demo"}
+  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+  grpcurl -plaintext -d '{
+    "queue":{
+      "name":"default",
+      "projectId":"p-demo",
+      "priorityTier":"research",
+      "allowedFlavors":["a10-mig-1g","a100-8x"]
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
+  ```
+
+- **Workspace (default script + env)**
+  ```bash
+  grpcurl -plaintext -d '{
+    "workload":{
+      "projectId":"p-demo",
+      "queue":"default",
+      "workspace":{
+        "flavor":"a10-mig-1g",
+        "image":"debian:bookworm-slim",
+        "env":{"EXAMPLE":"1"}
+      }
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  ```
+  Control-plane logs show `workload placed` → agent logs `executing workload`, `job submitted`, and `ack succeeded` with
+  `backend="workspace"` and `url=k8s://default/job/<name>`.
+
+- **Workspace with explicit command**
+  ```bash
+  grpcurl -plaintext -d '{
+    "workload":{
+      "projectId":"p-demo",
+      "queue":"default",
+      "workspace":{
+        "flavor":"a10-mig-1g",
+        "image":"debian:bookworm-slim",
+        "command":["bash","-lc","echo WS-CMD && sleep 1 && exit 0"]
+      }
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  ```
+  `kubectl logs` contains `WS-CMD`, proving the command override.
+
+- **Trainer v2 workload**
+  ```bash
+  grpcurl -plaintext -d '{
+    "workload":{
+      "projectId":"p-demo",
+      "queue":"default",
+      "training":{
+        "flavor":"a10-mig-1g",
+        "workers":1,
+        "gpusPerWorker":1,
+        "image":"python:3.11-slim",
+        "command":["python","-c","print(\"trainer v2 smoke\")"]
+      }
+    }
+  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  ```
+  Logs show `trainjob submitted`, followed by `trainjob succeeded`, and the ack uses `backend="trainer_v2"` with
+  `url=k8s://default/trainjob/<name>`. Inspect the CR:
+  ```bash
+  kubectl get trainjobs.trainer.kubeflow.org aegis-<id> -o jsonpath='{.status.conditions}{

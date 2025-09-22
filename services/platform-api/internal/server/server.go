@@ -51,6 +51,14 @@ var (
 		prometheus.CounterOpts{Name: "aegis_workload_acked_total", Help: "Workloads acked by final status"},
 		[]string{"status", "backend"},
 	)
+	mQueueWait = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "aegis_workload_queue_wait_seconds",
+			Help:    "Time between placement and lease per queue/flavor",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"queue", "flavor"},
+	)
 )
 
 func New(log *zap.Logger, st *store.MemStore) *Server { return &Server{log: log, store: st} }
@@ -154,6 +162,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	if s.store.GetFlavor(reqFlavor) == nil {
+		s.log.Warn("submit workload rejected; unknown flavor",
+			zap.String("workload_id", w.GetId()),
+			zap.String("flavor", reqFlavor),
+		)
+		return nil, status.Error(codes.FailedPrecondition, "unknown flavor: "+reqFlavor)
+	}
 
 	// Build candidates from current cluster snapshots
 	infos := s.store.ListClusterInfos()
@@ -196,6 +211,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	w.ClusterId = chosen
 	w.Status = statusPlaced
 	s.store.PutWorkload(w)
+	s.store.MarkPlaced(w.GetId())
 	mPlaced.WithLabelValues(reqFlavor).Inc()
 	s.log.Info("workload placed",
 		zap.String("workload_id", w.GetId()),
@@ -246,6 +262,50 @@ func (s *Server) LeaseWorkload(ctx context.Context, req *aegis.LeaseWorkloadRequ
 		return nil, err
 	}
 	items := s.store.LeaseWorkloads(req.GetClusterId(), int(req.GetMax()))
+	now := time.Now()
+	for _, w := range items {
+		queue := w.GetQueue()
+		if queue == "" {
+			queue = "unknown"
+		}
+		flavor, ferr := requiredFlavor(w)
+		if ferr != nil {
+			s.log.Warn("leased workload missing flavor",
+				zap.String("workload_id", w.GetId()),
+				zap.Error(ferr),
+			)
+			continue
+		}
+		if t0, ok := s.store.GetPlacedAt(w.GetId()); ok {
+			wait := now.Sub(t0)
+			mQueueWait.WithLabelValues(queue, flavor).Observe(wait.Seconds())
+			s.store.ClearPlacedAt(w.GetId())
+			s.log.Debug("queue wait observed",
+				zap.String("workload_id", w.GetId()),
+				zap.String("queue", queue),
+				zap.String("flavor", flavor),
+				zap.Duration("wait", wait),
+			)
+		}
+		if fl := s.store.GetFlavor(flavor); fl != nil {
+			w.Hints = &aegis.ResourceHints{
+				ResourceName: fl.GetResourceName(),
+				GpuCount:     fl.GetGpuCount(),
+			}
+			s.log.Debug("resource hints stamped",
+				zap.String("workload_id", w.GetId()),
+				zap.String("queue", queue),
+				zap.String("flavor", flavor),
+				zap.String("resource_name", fl.GetResourceName()),
+				zap.Int("gpu_count", int(fl.GetGpuCount())),
+			)
+		} else {
+			s.log.Debug("flavor missing in catalog; hints skipped",
+				zap.String("workload_id", w.GetId()),
+				zap.String("flavor", flavor),
+			)
+		}
+	}
 	if len(items) > 0 {
 		ids := make([]string, 0, len(items))
 		for _, w := range items {

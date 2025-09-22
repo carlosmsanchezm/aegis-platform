@@ -81,6 +81,13 @@ func (o *Orchestrator) execute(ctx context.Context, wl *aegis.Workload, free cha
 
 	kind := kindOf(wl)
 	o.log.Info("executing workload", zap.String("workload_id", wl.GetId()), zap.String("kind", kind))
+	if h := wl.GetHints(); h != nil {
+		o.log.Info("workload hints",
+			zap.String("workload_id", wl.GetId()),
+			zap.String("resource_name", h.GetResourceName()),
+			zap.Int32("gpu_count", h.GetGpuCount()),
+		)
+	}
 
 	var res executor.Result
 	switch wl.GetKind().(type) {

@@ -428,3 +428,106 @@ This scenario proves the Prompt 4 additions:
   `url=k8s://default/trainjob/<name>`. Inspect the CR:
   ```bash
   kubectl get trainjobs.trainer.kubeflow.org aegis-<id> -o jsonpath='{.status.conditions}{
+
+-----
+
+## Prompt 5 Validation — Precise GPU Mapping & Kueue
+
+This scenario validates the Prompt 5 features:
+
+1.  **Precise GPU Resource Mapping**: The control plane now has a **Flavor catalog**. It uses this to stamp `ResourceHints` (e.g., `resource_name: "nvidia.com/mig-1g.10gb"`) onto workloads when they are leased. The agent then uses these hints to request the correct GPU type in Kubernetes.
+2.  **Optional Kueue Admission**: When the `AEGIS_KUEUE_ENABLED=1` flag is set, the agent will detect if Kueue is installed. If so, it creates Workspace Jobs with the `spec.suspend: true` flag and the `kueue.x-k8s.io/queue-name` label, handing off admission control to the Kueue scheduler.
+3.  **New Queue-Wait Metric**: A new Prometheus histogram, `aegis_workload_queue_wait_seconds`, now measures the time a workload spends between being `PLACED` and `RUNNING` (leased).
+
+### 1\) Build and Start API
+
+```bash
+make tidy ALLOW_NET=1
+make build ALLOW_NET=1
+make run-api ALLOW_SOCKETS=1
+```
+
+### 2\) Seed Project, Queue, and Flavor Catalog
+
+In a new terminal, seed the control plane with the necessary objects. Note the new `UpsertFlavor` call which populates the catalog.
+
+```bash
+# Project
+grpcurl -plaintext -d '{
+  "project":{"id":"p-demo","displayName":"Demo","ownerGroup":"demo"}
+}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+# Queue
+grpcurl -plaintext -d '{
+  "queue":{"name":"default","projectId":"p-demo",
+           "priorityTier":"research",
+           "allowedFlavors":["a10-mig-1g"]}
+}' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
+
+# Flavor (with precise resource name)
+grpcurl -plaintext -d '{
+  "flavor":{
+    "name":"a10-mig-1g",
+    "resourceName":"nvidia.com/mig-1g.10gb",
+    "gpuCount":1
+  }
+}' localhost:8081 aegis.v1.AegisPlatform/UpsertFlavor
+```
+
+### 3\) Run Agent and Submit Workload
+
+In a new terminal, start the agent (in dry-run, no Kueue).
+
+```bash
+AEGIS_EXECUTOR=job \
+AEGIS_DRY_RUN=1 \
+AEGIS_NAMESPACE=default \
+make run-agent ALLOW_SOCKETS=1 \
+  AEGIS_CLUSTER_ID=dev-gke \
+  AEGIS_REGION=us-central
+```
+
+Submit a workload. The agent logs will now show the `ResourceHints` it received.
+
+```bash
+# In another terminal, submit the workload and capture its ID
+WID=$(grpcurl -plaintext -d '{
+  "workload":{"projectId":"p-demo","queue":"default",
+              "workspace":{"flavor":"a10-mig-1g"}}
+}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload | grep -o '"w-[^"]*"' | tr -d '"')
+```
+
+### 4\) Verify Hints and Metrics
+
+1.  **Check agent logs**: You will see lines confirming the hints were received and applied:
+    `{"level":"info", ... "msg":"workload hints", "resource_name":"nvidia.com/mig-1g.10gb", ...}`
+2.  **Check the API for the persisted hint**:
+    ```bash
+    grpcurl -plaintext -d "{\"id\":\"$WID\"}" localhost:8081 aegis.v1.AegisPlatform/GetWorkload
+    # Expect to see the "hints" object in the response.
+    ```
+3.  **Check metrics**:
+    ```bash
+    curl -s localhost:8080/metrics | grep 'aegis_workload_queue_wait_seconds'
+    # Expect a non-zero count for the new histogram.
+    ```
+
+### 5\) (Optional) Kueue Path Verification
+
+1.  **Stop the agent** and **restart it with Kueue enabled**:
+    ```bash
+    AEGIS_EXECUTOR=job \
+    AEGIS_DRY_RUN=1 \
+    AEGIS_KUEUE_ENABLED=1 \
+    AEGIS_KUEUE_QUEUE=default \
+    make run-agent ALLOW_SOCKETS=1 \
+      AEGIS_CLUSTER_ID=dev-gke
+    ```
+2.  **Submit a new workload** and capture its ID.
+3.  **Immediately check the created Job**:
+    ```bash
+    JOB_NAME="aegis-$(<new_workload_id>)"
+    kubectl get job "$JOB_NAME" -n default -o yaml | grep 'suspend:'
+    # Expect to see "suspend: true" initially. After a few seconds,
+    # Kueue will admit it, and the value will become "false".
+    ```

@@ -43,6 +43,13 @@ func (e *Executor) RunTraining(ctx context.Context, w *aegis.Workload) execiface
 	if gpusPer <= 0 {
 		gpusPer = 1
 	}
+	if h := w.GetHints(); h != nil {
+		e.log.Info("training applying resource hints",
+			zap.String("workload_id", w.GetId()),
+			zap.String("resource_name", h.GetResourceName()),
+			zap.Int32("gpu_count", h.GetGpuCount()),
+		)
+	}
 
 	_, cfg, err := kube.New()
 	if err != nil {
@@ -117,7 +124,7 @@ func (e *Executor) RunTraining(ctx context.Context, w *aegis.Workload) execiface
 	name := sanitizeName("aegis-" + w.GetId())
 	url := fmt.Sprintf("k8s://%s/pytorchjob/%s", e.namespace, name)
 
-	obj := buildPyTorchJob(gv, name, e.namespace, image, tr.GetCommand(), tr.GetFlavor(), gpusPer, workers, e.dryRun)
+	obj := buildPyTorchJob(gv, name, e.namespace, image, tr.GetCommand(), tr.GetFlavor(), gpusPer, workers, e.dryRun, w.GetHints())
 	res := dyn.Resource(gvr).Namespace(e.namespace)
 	if _, err := res.Create(ctx, obj, metav1.CreateOptions{}); err != nil {
 		if !kerrors.IsAlreadyExists(err) {
@@ -184,7 +191,7 @@ func detectPyTorchGVR(cfg *rest.Config) (string, schema.GroupVersionResource, er
 	return "", schema.GroupVersionResource{}, fmt.Errorf("pytorchjobs CRD not found")
 }
 
-func buildPyTorchJob(apiVersion, name, namespace, image string, command []string, flavor string, gpusPerWorker, workers int, dryRun bool) *unstructured.Unstructured {
+func buildPyTorchJob(apiVersion, name, namespace, image string, command []string, flavor string, gpusPerWorker, workers int, dryRun bool, hints *aegis.ResourceHints) *unstructured.Unstructured {
 	container := map[string]interface{}{
 		"name":  "pytorch",
 		"image": image,
@@ -193,11 +200,23 @@ func buildPyTorchJob(apiVersion, name, namespace, image string, command []string
 		container["command"] = stringSliceToAny(command)
 	}
 	if !dryRun {
-		resName := autoGPUResource(flavor)
-		if resName == "" {
-			resName = "nvidia.com/gpu"
+		resName := ""
+		count := max(1, gpusPerWorker)
+		if hints != nil {
+			if rn := hints.GetResourceName(); rn != "" {
+				resName = rn
+			}
+			if hints.GetGpuCount() > 0 {
+				count = int(hints.GetGpuCount())
+			}
 		}
-		quantity := resource.MustParse(strconv.Itoa(max(1, gpusPerWorker)))
+		if resName == "" {
+			resName = autoGPUResource(flavor)
+			if resName == "" {
+				resName = "nvidia.com/gpu"
+			}
+		}
+		quantity := resource.MustParse(strconv.Itoa(max(1, count)))
 		limits := map[string]interface{}{resName: quantity.String()}
 		container["resources"] = map[string]interface{}{
 			"limits":   limits,

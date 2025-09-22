@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 
 	execiface "github.com/yourorg/aegis/agents/k8s-agent/internal/executor"
 	"github.com/yourorg/aegis/agents/k8s-agent/internal/kube"
@@ -31,24 +34,64 @@ type Executor struct {
 	dryRun    bool
 	cleanup   bool
 	client    *kube.Clientset
+	restCfg   *rest.Config
+	kueueOn   bool
+	kueueQ    string
 }
 
 func New(log *zap.Logger) (*Executor, error) {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	cs, _, err := kube.New()
+	cs, cfg, err := kube.New()
 	if err != nil {
 		return nil, err
 	}
 	ns := getenv("AEGIS_NAMESPACE", defaultNamespace)
-	return &Executor{
+	e := &Executor{
 		log:       log,
 		namespace: ns,
 		dryRun:    os.Getenv("AEGIS_DRY_RUN") == "1",
 		cleanup:   os.Getenv("AEGIS_CLEANUP_JOBS") == "1",
 		client:    cs,
-	}, nil
+		restCfg:   cfg,
+	}
+
+	e.kueueQ = getenv("AEGIS_KUEUE_QUEUE", "")
+	if os.Getenv("AEGIS_KUEUE_ENABLED") == "1" && cfg != nil {
+		if ok, derr := detectKueue(cfg); derr != nil {
+			e.log.Warn("kueue detection failed", zap.Error(derr))
+		} else if ok {
+			e.kueueOn = true
+			queueName := e.kueueQ
+			if queueName == "" {
+				queueName = "<workload-queue>"
+			}
+			e.log.Info("kueue admission enabled",
+				zap.String("namespace", e.namespace),
+				zap.String("queue", queueName),
+				zap.Bool("using_workload_queue", e.kueueQ == ""),
+			)
+		} else {
+			e.log.Info("kueue CRDs not detected; continuing without admission")
+		}
+	}
+
+	return e, nil
+}
+
+func detectKueue(cfg *rest.Config) (bool, error) {
+	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, err
+	}
+	versions := []string{"kueue.x-k8s.io/v1beta1", "kueue.x-k8s.io/v1alpha2"}
+	for _, gv := range versions {
+		if _, err := disc.ServerResourcesForGroupVersion(gv); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (e *Executor) RunWorkspace(ctx context.Context, w *aegis.Workload) execiface.Result {
@@ -86,21 +129,29 @@ sleep 3;
 echo "[AEGIS] done";`
 
 	cmd := ws.GetCommand()
+	reqs := e.gpuRequests(w)
 	container := corev1.Container{
-		Name:  "workspace",
-		Image: image,
-		Resources: corev1.ResourceRequirements{
-			Requests: e.gpuRequests(ws.GetFlavor()),
-			Limits:   e.gpuRequests(ws.GetFlavor()),
-		},
+		Name:                     "workspace",
+		Image:                    image,
 		Env:                      env,
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+	}
+	if len(reqs) > 0 {
+		container.Resources = corev1.ResourceRequirements{Requests: reqs, Limits: reqs}
 	}
 	if len(cmd) > 0 {
 		container.Command = cmd
 	} else {
 		container.Command = []string{"/bin/sh", "-c"}
 		container.Args = []string{getenv("AEGIS_WORKSPACE_COMMAND", defaultCmd)}
+	}
+
+	if h := w.GetHints(); h != nil {
+		e.log.Info("workspace applying resource hints",
+			zap.String("workload_id", w.GetId()),
+			zap.String("resource_name", h.GetResourceName()),
+			zap.Int32("gpu_count", h.GetGpuCount()),
+		)
 	}
 
 	if e.dryRun {
@@ -118,18 +169,48 @@ echo "[AEGIS] done";`
 		zap.String("flavor", flavor),
 	)
 
+	jobLabels := map[string]string{
+		"aegis.workload/id": w.GetId(),
+		"aegis.job/name":    jobName,
+	}
+	podLabels := map[string]string{
+		"aegis.workload/id": w.GetId(),
+	}
+	suspend := false
+	if e.kueueOn {
+		queueName := e.kueueQ
+		if queueName == "" {
+			queueName = w.GetQueue()
+		}
+		if queueName == "" {
+			e.log.Warn("kueue enabled but queue missing; skipping admission",
+				zap.String("workload_id", w.GetId()),
+				zap.String("job", jobName),
+			)
+		} else {
+			jobLabels["kueue.x-k8s.io/queue-name"] = queueName
+			podLabels["kueue.x-k8s.io/queue-name"] = queueName
+			suspend = true
+			e.log.Info("kueue admission requested",
+				zap.String("workload_id", w.GetId()),
+				zap.String("job", jobName),
+				zap.String("queue", queueName),
+				zap.Bool("suspend", suspend),
+			)
+		}
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: e.namespace,
-			Labels: map[string]string{
-				"aegis.workload/id": w.GetId(),
-				"aegis.job/name":    jobName,
-			},
+			Labels:    jobLabels,
 		},
 		Spec: batchv1.JobSpec{
+			Suspend:      boolPtr(suspend),
 			BackoffLimit: int32ptr(0),
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers:    []corev1.Container{container},
@@ -247,17 +328,31 @@ func (e *Executor) pollJob(ctx context.Context, name string) string {
 	}
 }
 
-func (e *Executor) gpuRequests(flavor string) corev1.ResourceList {
-	if e.dryRun {
-		return corev1.ResourceList{}
+func (e *Executor) gpuRequests(w *aegis.Workload) corev1.ResourceList {
+	if e.dryRun || w == nil {
+		return nil
 	}
+	if h := w.GetHints(); h != nil {
+		resName := h.GetResourceName()
+		if resName == "" {
+			resName = defaultGPUResource(flavorOf(w))
+		}
+		if resName != "" {
+			cnt := h.GetGpuCount()
+			if cnt <= 0 {
+				cnt = 1
+			}
+			quantity := resource.MustParse(strconv.Itoa(int(cnt)))
+			return corev1.ResourceList{corev1.ResourceName(resName): quantity}
+		}
+	}
+
 	resourceName := getenv("AEGIS_GPU_RESOURCE_NAME", "")
 	if resourceName == "" {
-		if strings.HasPrefix(flavor, "mig-") {
-			resourceName = "nvidia.com/" + strings.TrimPrefix(flavor, "mig-")
-		} else {
-			resourceName = "nvidia.com/gpu"
-		}
+		resourceName = defaultGPUResource(flavorOf(w))
+	}
+	if resourceName == "" {
+		return nil
 	}
 	quantity := resource.MustParse("1")
 	return corev1.ResourceList{corev1.ResourceName(resourceName): quantity}
@@ -279,6 +374,26 @@ func isFailed(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+func flavorOf(w *aegis.Workload) string {
+	if w == nil {
+		return ""
+	}
+	if ws := w.GetWorkspace(); ws != nil && ws.GetFlavor() != "" {
+		return ws.GetFlavor()
+	}
+	if tr := w.GetTraining(); tr != nil && tr.GetFlavor() != "" {
+		return tr.GetFlavor()
+	}
+	return ""
+}
+
+func defaultGPUResource(flavor string) string {
+	if strings.HasPrefix(flavor, "mig-") {
+		return "nvidia.com/" + strings.TrimPrefix(flavor, "mig-")
+	}
+	return "nvidia.com/gpu"
 }
 
 func toEnvVars(env map[string]string) []corev1.EnvVar {
@@ -311,5 +426,7 @@ func getenv(key, def string) string {
 	}
 	return def
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 func int32ptr(v int32) *int32 { return &v }

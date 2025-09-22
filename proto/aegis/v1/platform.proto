@@ -32,9 +32,16 @@ message WorkspaceSpec {
 }
 message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; }
 
+message ResourceHints {
+  string resource_name = 1; // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
+  int32 gpu_count = 2;      // per container GPU count to request
+}
+
 message Workload {
   string id = 1; string project_id = 2; string queue = 3; string cluster_id = 4; string status = 5; string url = 6;
   oneof kind { WorkspaceSpec workspace = 10; TrainingSpec training = 11; }
+
+  ResourceHints hints = 12;
 }
 
 // Cluster handshake

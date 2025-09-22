@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 )
@@ -19,6 +20,7 @@ type MemStore struct {
 	flavors   map[string]*aegis.Flavor
 	queues    map[string]*aegis.Queue
 	workloads map[string]*aegis.Workload
+	placedAt  map[string]time.Time
 
 	// cluster state is managed via clusterState for fine-grained locking
 	cstate *clusterState
@@ -31,6 +33,7 @@ func NewMemStore() *MemStore {
 		flavors:   map[string]*aegis.Flavor{},
 		queues:    map[string]*aegis.Queue{},
 		workloads: map[string]*aegis.Workload{},
+		placedAt:  map[string]time.Time{},
 		cstate:    newClusterState(),
 	}
 }
@@ -101,6 +104,25 @@ func (s *MemStore) ListWorkloads(projectID string) []*aegis.Workload {
 		}
 	}
 	return out
+}
+
+func (s *MemStore) MarkPlaced(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.placedAt[id] = time.Now()
+}
+
+func (s *MemStore) GetPlacedAt(id string) (time.Time, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.placedAt[id]
+	return t, ok
+}
+
+func (s *MemStore) ClearPlacedAt(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.placedAt, id)
 }
 
 // -------- clusters --------

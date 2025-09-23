@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,9 +22,13 @@ type MemStore struct {
 	queues    map[string]*aegis.Queue
 	workloads map[string]*aegis.Workload
 	placedAt  map[string]time.Time
+	startedAt map[string]time.Time
+	estUSD    map[string]float64
 
 	// cluster state is managed via clusterState for fine-grained locking
 	cstate *clusterState
+
+	usage map[string]*budgetUsage
 }
 
 func NewMemStore() *MemStore {
@@ -34,8 +39,17 @@ func NewMemStore() *MemStore {
 		queues:    map[string]*aegis.Queue{},
 		workloads: map[string]*aegis.Workload{},
 		placedAt:  map[string]time.Time{},
+		startedAt: map[string]time.Time{},
+		estUSD:    map[string]float64{},
 		cstate:    newClusterState(),
+		usage:     map[string]*budgetUsage{},
 	}
+}
+
+type budgetUsage struct {
+	periodStart time.Time
+	reservedUSD float64
+	actualUSD   float64
 }
 
 // -------- projects/budgets/flavors/queues/workloads --------
@@ -51,15 +65,47 @@ func (s *MemStore) GetProject(id string) *aegis.Project {
 	return s.projects[id]
 }
 
+func budgetKey(projectID, queue string) string { return projectID + "|" + queue }
+
+func monthStartUTC(t time.Time) time.Time {
+	utc := t.UTC()
+	return time.Date(utc.Year(), utc.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func monthEndUTC(t time.Time) time.Time { return monthStartUTC(t).AddDate(0, 1, 0) }
+
+type BudgetUsageView struct {
+	ReservedUSD float64
+	ActualUSD   float64
+	PeriodStart time.Time
+	PeriodEnd   time.Time
+}
+
 func (s *MemStore) PutBudget(b *aegis.Budget) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.budgets[b.ProjectId] = b
+	s.budgets[budgetKey(b.ProjectId, b.Queue)] = b
 }
 func (s *MemStore) GetBudget(projectID string) *aegis.Budget {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.budgets[projectID]
+	return s.budgets[budgetKey(projectID, "")]
+}
+func (s *MemStore) GetBudgetExact(projectID, queue string) *aegis.Budget {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.budgets[budgetKey(projectID, queue)]
+}
+func (s *MemStore) ResolveBudget(projectID, queue string) (*aegis.Budget, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if b, ok := s.budgets[budgetKey(projectID, queue)]; ok {
+		return b, budgetKey(projectID, queue)
+	}
+	if b, ok := s.budgets[budgetKey(projectID, "")]; ok {
+		return b, budgetKey(projectID, "")
+	}
+	return nil, ""
 }
 
 func (s *MemStore) PutFlavor(f *aegis.Flavor) {
@@ -125,6 +171,62 @@ func (s *MemStore) ClearPlacedAt(id string) {
 	delete(s.placedAt, id)
 }
 
+func (s *MemStore) MarkStarted(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startedAt[id] = time.Now()
+}
+
+func (s *MemStore) GetStartedAt(id string) (time.Time, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.startedAt[id]
+	return t, ok
+}
+
+func (s *MemStore) SetEstimateUSD(id string, usd float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.estUSD[id] = usd
+}
+
+func (s *MemStore) PopEstimateUSD(id string) float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.estUSD[id]
+	delete(s.estUSD, id)
+	return v
+}
+
+// StartWorkload transitions a workload from PLACED to RUNNING. It returns the
+// workload alongside the observed queue wait and a boolean indicating whether a
+// wait duration was recorded. Subsequent invocations when the workload is
+// already RUNNING are treated as no-ops.
+func (s *MemStore) StartWorkload(id string) (*aegis.Workload, time.Duration, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, 0, false, fmt.Errorf("workload %s not found", id)
+	}
+
+	switch w.GetStatus() {
+	case statusPlaced:
+		w.Status = statusRunning
+		s.startedAt[id] = time.Now()
+		if t0, ok := s.placedAt[id]; ok {
+			delete(s.placedAt, id)
+			return w, time.Since(t0), true, nil
+		}
+		return w, 0, false, nil
+	case statusRunning:
+		return w, 0, false, nil
+	default:
+		return nil, 0, false, fmt.Errorf("workload %s not in a startable state", id)
+	}
+}
+
 // -------- clusters --------
 
 func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) {
@@ -150,6 +252,7 @@ func (s *MemStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 			continue
 		}
 		w.Status = statusRunning
+		s.startedAt[w.Id] = time.Now()
 		leased = append(leased, w)
 		if len(leased) >= max {
 			break
@@ -174,4 +277,87 @@ func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis
 		w.Url = url
 	}
 	return w, nil
+}
+
+// ---- Budget usage helpers ----
+
+func (s *MemStore) ReserveIfAllowed(projectID, queue string, estimateUSD float64) (allowed bool, policy string, reason string, view BudgetUsageView) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	b, key := s.resolveBudgetLocked(projectID, queue)
+	if b == nil {
+		return true, "", "", BudgetUsageView{}
+	}
+	u := s.ensureUsageLocked(key, now)
+	next := u.actualUSD + u.reservedUSD + estimateUSD
+	policy = b.GetPolicyMode()
+	if next > b.GetLimitUsd() && strings.EqualFold(policy, "HARD") {
+		return false, policy, "insufficient_funds", BudgetUsageView{ReservedUSD: u.reservedUSD, ActualUSD: u.actualUSD, PeriodStart: u.periodStart, PeriodEnd: monthEndUTC(now)}
+	}
+	u.reservedUSD += estimateUSD
+	return true, policy, "", BudgetUsageView{ReservedUSD: u.reservedUSD, ActualUSD: u.actualUSD, PeriodStart: u.periodStart, PeriodEnd: monthEndUTC(now)}
+}
+
+func (s *MemStore) ReconcileOnAck(projectID, queue string, estUSD, actualUSD float64) BudgetUsageView {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, key := s.resolveBudgetLocked(projectID, queue)
+	if key == "" {
+		return BudgetUsageView{}
+	}
+	u := s.ensureUsageLocked(key, now)
+	u.reservedUSD -= estUSD
+	if u.reservedUSD < 0 {
+		u.reservedUSD = 0
+	}
+	u.actualUSD += actualUSD
+	return BudgetUsageView{ReservedUSD: u.reservedUSD, ActualUSD: u.actualUSD, PeriodStart: u.periodStart, PeriodEnd: monthEndUTC(now)}
+}
+
+func (s *MemStore) UsageView(projectID, queue string) (BudgetUsageView, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	_, key := s.resolveBudgetLocked(projectID, queue)
+	if key == "" {
+		return BudgetUsageView{}, false
+	}
+	u, ok := s.usage[key]
+	if !ok {
+		return BudgetUsageView{ReservedUSD: 0, ActualUSD: 0, PeriodStart: monthStartUTC(now), PeriodEnd: monthEndUTC(now)}, true
+	}
+	return BudgetUsageView{ReservedUSD: u.reservedUSD, ActualUSD: u.actualUSD, PeriodStart: u.periodStart, PeriodEnd: monthEndUTC(now)}, true
+}
+
+func (s *MemStore) ListBudgets(filterProject string) []*aegis.Budget {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*aegis.Budget{}
+	for _, b := range s.budgets {
+		if filterProject == "" || b.GetProjectId() == filterProject {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func (s *MemStore) ensureUsageLocked(key string, now time.Time) *budgetUsage {
+	u, ok := s.usage[key]
+	if !ok || !u.periodStart.Equal(monthStartUTC(now)) {
+		u = &budgetUsage{periodStart: monthStartUTC(now)}
+		s.usage[key] = u
+	}
+	return u
+}
+
+func (s *MemStore) resolveBudgetLocked(projectID, queue string) (*aegis.Budget, string) {
+	if b, ok := s.budgets[budgetKey(projectID, queue)]; ok {
+		return b, budgetKey(projectID, queue)
+	}
+	if b, ok := s.budgets[budgetKey(projectID, "")]; ok {
+		return b, budgetKey(projectID, "")
+	}
+	return nil, ""
 }

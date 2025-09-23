@@ -1,533 +1,240 @@
 # aegis
 
-Local development quickstart lives in the make targets and scripts under
-`scripts/dev`. For direct API pokes, see
-`docs/grpcurl-cheatsheet.md` for step-by-step `grpcurl` examples compatible with
-the current proto definitions.
+`aegis` is a multi-cluster workload scheduling system. It consists of a central `platform-api` and a Kubernetes `operator` that runs in each target cluster. Users submit workloads to the platform API, which then places them onto the best available cluster by creating an `AegisWorkload` custom resource. The operator in the target cluster reconciles this resource, creating Kubernetes Jobs and managing their lifecycle.
+push
+## Local Development Quickstart
 
-> `make proto` expects `buf`, `protoc-gen-go`, and `protoc-gen-go-grpc` to be
-> available in `./bin` (or on your `PATH`). The `bin/` directory is ignored in
-> git so you can manage tool versions locally.
+This guide will get you running with your Docker Desktop Kubernetes cluster, the `platform-api`, and one `operator` instance.
 
-## Prompt 1 Validation Steps
+### Prerequisites
 
-These steps assume you are running locally (network-restricted sandboxes should
-only execute the non-network commands).
+  * Go (1.24+)
+  * Docker Desktop (with Kubernetes enabled)
+  * `kubectl`
+  * `grpcurl`
 
-1. **Regenerate protobuf stubs**
-   ```bash
-   PATH=$(pwd)/bin:$PATH make proto
-   ```
-2. **Tidy modules and build binaries**
-   ```bash
-   PATH=$(pwd)/bin:$PATH make tidy
-   PATH=$(pwd)/bin:$PATH make build
-   ```
-3. **Run the control-plane API** (local shell only)
-   ```bash
-   PATH=$(pwd)/bin:$PATH make run-api
-   ```
-4. **Launch one or more agents** (local shell only)
-   ```bash
-   PATH=$(pwd)/bin:$PATH make run-agent
-   # or customize
-   PATH=$(pwd)/bin:$PATH make run-agent \
-     AEGIS_CP_GRPC=localhost:8081 \
-     AEGIS_CLUSTER_ID=dev-gke \
-     AEGIS_REGION=us-central \
-     AEGIS_PROVIDER=DEV
-   ```
-5. **Exercise the API** using the commands in
-   `docs/grpcurl-cheatsheet.md` (create project, submit workload, list, etc.).
+### 1\. Prepare Your Environment
 
-> **Note:** Do not invoke the `run-*` targets inside sandboxed CI/agent
-> environments; they attempt to bind/listen on local ports. Use the `proto`,
-> `tidy`, and `build` targets there instead.
-
-
----
-
----
-
-## Week 1 Validation Steps — Placement + Lease/Ack (Prompt 2)
-
-Goal: Control plane **places** workloads to a cluster based on **regions + flavor + lowest TTFG**; agent **leases** and **acks** to **SUCCEEDED**.
-
-> Prereqs: use the make guards (notes at bottom). Memstore resets on API restart.
-
-### 0) Clean slate (optional)
-```bash
-pkill -f services/platform-api || true
-pkill -f k8s-agent/cmd/agent   || true
-lsof -nP -iTCP:8081 -sTCP:LISTEN
-````
-
-### 1) Generate + build + basic static checks
+First, clean up any previous runs and prepare your cluster.
 
 ```bash
-PATH="$(pwd)/bin:$PATH" BUF_CACHE_DIR="$(pwd)/.bufcache" make proto
-make tidy  ALLOW_NET=1
-make build ALLOW_NET=1
-make test  ALLOW_NET=1
-(cd services/platform-api && go list ./...)
-(cd agents/k8s-agent    && go list ./...)
+# Stop any lingering processes
+make stop
+pkill -f 'k8s-agent/cmd' || true
+
+# Delete old test resources
+kubectl delete jobs --all
+kubectl delete aegisworkloads --all
+
+# Apply the CRD and prepare the kubeconfig for the API
+kubectl apply -f agents/k8s-agent/config/crd/bases/aegis.yourorg.dev_aegisworkloads.yaml
+cp ~/.kube/config /tmp/dev-1.kubeconfig
 ```
-
-### 2) Run the API (Terminal A)
-
-```bash
-make run-api ALLOW_SOCKETS=1
-```
-
-### 3) Quick path (single agent, DRY-RUN executor) — works without a GPU
-
-Terminal B:
-
-```bash
-AEGIS_EXECUTOR=job \
-AEGIS_DRY_RUN=1 \
-AEGIS_NAMESPACE=default \
-AEGIS_TTFG_P50=15 \
-make run-agent ALLOW_SOCKETS=1 \
-  AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
-```
-
-Create project + submit (Terminal C):
-
-```bash
-grpcurl -plaintext -d '{
-  "project":{"id":"p-demo","displayName":"Demo","policy":{"regions":["us-central"]}}
-}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-# Use a flavor the agent advertises (see API heartbeats); default static set:
-#   ["a10-mig-1g","a100-8x"]
-grpcurl -plaintext -d '{
-  "workload":{"projectId":"p-demo","queue":"default",
-              "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19"}}
-}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-sleep 8
-grpcurl -plaintext -d '{"projectId":"p-demo"}' \
-  localhost:8081 aegis.v1.AegisPlatform/ListWorkloads
-# Expect: "status":"SUCCEEDED", "clusterId":"dev-gke"
-```
-
-### 3b) (Optional) Two-agent demo — placement prefers lower TTFG
-
-Terminal B:
-
-```bash
-AEGIS_TTFG_P50=120 make run-agent ALLOW_SOCKETS=1 \
-  AEGIS_CLUSTER_ID=dev-eks AEGIS_REGION=us-east
-```
-
-Terminal C:
-
-```bash
-AEGIS_TTFG_P50=30  make run-agent ALLOW_SOCKETS=1 \
-  AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
-```
-
-Then create project (regions `us-east/us-central`) and submit as above; expect `dev-gke` to be chosen.
-
-### Negative checks (optional)
-
-Missing flavor → `InvalidArgument`:
-
-```bash
-grpcurl -plaintext -d '{
-  "workload":{"projectId":"p-demo","queue":"default","workspace":{}}
-}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-```
-
-Unsupported flavor → `FailedPrecondition`:
-
-```bash
-grpcurl -plaintext -d '{
-  "workload":{"projectId":"p-demo","queue":"default","workspace":{"flavor":"h100-80gb"}}
-}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-```
-
-### Notes
-
-* Memstore resets when the API restarts → re-create the project.
-* Use make guards:
-
-  * `ALLOW_NET=1` for `tidy/build/test`
-  * `ALLOW_SOCKETS=1` for `run-*`
-* Agent flavor matching: submit a flavor the agent advertises (see API heartbeats).
-* If you see a stray `cluster_id:"dev-1"` heartbeat, kill old agents:
-
-  ```bash
-  pkill -f 'k8s-agent.*AEGIS_CLUSTER_ID=dev-1' || true
-  ```
-
----
-
-## Prompt 2 Validation — Real K8s executor (DRY-RUN)
-
-Use a local Kubernetes cluster (Docker Desktop works). `AEGIS_DRY_RUN=1` omits GPU requests so no GPU is required.
-
-- **Terminal A**
-  ```bash
-  make run-api ALLOW_SOCKETS=1
-  ```
-- **Terminal B**
-  ```bash
-  AEGIS_EXECUTOR=job \
-  AEGIS_DRY_RUN=1 \
-  AEGIS_NAMESPACE=default \
-  AEGIS_TTFG_P50=15 \
-  make run-agent ALLOW_SOCKETS=1 \
-    AEGIS_CLUSTER_ID=dev-gke \
-    AEGIS_REGION=us-central
-  ```
-- **Terminal C**
-  ```bash
-  grpcurl -plaintext -d '{
-    "project": {
-      "id": "p-demo",
-      "displayName": "Demo",
-      "policy": {"regions": ["us-central"]}
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-  grpcurl -plaintext -d '{
-    "workload": {
-      "projectId": "p-demo",
-      "queue": "default",
-      "workspace": {
-        "flavor": "a10-mig-1g",
-        "image": "alpine:3.19"
-      }
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  ```
-- **Verify** the workload reaches `SUCCEEDED` via `ListWorkloads`.
-- **Optional logs**
-  ```bash
-  kubectl logs -f -l aegis.workload/id=<WORKLOAD_ID> -n default --timestamps
-  ```
-  The Job prologue prints workload/pod/namespace/node for quick correlation.
-- **Optional training test** (requires Kubeflow Trainer v1 **or** v2)
-  ```bash
-  grpcurl -plaintext -d '{
-    "workload": {
-      "projectId": "p-demo",
-      "queue": "default",
-      "training": {
-        "flavor": "gpu-1x",
-        "workers": 2,
-        "gpusPerWorker": 1,
-        "image": "pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime",
-        "command": ["python", "-c", "print('hello aegis training')"]
-      }
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  ```
-  *If you are on Trainer v2*, apply a runtime once (example in `docs/runtime-torch-distributed.yaml`), then the agent will submit
-  `TrainJob` resources and the workload URL will look like `k8s://<ns>/trainjob/<name>`. Trainer v1 clusters continue to use
-  `PyTorchJob` and the URL reflects that.
-
-
----
-
-## What’s new in Prompt 3 vs Prompt 2
-
-**Prompt 2 ** proved the control-plane/agent contract:
-- Placement chose a cluster by **regions + flavor + lowest TTFG**.
-- Agent **leased** and immediately **acked** (simulated completion). No Kubernetes integration.
-
-**Prompt 3 ** turns that into **real execution on Kubernetes**:
-- Agent creates a **Kubernetes Job** for `workspace` workloads, **watches** it to completion, then **acks**.
-- Pods print a **prologue** (workload id, pod, namespace, node, image) for easy correlation.
-- Control plane **skips stale clusters** (no heartbeat within TTL) to avoid black-hole placements.
-- **DRY-RUN** (`AEGIS_DRY_RUN=1`) omits GPU requests, so the same code path runs on Docker Desktop/Kind. In production, unset DRY-RUN and optionally set `AEGIS_GPU_RESOURCE_NAME` (e.g., `nvidia.com/mig-1g.10gb`).
-
-### Demo: Stale heartbeat filter (place when fresh, refuse when stale)
-> Shows that CP won’t place onto clusters that aren’t heartbeating.
-
-- **Terminal A (CP)**
-  ```bash
-  make run-api ALLOW_SOCKETS=1
-  ```
-
-- **Terminal B (agent registers once, then stop)**
-  ```bash
-  AEGIS_EXECUTOR=none AEGIS_TTFG_P50=15 \
-  make run-agent ALLOW_SOCKETS=1 \
-    AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
-  # Ctrl-C after you see "cluster registered" in Terminal A
-  ```
-
-- **Terminal C (create project, wait past TTL, submit)**
-  ```bash
-  grpcurl -plaintext -d '{
-    "project":{"id":"p-demo","displayName":"Demo",
-               "policy":{"regions":["us-central"]}}
-  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-  sleep 50   # TTL is 45s
-  grpcurl -plaintext -d '{
-    "workload":{"projectId":"p-demo","queue":"default",
-                "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19"}}
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  # Expect: FailedPrecondition; CP logs "skipping stale cluster ..."
-  ```
-
-### Demo: Failure path (Job fails → FAILED)
-> Shows Job executor drives the final status based on Pod outcome.
-
-- **Terminal A (CP)**
-  ```bash
-  make run-api ALLOW_SOCKETS=1
-  ```
-
-- **Terminal B (agent, failing command)**
-  ```bash
-  AEGIS_EXECUTOR=job AEGIS_DRY_RUN=1 AEGIS_NAMESPACE=default AEGIS_TTFG_P50=15 \
-  AEGIS_WORKSPACE_COMMAND='echo "[AEGIS] failing"; exit 1' \
-  make run-agent ALLOW_SOCKETS=1 \
-    AEGIS_CLUSTER_ID=dev-gke AEGIS_REGION=us-central
-  ```
-
-- **Terminal C (create + submit)**
-  ```bash
-  grpcurl -plaintext -d '{
-    "project":{"id":"p-demo","displayName":"Demo",
-               "policy":{"regions":["us-central"]}}
-  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-  grpcurl -plaintext -d '{
-    "workload":{"projectId":"p-demo","queue":"default",
-                "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19"}}
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-
-  sleep 8
-  grpcurl -plaintext -d '{"projectId":"p-demo"}' \
-    localhost:8081 aegis.v1.AegisPlatform/ListWorkloads
-  # Expect: "status":"FAILED"
-  ```
-
-- **Optional: Pod logs**
-  ```bash
-  kubectl logs -f -l aegis.workload/id=<WORKLOAD_ID> -n default --timestamps
-  ```
-
-> **Tip:** If you see a stray `cluster_id:"dev-1"` heartbeat, kill leftover agents:
->
-> ```bash
-> pkill -f 'k8s-agent.*AEGIS_CLUSTER_ID=dev-1' || true
-> ```
-
-## Prompt 4 Validation — URLs, Metrics & Trainer v2
-
-This scenario proves the Prompt 4 additions:
-
-1. Workspaces respect custom commands, emit a prologue, and ack with `backend=workspace` plus a Job URL.
-2. Training workloads run end-to-end on **Trainer v2** (`TrainJob`) with the canonical runtime and ack with `backend=trainer_v2` and a TrainJob URL.
-3. Prometheus metrics count placed/leased/acked workloads with the new backend label.
-4. Failure and validation paths respond with clear errors.
-
-> One-time prep (Trainer v2):
-> ```bash
-> kubectl apply -f docs/runtime-torch-distributed.yaml
-> ```
-
-- **Terminal A – Control plane**
-  ```bash
-  make run-api ALLOW_SOCKETS=1
-  ```
-  Logs include:
-  ```text
-  … starting platform API grpc_addr=:8081 http_addr=:8080
-  … gRPC server listening addr=:8081
-  … HTTP gateway listening addr=:8080
-  ```
-
-- **Terminal B – Agent (DRY-RUN for workspaces)**
-  ```bash
-  AEGIS_EXECUTOR=job \
-  AEGIS_DRY_RUN=1 \
-  AEGIS_CLUSTER_ID=dev-gke \
-  AEGIS_REGION=us-central \
-  make run-agent ALLOW_SOCKETS=1
-  ```
-  You should see:
-  ```text
-  … starting k8s agent …
-  … cluster registered … flavors=a10-mig-1g,a100-8x
-  … orchestrator started … parallel=4
-  ```
-
-- **Terminal C – Seed project and queue**
-  ```bash
-  grpcurl -plaintext -d '{
-    "project":{"id":"p-demo","displayName":"Demo","ownerGroup":"demo"}
-  }' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-  grpcurl -plaintext -d '{
-    "queue":{
-      "name":"default",
-      "projectId":"p-demo",
-      "priorityTier":"research",
-      "allowedFlavors":["a10-mig-1g","a100-8x"]
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
-  ```
-
-- **Workspace (default script + env)**
-  ```bash
-  grpcurl -plaintext -d '{
-    "workload":{
-      "projectId":"p-demo",
-      "queue":"default",
-      "workspace":{
-        "flavor":"a10-mig-1g",
-        "image":"debian:bookworm-slim",
-        "env":{"EXAMPLE":"1"}
-      }
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  ```
-  Control-plane logs show `workload placed` → agent logs `executing workload`, `job submitted`, and `ack succeeded` with
-  `backend="workspace"` and `url=k8s://default/job/<name>`.
-
-- **Workspace with explicit command**
-  ```bash
-  grpcurl -plaintext -d '{
-    "workload":{
-      "projectId":"p-demo",
-      "queue":"default",
-      "workspace":{
-        "flavor":"a10-mig-1g",
-        "image":"debian:bookworm-slim",
-        "command":["bash","-lc","echo WS-CMD && sleep 1 && exit 0"]
-      }
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  ```
-  `kubectl logs` contains `WS-CMD`, proving the command override.
-
-- **Trainer v2 workload**
-  ```bash
-  grpcurl -plaintext -d '{
-    "workload":{
-      "projectId":"p-demo",
-      "queue":"default",
-      "training":{
-        "flavor":"a10-mig-1g",
-        "workers":1,
-        "gpusPerWorker":1,
-        "image":"python:3.11-slim",
-        "command":["python","-c","print(\"trainer v2 smoke\")"]
-      }
-    }
-  }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
-  ```
-  Logs show `trainjob submitted`, followed by `trainjob succeeded`, and the ack uses `backend="trainer_v2"` with
-  `url=k8s://default/trainjob/<name>`. Inspect the CR:
-  ```bash
-  kubectl get trainjobs.trainer.kubeflow.org aegis-<id> -o jsonpath='{.status.conditions}{
 
 -----
 
-## Prompt 5 Validation — Precise GPU Mapping & Kueue
+### 2\. Run the System
 
-This scenario validates the Prompt 5 features:
+You'll need three terminal windows for this guide.
 
-1.  **Precise GPU Resource Mapping**: The control plane now has a **Flavor catalog**. It uses this to stamp `ResourceHints` (e.g., `resource_name: "nvidia.com/mig-1g.10gb"`) onto workloads when they are leased. The agent then uses these hints to request the correct GPU type in Kubernetes.
-2.  **Optional Kueue Admission**: When the `AEGIS_KUEUE_ENABLED=1` flag is set, the agent will detect if Kueue is installed. If so, it creates Workspace Jobs with the `spec.suspend: true` flag and the `kueue.x-k8s.io/queue-name` label, handing off admission control to the Kueue scheduler.
-3.  **New Queue-Wait Metric**: A new Prometheus histogram, `aegis_workload_queue_wait_seconds`, now measures the time a workload spends between being `PLACED` and `RUNNING` (leased).
-
-### 1\) Build and Start API
+**Terminal A: Start the Platform API**
 
 ```bash
-make tidy ALLOW_NET=1
-make build ALLOW_NET=1
+# Set up and run the API. Leave this running.
+export KUBECONFIGS_DIR=/tmp
 make run-api ALLOW_SOCKETS=1
 ```
 
-### 2\) Seed Project, Queue, and Flavor Catalog
-
-In a new terminal, seed the control plane with the necessary objects. Note the new `UpsertFlavor` call which populates the catalog.
+**Terminal B: Start the Operator**
 
 ```bash
-# Project
-grpcurl -plaintext -d '{
-  "project":{"id":"p-demo","displayName":"Demo","ownerGroup":"demo"}
-}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-
-# Queue
-grpcurl -plaintext -d '{
-  "queue":{"name":"default","projectId":"p-demo",
-           "priorityTier":"research",
-           "allowedFlavors":["a10-mig-1g"]}
-}' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
-
-# Flavor (with precise resource name)
-grpcurl -plaintext -d '{
-  "flavor":{
-    "name":"a10-mig-1g",
-    "resourceName":"nvidia.com/mig-1g.10gb",
-    "gpuCount":1
-  }
-}' localhost:8081 aegis.v1.AegisPlatform/UpsertFlavor
+# This operator will run jobs immediately and advertise a CPU flavor.
+# Leave this running throughout all tests.
+AEGIS_DISABLE_KUEUE=1 \
+AEGIS_CLUSTER_ID=dev-1 \
+AEGIS_FLAVORS="cpu-small" \
+HEALTH_PROBE_BIND_ADDRESS=:18081 \
+make run-operator ALLOW_SOCKETS=1
 ```
 
-### 3\) Run Agent and Submit Workload
+**Terminal C: Your Command Terminal**
+This is where you will interact with the system. Before submitting workloads, wait about 15 seconds for the operator to register with the API. You can confirm this by seeing a `"cluster registered"` log in Terminal A.
 
-In a new terminal, start the agent (in dry-run, no Kueue).
+-----
 
-```bash
-AEGIS_EXECUTOR=job \
-AEGIS_DRY_RUN=1 \
-AEGIS_NAMESPACE=default \
-make run-agent ALLOW_SOCKETS=1 \
-  AEGIS_CLUSTER_ID=dev-gke \
-  AEGIS_REGION=us-central
-```
+## Validation Scenarios
 
-Submit a workload. The agent logs will now show the `ResourceHints` it received.
+The following scenarios validate the full functionality of the refactored system, mapped to the original project prompts.
 
-```bash
-# In another terminal, submit the workload and capture its ID
-WID=$(grpcurl -plaintext -d '{
-  "workload":{"projectId":"p-demo","queue":"default",
-              "workspace":{"flavor":"a10-mig-1g"}}
-}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload | grep -o '"w-[^"]*"' | tr -d '"')
-```
+### Prompt 1, 4, & 5: Full Lifecycle Validation
 
-### 4\) Verify Hints and Metrics
+**Goal**: Prove the core API works, jobs run to completion, the Start/Ack bridge fires, metrics are recorded, and CPU flavors are handled correctly.
 
-1.  **Check agent logs**: You will see lines confirming the hints were received and applied:
-    `{"level":"info", ... "msg":"workload hints", "resource_name":"nvidia.com/mig-1g.10gb", ...}`
-2.  **Check the API for the persisted hint**:
+1.  **Seed the API (Terminal C)**
+
     ```bash
-    grpcurl -plaintext -d "{\"id\":\"$WID\"}" localhost:8081 aegis.v1.AegisPlatform/GetWorkload
-    # Expect to see the "hints" object in the response.
-    ```
-3.  **Check metrics**:
-    ```bash
-    curl -s localhost:8080/metrics | grep 'aegis_workload_queue_wait_seconds'
-    # Expect a non-zero count for the new histogram.
+    grpcurl -plaintext -d '{"project":{"id":"p-demo"}}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+    grpcurl -plaintext -d '{"flavor":{"name":"cpu-small","gpuCount":0}}' localhost:8081 aegis.v1.AegisPlatform/UpsertFlavor
+    grpcurl -plaintext -d '{"queue":{"name":"default","projectId":"p-demo","allowedFlavors":["cpu-small"]}}' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
     ```
 
-### 5\) (Optional) Kueue Path Verification
+2.  **Submit Workloads (Terminal C)**
 
-1.  **Stop the agent** and **restart it with Kueue enabled**:
     ```bash
-    AEGIS_EXECUTOR=job \
-    AEGIS_DRY_RUN=1 \
-    AEGIS_KUEUE_ENABLED=1 \
-    AEGIS_KUEUE_QUEUE=default \
-    make run-agent ALLOW_SOCKETS=1 \
-      AEGIS_CLUSTER_ID=dev-gke
+    # Submit one workload that will SUCCEED
+    grpcurl -plaintext -d '{
+      "workload":{"projectId":"p-demo","queue":"default","workspace":{"flavor":"cpu-small","image":"alpine:3.19","command":["sh","-c","echo Success!; sleep 2"]}}
+    }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+
+    # Submit one workload that will FAIL
+    grpcurl -plaintext -d '{
+      "workload":{"projectId":"p-demo","queue":"default","workspace":{"flavor":"cpu-small","image":"alpine:3.19","command":["sh","-c","echo I will fail; exit 1"]}}
+    }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
     ```
-2.  **Submit a new workload** and capture its ID.
-3.  **Immediately check the created Job**:
+
+3.  **Wait and Verify (Terminal C)**
+
     ```bash
-    JOB_NAME="aegis-$(<new_workload_id>)"
-    kubectl get job "$JOB_NAME" -n default -o yaml | grep 'suspend:'
-    # Expect to see "suspend: true" initially. After a few seconds,
-    # Kueue will admit it, and the value will become "false".
+    # Give the jobs time to finish and be acknowledged
+    echo "Waiting 20 seconds for jobs to complete..."
+    sleep 20
+
+    # Verify the final state
+    echo "--- Final AegisWorkload Status ---"
+    kubectl get aegisworkloads
+    # ==> Expect one 'Succeeded' and one 'Failed' in the PHASE column.
+
+    echo -e "\n--- Final Metrics ---"
+    curl -s localhost:8080/metrics | grep "aegis_workload_acked_total"
+    # ==> Expect counters for both succeeded and failed statuses.
     ```
+
+      * **Verify API Logs (Terminal A)**: The logs will show the full `placed` -\> `start acknowledged` -\> `workload acknowledged` sequence for both the `SUCCEEDED` and `FAILED` jobs. 
+      * You can also place for more metrics
+      
+      ```bash
+      curl -s localhost:8080/metrics | grep -A1 '^# HELP aegis_workload_acked_total'
+      curl -s localhost:8080/metrics | egrep 'aegis_workload_(placed|leased|queue_wait)'
+      curl -si localhost:8080/metrics | head
+      ```
+      
+
+
+-----
+
+### Prompt 3: Stale Heartbeats
+
+**Goal**: Prove the API will not place workloads on clusters that have stopped sending heartbeats.
+
+1.  Start the Foundational Setup.
+2.  Stop the operator in Terminal B with `Ctrl+C`.
+3.  In Terminal C, wait for the TTL to expire, then try to submit a workload.
+    ```bash
+    # Wait 50 seconds (TTL is 45s)
+    sleep 50
+    grpcurl -plaintext -d '{"workload":{"projectId":"p-demo","queue":"default","workspace":{"flavor":"cpu-small","image":"alpine:3.19"}}}' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+    ```
+4.  **Result**: The command will fail with a `FailedPrecondition` error, and the API logs in Terminal A will show `"placement failed"` with the error `"no eligible cluster"`.
+
+-----
+
+### Prompt 2 & 5: Multi-Cluster Placement & Kueue
+
+**Goal**: Prove placement logic prefers the best cluster and that Kueue integration is present.
+
+1.  **Start a Second "Slow" Operator (Terminal D)**:
+    ```bash
+    # Terminal D
+    AEGIS_DISABLE_KUEUE=1 \
+    AEGIS_CLUSTER_ID=slow-cluster \
+    AEGIS_FLAVORS="cpu-small" \
+    AEGIS_TTFG_P50=120 \
+    HEALTH_PROBE_BIND_ADDRESS=:18082 \
+    make run-operator ALLOW_SOCKETS=1
+    ```
+2.  **Verify Placement**: Submit a workload from Terminal C. Check the API logs in Terminal A. You will see heartbeats from both operators, but the `"workload placed"` log will show `"cluster_id":"dev-1"`, proving the system chose the faster operator.
+3.  **Verify Kueue Integration (Optional)**: Stop the operators. Restart one operator **without** `AEGIS_DISABLE_KUEUE=1`.
+    ```bash
+    # Restart Terminal B without the disable flag
+    AEGIS_CLUSTER_ID=dev-1 \
+    AEGIS_FLAVORS="cpu-small" \
+    HEALTH_PROBE_BIND_ADDRESS=:18081 \
+    make run-operator ALLOW_SOCKETS=1
+    ```
+    Submit a workload. The created Kubernetes Job will now be in the `Suspended` state, proving the Kueue integration is active by default.
+    ```bash
+    kubectl get jobs
+    # NAME                 STATUS      COMPLETIONS   DURATION   AGE
+    # aegis-w-xxxxxxxx   Suspended   0/1                      5s
+    ```
+
+### Prompt 6: Budget Guardrail
+
+**Goal**: Prove the `platform-api` can enforce usage budgets, blocking workloads that would exceed their limit under a "HARD" policy and allowing them under a "SOFT" policy.
+
+1.  **Set Up Environment (Terminal A & B)**: Ensure the `platform-api` and `operator` are running as described in the "Run the System" section.
+
+2.  **Seed the API and Configure Budget (Terminal C)**:
+
+    ```bash
+    # Create the project
+    grpcurl -plaintext -d '{"project":{"id":"p-demo"}}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
+
+    # Create a GPU flavor and assign a price per hour for it
+    grpcurl -plaintext -d '{
+      "flavor":{"name":"a10-mig-1g","gpuCount":1,"resourceName":"nvidia.com/mig-1g.10gb","priceUsdPerGpuHour":1.50}
+    }' localhost:8081 aegis.v1.AegisPlatform/UpsertFlavor
+
+    # Create a queue that allows the new flavor
+    grpcurl -plaintext -d '{
+      "queue":{"name":"default","projectId":"p-demo","allowedFlavors":["a10-mig-1g"],"defaultMaxDurationSeconds":600}
+    }' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
+
+    # Set a HARD budget of $0.50 for the queue
+    grpcurl -plaintext -d '{
+      "budget":{"projectId":"p-demo","queue":"default","limitUsd":0.50,"policyMode":"HARD"}
+    }' localhost:8081 aegis.v1.AegisPlatform/UpsertBudget
+    ```
+
+3.  **Test "HARD" Policy (Terminal C)**: Submit a workload that is estimated to cost more than the budget.
+
+    ```bash
+    # This job's max duration (3600s) makes its estimated cost (~$1.50) exceed the $0.50 budget.
+    grpcurl -plaintext -d '{
+      "workload":{"projectId":"p-demo","queue":"default",
+        "workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19",
+                     "maxDurationSeconds":3600,"command":["sh","-c","echo BIG; sleep 1"]}}
+    }' localhost:8081 aegis.v1.AegisPlatform/SubmitWorkload
+    ```
+
+4.  **Verify Denial and Check Budget (Terminal C)**:
+
+    ```bash
+    # The previous command should fail as expected. Now check the metrics and budget status.
+    echo "--- Metrics ---"
+    curl -s localhost:8080/metrics | egrep 'aegis_budget_denied_total|aegis_workload_estimated_cost_usd'
+
+    echo "--- GetBudget ---"
+    grpcurl -plaintext -d '{"projectId":"p-demo","queue":"default"}' localhost:8081 aegis.v1.AegisPlatform/GetBudget
+    ```
+
+5.  **Expected Outcome**:
+
+      * The second `SubmitWorkload` command will be **denied** with a `FailedPrecondition` error message: `budget exceeded: insufficient_funds`.
+      * The metrics will show that the budget denial was recorded: `aegis_budget_denied_total{...} 1`.
+      * Querying the budget will show the full budget remains, as the workload was never run:
+        ```json
+        {
+          "budget": {
+            "projectId": "p-demo",
+            "queue": "default",
+            "limitUsd": 0.5,
+            "policyMode": "HARD"
+          },
+          "usage": {
+            "remainingUsd": 0.5,
+            "periodStartUtc": "2025-09-01",
+            "periodEndUtc": "2025-10-01"
+          }
+        }
+        ```

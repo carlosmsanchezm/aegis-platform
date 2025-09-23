@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -21,15 +23,21 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
+	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
-	log   *zap.Logger
-	store *store.MemStore
+	log             *zap.Logger
+	store           *store.MemStore
+	kubeClients     *kubeclients.Manager
+	targetNamespace string
 }
 
 const (
@@ -59,9 +67,49 @@ var (
 		},
 		[]string{"queue", "flavor"},
 	)
+	mBudgetActual = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "aegis_budget_actual_usd", Help: "Actual spend in USD for current UTC month"},
+		[]string{"project", "queue"},
+	)
+	mBudgetReserved = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "aegis_budget_reserved_usd", Help: "Reserved (estimated) USD for current UTC month"},
+		[]string{"project", "queue"},
+	)
+	mBudgetDenied = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "aegis_budget_denied_total", Help: "Budget denials at submit"},
+		[]string{"project", "queue", "reason"},
+	)
+	mBudgetOverrun = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "aegis_budget_overrun_total", Help: "Budget soft-policy overruns"},
+		[]string{"project", "queue"},
+	)
+	mEstimateHist = promauto.NewHistogram(
+		prometheus.HistogramOpts{Name: "aegis_workload_estimated_cost_usd", Help: "Estimated workload USD", Buckets: prometheus.ExponentialBuckets(0.01, 2, 15)},
+	)
 )
 
-func New(log *zap.Logger, st *store.MemStore) *Server { return &Server{log: log, store: st} }
+func New(log *zap.Logger, st *store.MemStore, clients *kubeclients.Manager, namespace string) *Server {
+	if namespace == "" {
+		namespace = "default"
+	}
+	return &Server{log: log, store: st, kubeClients: clients, targetNamespace: namespace}
+}
+
+func getEnvInt(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func (s *Server) defaultMaxRuntimeSeconds(q *aegis.Queue) int64 {
+	if q != nil && q.GetDefaultMaxDurationSeconds() > 0 {
+		return q.GetDefaultMaxDurationSeconds()
+	}
+	return getEnvInt("AEGIS_DEFAULT_MAX_RUNTIME_SECONDS", 3600)
+}
 
 func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequest) (*aegis.Project, error) {
 	if req == nil || req.Project == nil {
@@ -83,7 +131,12 @@ func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetReques
 	}
 	b := req.Budget
 	s.store.PutBudget(b)
-	s.log.Info("budget upserted", zap.String("project_id", b.GetProjectId()), zap.Float64("gpu_hours_cap", b.GetGpuHoursCap()), zap.Float64("warn_threshold_pct", b.GetWarnThresholdPct()))
+	s.log.Info("budget upserted",
+		zap.String("project_id", b.GetProjectId()),
+		zap.String("queue", b.GetQueue()),
+		zap.Float64("limit_usd", b.GetLimitUsd()),
+		zap.String("policy_mode", b.GetPolicyMode()),
+	)
 	return b, nil
 }
 
@@ -133,7 +186,7 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 		flavorNames = append(flavorNames, f.GetName())
 	}
 	s.store.UpdateClusterFromHeartbeat(hb)
-	s.log.Info("cluster heartbeat",
+	s.log.Debug("cluster heartbeat",
 		zap.String("cluster_id", hb.GetClusterId()),
 		zap.Float64("ttf_gpu_seconds_p50", hb.GetTtfGpuSecondsP50()),
 		zap.Strings("available_flavors", flavorNames),
@@ -162,12 +215,75 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if s.store.GetFlavor(reqFlavor) == nil {
+	flavorObj := s.store.GetFlavor(reqFlavor)
+	if flavorObj == nil {
 		s.log.Warn("submit workload rejected; unknown flavor",
 			zap.String("workload_id", w.GetId()),
 			zap.String("flavor", reqFlavor),
 		)
 		return nil, status.Error(codes.FailedPrecondition, "unknown flavor: "+reqFlavor)
+	}
+	queueObj := s.store.GetQueue(w.GetQueue())
+
+	estimateUSD, maxSecs, estErr := s.estimateWorkloadUSD(w, flavorObj, queueObj)
+	if estErr != nil {
+		s.log.Debug("workload cost estimate fallback",
+			zap.String("workload_id", w.GetId()),
+			zap.Error(estErr),
+		)
+	} else {
+		s.log.Debug("workload cost estimate",
+			zap.String("workload_id", w.GetId()),
+			zap.Float64("estimate_usd", estimateUSD),
+			zap.Int64("max_runtime_secs", maxSecs),
+		)
+	}
+	mEstimateHist.Observe(estimateUSD)
+	allowed, policy, reason, usage := s.store.ReserveIfAllowed(w.GetProjectId(), w.GetQueue(), estimateUSD)
+	if !allowed {
+		if reason == "" {
+			reason = "budget_denied"
+		}
+		mBudgetDenied.WithLabelValues(w.GetProjectId(), w.GetQueue(), reason).Inc()
+		s.log.Warn("budget reservation denied",
+			zap.String("workload_id", w.GetId()),
+			zap.String("project_id", w.GetProjectId()),
+			zap.String("queue", w.GetQueue()),
+			zap.Float64("estimate_usd", estimateUSD),
+			zap.String("reason", reason),
+		)
+		return nil, status.Error(codes.FailedPrecondition, "budget exceeded: "+reason)
+	}
+	if policy != "" {
+		if flavorObj.GetPriceUsdPerGpuHour() <= 0 {
+			mBudgetDenied.WithLabelValues(w.GetProjectId(), w.GetQueue(), "missing_price").Inc()
+			s.log.Warn("budget reservation denied: missing price",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+				zap.String("queue", w.GetQueue()),
+				zap.String("flavor", reqFlavor),
+			)
+			return nil, status.Error(codes.FailedPrecondition, "missing flavor pricing for budgeted project")
+		}
+		b := s.store.GetBudgetExact(w.GetProjectId(), w.GetQueue())
+		if b == nil {
+			b = s.store.GetBudgetExact(w.GetProjectId(), "")
+		}
+		if b != nil && strings.EqualFold(policy, "SOFT") && (usage.ActualUSD+usage.ReservedUSD) > b.GetLimitUsd() {
+			mBudgetOverrun.WithLabelValues(w.GetProjectId(), w.GetQueue()).Inc()
+			s.log.Warn("budget soft overrun",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+				zap.String("queue", w.GetQueue()),
+				zap.Float64("estimate_usd", estimateUSD),
+				zap.Float64("limit_usd", b.GetLimitUsd()),
+			)
+		}
+		mBudgetReserved.WithLabelValues(w.GetProjectId(), w.GetQueue()).Set(usage.ReservedUSD)
+		mBudgetActual.WithLabelValues(w.GetProjectId(), w.GetQueue()).Set(usage.ActualUSD)
+	}
+	if estimateUSD > 0 {
+		s.store.SetEstimateUSD(w.GetId(), estimateUSD)
 	}
 
 	// Build candidates from current cluster snapshots
@@ -196,13 +312,18 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		regions = p.GetPolicy().GetRegions()
 	}
 	pd := placement.PolicyDomain{Regions: regions}
-	chosen, perr := placement.ChooseCluster(cands, pd, reqFlavor)
+	placementFlavor := reqFlavor
+	if flavorObj.GetGpuCount() == 0 && flavorObj.GetResourceName() == "" {
+		placementFlavor = ""
+	}
+	chosen, perr := placement.ChooseCluster(cands, pd, placementFlavor)
 	if perr != nil {
 		s.log.Warn("placement failed",
 			zap.String("workload_id", w.GetId()),
 			zap.String("project_id", w.GetProjectId()),
 			zap.String("flavor", reqFlavor),
 			zap.Strings("regions", regions),
+			zap.Int("candidate_count", len(cands)),
 			zap.Error(perr),
 		)
 		return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("no eligible cluster for flavor=%s in policy regions=%v", reqFlavor, regions))
@@ -210,6 +331,50 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 
 	w.ClusterId = chosen
 	w.Status = statusPlaced
+
+	if fl := s.store.GetFlavor(reqFlavor); fl != nil {
+		w.Hints = &aegis.ResourceHints{
+			ResourceName: fl.GetResourceName(),
+			GpuCount:     fl.GetGpuCount(),
+		}
+	}
+
+	if s.kubeClients == nil {
+		err := status.Error(codes.Internal, "kubernetes client manager not configured")
+		s.log.Error("submit workload failed", zap.Error(err))
+		return nil, err
+	}
+
+	kubeClient, err := s.kubeClients.ClientFor(chosen)
+	if err != nil {
+		s.log.Error("submit workload failed: kube client", zap.String("cluster_id", chosen), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+	}
+
+	cr := buildAegisWorkloadCR(w, s.targetNamespace)
+	if err := kubeClient.Create(ctx, cr); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			s.log.Error("failed to create aegis workload CR",
+				zap.String("workload_id", w.GetId()),
+				zap.String("cluster_id", chosen),
+				zap.String("namespace", s.targetNamespace),
+				zap.Error(err),
+			)
+			return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
+		}
+		s.log.Info("aegis workload CR already exists",
+			zap.String("workload_id", w.GetId()),
+			zap.String("cluster_id", chosen),
+			zap.String("namespace", s.targetNamespace),
+		)
+	} else {
+		s.log.Info("aegis workload CR created",
+			zap.String("workload_id", w.GetId()),
+			zap.String("cluster_id", chosen),
+			zap.String("namespace", s.targetNamespace),
+		)
+	}
+
 	s.store.PutWorkload(w)
 	s.store.MarkPlaced(w.GetId())
 	mPlaced.WithLabelValues(reqFlavor).Inc()
@@ -219,6 +384,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		zap.String("flavor", reqFlavor),
 		zap.String("cluster_id", w.GetClusterId()),
 		zap.String("status", w.GetStatus()),
+		zap.String("namespace", s.targetNamespace),
 	)
 	return w, nil
 }
@@ -323,6 +489,78 @@ func (s *Server) LeaseWorkload(ctx context.Context, req *aegis.LeaseWorkloadRequ
 	return &aegis.LeaseWorkloadResponse{Items: items}, nil
 }
 
+func (s *Server) StartWorkload(ctx context.Context, req *aegis.StartWorkloadRequest) (*aegis.StartWorkloadResponse, error) {
+	if req == nil || req.GetId() == "" {
+		err := status.Error(codes.InvalidArgument, "workload id required")
+		s.log.Warn("start workload failed", zap.Error(err))
+		return nil, err
+	}
+	if req.GetClusterId() == "" {
+		err := status.Error(codes.InvalidArgument, "cluster_id required")
+		s.log.Warn("start workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
+		return nil, err
+	}
+
+	w := s.store.GetWorkload(req.GetId())
+	if w == nil {
+		err := status.Error(codes.NotFound, "workload not found")
+		s.log.Warn("start workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
+		return nil, err
+	}
+
+	if w.GetClusterId() != req.GetClusterId() {
+		err := status.Errorf(codes.FailedPrecondition, "workload assigned to cluster %s", w.GetClusterId())
+		s.log.Warn("start workload cluster mismatch",
+			zap.Error(err),
+			zap.String("workload_id", w.GetId()),
+			zap.String("expected_cluster", w.GetClusterId()),
+			zap.String("requested_cluster", req.GetClusterId()),
+		)
+		return nil, err
+	}
+
+	updated, wait, observed, err := s.store.StartWorkload(req.GetId())
+	if err != nil {
+		errStatus := status.Error(codes.FailedPrecondition, err.Error())
+		s.log.Warn("start workload state transition failed",
+			zap.Error(err),
+			zap.String("workload_id", req.GetId()),
+		)
+		return nil, errStatus
+	}
+
+	queue := updated.GetQueue()
+	if queue == "" {
+		queue = "unknown"
+	}
+	if observed {
+		if flavor, ferr := requiredFlavor(updated); ferr == nil {
+			mQueueWait.WithLabelValues(queue, flavor).Observe(wait.Seconds())
+			s.log.Debug("queue wait observed",
+				zap.String("workload_id", updated.GetId()),
+				zap.String("queue", queue),
+				zap.String("flavor", flavor),
+				zap.Duration("wait", wait),
+			)
+		} else {
+			s.log.Debug("start workload missing flavor for metrics",
+				zap.String("workload_id", updated.GetId()),
+				zap.Error(ferr),
+			)
+		}
+	}
+
+	idempotent := !observed && wait == 0
+	s.log.Info("workload start acknowledged",
+		zap.String("workload_id", updated.GetId()),
+		zap.String("cluster_id", updated.GetClusterId()),
+		zap.Bool("idempotent", idempotent),
+		zap.Duration("queue_wait", wait),
+	)
+
+	return &aegis.StartWorkloadResponse{Workload: updated}, nil
+}
+
 func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest) (*aegis.AckWorkloadResponse, error) {
 	if req == nil || req.GetId() == "" {
 		err := status.Error(codes.InvalidArgument, "workload id required")
@@ -376,7 +614,132 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		zap.String("backend", backend),
 		zap.String("url", updated.GetUrl()),
 	)
+	if b, _ := s.store.ResolveBudget(updated.GetProjectId(), updated.GetQueue()); b != nil {
+		reqFlavor, _ := requiredFlavor(updated)
+		fl := s.store.GetFlavor(reqFlavor)
+		runtimeSecs := int64(0)
+		if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
+			runtimeSecs = int64(time.Since(t0).Seconds())
+			if runtimeSecs < 0 {
+				runtimeSecs = 0
+			}
+		}
+		actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
+		estUSD := s.store.PopEstimateUSD(updated.GetId())
+		usage := s.store.ReconcileOnAck(updated.GetProjectId(), updated.GetQueue(), estUSD, actualUSD)
+		mBudgetReserved.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ReservedUSD)
+		mBudgetActual.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ActualUSD)
+		s.log.Info("budget reconciled",
+			zap.String("workload_id", updated.GetId()),
+			zap.String("project_id", updated.GetProjectId()),
+			zap.String("queue", updated.GetQueue()),
+			zap.Float64("released_estimate_usd", estUSD),
+			zap.Float64("actual_usd", actualUSD),
+			zap.Float64("usage_reserved_usd", usage.ReservedUSD),
+			zap.Float64("usage_actual_usd", usage.ActualUSD),
+			zap.Int64("runtime_secs", runtimeSecs),
+		)
+	}
 	return &aegis.AckWorkloadResponse{Workload: updated}, nil
+}
+
+func (s *Server) estimateWorkloadUSD(w *aegis.Workload, fl *aegis.Flavor, q *aegis.Queue) (float64, int64, error) {
+	if fl == nil {
+		return 0, 0, fmt.Errorf("missing flavor")
+	}
+	price := fl.GetPriceUsdPerGpuHour()
+	var totalGPUs int32
+	var maxSecs int64
+	switch wk := w.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		totalGPUs = fl.GetGpuCount()
+		if wk.Workspace.GetMaxDurationSeconds() > 0 {
+			maxSecs = wk.Workspace.GetMaxDurationSeconds()
+		}
+	case *aegis.Workload_Training:
+		workers := wk.Training.GetWorkers()
+		if workers <= 0 {
+			workers = 1
+		}
+		gpusPer := wk.Training.GetGpusPerWorker()
+		if gpusPer <= 0 {
+			gpusPer = fl.GetGpuCount()
+		}
+		totalGPUs = workers * gpusPer
+		if wk.Training.GetMaxDurationSeconds() > 0 {
+			maxSecs = wk.Training.GetMaxDurationSeconds()
+		}
+	default:
+	}
+	if maxSecs <= 0 {
+		maxSecs = s.defaultMaxRuntimeSeconds(q)
+	}
+	usd := float64(totalGPUs) * price * (float64(maxSecs) / 3600.0)
+	return usd, maxSecs, nil
+}
+
+func (s *Server) runtimeCostUSD(w *aegis.Workload, fl *aegis.Flavor, runtimeSecs int64) float64 {
+	if fl == nil || runtimeSecs <= 0 {
+		return 0
+	}
+	price := fl.GetPriceUsdPerGpuHour()
+	var totalGPUs int32
+	switch wk := w.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		totalGPUs = fl.GetGpuCount()
+	case *aegis.Workload_Training:
+		workers := wk.Training.GetWorkers()
+		if workers <= 0 {
+			workers = 1
+		}
+		gpusPer := wk.Training.GetGpusPerWorker()
+		if gpusPer <= 0 {
+			gpusPer = fl.GetGpuCount()
+		}
+		totalGPUs = workers * gpusPer
+	default:
+	}
+	return float64(totalGPUs) * price * (float64(runtimeSecs) / 3600.0)
+}
+
+func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*aegis.GetBudgetResponse, error) {
+	if req == nil || req.GetProjectId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
+	}
+	b := s.store.GetBudgetExact(req.GetProjectId(), req.GetQueue())
+	if b == nil {
+		b = s.store.GetBudgetExact(req.GetProjectId(), "")
+	}
+	if b == nil {
+		return nil, status.Error(codes.NotFound, "budget not found")
+	}
+	view, _ := s.store.UsageView(b.GetProjectId(), b.GetQueue())
+	resp := &aegis.GetBudgetResponse{Budget: b, Usage: &aegis.BudgetUsage{
+		ActualUsd:      view.ActualUSD,
+		ReservedUsd:    view.ReservedUSD,
+		RemainingUsd:   b.GetLimitUsd() - (view.ActualUSD + view.ReservedUSD),
+		PeriodStartUtc: view.PeriodStart.Format("2006-01-02"),
+		PeriodEndUtc:   view.PeriodEnd.Format("2006-01-02"),
+	}}
+	return resp, nil
+}
+
+func (s *Server) ListBudgets(ctx context.Context, req *aegis.ListBudgetsRequest) (*aegis.ListBudgetsResponse, error) {
+	items := []*aegis.BudgetWithUsage{}
+	for _, b := range s.store.ListBudgets(req.GetProjectId()) {
+		view, _ := s.store.UsageView(b.GetProjectId(), b.GetQueue())
+		items = append(items, &aegis.BudgetWithUsage{
+			Budget: b,
+			Usage: &aegis.BudgetUsage{
+				ActualUsd:      view.ActualUSD,
+				ReservedUsd:    view.ReservedUSD,
+				RemainingUsd:   b.GetLimitUsd() - (view.ActualUSD + view.ReservedUSD),
+				PeriodStartUtc: view.PeriodStart.Format("2006-01-02"),
+				PeriodEndUtc:   view.PeriodEnd.Format("2006-01-02"),
+			},
+		})
+	}
+	return &aegis.ListBudgetsResponse{Items: items}, nil
 }
 
 func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *Server) error {
@@ -412,6 +775,77 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		return err
 	}
 	return nil
+}
+
+func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.AegisWorkload {
+	spec := aegisv1alpha1.AegisWorkloadSpec{
+		ProjectID: w.GetProjectId(),
+		Queue:     w.GetQueue(),
+	}
+
+	switch wk := w.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		ws := wk.Workspace
+		if ws != nil {
+			spec.Workspace = &aegisv1alpha1.WorkspaceSpec{
+				Flavor:  ws.GetFlavor(),
+				Image:   ws.GetImage(),
+				Env:     cloneStringMap(ws.GetEnv()),
+				Command: cloneStringSlice(ws.GetCommand()),
+			}
+		}
+	case *aegis.Workload_Training:
+		tr := wk.Training
+		if tr != nil {
+			spec.Training = &aegisv1alpha1.TrainingSpec{
+				Flavor:        tr.GetFlavor(),
+				Workers:       tr.GetWorkers(),
+				GpusPerWorker: tr.GetGpusPerWorker(),
+				Image:         tr.GetImage(),
+				Command:       cloneStringSlice(tr.GetCommand()),
+				Gang:          tr.GetGang(),
+			}
+		}
+	}
+
+	if hints := w.GetHints(); hints != nil {
+		spec.Hints = &aegisv1alpha1.ResourceHints{
+			ResourceName: hints.GetResourceName(),
+			GpuCount:     hints.GetGpuCount(),
+		}
+	}
+
+	return &aegisv1alpha1.AegisWorkload{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: aegisv1alpha1.GroupVersion.String(),
+			Kind:       "AegisWorkload",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      w.GetId(),
+			Namespace: namespace,
+		},
+		Spec: spec,
+	}
+}
+
+func cloneStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func requiredFlavor(w *aegis.Workload) (string, error) {

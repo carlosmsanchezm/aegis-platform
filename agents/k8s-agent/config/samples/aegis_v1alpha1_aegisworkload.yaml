@@ -1,0 +1,10 @@
+apiVersion: aegis.yourorg.dev/v1alpha1
+kind: AegisWorkload
+metadata:
+  name: aegisworkload-sample
+spec:
+  projectId: demo-project
+  queue: research
+  workspace:
+    flavor: mig-1g.10gb
+    image: alpine:3.19

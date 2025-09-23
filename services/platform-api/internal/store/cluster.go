@@ -52,11 +52,22 @@ func (cs *clusterState) updateFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 		ci = &ClusterInfo{ID: hb.ClusterId}
 		cs.clusters[hb.ClusterId] = ci
 	}
-	set := map[string]bool{}
+	newSet := map[string]bool{}
 	for _, f := range hb.GetAvailableFlavors() {
-		set[f.GetName()] = true
+		name := f.GetName()
+		if name != "" {
+			newSet[name] = true
+		}
 	}
-	ci.AvailableFlavorSet = set
+	if ci.AvailableFlavorSet != nil {
+		for k := range ci.AvailableFlavorSet {
+			newSet[k] = true
+		}
+	}
+	if len(newSet) == 0 && len(ci.AvailableFlavorSet) > 0 {
+		newSet = ci.AvailableFlavorSet
+	}
+	ci.AvailableFlavorSet = newSet
 	ci.TTFGSecondsP50 = hb.GetTtfGpuSecondsP50()
 	ci.LastHeartbeat = time.Now()
 }

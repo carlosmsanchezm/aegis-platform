@@ -1,0 +1,19 @@
+apiVersion: aegis.yourorg.dev/v1alpha1
+kind: AegisWorkload
+metadata:
+  name: sample-training
+spec:
+  projectId: demo-project
+  queue: research
+  training:
+    flavor: nvidia-a100
+    workers: 2
+    gpusPerWorker: 1
+    image: pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime
+    command:
+      - python
+      - -c
+      - print("training placeholder")
+  hints:
+    resourceName: nvidia.com/gpu
+    gpuCount: 1

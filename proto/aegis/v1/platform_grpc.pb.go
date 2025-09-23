@@ -21,12 +21,15 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AegisPlatform_CreateProject_FullMethodName   = "/aegis.v1.AegisPlatform/CreateProject"
 	AegisPlatform_UpsertBudget_FullMethodName    = "/aegis.v1.AegisPlatform/UpsertBudget"
+	AegisPlatform_GetBudget_FullMethodName       = "/aegis.v1.AegisPlatform/GetBudget"
+	AegisPlatform_ListBudgets_FullMethodName     = "/aegis.v1.AegisPlatform/ListBudgets"
 	AegisPlatform_UpsertFlavor_FullMethodName    = "/aegis.v1.AegisPlatform/UpsertFlavor"
 	AegisPlatform_UpsertQueue_FullMethodName     = "/aegis.v1.AegisPlatform/UpsertQueue"
 	AegisPlatform_SubmitWorkload_FullMethodName  = "/aegis.v1.AegisPlatform/SubmitWorkload"
 	AegisPlatform_GetWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/GetWorkload"
 	AegisPlatform_ListWorkloads_FullMethodName   = "/aegis.v1.AegisPlatform/ListWorkloads"
 	AegisPlatform_LeaseWorkload_FullMethodName   = "/aegis.v1.AegisPlatform/LeaseWorkload"
+	AegisPlatform_StartWorkload_FullMethodName   = "/aegis.v1.AegisPlatform/StartWorkload"
 	AegisPlatform_AckWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/AckWorkload"
 	AegisPlatform_RegisterCluster_FullMethodName = "/aegis.v1.AegisPlatform/RegisterCluster"
 	AegisPlatform_Heartbeat_FullMethodName       = "/aegis.v1.AegisPlatform/Heartbeat"
@@ -40,12 +43,15 @@ const (
 type AegisPlatformClient interface {
 	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*Project, error)
 	UpsertBudget(ctx context.Context, in *UpsertBudgetRequest, opts ...grpc.CallOption) (*Budget, error)
+	GetBudget(ctx context.Context, in *GetBudgetRequest, opts ...grpc.CallOption) (*GetBudgetResponse, error)
+	ListBudgets(ctx context.Context, in *ListBudgetsRequest, opts ...grpc.CallOption) (*ListBudgetsResponse, error)
 	UpsertFlavor(ctx context.Context, in *UpsertFlavorRequest, opts ...grpc.CallOption) (*Flavor, error)
 	UpsertQueue(ctx context.Context, in *UpsertQueueRequest, opts ...grpc.CallOption) (*Queue, error)
 	SubmitWorkload(ctx context.Context, in *SubmitWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
 	LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error)
+	StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error)
 	AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error)
 	RegisterCluster(ctx context.Context, in *ClusterRegisterRequest, opts ...grpc.CallOption) (*ClusterRegisterResponse, error)
 	Heartbeat(ctx context.Context, in *ClusterHeartbeat, opts ...grpc.CallOption) (*ClusterHeartbeatAck, error)
@@ -73,6 +79,26 @@ func (c *aegisPlatformClient) UpsertBudget(ctx context.Context, in *UpsertBudget
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Budget)
 	err := c.cc.Invoke(ctx, AegisPlatform_UpsertBudget_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) GetBudget(ctx context.Context, in *GetBudgetRequest, opts ...grpc.CallOption) (*GetBudgetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBudgetResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_GetBudget_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) ListBudgets(ctx context.Context, in *ListBudgetsRequest, opts ...grpc.CallOption) (*ListBudgetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBudgetsResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_ListBudgets_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +165,16 @@ func (c *aegisPlatformClient) LeaseWorkload(ctx context.Context, in *LeaseWorklo
 	return out, nil
 }
 
+func (c *aegisPlatformClient) StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartWorkloadResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_StartWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aegisPlatformClient) AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AckWorkloadResponse)
@@ -177,12 +213,15 @@ func (c *aegisPlatformClient) Heartbeat(ctx context.Context, in *ClusterHeartbea
 type AegisPlatformServer interface {
 	CreateProject(context.Context, *CreateProjectRequest) (*Project, error)
 	UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error)
+	GetBudget(context.Context, *GetBudgetRequest) (*GetBudgetResponse, error)
+	ListBudgets(context.Context, *ListBudgetsRequest) (*ListBudgetsResponse, error)
 	UpsertFlavor(context.Context, *UpsertFlavorRequest) (*Flavor, error)
 	UpsertQueue(context.Context, *UpsertQueueRequest) (*Queue, error)
 	SubmitWorkload(context.Context, *SubmitWorkloadRequest) (*Workload, error)
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
 	LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error)
+	StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error)
 	AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error)
 	RegisterCluster(context.Context, *ClusterRegisterRequest) (*ClusterRegisterResponse, error)
 	Heartbeat(context.Context, *ClusterHeartbeat) (*ClusterHeartbeatAck, error)
@@ -202,6 +241,12 @@ func (UnimplementedAegisPlatformServer) CreateProject(context.Context, *CreatePr
 func (UnimplementedAegisPlatformServer) UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpsertBudget not implemented")
 }
+func (UnimplementedAegisPlatformServer) GetBudget(context.Context, *GetBudgetRequest) (*GetBudgetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBudget not implemented")
+}
+func (UnimplementedAegisPlatformServer) ListBudgets(context.Context, *ListBudgetsRequest) (*ListBudgetsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBudgets not implemented")
+}
 func (UnimplementedAegisPlatformServer) UpsertFlavor(context.Context, *UpsertFlavorRequest) (*Flavor, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpsertFlavor not implemented")
 }
@@ -219,6 +264,9 @@ func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWork
 }
 func (UnimplementedAegisPlatformServer) LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LeaseWorkload not implemented")
+}
+func (UnimplementedAegisPlatformServer) StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartWorkload not implemented")
 }
 func (UnimplementedAegisPlatformServer) AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AckWorkload not implemented")
@@ -282,6 +330,42 @@ func _AegisPlatform_UpsertBudget_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AegisPlatformServer).UpsertBudget(ctx, req.(*UpsertBudgetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_GetBudget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBudgetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).GetBudget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_GetBudget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).GetBudget(ctx, req.(*GetBudgetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_ListBudgets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBudgetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ListBudgets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ListBudgets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ListBudgets(ctx, req.(*ListBudgetsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -394,6 +478,24 @@ func _AegisPlatform_LeaseWorkload_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_StartWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).StartWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_StartWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).StartWorkload(ctx, req.(*StartWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_AckWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AckWorkloadRequest)
 	if err := dec(in); err != nil {
@@ -464,6 +566,14 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AegisPlatform_UpsertBudget_Handler,
 		},
 		{
+			MethodName: "GetBudget",
+			Handler:    _AegisPlatform_GetBudget_Handler,
+		},
+		{
+			MethodName: "ListBudgets",
+			Handler:    _AegisPlatform_ListBudgets_Handler,
+		},
+		{
 			MethodName: "UpsertFlavor",
 			Handler:    _AegisPlatform_UpsertFlavor_Handler,
 		},
@@ -486,6 +596,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LeaseWorkload",
 			Handler:    _AegisPlatform_LeaseWorkload_Handler,
+		},
+		{
+			MethodName: "StartWorkload",
+			Handler:    _AegisPlatform_StartWorkload_Handler,
 		},
 		{
 			MethodName: "AckWorkload",

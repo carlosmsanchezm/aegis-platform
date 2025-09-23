@@ -37,7 +37,7 @@ func ChooseCluster(cands []Candidate, pd PolicyDomain, reqFlavor string) (string
 		if !regionOK(c.Region) {
 			continue
 		}
-		if !c.Flavors[reqFlavor] {
+		if reqFlavor != "" && !c.Flavors[reqFlavor] {
 			continue
 		}
 		if c.TTFGSeconds < bestTTFG {

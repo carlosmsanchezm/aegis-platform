@@ -6,7 +6,12 @@ option go_package = "github.com/yourorg/aegis/proto/aegis/v1;aegisv1";
 message Project { string id = 1; string display_name = 2; string owner_group = 3; PolicyDomain policy = 4; }
 message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
 
-message Budget { string project_id = 1; double gpu_hours_cap = 2; double warn_threshold_pct = 3; double consumed_gpu_hours = 4; }
+message Budget {
+  string project_id = 1;
+  string queue = 2;
+  double limit_usd = 3;
+  string policy_mode = 4;
+}
 
 message Flavor {
   string name = 1;
@@ -16,11 +21,13 @@ message Flavor {
   string resource_name = 5;
   int32 gpu_count = 6;
   double memory_gib = 7;
+  double price_usd_per_gpu_hour = 8;
 }
 
 message Queue {
   string name = 1; string project_id = 2; string priority_tier = 3; // "prod"|"research"|"background"
   repeated string allowed_flavors = 4;
+  int64 default_max_duration_seconds = 5;
 }
 
 // Workload
@@ -29,8 +36,9 @@ message WorkspaceSpec {
   string image = 2;
   map<string,string> env = 3;
   repeated string command = 4;
+  int64 max_duration_seconds = 5;
 }
-message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; }
+message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; int64 max_duration_seconds = 7; }
 
 message ResourceHints {
   string resource_name = 1; // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
@@ -80,10 +88,35 @@ message AckWorkloadResponse {
   Workload workload = 1;
 }
 
+message StartWorkloadRequest {
+  string id = 1;
+  string cluster_id = 2;
+}
+
+message StartWorkloadResponse {
+  Workload workload = 1;
+}
+
+message GetBudgetRequest { string project_id = 1; string queue = 2; }
+message BudgetUsage {
+  double actual_usd = 1;
+  double reserved_usd = 2;
+  double remaining_usd = 3;
+  string period_start_utc = 4;
+  string period_end_utc = 5;
+}
+message GetBudgetResponse { Budget budget = 1; BudgetUsage usage = 2; }
+
+message ListBudgetsRequest { string project_id = 1; }
+message BudgetWithUsage { Budget budget = 1; BudgetUsage usage = 2; }
+message ListBudgetsResponse { repeated BudgetWithUsage items = 1; }
+
 // Service
 service AegisPlatform {
   rpc CreateProject(CreateProjectRequest) returns (Project);
   rpc UpsertBudget(UpsertBudgetRequest) returns (Budget);
+  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse);
+  rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse);
   rpc UpsertFlavor(UpsertFlavorRequest) returns (Flavor);
   rpc UpsertQueue(UpsertQueueRequest) returns (Queue);
 
@@ -92,6 +125,7 @@ service AegisPlatform {
   rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
 
   rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse);
+  rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse);
   rpc AckWorkload(AckWorkloadRequest) returns (AckWorkloadResponse);
 
   rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse);

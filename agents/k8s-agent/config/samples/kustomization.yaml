@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- aegis_v1alpha1_aegisworkload.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

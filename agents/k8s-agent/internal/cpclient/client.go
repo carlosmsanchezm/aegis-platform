@@ -50,7 +50,7 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 			logger.Info("heartbeat loop context canceled", zap.String("cluster_id", clusterID))
 			return
 		case <-ticker.C:
-			logger.Info("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)))
+			logger.Debug("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)))
 			if _, err := c.api.Heartbeat(ctx, &aegis.ClusterHeartbeat{
 				ClusterId:        clusterID,
 				TtfGpuSecondsP50: ttf,
@@ -59,7 +59,7 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 				logger.Warn("heartbeat failed", zap.String("cluster_id", clusterID), zap.Error(err))
 				continue
 			}
-			logger.Info("heartbeat acknowledged", zap.String("cluster_id", clusterID))
+			logger.Debug("heartbeat acknowledged", zap.String("cluster_id", clusterID))
 		}
 	}
 }
@@ -74,5 +74,10 @@ func (c *Client) Lease(ctx context.Context, clusterID string, max int32) ([]*aeg
 
 func (c *Client) Ack(ctx context.Context, id, status, backend, url string) error {
 	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status, Backend: backend, Url: url})
+	return err
+}
+
+func (c *Client) Start(ctx context.Context, id, clusterID string) error {
+	_, err := c.api.StartWorkload(ctx, &aegis.StartWorkloadRequest{Id: id, ClusterId: clusterID})
 	return err
 }

@@ -151,13 +151,13 @@ func (x *PolicyDomain) GetDenyEgressByDefault() bool {
 }
 
 type Budget struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	ProjectId        string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	GpuHoursCap      float64                `protobuf:"fixed64,2,opt,name=gpu_hours_cap,json=gpuHoursCap,proto3" json:"gpu_hours_cap,omitempty"`
-	WarnThresholdPct float64                `protobuf:"fixed64,3,opt,name=warn_threshold_pct,json=warnThresholdPct,proto3" json:"warn_threshold_pct,omitempty"`
-	ConsumedGpuHours float64                `protobuf:"fixed64,4,opt,name=consumed_gpu_hours,json=consumedGpuHours,proto3" json:"consumed_gpu_hours,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	Queue         string                 `protobuf:"bytes,2,opt,name=queue,proto3" json:"queue,omitempty"`
+	LimitUsd      float64                `protobuf:"fixed64,3,opt,name=limit_usd,json=limitUsd,proto3" json:"limit_usd,omitempty"`
+	PolicyMode    string                 `protobuf:"bytes,4,opt,name=policy_mode,json=policyMode,proto3" json:"policy_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Budget) Reset() {
@@ -197,38 +197,39 @@ func (x *Budget) GetProjectId() string {
 	return ""
 }
 
-func (x *Budget) GetGpuHoursCap() float64 {
+func (x *Budget) GetQueue() string {
 	if x != nil {
-		return x.GpuHoursCap
+		return x.Queue
+	}
+	return ""
+}
+
+func (x *Budget) GetLimitUsd() float64 {
+	if x != nil {
+		return x.LimitUsd
 	}
 	return 0
 }
 
-func (x *Budget) GetWarnThresholdPct() float64 {
+func (x *Budget) GetPolicyMode() string {
 	if x != nil {
-		return x.WarnThresholdPct
+		return x.PolicyMode
 	}
-	return 0
-}
-
-func (x *Budget) GetConsumedGpuHours() float64 {
-	if x != nil {
-		return x.ConsumedGpuHours
-	}
-	return 0
+	return ""
 }
 
 type Flavor struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Chip          string                 `protobuf:"bytes,2,opt,name=chip,proto3" json:"chip,omitempty"`
-	MigProfile    string                 `protobuf:"bytes,3,opt,name=mig_profile,json=migProfile,proto3" json:"mig_profile,omitempty"`
-	RdmaRequired  bool                   `protobuf:"varint,4,opt,name=rdma_required,json=rdmaRequired,proto3" json:"rdma_required,omitempty"`
-	ResourceName  string                 `protobuf:"bytes,5,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
-	GpuCount      int32                  `protobuf:"varint,6,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`
-	MemoryGib     float64                `protobuf:"fixed64,7,opt,name=memory_gib,json=memoryGib,proto3" json:"memory_gib,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Chip               string                 `protobuf:"bytes,2,opt,name=chip,proto3" json:"chip,omitempty"`
+	MigProfile         string                 `protobuf:"bytes,3,opt,name=mig_profile,json=migProfile,proto3" json:"mig_profile,omitempty"`
+	RdmaRequired       bool                   `protobuf:"varint,4,opt,name=rdma_required,json=rdmaRequired,proto3" json:"rdma_required,omitempty"`
+	ResourceName       string                 `protobuf:"bytes,5,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	GpuCount           int32                  `protobuf:"varint,6,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`
+	MemoryGib          float64                `protobuf:"fixed64,7,opt,name=memory_gib,json=memoryGib,proto3" json:"memory_gib,omitempty"`
+	PriceUsdPerGpuHour float64                `protobuf:"fixed64,8,opt,name=price_usd_per_gpu_hour,json=priceUsdPerGpuHour,proto3" json:"price_usd_per_gpu_hour,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Flavor) Reset() {
@@ -310,14 +311,22 @@ func (x *Flavor) GetMemoryGib() float64 {
 	return 0
 }
 
+func (x *Flavor) GetPriceUsdPerGpuHour() float64 {
+	if x != nil {
+		return x.PriceUsdPerGpuHour
+	}
+	return 0
+}
+
 type Queue struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	ProjectId      string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	PriorityTier   string                 `protobuf:"bytes,3,opt,name=priority_tier,json=priorityTier,proto3" json:"priority_tier,omitempty"` // "prod"|"research"|"background"
-	AllowedFlavors []string               `protobuf:"bytes,4,rep,name=allowed_flavors,json=allowedFlavors,proto3" json:"allowed_flavors,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	Name                      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	ProjectId                 string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	PriorityTier              string                 `protobuf:"bytes,3,opt,name=priority_tier,json=priorityTier,proto3" json:"priority_tier,omitempty"` // "prod"|"research"|"background"
+	AllowedFlavors            []string               `protobuf:"bytes,4,rep,name=allowed_flavors,json=allowedFlavors,proto3" json:"allowed_flavors,omitempty"`
+	DefaultMaxDurationSeconds int64                  `protobuf:"varint,5,opt,name=default_max_duration_seconds,json=defaultMaxDurationSeconds,proto3" json:"default_max_duration_seconds,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *Queue) Reset() {
@@ -378,15 +387,23 @@ func (x *Queue) GetAllowedFlavors() []string {
 	return nil
 }
 
+func (x *Queue) GetDefaultMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.DefaultMaxDurationSeconds
+	}
+	return 0
+}
+
 // Workload
 type WorkspaceSpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Flavor        string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	Image         string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
-	Env           map[string]string      `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Command       []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Flavor             string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Image              string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
+	Env                map[string]string      `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Command            []string               `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"`
+	MaxDurationSeconds int64                  `protobuf:"varint,5,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *WorkspaceSpec) Reset() {
@@ -447,16 +464,24 @@ func (x *WorkspaceSpec) GetCommand() []string {
 	return nil
 }
 
+func (x *WorkspaceSpec) GetMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.MaxDurationSeconds
+	}
+	return 0
+}
+
 type TrainingSpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Flavor        string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	Workers       int32                  `protobuf:"varint,2,opt,name=workers,proto3" json:"workers,omitempty"`
-	GpusPerWorker int32                  `protobuf:"varint,3,opt,name=gpus_per_worker,json=gpusPerWorker,proto3" json:"gpus_per_worker,omitempty"`
-	Image         string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
-	Command       []string               `protobuf:"bytes,5,rep,name=command,proto3" json:"command,omitempty"`
-	Gang          bool                   `protobuf:"varint,6,opt,name=gang,proto3" json:"gang,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Flavor             string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Workers            int32                  `protobuf:"varint,2,opt,name=workers,proto3" json:"workers,omitempty"`
+	GpusPerWorker      int32                  `protobuf:"varint,3,opt,name=gpus_per_worker,json=gpusPerWorker,proto3" json:"gpus_per_worker,omitempty"`
+	Image              string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
+	Command            []string               `protobuf:"bytes,5,rep,name=command,proto3" json:"command,omitempty"`
+	Gang               bool                   `protobuf:"varint,6,opt,name=gang,proto3" json:"gang,omitempty"`
+	MaxDurationSeconds int64                  `protobuf:"varint,7,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *TrainingSpec) Reset() {
@@ -529,6 +554,13 @@ func (x *TrainingSpec) GetGang() bool {
 		return x.Gang
 	}
 	return false
+}
+
+func (x *TrainingSpec) GetMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.MaxDurationSeconds
+	}
+	return 0
 }
 
 type ResourceHints struct {
@@ -1515,6 +1547,422 @@ func (x *AckWorkloadResponse) GetWorkload() *Workload {
 	return nil
 }
 
+type StartWorkloadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ClusterId     string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartWorkloadRequest) Reset() {
+	*x = StartWorkloadRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartWorkloadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartWorkloadRequest) ProtoMessage() {}
+
+func (x *StartWorkloadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartWorkloadRequest.ProtoReflect.Descriptor instead.
+func (*StartWorkloadRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *StartWorkloadRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *StartWorkloadRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+type StartWorkloadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workload      *Workload              `protobuf:"bytes,1,opt,name=workload,proto3" json:"workload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartWorkloadResponse) Reset() {
+	*x = StartWorkloadResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartWorkloadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartWorkloadResponse) ProtoMessage() {}
+
+func (x *StartWorkloadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartWorkloadResponse.ProtoReflect.Descriptor instead.
+func (*StartWorkloadResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *StartWorkloadResponse) GetWorkload() *Workload {
+	if x != nil {
+		return x.Workload
+	}
+	return nil
+}
+
+type GetBudgetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	Queue         string                 `protobuf:"bytes,2,opt,name=queue,proto3" json:"queue,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBudgetRequest) Reset() {
+	*x = GetBudgetRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBudgetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBudgetRequest) ProtoMessage() {}
+
+func (x *GetBudgetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBudgetRequest.ProtoReflect.Descriptor instead.
+func (*GetBudgetRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *GetBudgetRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *GetBudgetRequest) GetQueue() string {
+	if x != nil {
+		return x.Queue
+	}
+	return ""
+}
+
+type BudgetUsage struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActualUsd      float64                `protobuf:"fixed64,1,opt,name=actual_usd,json=actualUsd,proto3" json:"actual_usd,omitempty"`
+	ReservedUsd    float64                `protobuf:"fixed64,2,opt,name=reserved_usd,json=reservedUsd,proto3" json:"reserved_usd,omitempty"`
+	RemainingUsd   float64                `protobuf:"fixed64,3,opt,name=remaining_usd,json=remainingUsd,proto3" json:"remaining_usd,omitempty"`
+	PeriodStartUtc string                 `protobuf:"bytes,4,opt,name=period_start_utc,json=periodStartUtc,proto3" json:"period_start_utc,omitempty"`
+	PeriodEndUtc   string                 `protobuf:"bytes,5,opt,name=period_end_utc,json=periodEndUtc,proto3" json:"period_end_utc,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *BudgetUsage) Reset() {
+	*x = BudgetUsage{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BudgetUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BudgetUsage) ProtoMessage() {}
+
+func (x *BudgetUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BudgetUsage.ProtoReflect.Descriptor instead.
+func (*BudgetUsage) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *BudgetUsage) GetActualUsd() float64 {
+	if x != nil {
+		return x.ActualUsd
+	}
+	return 0
+}
+
+func (x *BudgetUsage) GetReservedUsd() float64 {
+	if x != nil {
+		return x.ReservedUsd
+	}
+	return 0
+}
+
+func (x *BudgetUsage) GetRemainingUsd() float64 {
+	if x != nil {
+		return x.RemainingUsd
+	}
+	return 0
+}
+
+func (x *BudgetUsage) GetPeriodStartUtc() string {
+	if x != nil {
+		return x.PeriodStartUtc
+	}
+	return ""
+}
+
+func (x *BudgetUsage) GetPeriodEndUtc() string {
+	if x != nil {
+		return x.PeriodEndUtc
+	}
+	return ""
+}
+
+type GetBudgetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Budget        *Budget                `protobuf:"bytes,1,opt,name=budget,proto3" json:"budget,omitempty"`
+	Usage         *BudgetUsage           `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBudgetResponse) Reset() {
+	*x = GetBudgetResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBudgetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBudgetResponse) ProtoMessage() {}
+
+func (x *GetBudgetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBudgetResponse.ProtoReflect.Descriptor instead.
+func (*GetBudgetResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *GetBudgetResponse) GetBudget() *Budget {
+	if x != nil {
+		return x.Budget
+	}
+	return nil
+}
+
+func (x *GetBudgetResponse) GetUsage() *BudgetUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+type ListBudgetsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBudgetsRequest) Reset() {
+	*x = ListBudgetsRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBudgetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBudgetsRequest) ProtoMessage() {}
+
+func (x *ListBudgetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBudgetsRequest.ProtoReflect.Descriptor instead.
+func (*ListBudgetsRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ListBudgetsRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+type BudgetWithUsage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Budget        *Budget                `protobuf:"bytes,1,opt,name=budget,proto3" json:"budget,omitempty"`
+	Usage         *BudgetUsage           `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BudgetWithUsage) Reset() {
+	*x = BudgetWithUsage{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BudgetWithUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BudgetWithUsage) ProtoMessage() {}
+
+func (x *BudgetWithUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BudgetWithUsage.ProtoReflect.Descriptor instead.
+func (*BudgetWithUsage) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *BudgetWithUsage) GetBudget() *Budget {
+	if x != nil {
+		return x.Budget
+	}
+	return nil
+}
+
+func (x *BudgetWithUsage) GetUsage() *BudgetUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+type ListBudgetsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*BudgetWithUsage     `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBudgetsResponse) Reset() {
+	*x = ListBudgetsResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBudgetsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBudgetsResponse) ProtoMessage() {}
+
+func (x *ListBudgetsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBudgetsResponse.ProtoReflect.Descriptor instead.
+func (*ListBudgetsResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ListBudgetsResponse) GetItems() []*BudgetWithUsage {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 var File_aegis_v1_platform_proto protoreflect.FileDescriptor
 
 const file_aegis_v1_platform_proto_rawDesc = "" +
@@ -1530,13 +1978,14 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\aregions\x18\x01 \x03(\tR\aregions\x12\x1d\n" +
 	"\n" +
 	"data_level\x18\x02 \x01(\tR\tdataLevel\x123\n" +
-	"\x16deny_egress_by_default\x18\x03 \x01(\bR\x13denyEgressByDefault\"\xa7\x01\n" +
+	"\x16deny_egress_by_default\x18\x03 \x01(\bR\x13denyEgressByDefault\"{\n" +
 	"\x06Budget\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x01 \x01(\tR\tprojectId\x12\"\n" +
-	"\rgpu_hours_cap\x18\x02 \x01(\x01R\vgpuHoursCap\x12,\n" +
-	"\x12warn_threshold_pct\x18\x03 \x01(\x01R\x10warnThresholdPct\x12,\n" +
-	"\x12consumed_gpu_hours\x18\x04 \x01(\x01R\x10consumedGpuHours\"\xd7\x01\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x14\n" +
+	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x1b\n" +
+	"\tlimit_usd\x18\x03 \x01(\x01R\blimitUsd\x12\x1f\n" +
+	"\vpolicy_mode\x18\x04 \x01(\tR\n" +
+	"policyMode\"\x8b\x02\n" +
 	"\x06Flavor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04chip\x18\x02 \x01(\tR\x04chip\x12\x1f\n" +
@@ -1546,28 +1995,32 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\rresource_name\x18\x05 \x01(\tR\fresourceName\x12\x1b\n" +
 	"\tgpu_count\x18\x06 \x01(\x05R\bgpuCount\x12\x1d\n" +
 	"\n" +
-	"memory_gib\x18\a \x01(\x01R\tmemoryGib\"\x88\x01\n" +
+	"memory_gib\x18\a \x01(\x01R\tmemoryGib\x122\n" +
+	"\x16price_usd_per_gpu_hour\x18\b \x01(\x01R\x12priceUsdPerGpuHour\"\xc9\x01\n" +
 	"\x05Queue\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\x12#\n" +
 	"\rpriority_tier\x18\x03 \x01(\tR\fpriorityTier\x12'\n" +
-	"\x0fallowed_flavors\x18\x04 \x03(\tR\x0eallowedFlavors\"\xc3\x01\n" +
+	"\x0fallowed_flavors\x18\x04 \x03(\tR\x0eallowedFlavors\x12?\n" +
+	"\x1cdefault_max_duration_seconds\x18\x05 \x01(\x03R\x19defaultMaxDurationSeconds\"\xf5\x01\n" +
 	"\rWorkspaceSpec\x12\x16\n" +
 	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x122\n" +
 	"\x03env\x18\x03 \x03(\v2 .aegis.v1.WorkspaceSpec.EnvEntryR\x03env\x12\x18\n" +
-	"\acommand\x18\x04 \x03(\tR\acommand\x1a6\n" +
+	"\acommand\x18\x04 \x03(\tR\acommand\x120\n" +
+	"\x14max_duration_seconds\x18\x05 \x01(\x03R\x12maxDurationSeconds\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xac\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xde\x01\n" +
 	"\fTrainingSpec\x12\x16\n" +
 	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x18\n" +
 	"\aworkers\x18\x02 \x01(\x05R\aworkers\x12&\n" +
 	"\x0fgpus_per_worker\x18\x03 \x01(\x05R\rgpusPerWorker\x12\x14\n" +
 	"\x05image\x18\x04 \x01(\tR\x05image\x12\x18\n" +
 	"\acommand\x18\x05 \x03(\tR\acommand\x12\x12\n" +
-	"\x04gang\x18\x06 \x01(\bR\x04gang\"Q\n" +
+	"\x04gang\x18\x06 \x01(\bR\x04gang\x120\n" +
+	"\x14max_duration_seconds\x18\a \x01(\x03R\x12maxDurationSeconds\"Q\n" +
 	"\rResourceHints\x12#\n" +
 	"\rresource_name\x18\x01 \x01(\tR\fresourceName\x12\x1b\n" +
 	"\tgpu_count\x18\x02 \x01(\x05R\bgpuCount\"\xbe\x02\n" +
@@ -1634,16 +2087,47 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x03url\x18\x03 \x01(\tR\x03url\x12\x18\n" +
 	"\abackend\x18\x04 \x01(\tR\abackend\"E\n" +
 	"\x13AckWorkloadResponse\x12.\n" +
-	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload2\xab\x06\n" +
+	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload\"E\n" +
+	"\x14StartWorkloadRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x02 \x01(\tR\tclusterId\"G\n" +
+	"\x15StartWorkloadResponse\x12.\n" +
+	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload\"G\n" +
+	"\x10GetBudgetRequest\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x14\n" +
+	"\x05queue\x18\x02 \x01(\tR\x05queue\"\xc4\x01\n" +
+	"\vBudgetUsage\x12\x1d\n" +
+	"\n" +
+	"actual_usd\x18\x01 \x01(\x01R\tactualUsd\x12!\n" +
+	"\freserved_usd\x18\x02 \x01(\x01R\vreservedUsd\x12#\n" +
+	"\rremaining_usd\x18\x03 \x01(\x01R\fremainingUsd\x12(\n" +
+	"\x10period_start_utc\x18\x04 \x01(\tR\x0eperiodStartUtc\x12$\n" +
+	"\x0eperiod_end_utc\x18\x05 \x01(\tR\fperiodEndUtc\"j\n" +
+	"\x11GetBudgetResponse\x12(\n" +
+	"\x06budget\x18\x01 \x01(\v2\x10.aegis.v1.BudgetR\x06budget\x12+\n" +
+	"\x05usage\x18\x02 \x01(\v2\x15.aegis.v1.BudgetUsageR\x05usage\"3\n" +
+	"\x12ListBudgetsRequest\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\"h\n" +
+	"\x0fBudgetWithUsage\x12(\n" +
+	"\x06budget\x18\x01 \x01(\v2\x10.aegis.v1.BudgetR\x06budget\x12+\n" +
+	"\x05usage\x18\x02 \x01(\v2\x15.aegis.v1.BudgetUsageR\x05usage\"F\n" +
+	"\x13ListBudgetsResponse\x12/\n" +
+	"\x05items\x18\x01 \x03(\v2\x19.aegis.v1.BudgetWithUsageR\x05items2\x8f\b\n" +
 	"\rAegisPlatform\x12B\n" +
 	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\x12?\n" +
-	"\fUpsertBudget\x12\x1d.aegis.v1.UpsertBudgetRequest\x1a\x10.aegis.v1.Budget\x12?\n" +
+	"\fUpsertBudget\x12\x1d.aegis.v1.UpsertBudgetRequest\x1a\x10.aegis.v1.Budget\x12D\n" +
+	"\tGetBudget\x12\x1a.aegis.v1.GetBudgetRequest\x1a\x1b.aegis.v1.GetBudgetResponse\x12J\n" +
+	"\vListBudgets\x12\x1c.aegis.v1.ListBudgetsRequest\x1a\x1d.aegis.v1.ListBudgetsResponse\x12?\n" +
 	"\fUpsertFlavor\x12\x1d.aegis.v1.UpsertFlavorRequest\x1a\x10.aegis.v1.Flavor\x12<\n" +
 	"\vUpsertQueue\x12\x1c.aegis.v1.UpsertQueueRequest\x1a\x0f.aegis.v1.Queue\x12E\n" +
 	"\x0eSubmitWorkload\x12\x1f.aegis.v1.SubmitWorkloadRequest\x1a\x12.aegis.v1.Workload\x12?\n" +
 	"\vGetWorkload\x12\x1c.aegis.v1.GetWorkloadRequest\x1a\x12.aegis.v1.Workload\x12P\n" +
 	"\rListWorkloads\x12\x1e.aegis.v1.ListWorkloadsRequest\x1a\x1f.aegis.v1.ListWorkloadsResponse\x12P\n" +
-	"\rLeaseWorkload\x12\x1e.aegis.v1.LeaseWorkloadRequest\x1a\x1f.aegis.v1.LeaseWorkloadResponse\x12J\n" +
+	"\rLeaseWorkload\x12\x1e.aegis.v1.LeaseWorkloadRequest\x1a\x1f.aegis.v1.LeaseWorkloadResponse\x12P\n" +
+	"\rStartWorkload\x12\x1e.aegis.v1.StartWorkloadRequest\x1a\x1f.aegis.v1.StartWorkloadResponse\x12J\n" +
 	"\vAckWorkload\x12\x1c.aegis.v1.AckWorkloadRequest\x1a\x1d.aegis.v1.AckWorkloadResponse\x12V\n" +
 	"\x0fRegisterCluster\x12 .aegis.v1.ClusterRegisterRequest\x1a!.aegis.v1.ClusterRegisterResponse\x12F\n" +
 	"\tHeartbeat\x12\x1a.aegis.v1.ClusterHeartbeat\x1a\x1d.aegis.v1.ClusterHeartbeatAckB\x8f\x01\n" +
@@ -1661,7 +2145,7 @@ func file_aegis_v1_platform_proto_rawDescGZIP() []byte {
 	return file_aegis_v1_platform_proto_rawDescData
 }
 
-var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Project)(nil),                 // 0: aegis.v1.Project
 	(*PolicyDomain)(nil),            // 1: aegis.v1.PolicyDomain
@@ -1688,16 +2172,24 @@ var file_aegis_v1_platform_proto_goTypes = []any{
 	(*LeaseWorkloadResponse)(nil),   // 22: aegis.v1.LeaseWorkloadResponse
 	(*AckWorkloadRequest)(nil),      // 23: aegis.v1.AckWorkloadRequest
 	(*AckWorkloadResponse)(nil),     // 24: aegis.v1.AckWorkloadResponse
-	nil,                             // 25: aegis.v1.WorkspaceSpec.EnvEntry
-	nil,                             // 26: aegis.v1.ClusterRegisterRequest.LabelsEntry
+	(*StartWorkloadRequest)(nil),    // 25: aegis.v1.StartWorkloadRequest
+	(*StartWorkloadResponse)(nil),   // 26: aegis.v1.StartWorkloadResponse
+	(*GetBudgetRequest)(nil),        // 27: aegis.v1.GetBudgetRequest
+	(*BudgetUsage)(nil),             // 28: aegis.v1.BudgetUsage
+	(*GetBudgetResponse)(nil),       // 29: aegis.v1.GetBudgetResponse
+	(*ListBudgetsRequest)(nil),      // 30: aegis.v1.ListBudgetsRequest
+	(*BudgetWithUsage)(nil),         // 31: aegis.v1.BudgetWithUsage
+	(*ListBudgetsResponse)(nil),     // 32: aegis.v1.ListBudgetsResponse
+	nil,                             // 33: aegis.v1.WorkspaceSpec.EnvEntry
+	nil,                             // 34: aegis.v1.ClusterRegisterRequest.LabelsEntry
 }
 var file_aegis_v1_platform_proto_depIdxs = []int32{
 	1,  // 0: aegis.v1.Project.policy:type_name -> aegis.v1.PolicyDomain
-	25, // 1: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
+	33, // 1: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
 	5,  // 2: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
 	6,  // 3: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
 	7,  // 4: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
-	26, // 5: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
+	34, // 5: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
 	3,  // 6: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
 	0,  // 7: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
 	2,  // 8: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
@@ -1707,33 +2199,45 @@ var file_aegis_v1_platform_proto_depIdxs = []int32{
 	8,  // 12: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
 	8,  // 13: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
 	8,  // 14: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
-	13, // 15: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
-	14, // 16: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
-	15, // 17: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
-	16, // 18: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
-	17, // 19: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
-	18, // 20: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
-	19, // 21: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
-	21, // 22: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
-	23, // 23: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
-	9,  // 24: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
-	11, // 25: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
-	0,  // 26: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
-	2,  // 27: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
-	3,  // 28: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
-	4,  // 29: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
-	8,  // 30: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
-	8,  // 31: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
-	20, // 32: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
-	22, // 33: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
-	24, // 34: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
-	10, // 35: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
-	12, // 36: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
-	26, // [26:37] is the sub-list for method output_type
-	15, // [15:26] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	8,  // 15: aegis.v1.StartWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	2,  // 16: aegis.v1.GetBudgetResponse.budget:type_name -> aegis.v1.Budget
+	28, // 17: aegis.v1.GetBudgetResponse.usage:type_name -> aegis.v1.BudgetUsage
+	2,  // 18: aegis.v1.BudgetWithUsage.budget:type_name -> aegis.v1.Budget
+	28, // 19: aegis.v1.BudgetWithUsage.usage:type_name -> aegis.v1.BudgetUsage
+	31, // 20: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
+	13, // 21: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
+	14, // 22: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
+	27, // 23: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
+	30, // 24: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
+	15, // 25: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
+	16, // 26: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
+	17, // 27: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
+	18, // 28: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
+	19, // 29: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
+	21, // 30: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
+	25, // 31: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
+	23, // 32: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
+	9,  // 33: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
+	11, // 34: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
+	0,  // 35: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
+	2,  // 36: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
+	29, // 37: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
+	32, // 38: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
+	3,  // 39: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
+	4,  // 40: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
+	8,  // 41: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
+	8,  // 42: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
+	20, // 43: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
+	22, // 44: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
+	26, // 45: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
+	24, // 46: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
+	10, // 47: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
+	12, // 48: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
+	35, // [35:49] is the sub-list for method output_type
+	21, // [21:35] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_aegis_v1_platform_proto_init() }
@@ -1751,7 +2255,7 @@ func file_aegis_v1_platform_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aegis_v1_platform_proto_rawDesc), len(file_aegis_v1_platform_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

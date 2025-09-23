@@ -15,8 +15,11 @@ AEGIS_CP_GRPC ?= localhost:8081
 AEGIS_CLUSTER_ID ?= dev-1
 AEGIS_REGION ?= us-local
 AEGIS_PROVIDER ?= DEV
+AEGIS_DISABLE_KUEUE ?= 0
+HEALTH_PROBE_BIND_ADDRESS ?= :8081
+AEGIS_FLAVORS ?=
 
-.PHONY: all proto tidy build test verify run-api run-agent stop
+.PHONY: all proto tidy build test verify run-api run-operator stop
 
 all: proto tidy build
 
@@ -67,13 +70,22 @@ else
 	@echo "ALLOW_SOCKETS=0: disabled here"
 endif
 
-run-agent:
+run-operator:
 ifeq ($(ALLOW_SOCKETS),1)
-	@cd $(AGENT_MOD) && AEGIS_CP_GRPC=$(AEGIS_CP_GRPC) AEGIS_CLUSTER_ID=$(AEGIS_CLUSTER_ID) AEGIS_REGION=$(AEGIS_REGION) AEGIS_PROVIDER=$(AEGIS_PROVIDER) go run ./cmd/agent
+	@cd $(AGENT_MOD) && \
+	AEGIS_CP_GRPC=$(AEGIS_CP_GRPC) \
+	AEGIS_CLUSTER_ID=$(AEGIS_CLUSTER_ID) \
+	AEGIS_REGION=$(AEGIS_REGION) \
+	AEGIS_PROVIDER=$(AEGIS_PROVIDER) \
+	AEGIS_DISABLE_KUEUE=$(AEGIS_DISABLE_KUEUE) \
+	HEALTH_PROBE_BIND_ADDRESS=$(HEALTH_PROBE_BIND_ADDRESS) \
+	AEGIS_FLAVORS="$(AEGIS_FLAVORS)" \
+	KUBECONFIG=$(KUBECONFIG) \
+	go run ./cmd
 else
 	@echo "ALLOW_SOCKETS=0: disabled here"
 endif
 
 stop:
 	@pkill -f services/platform-api || true
-	@pkill -f k8s-agent/cmd/agent || true
+	@pkill -f "k8s-agent/cmd" || true

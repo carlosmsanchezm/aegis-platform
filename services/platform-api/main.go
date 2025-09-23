@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/server"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
@@ -19,7 +20,10 @@ func main() {
 	httpAddr := getenv("HTTP_ADDR", ":8080")
 
 	st := store.NewMemStore()
-	svc := server.New(logger, st)
+	kubeconfigsDir := getenv("KUBECONFIGS_DIR", "/tmp/kubeconfigs")
+	targetNamespace := getenv("AEGIS_NAMESPACE", "default")
+	kubeClientManager := kubeclients.New(kubeconfigsDir)
+	svc := server.New(logger, st, kubeClientManager, targetNamespace)
 
 	logger.Info("starting platform API", zap.String("grpc_addr", grpcAddr), zap.String("http_addr", httpAddr))
 

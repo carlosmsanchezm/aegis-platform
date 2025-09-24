@@ -10,3 +10,8 @@ plugins:
     out: .
     opt:
       - paths=source_relative
+  - plugin: buf.build/grpc-ecosystem/gateway
+    out: .
+    opt:
+      - paths=source_relative
+      - generate_unbound_methods=true

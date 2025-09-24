@@ -352,6 +352,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	}
 
 	cr := buildAegisWorkloadCR(w, s.targetNamespace)
+	// Surface computed max runtime so the operator can apply an active deadline without a CRD change.
+	if maxSecs > 0 {
+		if cr.Annotations == nil {
+			cr.Annotations = map[string]string{}
+		}
+		cr.Annotations["aegis.yourorg.dev/maxDurationSeconds"] = strconv.FormatInt(maxSecs, 10)
+	}
 	if err := kubeClient.Create(ctx, cr); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			s.log.Error("failed to create aegis workload CR",
@@ -753,8 +760,12 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 
 	log.Info("gRPC server listening", zap.String("addr", addrGRPC))
 
-	// HTTP gateway mux with Prometheus metrics exposed.
+	// HTTP gateway mux with REST handlers + Prometheus metrics.
 	mux := runtime.NewServeMux()
+	// Register REST handlers for our in-process service (no network dials).
+	if err := aegis.RegisterAegisPlatformHandlerServer(ctx, mux, svc); err != nil {
+		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
+	}
 	root := http.NewServeMux()
 	root.Handle("/", mux)
 	root.Handle("/metrics", promhttp.Handler())

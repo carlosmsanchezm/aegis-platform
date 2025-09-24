@@ -19,20 +19,22 @@ type GPUHints struct {
 
 // WorkspaceOptions describes the inputs required to render a Kubernetes Job for workspaces.
 type WorkspaceOptions struct {
-	Namespace           string
-	JobName             string
-	WorkloadID          string
-	Image               string
-	Command             []string
-	DefaultCommand      string
-	Env                 map[string]string
-	Flavor              string
-	Queue               string
-	Hints               *GPUHints
-	DryRun              bool
-	KueueEnabled        bool
-	KueueQueue          string
-	GPUResourceOverride string
+	Namespace               string
+	JobName                 string
+	WorkloadID              string
+	Image                   string
+	Command                 []string
+	DefaultCommand          string
+	Env                     map[string]string
+	Flavor                  string
+	Queue                   string
+	Hints                   *GPUHints
+	DryRun                  bool
+	KueueEnabled            bool
+	KueueQueue              string
+	GPUResourceOverride     string
+	ActiveDeadlineSeconds   *int64
+	TTLSecondsAfterFinished *int32
 }
 
 // BuildWorkspaceJob renders a batch/v1 Job matching the legacy executor behaviour.
@@ -80,15 +82,23 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		}
 	}
 
+	jobAnnotations := map[string]string{}
+	if !kueueAllowed {
+		jobAnnotations["kueue.x-k8s.io/skip-admission"] = "true"
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      opts.JobName,
-			Namespace: opts.Namespace,
-			Labels:    jobLabels,
+			Name:        opts.JobName,
+			Namespace:   opts.Namespace,
+			Labels:      jobLabels,
+			Annotations: jobAnnotations,
 		},
 		Spec: batchv1.JobSpec{
-			Suspend:      boolPtr(suspend),
-			BackoffLimit: int32Ptr(0),
+			Suspend:                 boolPtr(suspend),
+			BackoffLimit:            int32Ptr(0),
+			ActiveDeadlineSeconds:   opts.ActiveDeadlineSeconds,
+			TTLSecondsAfterFinished: opts.TTLSecondsAfterFinished,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{

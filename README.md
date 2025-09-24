@@ -232,9 +232,68 @@ The following scenarios validate the full functionality of the refactored system
             "policyMode": "HARD"
           },
           "usage": {
-            "remainingUsd": 0.5,
-            "periodStartUtc": "2025-09-01",
-            "periodEndUtc": "2025-10-01"
-          }
-        }
-        ```
+        "remainingUsd": 0.5,
+        "periodStartUtc": "2025-09-01",
+        "periodEndUtc": "2025-10-01"
+      }
+    }
+    ```
+
+## Backstage Workspace MVP (UI → API → Operator)
+
+We now ship a Backstage plugin that lets anyone submit a Workspace workload through the web app and watch it complete end-to-end.
+
+### What was implemented
+
+- **Proxy wiring** – Backstage backend exposes `/api/proxy/aegis/*` and forwards to the platform API on `http://localhost:8080` (`app-config.yaml` moved under `proxy.endpoints`).
+- **Aegis plugin** – Route `/aegis` renders a form with `projectId`, `queue`, `flavor`, `image`, `command`, and optional `maxDurationSeconds` fields. Submissions call the REST gateway (`SubmitWorkload`) through the proxy.
+- **Auto status polling** – After submit, the page polls `GetWorkload` until it reaches `SUCCEEDED` or `FAILED`, updating the UI card without a manual refresh.
+
+### Runbook
+
+1. **Start Backstage** (from `aegis-platform`):
+   ```bash
+   yarn start
+   ```
+2. **Load the page** – Visit `http://localhost:3000/aegis` and keep the default sample values (`echo Hello from Aegis; sleep 2`).
+3. **Submit** – Click **Submit** and watch the card show the new workload ID. Within a few seconds the status will advance to `SUCCEEDED` (or `FAILED` if you pick a shorter deadline).
+4. **Verify backend traffic** – Platform API logs will show `workload placed`, `workload start acknowledged`, and finally `workload acknowledged` when the Job finishes.
+
+If the command never finishes, check the Kueue instructions below (Kueue may still have the Job queued).
+
+## Operator + Kueue Integration
+
+The operator has been updated to respect Kueue’s admission flow instead of fighting it. Jobs carry `kueue.x-k8s.io/queue-name`, start suspended, and Kueue unsuspends them when resources are available. The operator no longer strips the label or force-unsuspends when Kueue is enabled.
+
+### Configuration knobs
+
+- **Enable Kueue integration** when you want Kueue to queue workloads:
+  ```bash
+  export AEGIS_KUEUE_ENABLED=1
+  export AEGIS_DISABLE_KUEUE=0
+  HEALTH_PROBE_BIND_ADDRESS=:8082 make run-operator ALLOW_SOCKETS=1
+  ```
+  If your cluster uses a custom LocalQueue name, set `AEGIS_KUEUE_QUEUE=<queue>`; otherwise the operator reuses `AegisWorkload.Spec.Queue` (e.g., `default`).
+
+- **Disable Kueue integration** for clusters without Kueue:
+  ```bash
+  export AEGIS_KUEUE_ENABLED=0
+  export AEGIS_DISABLE_KUEUE=1   # default from the Makefile
+  HEALTH_PROBE_BIND_ADDRESS=:8082 make run-operator ALLOW_SOCKETS=1
+  ```
+  In this mode Jobs are created unsuspended, queue labels are removed, and behavior matches the pre-Kueue flow.
+
+### Testing with Kueue
+
+1. Ensure your namespace is bound to a Kueue LocalQueue and any previous `aegis-w-*` Jobs/Workloads are deleted.
+2. Start the operator with `AEGIS_KUEUE_ENABLED=1`, as shown above.
+3. Submit a workload (`grpcurl`, Backstage UI, or other client).
+4. Watch the Job lifecycle:
+   ```bash
+   kubectl get jobs -w
+   ```
+   - Initially `STATUS` is `Suspended 0/1`; the operator records `QueuedByKueue`.
+   - When Kueue admits the workload, `Suspend` flips to `false`, Kubernetes creates pods, and the operator logs `AdmittedByKueue` and transitions the AegisWorkload to `Running`.
+   - Once pods exit, the Job becomes `Completed 1/1` and the operator sends the `AckWorkload` bridge (`SUCCEEDED` or `FAILED`).
+
+If Jobs stay suspended forever, confirm Kueue has available quota or temporarily disable Kueue (set `AEGIS_DISABLE_KUEUE=1`) to revert to the legacy behavior.

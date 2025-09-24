@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +36,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 
 	aegisproto "github.com/yourorg/aegis/proto/aegis/v1"
@@ -55,10 +55,12 @@ const (
 	backendWorkspace = "workspace"
 	backendPyTorch   = "pytorch_v1"
 
-	requeuePending = 10 * time.Second
+	requeuePending               = 10 * time.Second
+	workspaceJobTTLSeconds int32 = 600
 
-	annotationStartAcked = "aegis.yourorg.dev/start-acked"
-	annotationFinalAcked = "aegis.yourorg.dev/final-acked"
+	annotationStartAcked         = "aegis.yourorg.dev/start-acked"
+	annotationFinalAcked         = "aegis.yourorg.dev/final-acked"
+	annotationMaxDurationSeconds = "aegis.yourorg.dev/maxDurationSeconds"
 )
 
 // AegisWorkloadReconciler reconciles a AegisWorkload object.
@@ -138,24 +140,32 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	jobName := builders.SanitizeName("aegis-" + aw.Name)
 	jobKey := types.NamespacedName{Name: jobName, Namespace: aw.Namespace}
 
+	maxDeadline, mdErr := maxDurationFromAnnotation(aw)
+	if mdErr != nil {
+		log.Error(mdErr, "invalid max duration annotation", "annotation", aw.GetAnnotations()[annotationMaxDurationSeconds])
+	}
+	ttlAfterFinished := ptr.To(workspaceJobTTLSeconds)
+
 	var job batchv1.Job
 	err := r.Get(ctx, jobKey, &job)
 	if apierrors.IsNotFound(err) {
 		opts := builders.WorkspaceOptions{
-			Namespace:           aw.Namespace,
-			JobName:             jobName,
-			WorkloadID:          aw.Name,
-			Image:               image,
-			Command:             spec.Command,
-			DefaultCommand:      workspaceDefaultCommand(image),
-			Env:                 spec.Env,
-			Flavor:              flavor,
-			Queue:               aw.Spec.Queue,
-			Hints:               convertSpecHints(aw.Spec.Hints),
-			DryRun:              r.dryRun,
-			KueueEnabled:        r.kueueEnabled,
-			KueueQueue:          r.kueueQueue,
-			GPUResourceOverride: r.gpuResourceOverride,
+			Namespace:               aw.Namespace,
+			JobName:                 jobName,
+			WorkloadID:              aw.Name,
+			Image:                   image,
+			Command:                 spec.Command,
+			DefaultCommand:          workspaceDefaultCommand(image),
+			Env:                     spec.Env,
+			Flavor:                  flavor,
+			Queue:                   aw.Spec.Queue,
+			Hints:                   convertSpecHints(aw.Spec.Hints),
+			DryRun:                  r.dryRun,
+			KueueEnabled:            r.kueueEnabled,
+			KueueQueue:              r.kueueQueue,
+			GPUResourceOverride:     r.gpuResourceOverride,
+			ActiveDeadlineSeconds:   maxDeadline,
+			TTLSecondsAfterFinished: ttlAfterFinished,
 		}
 		obj := builders.BuildWorkspaceJob(opts)
 		if err := controllerutil.SetControllerReference(aw, obj, r.Scheme); err != nil {
@@ -181,15 +191,62 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 		return ctrl.Result{}, err
 	}
 
-	if !r.kueueEnabled && job.Spec.Suspend != nil && *job.Spec.Suspend {
-		switch err := r.unsuspendJob(ctx, jobKey); {
-		case err == nil:
-			log.Info("unsuspended job", "job", jobName)
-		case apierrors.IsNotFound(err):
-			return ctrl.Result{}, nil
-		default:
+	updated := false
+
+	if r.kueueEnabled {
+		if ptr.Deref(job.Spec.Suspend, false) {
+			if aw.Status.Message != "Queued by Kueue" {
+				r.Recorder.Eventf(aw, corev1.EventTypeNormal, "QueuedByKueue",
+					"Job %s queued by Kueue (queue=%q)", jobName, job.Labels["kueue.x-k8s.io/queue-name"])
+				if err := r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
+					st.Message = "Queued by Kueue"
+				}); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+		} else if aw.Status.Message == "Queued by Kueue" {
+			r.Recorder.Eventf(aw, corev1.EventTypeNormal, "AdmittedByKueue",
+				"Job %s admitted by Kueue", jobName)
+			if err := r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
+				st.Message = ""
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if job.Spec.Suspend == nil || ptr.Deref(job.Spec.Suspend, false) {
+			job.Spec.Suspend = ptr.To(false)
+			updated = true
+		}
+		if job.Labels != nil {
+			if _, ok := job.Labels["kueue.x-k8s.io/queue-name"]; ok {
+				delete(job.Labels, "kueue.x-k8s.io/queue-name")
+				updated = true
+			}
+		}
+		if job.Spec.Template.Labels != nil {
+			if _, ok := job.Spec.Template.Labels["kueue.x-k8s.io/queue-name"]; ok {
+				delete(job.Spec.Template.Labels, "kueue.x-k8s.io/queue-name")
+				updated = true
+			}
+		}
+	}
+	if maxDeadline != nil {
+		current := ptr.Deref(job.Spec.ActiveDeadlineSeconds, int64(0))
+		if job.Spec.ActiveDeadlineSeconds == nil || current != *maxDeadline {
+			job.Spec.ActiveDeadlineSeconds = ptr.To(*maxDeadline)
+			updated = true
+		}
+	}
+	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != workspaceJobTTLSeconds {
+		job.Spec.TTLSecondsAfterFinished = ptr.To(workspaceJobTTLSeconds)
+		updated = true
+	}
+	if updated {
+		if err := r.Update(ctx, &job); err != nil {
 			return ctrl.Result{}, err
 		}
+		log.Info("workspace job spec updated", "job", jobName)
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -326,20 +383,6 @@ func (r *AegisWorkloadReconciler) applyTrainingTransitions(ctx context.Context, 
 			r.ackWorkloadBridge(ctx, aw, "FAILED")
 		}
 	}
-}
-
-func (r *AegisWorkloadReconciler) unsuspendJob(ctx context.Context, key types.NamespacedName) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var latest batchv1.Job
-		if err := r.Get(ctx, key, &latest); err != nil {
-			return err
-		}
-		if latest.Spec.Suspend != nil && !*latest.Spec.Suspend {
-			return nil
-		}
-		latest.Spec.Suspend = ptr.To(false)
-		return r.Update(ctx, &latest)
-	})
 }
 
 func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
@@ -562,6 +605,24 @@ func convertSpecHints(h *aegisv1alpha1.ResourceHints) *builders.GPUHints {
 		return nil
 	}
 	return &builders.GPUHints{ResourceName: h.ResourceName, GPUCount: h.GpuCount}
+}
+
+func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) {
+	if aw == nil {
+		return nil, nil
+	}
+	val := aw.GetAnnotations()[annotationMaxDurationSeconds]
+	if val == "" {
+		return nil, nil
+	}
+	secs, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", annotationMaxDurationSeconds, err)
+	}
+	if secs <= 0 {
+		return nil, nil
+	}
+	return ptr.To(secs), nil
 }
 
 func workspaceDefaultCommand(image string) string {

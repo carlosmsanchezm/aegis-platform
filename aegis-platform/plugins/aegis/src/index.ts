@@ -1,2 +1,11 @@
-export { aegisPlugin, AegisPage } from './plugin';
-export { rootRouteRef } from './routes';
+export {
+	aegisPlugin,
+	AegisPage,
+	AegisWorkloadListPage,
+	AegisWorkloadDetailsPage,
+} from './plugin';
+export {
+	rootRouteRef,
+	workloadsRouteRef,
+	workloadDetailsRouteRef,
+} from './routes';

@@ -37,7 +37,11 @@ import { RequirePermission } from '@backstage/plugin-permission-react';
 import { catalogEntityCreatePermission } from '@backstage/plugin-catalog-common/alpha';
 import { NotificationsPage } from '@backstage/plugin-notifications';
 import { SignalsDisplay } from '@backstage/plugin-signals';
-import { AegisPage } from '@internal/plugin-aegis';
+import {
+  AegisPage,
+  AegisWorkloadListPage,
+  AegisWorkloadDetailsPage,
+} from '@internal/plugin-aegis';
 
 const app = createApp({
   apis,
@@ -99,6 +103,8 @@ const routes = (
     <Route path="/catalog-graph" element={<CatalogGraphPage />} />
     <Route path="/notifications" element={<NotificationsPage />} />
     <Route path="/aegis" element={<AegisPage />} />
+    <Route path="/aegis/workloads" element={<AegisWorkloadListPage />} />
+    <Route path="/aegis/workloads/:id" element={<AegisWorkloadDetailsPage />} />
   </FlatRoutes>
 );
 

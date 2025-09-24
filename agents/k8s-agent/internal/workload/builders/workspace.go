@@ -13,8 +13,10 @@ import (
 
 // GPUHints mirrors the control-plane hint payload.
 type GPUHints struct {
-	ResourceName string
-	GPUCount     int32
+	ResourceName    string
+	GPUCount        int32
+	CpuCoresRequest *string
+	MemoryRequest   *string
 }
 
 // WorkspaceOptions describes the inputs required to render a Kubernetes Job for workspaces.
@@ -47,6 +49,34 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		corev1.EnvVar{Name: "NODE_NAME", ValueFrom: fieldRef("spec.nodeName")},
 	)
 
+	resources := corev1.ResourceRequirements{
+		Limits:   corev1.ResourceList{},
+		Requests: corev1.ResourceList{},
+	}
+	resourcesRequested := false
+
+	if !opts.DryRun {
+		if res := gpuResourceRequests(opts); len(res) > 0 {
+			for name, qty := range res {
+				resources.Requests[name] = qty
+				resources.Limits[name] = qty
+			}
+			resourcesRequested = true
+		}
+		if opts.Hints != nil && opts.Hints.CpuCoresRequest != nil && *opts.Hints.CpuCoresRequest != "" {
+			cpuQty := resource.MustParse(*opts.Hints.CpuCoresRequest)
+			resources.Requests[corev1.ResourceCPU] = cpuQty
+			resources.Limits[corev1.ResourceCPU] = cpuQty
+			resourcesRequested = true
+		}
+		if opts.Hints != nil && opts.Hints.MemoryRequest != nil && *opts.Hints.MemoryRequest != "" {
+			memQty := resource.MustParse(*opts.Hints.MemoryRequest)
+			resources.Requests[corev1.ResourceMemory] = memQty
+			resources.Limits[corev1.ResourceMemory] = memQty
+			resourcesRequested = true
+		}
+	}
+
 	container := corev1.Container{
 		Name:                     "workspace",
 		Image:                    opts.Image,
@@ -54,8 +84,8 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 	}
 
-	if res := gpuResourceRequests(opts); len(res) > 0 {
-		container.Resources = corev1.ResourceRequirements{Requests: res, Limits: res}
+	if resourcesRequested {
+		container.Resources = resources
 	}
 
 	if len(opts.Command) > 0 {

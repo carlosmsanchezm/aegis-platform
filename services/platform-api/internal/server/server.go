@@ -28,8 +28,10 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type Server struct {
@@ -45,6 +47,11 @@ const (
 	statusRunning = "RUNNING"
 
 	heartbeatTTL = 45 * time.Second
+
+	labelWorkloadID = "aegis.workload/id"
+
+	uiStatusQueuedByKueue = "QUEUED_BY_KUEUE"
+	uiStatusSubmitted     = "SUBMITTED"
 )
 
 var (
@@ -334,8 +341,10 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 
 	if fl := s.store.GetFlavor(reqFlavor); fl != nil {
 		w.Hints = &aegis.ResourceHints{
-			ResourceName: fl.GetResourceName(),
-			GpuCount:     fl.GetGpuCount(),
+			ResourceName:    fl.GetResourceName(),
+			GpuCount:        fl.GetGpuCount(),
+			CpuCoresRequest: fl.GetCpuCoresRequest(),
+			MemoryRequest:   fl.GetMemoryRequest(),
 		}
 	}
 
@@ -408,8 +417,105 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 		s.log.Warn("workload not found", zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
+	cache := make(map[string]client.Client)
+	s.enrichWorkloadUI(ctx, cache, w)
 	s.log.Info("workload retrieved", zap.String("workload_id", w.GetId()), zap.String("status", w.GetStatus()), zap.String("project_id", w.GetProjectId()))
 	return w, nil
+}
+
+func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.Client, w *aegis.Workload) {
+	if w == nil {
+		return
+	}
+	fallback := w.GetStatus()
+	if fallback == "" {
+		fallback = uiStatusSubmitted
+	}
+	w.UiStatus = fallback
+	w.Message = w.GetMessage()
+
+	if s.kubeClients == nil || w.GetClusterId() == "" {
+		return
+	}
+
+	if cache == nil {
+		cache = make(map[string]client.Client)
+	}
+	cli, ok := cache[w.GetClusterId()]
+	if !ok {
+		clientForCluster, err := s.kubeClients.ClientFor(w.GetClusterId())
+		if err != nil {
+			s.log.Debug("skip ui enrichment; kube client unavailable",
+				zap.String("workload_id", w.GetId()),
+				zap.String("cluster_id", w.GetClusterId()),
+				zap.Error(err),
+			)
+			cache[w.GetClusterId()] = nil
+			return
+		}
+		cache[w.GetClusterId()] = clientForCluster
+		cli = clientForCluster
+	}
+	if cli == nil {
+		return
+	}
+
+	var jobList batchv1.JobList
+	if err := cli.List(ctx, &jobList, client.InNamespace(s.targetNamespace), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
+		s.log.Debug("skip ui enrichment; listing jobs failed",
+			zap.String("workload_id", w.GetId()),
+			zap.Error(err),
+		)
+		return
+	}
+	if len(jobList.Items) == 0 {
+		return
+	}
+
+	uiStatus, message := jobUiStatus(&jobList.Items[0], fallback)
+	w.UiStatus = uiStatus
+	if message != "" {
+		w.Message = message
+	}
+}
+
+func jobUiStatus(job *batchv1.Job, fallback string) (string, string) {
+	if job == nil {
+		return fallback, ""
+	}
+
+	var message string
+	for _, cond := range job.Status.Conditions {
+		if cond.Message != "" {
+			message = cond.Message
+		}
+		if cond.Type == batchv1.JobFailed && cond.Message != "" {
+			message = cond.Message
+		}
+		if cond.Type == batchv1.JobSuspended && cond.Message != "" {
+			message = cond.Message
+		}
+	}
+
+	if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		if message == "" {
+			message = "Job is suspended"
+		}
+		return uiStatusQueuedByKueue, message
+	}
+	if job.Status.Succeeded > 0 {
+		return "SUCCEEDED", message
+	}
+	if job.Status.Failed > 0 {
+		if message == "" {
+			message = "Job has failed"
+		}
+		return "FAILED", message
+	}
+	if job.Status.Active > 0 {
+		return "RUNNING", message
+	}
+	return uiStatusSubmitted, message
 }
 
 func (s *Server) ListWorkloads(ctx context.Context, req *aegis.ListWorkloadsRequest) (*aegis.ListWorkloadsResponse, error) {
@@ -419,6 +525,10 @@ func (s *Server) ListWorkloads(ctx context.Context, req *aegis.ListWorkloadsRequ
 		return nil, err
 	}
 	items := s.store.ListWorkloads(req.ProjectId)
+	cache := make(map[string]client.Client)
+	for _, w := range items {
+		s.enrichWorkloadUI(ctx, cache, w)
+	}
 	s.log.Info("workloads listed", zap.String("project_id", req.GetProjectId()), zap.Int("count", len(items)))
 	return &aegis.ListWorkloadsResponse{Items: items}, nil
 }
@@ -462,8 +572,10 @@ func (s *Server) LeaseWorkload(ctx context.Context, req *aegis.LeaseWorkloadRequ
 		}
 		if fl := s.store.GetFlavor(flavor); fl != nil {
 			w.Hints = &aegis.ResourceHints{
-				ResourceName: fl.GetResourceName(),
-				GpuCount:     fl.GetGpuCount(),
+				ResourceName:    fl.GetResourceName(),
+				GpuCount:        fl.GetGpuCount(),
+				CpuCoresRequest: fl.GetCpuCoresRequest(),
+				MemoryRequest:   fl.GetMemoryRequest(),
 			}
 			s.log.Debug("resource hints stamped",
 				zap.String("workload_id", w.GetId()),
@@ -471,6 +583,8 @@ func (s *Server) LeaseWorkload(ctx context.Context, req *aegis.LeaseWorkloadRequ
 				zap.String("flavor", flavor),
 				zap.String("resource_name", fl.GetResourceName()),
 				zap.Int("gpu_count", int(fl.GetGpuCount())),
+				zap.String("cpu_request", fl.GetCpuCoresRequest()),
+				zap.String("memory_request", fl.GetMemoryRequest()),
 			)
 		} else {
 			s.log.Debug("flavor missing in catalog; hints skipped",

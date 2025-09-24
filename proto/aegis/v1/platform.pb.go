@@ -228,8 +228,12 @@ type Flavor struct {
 	GpuCount           int32                  `protobuf:"varint,6,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`
 	MemoryGib          float64                `protobuf:"fixed64,7,opt,name=memory_gib,json=memoryGib,proto3" json:"memory_gib,omitempty"`
 	PriceUsdPerGpuHour float64                `protobuf:"fixed64,8,opt,name=price_usd_per_gpu_hour,json=priceUsdPerGpuHour,proto3" json:"price_usd_per_gpu_hour,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Optional CPU request expressed in Kubernetes quantity format, e.g. "1" or "500m".
+	CpuCoresRequest string `protobuf:"bytes,9,opt,name=cpu_cores_request,json=cpuCoresRequest,proto3" json:"cpu_cores_request,omitempty"`
+	// Optional memory request expressed in Kubernetes quantity format, e.g. "4Gi" or "1024Mi".
+	MemoryRequest string `protobuf:"bytes,10,opt,name=memory_request,json=memoryRequest,proto3" json:"memory_request,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Flavor) Reset() {
@@ -316,6 +320,20 @@ func (x *Flavor) GetPriceUsdPerGpuHour() float64 {
 		return x.PriceUsdPerGpuHour
 	}
 	return 0
+}
+
+func (x *Flavor) GetCpuCoresRequest() string {
+	if x != nil {
+		return x.CpuCoresRequest
+	}
+	return ""
+}
+
+func (x *Flavor) GetMemoryRequest() string {
+	if x != nil {
+		return x.MemoryRequest
+	}
+	return ""
 }
 
 type Queue struct {
@@ -564,9 +582,13 @@ func (x *TrainingSpec) GetMaxDurationSeconds() int64 {
 }
 
 type ResourceHints struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResourceName  string                 `protobuf:"bytes,1,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"` // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
-	GpuCount      int32                  `protobuf:"varint,2,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`            // per container GPU count to request
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ResourceName string                 `protobuf:"bytes,1,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"` // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
+	GpuCount     int32                  `protobuf:"varint,2,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`            // per container GPU count to request
+	// Optional CPU core quantity expressed as a Kubernetes quantity string.
+	CpuCoresRequest string `protobuf:"bytes,3,opt,name=cpu_cores_request,json=cpuCoresRequest,proto3" json:"cpu_cores_request,omitempty"`
+	// Optional memory quantity expressed as a Kubernetes quantity string.
+	MemoryRequest string `protobuf:"bytes,4,opt,name=memory_request,json=memoryRequest,proto3" json:"memory_request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -615,6 +637,20 @@ func (x *ResourceHints) GetGpuCount() int32 {
 	return 0
 }
 
+func (x *ResourceHints) GetCpuCoresRequest() string {
+	if x != nil {
+		return x.CpuCoresRequest
+	}
+	return ""
+}
+
+func (x *ResourceHints) GetMemoryRequest() string {
+	if x != nil {
+		return x.MemoryRequest
+	}
+	return ""
+}
+
 type Workload struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -629,6 +665,8 @@ type Workload struct {
 	//	*Workload_Training
 	Kind          isWorkload_Kind `protobuf_oneof:"kind"`
 	Hints         *ResourceHints  `protobuf:"bytes,12,opt,name=hints,proto3" json:"hints,omitempty"`
+	UiStatus      string          `protobuf:"bytes,13,opt,name=ui_status,json=uiStatus,proto3" json:"ui_status,omitempty"`
+	Message       string          `protobuf:"bytes,14,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -735,6 +773,20 @@ func (x *Workload) GetHints() *ResourceHints {
 		return x.Hints
 	}
 	return nil
+}
+
+func (x *Workload) GetUiStatus() string {
+	if x != nil {
+		return x.UiStatus
+	}
+	return ""
+}
+
+func (x *Workload) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 type isWorkload_Kind interface {
@@ -1985,7 +2037,7 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x1b\n" +
 	"\tlimit_usd\x18\x03 \x01(\x01R\blimitUsd\x12\x1f\n" +
 	"\vpolicy_mode\x18\x04 \x01(\tR\n" +
-	"policyMode\"\x8b\x02\n" +
+	"policyMode\"\xde\x02\n" +
 	"\x06Flavor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04chip\x18\x02 \x01(\tR\x04chip\x12\x1f\n" +
@@ -1996,7 +2048,10 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\tgpu_count\x18\x06 \x01(\x05R\bgpuCount\x12\x1d\n" +
 	"\n" +
 	"memory_gib\x18\a \x01(\x01R\tmemoryGib\x122\n" +
-	"\x16price_usd_per_gpu_hour\x18\b \x01(\x01R\x12priceUsdPerGpuHour\"\xc9\x01\n" +
+	"\x16price_usd_per_gpu_hour\x18\b \x01(\x01R\x12priceUsdPerGpuHour\x12*\n" +
+	"\x11cpu_cores_request\x18\t \x01(\tR\x0fcpuCoresRequest\x12%\n" +
+	"\x0ememory_request\x18\n" +
+	" \x01(\tR\rmemoryRequest\"\xc9\x01\n" +
 	"\x05Queue\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
@@ -2020,10 +2075,12 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05image\x18\x04 \x01(\tR\x05image\x12\x18\n" +
 	"\acommand\x18\x05 \x03(\tR\acommand\x12\x12\n" +
 	"\x04gang\x18\x06 \x01(\bR\x04gang\x120\n" +
-	"\x14max_duration_seconds\x18\a \x01(\x03R\x12maxDurationSeconds\"Q\n" +
+	"\x14max_duration_seconds\x18\a \x01(\x03R\x12maxDurationSeconds\"\xa4\x01\n" +
 	"\rResourceHints\x12#\n" +
 	"\rresource_name\x18\x01 \x01(\tR\fresourceName\x12\x1b\n" +
-	"\tgpu_count\x18\x02 \x01(\x05R\bgpuCount\"\xbe\x02\n" +
+	"\tgpu_count\x18\x02 \x01(\x05R\bgpuCount\x12*\n" +
+	"\x11cpu_cores_request\x18\x03 \x01(\tR\x0fcpuCoresRequest\x12%\n" +
+	"\x0ememory_request\x18\x04 \x01(\tR\rmemoryRequest\"\xf5\x02\n" +
 	"\bWorkload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2036,7 +2093,9 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\tworkspace\x18\n" +
 	" \x01(\v2\x17.aegis.v1.WorkspaceSpecH\x00R\tworkspace\x124\n" +
 	"\btraining\x18\v \x01(\v2\x16.aegis.v1.TrainingSpecH\x00R\btraining\x12-\n" +
-	"\x05hints\x18\f \x01(\v2\x17.aegis.v1.ResourceHintsR\x05hintsB\x06\n" +
+	"\x05hints\x18\f \x01(\v2\x17.aegis.v1.ResourceHintsR\x05hints\x12\x1b\n" +
+	"\tui_status\x18\r \x01(\tR\buiStatus\x12\x18\n" +
+	"\amessage\x18\x0e \x01(\tR\amessageB\x06\n" +
 	"\x04kind\"\x87\x02\n" +
 	"\x16ClusterRegisterRequest\x12\x1d\n" +
 	"\n" +

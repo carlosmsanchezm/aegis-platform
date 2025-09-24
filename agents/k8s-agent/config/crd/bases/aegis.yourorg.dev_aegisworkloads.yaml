@@ -56,10 +56,18 @@ spec:
                 description: Hints carries scheduling hints propagated from the control
                   plane.
                 properties:
+                  cpuCoresRequest:
+                    description: CpuCoresRequest is the CPU core quantity to request
+                      (e.g. "1", "500m").
+                    type: string
                   gpuCount:
                     description: GpuCount is the number of GPUs to request per container.
                     format: int32
                     type: integer
+                  memoryRequest:
+                    description: MemoryRequest is the memory quantity to request (e.g.
+                      "4Gi", "1024Mi").
+                    type: string
                   resourceName:
                     description: ResourceName is the GPU resource alias to request
                       (e.g. nvidia.com/mig-1g.10gb).

@@ -77,6 +77,14 @@ type ResourceHints struct {
 	// GpuCount is the number of GPUs to request per container.
 	// +kubebuilder:validation:Optional
 	GpuCount int32 `json:"gpuCount,omitempty"`
+
+	// CpuCoresRequest is the CPU core quantity to request (e.g. "1", "500m").
+	// +kubebuilder:validation:Optional
+	CpuCoresRequest *string `json:"cpuCoresRequest,omitempty"`
+
+	// MemoryRequest is the memory quantity to request (e.g. "4Gi", "1024Mi").
+	// +kubebuilder:validation:Optional
+	MemoryRequest *string `json:"memoryRequest,omitempty"`
 }
 
 // AegisWorkloadSpec defines the desired state of AegisWorkload.

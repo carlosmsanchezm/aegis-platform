@@ -22,6 +22,10 @@ message Flavor {
   int32 gpu_count = 6;
   double memory_gib = 7;
   double price_usd_per_gpu_hour = 8;
+  // Optional CPU request expressed in Kubernetes quantity format, e.g. "1" or "500m".
+  string cpu_cores_request = 9;
+  // Optional memory request expressed in Kubernetes quantity format, e.g. "4Gi" or "1024Mi".
+  string memory_request = 10;
 }
 
 message Queue {
@@ -43,6 +47,10 @@ message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_wor
 message ResourceHints {
   string resource_name = 1; // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
   int32 gpu_count = 2;      // per container GPU count to request
+  // Optional CPU core quantity expressed as a Kubernetes quantity string.
+  string cpu_cores_request = 3;
+  // Optional memory quantity expressed as a Kubernetes quantity string.
+  string memory_request = 4;
 }
 
 message Workload {
@@ -50,6 +58,8 @@ message Workload {
   oneof kind { WorkspaceSpec workspace = 10; TrainingSpec training = 11; }
 
   ResourceHints hints = 12;
+  string ui_status = 13;
+  string message = 14;
 }
 
 // Cluster handshake

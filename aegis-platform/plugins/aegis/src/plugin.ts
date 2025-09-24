@@ -1,9 +1,9 @@
 import {
-  createPlugin,
-  createRoutableExtension,
+	createPlugin,
+	createRoutableExtension,
 } from '@backstage/core-plugin-api';
 
-import { rootRouteRef } from './routes';
+import { rootRouteRef, workloadsRouteRef, workloadDetailsRouteRef } from './routes';
 
 export const aegisPlugin = createPlugin({
   id: 'aegis',
@@ -20,5 +20,27 @@ export const AegisPage = aegisPlugin.provide(
         m => m.SubmitWorkloadPage,
       ),
     mountPoint: rootRouteRef,
+  }),
+);
+
+export const AegisWorkloadListPage = aegisPlugin.provide(
+  createRoutableExtension({
+    name: 'AegisWorkloadListPage',
+    component: () =>
+      import('./components/WorkloadListPage').then(
+        m => m.WorkloadListPage,
+      ),
+    mountPoint: workloadsRouteRef,
+  }),
+);
+
+export const AegisWorkloadDetailsPage = aegisPlugin.provide(
+  createRoutableExtension({
+    name: 'AegisWorkloadDetailsPage',
+    component: () =>
+      import('./components/WorkloadDetailsPage').then(
+        m => m.WorkloadDetailsPage,
+      ),
+    mountPoint: workloadDetailsRouteRef,
   }),
 );

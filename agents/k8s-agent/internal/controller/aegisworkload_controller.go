@@ -604,7 +604,12 @@ func convertSpecHints(h *aegisv1alpha1.ResourceHints) *builders.GPUHints {
 	if h == nil {
 		return nil
 	}
-	return &builders.GPUHints{ResourceName: h.ResourceName, GPUCount: h.GpuCount}
+	return &builders.GPUHints{
+		ResourceName:    h.ResourceName,
+		GPUCount:        h.GpuCount,
+		CpuCoresRequest: h.CpuCoresRequest,
+		MemoryRequest:   h.MemoryRequest,
+	}
 }
 
 func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) {

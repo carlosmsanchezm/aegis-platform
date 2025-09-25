@@ -37,6 +37,14 @@ type WorkspaceSpec struct {
 	// Command overrides the default entrypoint.
 	// +kubebuilder:validation:Optional
 	Command []string `json:"command,omitempty"`
+
+	// Interactive indicates the workspace expects interactive access (SSH, VS Code, etc).
+	// +kubebuilder:validation:Optional
+	Interactive bool `json:"interactive,omitempty"`
+
+	// Ports exposes additional container ports for interactive scenarios (default 22 when empty).
+	// +kubebuilder:validation:Optional
+	Ports []int32 `json:"ports,omitempty"`
 }
 
 // TrainingSpec captures distributed training configuration details.

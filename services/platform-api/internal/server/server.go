@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -20,6 +21,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
@@ -36,10 +38,23 @@ import (
 
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
-	log             *zap.Logger
-	store           *store.MemStore
-	kubeClients     *kubeclients.Manager
-	targetNamespace string
+	log              *zap.Logger
+	store            *store.MemStore
+	kubeClients      *kubeclients.Manager
+	targetNamespace  string
+	proxyBaseURL     string
+	proxyAudience    string
+	proxySecret      []byte
+	proxyTokenTTL    time.Duration
+	proxyDefaultUser string
+}
+
+type proxyClaims struct {
+	Sub     string `json:"sub"`
+	Wid     string `json:"wid"`
+	Dest    string `json:"dest"`
+	Cluster string `json:"cluster,omitempty"`
+	jwt.RegisteredClaims
 }
 
 const (
@@ -52,6 +67,9 @@ const (
 
 	uiStatusQueuedByKueue = "QUEUED_BY_KUEUE"
 	uiStatusSubmitted     = "SUBMITTED"
+
+	defaultProxyTokenTTLSeconds = 300
+	svcClusterDomainSuffix      = ".svc.cluster.local"
 )
 
 var (
@@ -99,7 +117,31 @@ func New(log *zap.Logger, st *store.MemStore, clients *kubeclients.Manager, name
 	if namespace == "" {
 		namespace = "default"
 	}
-	return &Server{log: log, store: st, kubeClients: clients, targetNamespace: namespace}
+	baseURL := strings.TrimRight(os.Getenv("AEGIS_PROXY_BASE_URL"), "/")
+	audience := os.Getenv("AEGIS_PROXY_EXPECTED_AUDIENCE")
+	if audience == "" {
+		audience = "aegis-proxy"
+	}
+	secret := os.Getenv("AEGIS_PROXY_JWT_SECRET")
+	ttlSeconds := getEnvInt("AEGIS_PROXY_TOKEN_TTL_SECONDS", defaultProxyTokenTTLSeconds)
+	if ttlSeconds <= 0 {
+		ttlSeconds = defaultProxyTokenTTLSeconds
+	}
+	proxyUser := os.Getenv("AEGIS_PROXY_DEFAULT_SSH_USER")
+	if proxyUser == "" {
+		proxyUser = "vscode"
+	}
+	return &Server{
+		log:              log,
+		store:            st,
+		kubeClients:      clients,
+		targetNamespace:  namespace,
+		proxyBaseURL:     baseURL,
+		proxyAudience:    audience,
+		proxySecret:      []byte(secret),
+		proxyTokenTTL:    time.Duration(ttlSeconds) * time.Second,
+		proxyDefaultUser: proxyUser,
+	}
 }
 
 func getEnvInt(key string, def int64) int64 {
@@ -421,6 +463,85 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 	s.enrichWorkloadUI(ctx, cache, w)
 	s.log.Info("workload retrieved", zap.String("workload_id", w.GetId()), zap.String("status", w.GetStatus()), zap.String("project_id", w.GetProjectId()))
 	return w, nil
+}
+
+func (s *Server) GetWorkspaceConnectionDetails(ctx context.Context, req *aegis.GetWorkspaceConnectionDetailsRequest) (*aegis.GetWorkspaceConnectionDetailsResponse, error) {
+	if req == nil || req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workload id required")
+	}
+	if len(s.proxySecret) == 0 || s.proxyBaseURL == "" {
+		return nil, status.Error(codes.FailedPrecondition, "proxy configuration not available")
+	}
+
+	w := s.store.GetWorkload(req.GetId())
+	if w == nil {
+		return nil, status.Error(codes.NotFound, "workload not found")
+	}
+
+	wk, ok := w.GetKind().(*aegis.Workload_Workspace)
+	if !ok || wk.Workspace == nil {
+		return nil, status.Error(codes.FailedPrecondition, "workload is not a workspace")
+	}
+	if !wk.Workspace.GetInteractive() {
+		return nil, status.Error(codes.FailedPrecondition, "workspace is not interactive")
+	}
+	if w.GetStatus() != statusRunning {
+		return nil, status.Errorf(codes.FailedPrecondition, "workspace status %s is not running", w.GetStatus())
+	}
+	if w.GetClusterId() == "" {
+		return nil, status.Error(codes.FailedPrecondition, "workspace cluster not assigned yet")
+	}
+
+	port := selectWorkspacePort(wk.Workspace)
+	serviceName := fmt.Sprintf("aegis-w-%s", w.GetId())
+	internalHost := fmt.Sprintf("%s.%s%s", serviceName, s.targetNamespace, svcClusterDomainSuffix)
+	dest := fmt.Sprintf("%s:%d", internalHost, port)
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.proxyTokenTTL)
+	if !expiresAt.After(now) {
+		expiresAt = now.Add(time.Duration(defaultProxyTokenTTLSeconds) * time.Second)
+	}
+	subject := subjectFromContext(ctx)
+	claims := proxyClaims{
+		Sub:     subject,
+		Wid:     w.GetId(),
+		Dest:    dest,
+		Cluster: w.GetClusterId(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   subject,
+			Audience:  jwt.ClaimStrings{s.proxyAudience},
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        RandID(),
+		},
+	}
+
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.proxySecret)
+	if err != nil {
+		s.log.Error("failed to sign workspace proxy token", zap.Error(err), zap.String("workload_id", w.GetId()))
+		return nil, status.Error(codes.Internal, "failed to sign token")
+	}
+
+	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
+	s.log.Info("workspace proxy token issued",
+		zap.String("workload_id", w.GetId()),
+		zap.String("dest", dest),
+		zap.String("cluster_id", w.GetClusterId()),
+		zap.String("subject", subject),
+		zap.Time("expires_at", expiresAt),
+	)
+
+	return &aegis.GetWorkspaceConnectionDetailsResponse{
+		ProxyUrl:     proxyURL,
+		Token:        token,
+		SshHostAlias: serviceName,
+		SshUsername:  s.proxyDefaultUser,
+		InternalHost: internalHost,
+		DestPort:     port,
+		ExpiresAtUtc: expiresAt.Format(time.RFC3339),
+	}, nil
 }
 
 func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.Client, w *aegis.Workload) {
@@ -913,10 +1034,12 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 		ws := wk.Workspace
 		if ws != nil {
 			spec.Workspace = &aegisv1alpha1.WorkspaceSpec{
-				Flavor:  ws.GetFlavor(),
-				Image:   ws.GetImage(),
-				Env:     cloneStringMap(ws.GetEnv()),
-				Command: cloneStringSlice(ws.GetCommand()),
+				Flavor:      ws.GetFlavor(),
+				Image:       ws.GetImage(),
+				Env:         cloneStringMap(ws.GetEnv()),
+				Command:     cloneStringSlice(ws.GetCommand()),
+				Interactive: ws.GetInteractive(),
+				Ports:       cloneInt32Slice(ws.GetPorts()),
 			}
 		}
 	case *aegis.Workload_Training:
@@ -935,8 +1058,10 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 
 	if hints := w.GetHints(); hints != nil {
 		spec.Hints = &aegisv1alpha1.ResourceHints{
-			ResourceName: hints.GetResourceName(),
-			GpuCount:     hints.GetGpuCount(),
+			ResourceName:    hints.GetResourceName(),
+			GpuCount:        hints.GetGpuCount(),
+			CpuCoresRequest: stringPtr(hints.GetCpuCoresRequest()),
+			MemoryRequest:   stringPtr(hints.GetMemoryRequest()),
 		}
 	}
 
@@ -962,6 +1087,15 @@ func cloneStringSlice(in []string) []string {
 	return out
 }
 
+func cloneInt32Slice(in []int32) []int32 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]int32, len(in))
+	copy(out, in)
+	return out
+}
+
 func cloneStringMap(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -971,6 +1105,25 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func stringPtr(in string) *string {
+	if strings.TrimSpace(in) == "" {
+		return nil
+	}
+	v := in
+	return &v
+}
+
+func selectWorkspacePort(spec *aegis.WorkspaceSpec) int32 {
+	if spec != nil {
+		for _, port := range spec.GetPorts() {
+			if port > 0 {
+				return port
+			}
+		}
+	}
+	return 22
 }
 
 func requiredFlavor(w *aegis.Workload) (string, error) {
@@ -994,4 +1147,21 @@ func RandID() string {
 		return strconv.FormatInt(time.Now().UnixNano(), 16)
 	}
 	return hex.EncodeToString(buf)
+}
+
+func subjectFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return "unknown"
+	}
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		for _, key := range []string{"x-aegis-user", "x-aegis-subject", "x-forwarded-user", "x-forwarded-email", "x-user-email"} {
+			if values := md.Get(key); len(values) > 0 {
+				candidate := strings.TrimSpace(values[0])
+				if candidate != "" {
+					return candidate
+				}
+			}
+		}
+	}
+	return "unknown"
 }

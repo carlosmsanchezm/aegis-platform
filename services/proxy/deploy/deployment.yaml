@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aegis-auth-proxy
+  namespace: default
+  labels:
+    app: aegis-auth-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aegis-auth-proxy
+  template:
+    metadata:
+      labels:
+        app: aegis-auth-proxy
+    spec:
+      containers:
+        - name: proxy
+          image: aegis-auth-proxy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AEGIS_PROXY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aegis-proxy-secret
+                  key: jwt-secret
+            - name: AEGIS_PROXY_EXPECTED_AUDIENCE
+              value: aegis-proxy
+            - name: AEGIS_PROXY_LISTEN
+              value: :8080
+            - name: AEGIS_PROXY_ALLOWED_SUFFIX
+              value: .svc.cluster.local
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20

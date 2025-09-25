@@ -1,0 +1,10 @@
+# Ignore node_modules folders from the Backstage UI
+aegis-platform/node_modules
+aegis-platform/packages/app/node_modules
+aegis-platform/packages/backend/node_modules
+aegis-platform/plugins/aegis/node_modules
+
+# Ignore local build artifacts
+bin/
+dist/
+*.log

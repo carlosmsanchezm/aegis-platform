@@ -4,6 +4,8 @@ export type WorkspaceSpec = {
   flavor?: string;
   image?: string;
   command?: string[];
+  interactive?: boolean;
+  ports?: number[];
 };
 
 export type TrainingSpec = {
@@ -23,6 +25,16 @@ export type WorkloadDTO = {
   url?: string;
   workspace?: WorkspaceSpec;
   training?: TrainingSpec;
+};
+
+export type ConnectionDetails = {
+  proxyUrl: string;
+  token: string;
+  sshHostAlias: string;
+  sshUsername?: string;
+  internalHost: string;
+  destPort: number;
+  expiresAtUtc: string;
 };
 
 export type ListWorkloadsResponse = {
@@ -81,6 +93,18 @@ export const getWorkload = async (
     fetchApi,
     discoveryApi,
     'aegis.v1.AegisPlatform/GetWorkload',
+    { id },
+  );
+
+export const getWorkspaceConnectionDetails = async (
+  fetchApi: FetchApi,
+  discoveryApi: DiscoveryApi,
+  id: string,
+): Promise<ConnectionDetails> =>
+  postJson<{ id: string }, ConnectionDetails>(
+    fetchApi,
+    discoveryApi,
+    'aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails',
     { id },
   );
 

@@ -25,12 +25,15 @@ import {
 import ArrowBackIcon from '@material-ui/icons/ArrowBack';
 import {
   WorkloadDTO,
+  ConnectionDetails,
   getWorkload,
+  getWorkspaceConnectionDetails,
   getFlavor,
   mapDisplayStatus,
   parseKubernetesUrl,
   buildKubectlDescribeCommand,
 } from '../api/aegisClient';
+import { ConnectModal } from './ConnectModal';
 
 const statusChip = (status: string) => {
   const mapped = mapDisplayStatus(status);
@@ -57,6 +60,10 @@ export const WorkloadDetailsPage: FC = () => {
   const [workload, setWorkload] = useState<WorkloadDTO | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectLoading, setConnectLoading] = useState(false);
+  const [connectDetails, setConnectDetails] = useState<ConnectionDetails | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -81,13 +88,48 @@ export const WorkloadDetailsPage: FC = () => {
     load();
   }, [load]);
 
+  const handleConnectClose = useCallback(() => {
+    setConnectOpen(false);
+    setConnectLoading(false);
+    setConnectError(null);
+    setConnectDetails(null);
+  }, []);
+
+  const handleConnect = useCallback(async () => {
+    if (!workload?.id) {
+      alertApi.post({ message: 'Workload id is missing', severity: 'error' });
+      return;
+    }
+
+    setConnectOpen(true);
+    setConnectLoading(true);
+    setConnectError(null);
+    setConnectDetails(null);
+
+    try {
+      const details = await getWorkspaceConnectionDetails(fetchApi, discoveryApi, workload.id);
+      setConnectDetails(details);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setConnectError(msg);
+      alertApi.post({ message: `Failed to fetch connection details: ${msg}`, severity: 'error' });
+    } finally {
+      setConnectLoading(false);
+    }
+  }, [alertApi, discoveryApi, fetchApi, workload?.id]);
+
   const loc = parseKubernetesUrl(workload?.url);
   const kubectlCmd = buildKubectlDescribeCommand(loc);
+
+  const rawStatus = workload?.uiStatus ?? workload?.status ?? '';
+  const canConnect = Boolean(workload?.workspace?.interactive);
+  const isRunning = rawStatus === 'RUNNING' || workload?.status === 'RUNNING';
+  const connectButtonDisabled = connectLoading || !isRunning;
 
   const metadata = workload
     ? {
         'Workload ID': workload.id ?? '—',
-        Status: workload.uiStatus ?? workload.status ?? '—',
+        Status: rawStatus || '—',
         Flavor: getFlavor(workload) || '—',
         Project: workload.projectId ?? '—',
         Queue: workload.queue ?? '—',
@@ -122,12 +164,31 @@ export const WorkloadDetailsPage: FC = () => {
         {workload && (
           <Box display="flex" flexDirection="column" gridGap={16}>
             <InfoCard title="Status">
-              <Box display="flex" alignItems="center" gridGap={16}>
-                {statusChip(workload.uiStatus ?? workload.status ?? '')}
-                {workload.message && (
-                  <Typography variant="body2" color="textSecondary">
-                    {workload.message}
-                  </Typography>
+              <Box display="flex" flexDirection="column" gridGap={12}>
+                <Box display="flex" alignItems="center" gridGap={16}>
+                  {statusChip(rawStatus)}
+                  {workload.message && (
+                    <Typography variant="body2" color="textSecondary">
+                      {workload.message}
+                    </Typography>
+                  )}
+                </Box>
+                {canConnect && (
+                  <Box>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      disabled={connectButtonDisabled}
+                      onClick={handleConnect}
+                    >
+                      {connectLoading ? 'Requesting token…' : 'Connect'}
+                    </Button>
+                    {!isRunning && (
+                      <Typography variant="caption" color="textSecondary" display="block">
+                        Workspace must be running before connecting.
+                      </Typography>
+                    )}
+                  </Box>
                 )}
               </Box>
             </InfoCard>
@@ -173,6 +234,14 @@ export const WorkloadDetailsPage: FC = () => {
           </Box>
         )}
       </Content>
+      <ConnectModal
+        open={connectOpen}
+        onClose={handleConnectClose}
+        loading={connectLoading}
+        error={connectError}
+        details={connectDetails}
+        workloadId={workload?.id ?? ''}
+      />
     </Page>
   );
 };

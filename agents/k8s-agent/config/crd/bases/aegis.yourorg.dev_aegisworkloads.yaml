@@ -131,6 +131,17 @@ spec:
                   image:
                     description: Image contains the container image to execute.
                     type: string
+                  interactive:
+                    description: Interactive indicates the workspace expects interactive
+                      access (SSH, VS Code, etc).
+                    type: boolean
+                  ports:
+                    description: Ports exposes additional container ports for interactive
+                      scenarios (default 22 when empty).
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
                 type: object
             required:
             - projectId

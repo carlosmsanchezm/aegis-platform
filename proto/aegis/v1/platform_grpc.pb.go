@@ -19,20 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AegisPlatform_CreateProject_FullMethodName   = "/aegis.v1.AegisPlatform/CreateProject"
-	AegisPlatform_UpsertBudget_FullMethodName    = "/aegis.v1.AegisPlatform/UpsertBudget"
-	AegisPlatform_GetBudget_FullMethodName       = "/aegis.v1.AegisPlatform/GetBudget"
-	AegisPlatform_ListBudgets_FullMethodName     = "/aegis.v1.AegisPlatform/ListBudgets"
-	AegisPlatform_UpsertFlavor_FullMethodName    = "/aegis.v1.AegisPlatform/UpsertFlavor"
-	AegisPlatform_UpsertQueue_FullMethodName     = "/aegis.v1.AegisPlatform/UpsertQueue"
-	AegisPlatform_SubmitWorkload_FullMethodName  = "/aegis.v1.AegisPlatform/SubmitWorkload"
-	AegisPlatform_GetWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/GetWorkload"
-	AegisPlatform_ListWorkloads_FullMethodName   = "/aegis.v1.AegisPlatform/ListWorkloads"
-	AegisPlatform_LeaseWorkload_FullMethodName   = "/aegis.v1.AegisPlatform/LeaseWorkload"
-	AegisPlatform_StartWorkload_FullMethodName   = "/aegis.v1.AegisPlatform/StartWorkload"
-	AegisPlatform_AckWorkload_FullMethodName     = "/aegis.v1.AegisPlatform/AckWorkload"
-	AegisPlatform_RegisterCluster_FullMethodName = "/aegis.v1.AegisPlatform/RegisterCluster"
-	AegisPlatform_Heartbeat_FullMethodName       = "/aegis.v1.AegisPlatform/Heartbeat"
+	AegisPlatform_CreateProject_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateProject"
+	AegisPlatform_UpsertBudget_FullMethodName                  = "/aegis.v1.AegisPlatform/UpsertBudget"
+	AegisPlatform_GetBudget_FullMethodName                     = "/aegis.v1.AegisPlatform/GetBudget"
+	AegisPlatform_ListBudgets_FullMethodName                   = "/aegis.v1.AegisPlatform/ListBudgets"
+	AegisPlatform_UpsertFlavor_FullMethodName                  = "/aegis.v1.AegisPlatform/UpsertFlavor"
+	AegisPlatform_UpsertQueue_FullMethodName                   = "/aegis.v1.AegisPlatform/UpsertQueue"
+	AegisPlatform_SubmitWorkload_FullMethodName                = "/aegis.v1.AegisPlatform/SubmitWorkload"
+	AegisPlatform_GetWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/GetWorkload"
+	AegisPlatform_ListWorkloads_FullMethodName                 = "/aegis.v1.AegisPlatform/ListWorkloads"
+	AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName = "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"
+	AegisPlatform_LeaseWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/LeaseWorkload"
+	AegisPlatform_StartWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/StartWorkload"
+	AegisPlatform_AckWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/AckWorkload"
+	AegisPlatform_RegisterCluster_FullMethodName               = "/aegis.v1.AegisPlatform/RegisterCluster"
+	AegisPlatform_Heartbeat_FullMethodName                     = "/aegis.v1.AegisPlatform/Heartbeat"
 )
 
 // AegisPlatformClient is the client API for AegisPlatform service.
@@ -50,6 +51,7 @@ type AegisPlatformClient interface {
 	SubmitWorkload(ctx context.Context, in *SubmitWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
+	GetWorkspaceConnectionDetails(ctx context.Context, in *GetWorkspaceConnectionDetailsRequest, opts ...grpc.CallOption) (*GetWorkspaceConnectionDetailsResponse, error)
 	LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error)
 	StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error)
 	AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error)
@@ -155,6 +157,16 @@ func (c *aegisPlatformClient) ListWorkloads(ctx context.Context, in *ListWorkloa
 	return out, nil
 }
 
+func (c *aegisPlatformClient) GetWorkspaceConnectionDetails(ctx context.Context, in *GetWorkspaceConnectionDetailsRequest, opts ...grpc.CallOption) (*GetWorkspaceConnectionDetailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetWorkspaceConnectionDetailsResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aegisPlatformClient) LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LeaseWorkloadResponse)
@@ -220,6 +232,7 @@ type AegisPlatformServer interface {
 	SubmitWorkload(context.Context, *SubmitWorkloadRequest) (*Workload, error)
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
+	GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error)
 	LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error)
 	StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error)
 	AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error)
@@ -261,6 +274,9 @@ func (UnimplementedAegisPlatformServer) GetWorkload(context.Context, *GetWorkloa
 }
 func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkloads not implemented")
+}
+func (UnimplementedAegisPlatformServer) GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceConnectionDetails not implemented")
 }
 func (UnimplementedAegisPlatformServer) LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LeaseWorkload not implemented")
@@ -460,6 +476,24 @@ func _AegisPlatform_ListWorkloads_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_GetWorkspaceConnectionDetails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWorkspaceConnectionDetailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).GetWorkspaceConnectionDetails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).GetWorkspaceConnectionDetails(ctx, req.(*GetWorkspaceConnectionDetailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_LeaseWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LeaseWorkloadRequest)
 	if err := dec(in); err != nil {
@@ -592,6 +626,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkloads",
 			Handler:    _AegisPlatform_ListWorkloads_Handler,
+		},
+		{
+			MethodName: "GetWorkspaceConnectionDetails",
+			Handler:    _AegisPlatform_GetWorkspaceConnectionDetails_Handler,
 		},
 		{
 			MethodName: "LeaseWorkload",

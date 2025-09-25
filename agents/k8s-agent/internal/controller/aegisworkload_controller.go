@@ -27,12 +27,14 @@ import (
 	"go.uber.org/zap"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
@@ -58,6 +60,8 @@ const (
 	requeuePending               = 10 * time.Second
 	workspaceJobTTLSeconds int32 = 600
 
+	labelWorkloadID = "aegis.workload/id"
+
 	annotationStartAcked         = "aegis.yourorg.dev/start-acked"
 	annotationFinalAcked         = "aegis.yourorg.dev/final-acked"
 	annotationMaxDurationSeconds = "aegis.yourorg.dev/maxDurationSeconds"
@@ -81,6 +85,9 @@ type AegisWorkloadReconciler struct {
 	dryRun                bool
 	kueueEnabled          bool
 	kueueQueue            string
+	proxyServiceName      string
+	proxyServicePort      int32
+	proxyIngressHost      string
 
 	pyTorchAPIVersion string
 	pyTorchGVR        *schema.GroupVersionResource
@@ -94,6 +101,8 @@ type AegisWorkloadReconciler struct {
 // +kubebuilder:rbac:groups=training.kubeflow.org,resources=trainjobs;trainjobs/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the workload CR reflects the lifecycle of the underlying compute object.
 func (r *AegisWorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -192,6 +201,21 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	}
 
 	updated := false
+
+	workspaceInteractive := spec != nil && spec.Interactive
+	if workspaceInteractive {
+		if changed, err := r.ensureInteractiveResources(ctx, aw); err != nil {
+			return ctrl.Result{}, err
+		} else if changed {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+	} else {
+		if changed, err := r.cleanupInteractiveResources(ctx, aw); err != nil {
+			return ctrl.Result{}, err
+		} else if changed {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+	}
 
 	if r.kueueEnabled {
 		if ptr.Deref(job.Spec.Suspend, false) {
@@ -587,6 +611,153 @@ func (r *AegisWorkloadReconciler) markAnnotation(ctx context.Context, aw *aegisv
 	return r.Patch(ctx, aw, client.MergeFrom(original))
 }
 
+func (r *AegisWorkloadReconciler) ensureInteractiveResources(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
+	ports := effectiveWorkspacePorts(aw.Spec.Workspace)
+	changed := false
+
+	if svcChanged, err := r.ensureWorkspaceService(ctx, aw, ports); err != nil {
+		return false, err
+	} else if svcChanged {
+		changed = true
+	}
+
+	if ingChanged, err := r.ensureWorkspaceIngress(ctx, aw); err != nil {
+		return false, err
+	} else if ingChanged {
+		changed = true
+	}
+
+	return changed, nil
+}
+
+func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
+	changed := false
+
+	svcName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	svc := &corev1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: aw.Namespace}, svc); err == nil {
+		if metav1.IsControlledBy(svc, aw) {
+			if err := r.Delete(ctx, svc); err != nil && !apierrors.IsNotFound(err) {
+				return false, err
+			}
+			changed = true
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
+
+	ingName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	ing := &networkingv1.Ingress{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ingName, Namespace: aw.Namespace}, ing); err == nil {
+		if metav1.IsControlledBy(ing, aw) {
+			if err := r.Delete(ctx, ing); err != nil && !apierrors.IsNotFound(err) {
+				return false, err
+			}
+			changed = true
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
+
+	return changed, nil
+}
+
+func (r *AegisWorkloadReconciler) ensureWorkspaceService(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, ports []int32) (bool, error) {
+	svcName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: aw.Namespace}}
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		if err := controllerutil.SetControllerReference(aw, svc, r.Scheme); err != nil {
+			return err
+		}
+		if svc.Labels == nil {
+			svc.Labels = map[string]string{}
+		}
+		svc.Labels[labelWorkloadID] = aw.Name
+		svc.Spec.Selector = map[string]string{labelWorkloadID: aw.Name}
+		svc.Spec.Type = corev1.ServiceTypeClusterIP
+		servicePorts := make([]corev1.ServicePort, 0, len(ports))
+		for _, p := range ports {
+			if p <= 0 {
+				continue
+			}
+			servicePorts = append(servicePorts, corev1.ServicePort{
+				Name:       fmt.Sprintf("tcp-%d", p),
+				Port:       p,
+				TargetPort: intstr.FromInt(int(p)),
+				Protocol:   corev1.ProtocolTCP,
+			})
+		}
+		svc.Spec.Ports = servicePorts
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return result != controllerutil.OperationResultNone, nil
+}
+
+func (r *AegisWorkloadReconciler) ensureWorkspaceIngress(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
+	ingName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	ing := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: ingName, Namespace: aw.Namespace}}
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, ing, func() error {
+		if err := controllerutil.SetControllerReference(aw, ing, r.Scheme); err != nil {
+			return err
+		}
+		if ing.Labels == nil {
+			ing.Labels = map[string]string{}
+		}
+		ing.Labels[labelWorkloadID] = aw.Name
+		path := fmt.Sprintf("/proxy/%s", aw.Name)
+		pathType := networkingv1.PathTypePrefix
+		backendPort := networkingv1.ServiceBackendPort{Number: r.proxyServicePort}
+		ing.Spec = networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{createIngressRule(r.proxyIngressHost, path, r.proxyServiceName, backendPort, pathType)},
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return result != controllerutil.OperationResultNone, nil
+}
+
+func effectiveWorkspacePorts(spec *aegisv1alpha1.WorkspaceSpec) []int32 {
+	if spec == nil || len(spec.Ports) == 0 {
+		return []int32{22}
+	}
+	ports := make([]int32, 0, len(spec.Ports))
+	for _, p := range spec.Ports {
+		if p > 0 {
+			ports = append(ports, p)
+		}
+	}
+	if len(ports) == 0 {
+		return []int32{22}
+	}
+	return ports
+}
+
+func createIngressRule(host, path, serviceName string, backendPort networkingv1.ServiceBackendPort, pathType networkingv1.PathType) networkingv1.IngressRule {
+	backend := networkingv1.IngressBackend{
+		Service: &networkingv1.IngressServiceBackend{
+			Name: serviceName,
+			Port: backendPort,
+		},
+	}
+	return networkingv1.IngressRule{
+		Host: host,
+		IngressRuleValue: networkingv1.IngressRuleValue{
+			HTTP: &networkingv1.HTTPIngressRuleValue{
+				Paths: []networkingv1.HTTPIngressPath{{
+					Path:     path,
+					PathType: &pathType,
+					Backend:  backend,
+				}},
+			},
+		},
+	}
+}
+
 func backendForWorkload(aw *aegisv1alpha1.AegisWorkload) string {
 	if aw.Status.Backend != "" {
 		return aw.Status.Backend
@@ -694,6 +865,17 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.dryRun = os.Getenv("AEGIS_DRY_RUN") == "1"
 	r.kueueEnabled = os.Getenv("AEGIS_KUEUE_ENABLED") == "1"
 	r.kueueQueue = envOrDefault("AEGIS_KUEUE_QUEUE", "")
+	r.proxyServiceName = envOrDefault("AEGIS_PROXY_SERVICE_NAME", "aegis-auth-proxy")
+	if portStr := envOrDefault("AEGIS_PROXY_SERVICE_PORT", "8080"); portStr != "" {
+		if val, err := strconv.Atoi(portStr); err == nil {
+			r.proxyServicePort = int32(val)
+		} else {
+			r.proxyServicePort = 8080
+		}
+	} else {
+		r.proxyServicePort = 8080
+	}
+	r.proxyIngressHost = envOrDefault("AEGIS_PROXY_INGRESS_HOST", "")
 	if r.kueueEnabled {
 		if ok, err := workdiscovery.DetectKueue(r.Config); err != nil {
 			ctrl.Log.WithName("operator").Error(err, "kueue detection failed")

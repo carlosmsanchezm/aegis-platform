@@ -1,4 +1,5 @@
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Page,
   Header,
@@ -64,6 +65,7 @@ export const WorkloadListPage: FC = () => {
   const fetchApi = useApi(fetchApiRef);
   const discoveryApi = useApi(discoveryApiRef);
   const alertApi = useApi(alertApiRef);
+  const navigate = useNavigate();
 
   const [projectId, setProjectId] = useState('p-demo');
   const [rows, setRows] = useState<WorkloadRow[]>([]);
@@ -150,7 +152,15 @@ export const WorkloadListPage: FC = () => {
         field: 'id',
         render: row => (
           <Box display="flex" alignItems="center" gridGap={8}>
-            <Typography variant="body2">{row.id}</Typography>
+            {row.id ? (
+              <RouterLink to={`/aegis/workloads/${row.id}`} style={{ textDecoration: 'none' }}>
+                <Typography variant="body2" color="primary">
+                  {row.id}
+                </Typography>
+              </RouterLink>
+            ) : (
+              <Typography variant="body2">—</Typography>
+            )}
             {row.id ? <CopyTextButton text={row.id} /> : null}
           </Box>
         ),
@@ -185,6 +195,22 @@ export const WorkloadListPage: FC = () => {
             </Box>
           );
         },
+      },
+      {
+        title: 'Actions',
+        field: 'actions',
+        sorting: false,
+        render: row => (
+          <Button
+            variant="outlined"
+            size="small"
+            component={RouterLink}
+            to={row.id ? `/aegis/workloads/${row.id}` : '#'}
+            disabled={!row.id}
+          >
+            Details
+          </Button>
+        ),
       },
     ],
     [],
@@ -262,10 +288,18 @@ export const WorkloadListPage: FC = () => {
               search: false,
               sorting: true,
               padding: 'dense',
+              rowStyle: {
+                cursor: 'pointer',
+              },
             }}
             data={filteredRows}
             columns={columns}
             title="Workloads"
+            onRowClick={(_, row) => {
+              if (row?.id) {
+                navigate(`/aegis/workloads/${row.id}`);
+              }
+            }}
           />
         </Box>
       </Content>

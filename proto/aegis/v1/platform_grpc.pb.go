@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -29,6 +30,9 @@ const (
 	AegisPlatform_GetWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/GetWorkload"
 	AegisPlatform_ListWorkloads_FullMethodName                 = "/aegis.v1.AegisPlatform/ListWorkloads"
 	AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName = "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"
+	AegisPlatform_CreateConnectionSession_FullMethodName       = "/aegis.v1.AegisPlatform/CreateConnectionSession"
+	AegisPlatform_RenewConnectionSession_FullMethodName        = "/aegis.v1.AegisPlatform/RenewConnectionSession"
+	AegisPlatform_RevokeConnectionSession_FullMethodName       = "/aegis.v1.AegisPlatform/RevokeConnectionSession"
 	AegisPlatform_LeaseWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/LeaseWorkload"
 	AegisPlatform_StartWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/StartWorkload"
 	AegisPlatform_AckWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/AckWorkload"
@@ -52,6 +56,9 @@ type AegisPlatformClient interface {
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
 	GetWorkspaceConnectionDetails(ctx context.Context, in *GetWorkspaceConnectionDetailsRequest, opts ...grpc.CallOption) (*GetWorkspaceConnectionDetailsResponse, error)
+	CreateConnectionSession(ctx context.Context, in *CreateConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error)
+	RenewConnectionSession(ctx context.Context, in *RenewConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error)
+	RevokeConnectionSession(ctx context.Context, in *RevokeConnectionSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error)
 	StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error)
 	AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error)
@@ -167,6 +174,36 @@ func (c *aegisPlatformClient) GetWorkspaceConnectionDetails(ctx context.Context,
 	return out, nil
 }
 
+func (c *aegisPlatformClient) CreateConnectionSession(ctx context.Context, in *CreateConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConnectionSession)
+	err := c.cc.Invoke(ctx, AegisPlatform_CreateConnectionSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) RenewConnectionSession(ctx context.Context, in *RenewConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConnectionSession)
+	err := c.cc.Invoke(ctx, AegisPlatform_RenewConnectionSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) RevokeConnectionSession(ctx context.Context, in *RevokeConnectionSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, AegisPlatform_RevokeConnectionSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aegisPlatformClient) LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LeaseWorkloadResponse)
@@ -233,6 +270,9 @@ type AegisPlatformServer interface {
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
 	GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error)
+	CreateConnectionSession(context.Context, *CreateConnectionSessionRequest) (*ConnectionSession, error)
+	RenewConnectionSession(context.Context, *RenewConnectionSessionRequest) (*ConnectionSession, error)
+	RevokeConnectionSession(context.Context, *RevokeConnectionSessionRequest) (*emptypb.Empty, error)
 	LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error)
 	StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error)
 	AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error)
@@ -277,6 +317,15 @@ func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWork
 }
 func (UnimplementedAegisPlatformServer) GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceConnectionDetails not implemented")
+}
+func (UnimplementedAegisPlatformServer) CreateConnectionSession(context.Context, *CreateConnectionSessionRequest) (*ConnectionSession, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateConnectionSession not implemented")
+}
+func (UnimplementedAegisPlatformServer) RenewConnectionSession(context.Context, *RenewConnectionSessionRequest) (*ConnectionSession, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RenewConnectionSession not implemented")
+}
+func (UnimplementedAegisPlatformServer) RevokeConnectionSession(context.Context, *RevokeConnectionSessionRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeConnectionSession not implemented")
 }
 func (UnimplementedAegisPlatformServer) LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LeaseWorkload not implemented")
@@ -494,6 +543,60 @@ func _AegisPlatform_GetWorkspaceConnectionDetails_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_CreateConnectionSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateConnectionSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).CreateConnectionSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_CreateConnectionSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).CreateConnectionSession(ctx, req.(*CreateConnectionSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_RenewConnectionSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenewConnectionSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).RenewConnectionSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_RenewConnectionSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).RenewConnectionSession(ctx, req.(*RenewConnectionSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_RevokeConnectionSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeConnectionSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).RevokeConnectionSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_RevokeConnectionSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).RevokeConnectionSession(ctx, req.(*RevokeConnectionSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_LeaseWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LeaseWorkloadRequest)
 	if err := dec(in); err != nil {
@@ -630,6 +733,18 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkspaceConnectionDetails",
 			Handler:    _AegisPlatform_GetWorkspaceConnectionDetails_Handler,
+		},
+		{
+			MethodName: "CreateConnectionSession",
+			Handler:    _AegisPlatform_CreateConnectionSession_Handler,
+		},
+		{
+			MethodName: "RenewConnectionSession",
+			Handler:    _AegisPlatform_RenewConnectionSession_Handler,
+		},
+		{
+			MethodName: "RevokeConnectionSession",
+			Handler:    _AegisPlatform_RevokeConnectionSession_Handler,
 		},
 		{
 			MethodName: "LeaseWorkload",

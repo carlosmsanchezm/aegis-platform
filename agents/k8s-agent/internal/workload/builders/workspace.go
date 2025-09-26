@@ -1,6 +1,7 @@
 package builders
 
 import (
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -35,6 +36,10 @@ type WorkspaceOptions struct {
 	KueueEnabled            bool
 	KueueQueue              string
 	GPUResourceOverride     string
+	Interactive             bool
+	InteractivePorts        []int32
+	SSHSecretName           string
+	SSHBootstrapImage       string
 	ActiveDeadlineSeconds   *int64
 	TTLSecondsAfterFinished *int32
 }
@@ -95,6 +100,13 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		container.Args = []string{opts.DefaultCommand}
 	}
 
+	if opts.Interactive {
+		if len(opts.InteractivePorts) == 0 {
+			opts.InteractivePorts = []int32{22}
+		}
+		applyInteractiveContainerSettings(&container, opts)
+	}
+
 	jobLabels := map[string]string{
 		"aegis.workload/id": opts.WorkloadID,
 		"aegis.job/name":    opts.JobName,
@@ -139,7 +151,152 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		},
 	}
 
+	if opts.Interactive {
+		configureInteractivePod(job, opts)
+	}
+
 	return job
+}
+
+func applyInteractiveContainerSettings(container *corev1.Container, opts WorkspaceOptions) {
+	if container == nil {
+		return
+	}
+	seen := map[int32]bool{}
+	for _, port := range opts.InteractivePorts {
+		if port <= 0 || seen[port] {
+			continue
+		}
+		container.Ports = append(container.Ports, corev1.ContainerPort{
+			Name:          fmt.Sprintf("tcp-%d", port),
+			ContainerPort: port,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		seen[port] = true
+	}
+}
+
+func configureInteractivePod(job *batchv1.Job, opts WorkspaceOptions) {
+	if job == nil {
+		return
+	}
+	podSpec := &job.Spec.Template.Spec
+	if len(podSpec.Containers) == 0 {
+		return
+	}
+	main := &podSpec.Containers[0]
+
+	const (
+		sshConfigVolume   = "aegis-ssh-config"
+		sshMaterialVolume = "aegis-ssh-material"
+	)
+
+	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+		Name: sshConfigVolume,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+	if opts.SSHSecretName != "" {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: sshMaterialVolume,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: opts.SSHSecretName},
+			},
+		})
+	}
+
+	bootstrapImage := opts.SSHBootstrapImage
+	if bootstrapImage == "" {
+		bootstrapImage = os.Getenv("AEGIS_SSH_BOOTSTRAP_IMAGE")
+	}
+	if bootstrapImage == "" {
+		bootstrapImage = opts.Image
+	}
+	if bootstrapImage == "" {
+		bootstrapImage = "busybox:1.36"
+	}
+
+	script := `set -eu
+ROOT="/config-root"
+CFG_DIR="${ROOT}/config"
+KEY_DIR="${ROOT}/keys"
+mkdir -p "${CFG_DIR}" "${KEY_DIR}"
+
+CFG_FILE="${CFG_DIR}/sshd_config"
+cat <<'EOF' >"${CFG_FILE}"
+# Managed by Aegis workspace bootstrap
+Port 2222
+ListenAddress 0.0.0.0
+
+# Authentication policy
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+PermitRootLogin no
+AuthorizedKeysFile /aegis-ssh/authorized_keys
+
+# Required for VS Code Remote SSH
+AllowTcpForwarding yes
+AllowStreamLocalForwarding yes
+GatewayPorts no
+
+# Harden other vectors
+X11Forwarding no
+ClientAliveInterval 120
+ClientAliveCountMax 2
+
+# Keep parity with image defaults, but allow drop-ins when present
+Include /etc/ssh/sshd_config.d/*.conf
+
+Match all
+  AllowTcpForwarding yes
+  AllowStreamLocalForwarding yes
+  GatewayPorts no
+  PermitOpen any
+  PermitListen any
+EOF
+
+chmod 600 "${CFG_FILE}" || true
+chown root:root "${CFG_FILE}" 2>/dev/null || true
+
+AUTH_KEYS="${KEY_DIR}/authorized_keys"
+rm -f "${AUTH_KEYS}"
+touch "${AUTH_KEYS}"
+chmod 600 "${AUTH_KEYS}"
+if [ -f /material/authorized_keys ]; then
+  cp /material/authorized_keys "${AUTH_KEYS}"
+  chmod 600 "${AUTH_KEYS}"
+fi
+
+if [ -f /material/trusted_user_ca_keys ]; then
+  CA_FILE="${KEY_DIR}/trusted_user_ca_keys"
+  cp /material/trusted_user_ca_keys "${CA_FILE}"
+  chmod 644 "${CA_FILE}"
+  printf '\nTrustedUserCAKeys /aegis-ssh/trusted_user_ca_keys\n' >>"${CFG_FILE}"
+fi
+`
+
+	init := corev1.Container{
+		Name:    "aegis-ssh-bootstrap",
+		Image:   bootstrapImage,
+		Command: []string{"/bin/sh", "-c", script},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: sshConfigVolume, MountPath: "/config-root"},
+		},
+	}
+	if opts.SSHSecretName != "" {
+		init.VolumeMounts = append(init.VolumeMounts, corev1.VolumeMount{Name: sshMaterialVolume, MountPath: "/material", ReadOnly: true})
+	}
+	podSpec.InitContainers = append(podSpec.InitContainers, init)
+
+	main.VolumeMounts = append(main.VolumeMounts,
+		corev1.VolumeMount{Name: sshConfigVolume, MountPath: "/aegis-ssh", SubPath: "keys"},
+		// Mount config where sshd.pam reads it so forwarding settings apply.
+		corev1.VolumeMount{Name: sshConfigVolume, MountPath: "/config/sshd", SubPath: "config"},
+	)
+	main.Env = append(main.Env, corev1.EnvVar{Name: "AEGIS_SSH_CONFIG_DIR", Value: "/aegis-ssh"})
 }
 
 func gpuResourceRequests(opts WorkspaceOptions) corev1.ResourceList {

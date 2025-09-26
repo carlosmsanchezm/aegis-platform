@@ -305,6 +305,87 @@ func local_request_AegisPlatform_GetWorkspaceConnectionDetails_0(ctx context.Con
 	return msg, metadata, err
 }
 
+func request_AegisPlatform_CreateConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.CreateConnectionSession(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_CreateConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.CreateConnectionSession(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_AegisPlatform_RenewConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RenewConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.RenewConnectionSession(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_RenewConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RenewConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.RenewConnectionSession(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_AegisPlatform_RevokeConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RevokeConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.RevokeConnectionSession(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_RevokeConnectionSession_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RevokeConnectionSessionRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.RevokeConnectionSession(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 func request_AegisPlatform_LeaseWorkload_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq LeaseWorkloadRequest
@@ -646,6 +727,66 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetWorkspaceConnectionDetails_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_CreateConnectionSession_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_RenewConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RenewConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_RenewConnectionSession_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_RenewConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_RevokeConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RevokeConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_RevokeConnectionSession_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_RevokeConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodPost, pattern_AegisPlatform_LeaseWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -956,6 +1097,57 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetWorkspaceConnectionDetails_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_CreateConnectionSession_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_RenewConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RenewConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_RenewConnectionSession_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_RenewConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_RevokeConnectionSession_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RevokeConnectionSession"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_RevokeConnectionSession_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_RevokeConnectionSession_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodPost, pattern_AegisPlatform_LeaseWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -1055,6 +1247,9 @@ var (
 	pattern_AegisPlatform_GetWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "GetWorkload"}, ""))
 	pattern_AegisPlatform_ListWorkloads_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "ListWorkloads"}, ""))
 	pattern_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "GetWorkspaceConnectionDetails"}, ""))
+	pattern_AegisPlatform_CreateConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "CreateConnectionSession"}, ""))
+	pattern_AegisPlatform_RenewConnectionSession_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "RenewConnectionSession"}, ""))
+	pattern_AegisPlatform_RevokeConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "RevokeConnectionSession"}, ""))
 	pattern_AegisPlatform_LeaseWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "LeaseWorkload"}, ""))
 	pattern_AegisPlatform_StartWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "StartWorkload"}, ""))
 	pattern_AegisPlatform_AckWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "AckWorkload"}, ""))
@@ -1073,6 +1268,9 @@ var (
 	forward_AegisPlatform_GetWorkload_0                   = runtime.ForwardResponseMessage
 	forward_AegisPlatform_ListWorkloads_0                 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.ForwardResponseMessage
+	forward_AegisPlatform_CreateConnectionSession_0       = runtime.ForwardResponseMessage
+	forward_AegisPlatform_RenewConnectionSession_0        = runtime.ForwardResponseMessage
+	forward_AegisPlatform_RevokeConnectionSession_0       = runtime.ForwardResponseMessage
 	forward_AegisPlatform_LeaseWorkload_0                 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_StartWorkload_0                 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_AckWorkload_0                   = runtime.ForwardResponseMessage

@@ -18,15 +18,17 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 )
@@ -76,20 +78,82 @@ var _ = Describe("AegisWorkload Controller", func() {
 			By("Cleanup the specific resource instance AegisWorkload")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
+		It("creates and cleans interactive workspace networking assets", func() {
 			controllerReconciler := &AegisWorkloadReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: record.NewFakeRecorder(10),
+				Client:            k8sClient,
+				Scheme:            k8sClient.Scheme(),
+				Recorder:          record.NewFakeRecorder(20),
+				proxyServiceName:  "aegis-proxy",
+				proxyServicePort:  8443,
+				proxyIngressHost:  "proxy.test.local",
+				sshBootstrapImage: "busybox:1.36",
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
+			req := reconcile.Request{NamespacedName: typeNamespacedName}
+
+			By("marking the workspace interactive")
+			resource := &aegisv1alpha1.AegisWorkload{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+			resource.Spec.Workspace.Interactive = true
+			resource.Spec.Workspace.Ports = []int32{2222}
+			if resource.Annotations == nil {
+				resource.Annotations = map[string]string{}
+			}
+			resource.Annotations[annotationSSHAuthorizedKeys] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForTests"
+			Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+
+			By("reconciling to create job and interactive resources")
+			_, err := controllerReconciler.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+			_, err = controllerReconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			svcName := types.NamespacedName{Name: "aegis-w-" + resourceName, Namespace: "default"}
+			ingName := types.NamespacedName{Name: "aegis-w-" + resourceName, Namespace: "default"}
+			secretName := types.NamespacedName{Name: workspaceSSHSecretName(resourceName), Namespace: "default"}
+
+			svc := &corev1.Service{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, svcName, svc)
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			Expect(svc.Spec.Ports).To(HaveLen(1))
+			Expect(svc.Spec.Ports[0].Port).To(Equal(int32(2222)))
+
+			ing := &networkingv1.Ingress{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, ingName, ing)
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			Expect(ing.Spec.Rules).To(HaveLen(1))
+			Expect(ing.Spec.Rules[0].Host).To(Equal("proxy.test.local"))
+			Expect(ing.Spec.Rules[0].IngressRuleValue.HTTP.Paths).ToNot(BeEmpty())
+			Expect(ing.Spec.Rules[0].IngressRuleValue.HTTP.Paths[0].Path).To(Equal("/proxy/" + resourceName))
+
+			secret := &corev1.Secret{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, secretName, secret)
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			Expect(secret.Data).To(HaveKey("authorized_keys"))
+
+			By("disabling interactivity to trigger cleanup")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+			resource.Spec.Workspace.Interactive = false
+			delete(resource.Annotations, annotationSSHAuthorizedKeys)
+			Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = controllerReconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, svcName, &corev1.Service{}))
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, ingName, &networkingv1.Ingress{}))
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, secretName, &corev1.Secret{}))
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
 		})
 	})
 })

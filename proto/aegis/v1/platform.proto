@@ -2,6 +2,8 @@ syntax = "proto3";
 package aegis.v1;
 option go_package = "github.com/yourorg/aegis/proto/aegis/v1;aegisv1";
 
+import "google/protobuf/empty.proto";
+
 // ---- Core resource messages ----
 message Project { string id = 1; string display_name = 2; string owner_group = 3; PolicyDomain policy = 4; }
 message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
@@ -78,6 +80,31 @@ message GetWorkspaceConnectionDetailsResponse {
   string expires_at_utc = 7;
 }
 
+message CreateConnectionSessionRequest {
+  string workload_id = 1;
+  string client = 2; // "vscode" | "ssh" | "cli"
+}
+
+message ConnectionSession {
+  string session_id = 1;
+  string token = 2; // short-lived, single-use JWT
+  string ssh_user = 3; // e.g., "aegis-<uid>"
+  string ssh_host_alias = 4; // e.g., "aegis-w-123"
+  string vscode_uri = 5; // vscode://vscode-remote/ssh-remote+<alias>
+  string ssh_config = 6; // ephemeral config snippet
+  string proxy_url = 7; // https://proxy.cluster/proxy/<workload-id>
+  string expires_at_utc = 8;
+  bool one_time = 9;
+}
+
+message RenewConnectionSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeConnectionSessionRequest {
+  string session_id = 1;
+}
+
 // Cluster handshake
 message ClusterRegisterRequest { string cluster_id = 1; string provider = 2; string region = 3; string il_level = 4; map<string,string> labels = 5; }
 message ClusterRegisterResponse { bool ok = 1; string message = 2; }
@@ -151,6 +178,10 @@ service AegisPlatform {
   rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
 
   rpc GetWorkspaceConnectionDetails(GetWorkspaceConnectionDetailsRequest) returns (GetWorkspaceConnectionDetailsResponse);
+
+  rpc CreateConnectionSession(CreateConnectionSessionRequest) returns (ConnectionSession);
+  rpc RenewConnectionSession(RenewConnectionSessionRequest) returns (ConnectionSession);
+  rpc RevokeConnectionSession(RevokeConnectionSessionRequest) returns (google.protobuf.Empty);
 
   rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse);
   rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse);

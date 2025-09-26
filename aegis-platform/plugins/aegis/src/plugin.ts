@@ -3,7 +3,12 @@ import {
 	createRoutableExtension,
 } from '@backstage/core-plugin-api';
 
-import { rootRouteRef, workloadsRouteRef, workloadDetailsRouteRef } from './routes';
+import {
+  rootRouteRef,
+  workloadsRouteRef,
+  workloadDetailsRouteRef,
+  launchWorkspaceRouteRef,
+} from './routes';
 
 export const aegisPlugin = createPlugin({
   id: 'aegis',
@@ -42,5 +47,16 @@ export const AegisWorkloadDetailsPage = aegisPlugin.provide(
         m => m.WorkloadDetailsPage,
       ),
     mountPoint: workloadDetailsRouteRef,
+  }),
+);
+
+export const AegisLaunchWorkspacePage = aegisPlugin.provide(
+  createRoutableExtension({
+    name: 'AegisLaunchWorkspacePage',
+    component: () =>
+      import('./components/LaunchWorkspacePage').then(
+        m => m.LaunchWorkspacePage,
+      ),
+    mountPoint: launchWorkspaceRouteRef,
   }),
 );

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
@@ -38,23 +40,34 @@ import (
 
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
-	log              *zap.Logger
-	store            *store.MemStore
-	kubeClients      *kubeclients.Manager
-	targetNamespace  string
-	proxyBaseURL     string
-	proxyAudience    string
-	proxySecret      []byte
-	proxyTokenTTL    time.Duration
-	proxyDefaultUser string
+	log             *zap.Logger
+	store           *store.MemStore
+	kubeClients     *kubeclients.Manager
+	targetNamespace string
+	proxyBaseURL    string
+	proxyAudience   string
+	proxySecret     []byte
+	proxyTokenTTL   time.Duration
 }
 
 type proxyClaims struct {
 	Sub     string `json:"sub"`
 	Wid     string `json:"wid"`
 	Dest    string `json:"dest"`
+	DNS     string `json:"dns,omitempty"`
 	Cluster string `json:"cluster,omitempty"`
+	OneTime bool   `json:"one_time,omitempty"`
 	jwt.RegisteredClaims
+}
+
+type sessionContext struct {
+	workload     *aegis.Workload
+	workspace    *aegis.WorkspaceSpec
+	port         int32
+	alias        string
+	internalHost string
+	dest         string
+	proxyURL     string
 }
 
 const (
@@ -70,6 +83,7 @@ const (
 
 	defaultProxyTokenTTLSeconds = 300
 	svcClusterDomainSuffix      = ".svc.cluster.local"
+	maxSessionTTL               = 5 * time.Minute
 )
 
 var (
@@ -127,20 +141,15 @@ func New(log *zap.Logger, st *store.MemStore, clients *kubeclients.Manager, name
 	if ttlSeconds <= 0 {
 		ttlSeconds = defaultProxyTokenTTLSeconds
 	}
-	proxyUser := os.Getenv("AEGIS_PROXY_DEFAULT_SSH_USER")
-	if proxyUser == "" {
-		proxyUser = "vscode"
-	}
 	return &Server{
-		log:              log,
-		store:            st,
-		kubeClients:      clients,
-		targetNamespace:  namespace,
-		proxyBaseURL:     baseURL,
-		proxyAudience:    audience,
-		proxySecret:      []byte(secret),
-		proxyTokenTTL:    time.Duration(ttlSeconds) * time.Second,
-		proxyDefaultUser: proxyUser,
+		log:             log,
+		store:           st,
+		kubeClients:     clients,
+		targetNamespace: namespace,
+		proxyBaseURL:    baseURL,
+		proxyAudience:   audience,
+		proxySecret:     []byte(secret),
+		proxyTokenTTL:   time.Duration(ttlSeconds) * time.Second,
 	}
 }
 
@@ -466,82 +475,210 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 }
 
 func (s *Server) GetWorkspaceConnectionDetails(ctx context.Context, req *aegis.GetWorkspaceConnectionDetailsRequest) (*aegis.GetWorkspaceConnectionDetailsResponse, error) {
-	if req == nil || req.GetId() == "" {
+	workloadID := strings.TrimSpace(req.GetId())
+	if workloadID == "" {
 		return nil, status.Error(codes.InvalidArgument, "workload id required")
 	}
-	if len(s.proxySecret) == 0 || s.proxyBaseURL == "" {
-		return nil, status.Error(codes.FailedPrecondition, "proxy configuration not available")
+	subject := subjectFromContext(ctx)
+	if !validSubject(subject) {
+		err := status.Error(codes.PermissionDenied, "authenticated subject required")
+		s.auditSession("session.create", nil, err, zap.String("workload_id", workloadID), zap.String("client", "legacy"))
+		return nil, err
 	}
 
-	w := s.store.GetWorkload(req.GetId())
-	if w == nil {
-		return nil, status.Error(codes.NotFound, "workload not found")
+	session, err := s.mintConnectionSession(ctx, workloadID, "legacy", subject)
+	if err != nil {
+		s.auditSession("session.create", nil, err, zap.String("workload_id", workloadID), zap.String("client", "legacy"), zap.String("subject", subject))
+		return nil, err
 	}
 
-	wk, ok := w.GetKind().(*aegis.Workload_Workspace)
-	if !ok || wk.Workspace == nil {
-		return nil, status.Error(codes.FailedPrecondition, "workload is not a workspace")
-	}
-	if !wk.Workspace.GetInteractive() {
-		return nil, status.Error(codes.FailedPrecondition, "workspace is not interactive")
-	}
-	if w.GetStatus() != statusRunning {
-		return nil, status.Errorf(codes.FailedPrecondition, "workspace status %s is not running", w.GetStatus())
-	}
-	if w.GetClusterId() == "" {
-		return nil, status.Error(codes.FailedPrecondition, "workspace cluster not assigned yet")
-	}
+	s.auditSession("session.create", session, nil)
 
-	port := selectWorkspacePort(wk.Workspace)
-	serviceName := fmt.Sprintf("aegis-w-%s", w.GetId())
-	internalHost := fmt.Sprintf("%s.%s%s", serviceName, s.targetNamespace, svcClusterDomainSuffix)
-	dest := fmt.Sprintf("%s:%d", internalHost, port)
+	return &aegis.GetWorkspaceConnectionDetailsResponse{
+		ProxyUrl:     session.ProxyURL,
+		Token:        session.Token,
+		SshHostAlias: session.SSHHostAlias,
+		SshUsername:  session.SSHUser,
+		InternalHost: session.InternalHost,
+		DestPort:     session.Port,
+		ExpiresAtUtc: session.ExpiresAt.UTC().Format(time.RFC3339),
+	}, nil
+}
 
-	now := time.Now().UTC()
-	expiresAt := now.Add(s.proxyTokenTTL)
-	if !expiresAt.After(now) {
-		expiresAt = now.Add(time.Duration(defaultProxyTokenTTLSeconds) * time.Second)
+func (s *Server) CreateConnectionSession(ctx context.Context, req *aegis.CreateConnectionSessionRequest) (*aegis.ConnectionSession, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	workloadID := strings.TrimSpace(req.GetWorkloadId())
+	if workloadID == "" {
+		return nil, status.Error(codes.InvalidArgument, "workload id required")
+	}
+	client, err := normalizeClient(req.GetClient())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	subject := subjectFromContext(ctx)
+	if !validSubject(subject) {
+		err := status.Error(codes.PermissionDenied, "authenticated subject required")
+		s.auditSession("session.create", nil, err, zap.String("workload_id", workloadID), zap.String("client", client))
+		return nil, err
+	}
+
+	session, err := s.mintConnectionSession(ctx, workloadID, client, subject)
+	if err != nil {
+		s.auditSession("session.create", nil, err, zap.String("workload_id", workloadID), zap.String("client", client), zap.String("subject", subject))
+		return nil, err
+	}
+
+	s.auditSession("session.create", session, nil)
+	return sessionToProto(session), nil
+}
+
+func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewConnectionSessionRequest) (*aegis.ConnectionSession, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	sessionID := strings.TrimSpace(req.GetSessionId())
+	if sessionID == "" {
+		return nil, status.Error(codes.InvalidArgument, "session id required")
+	}
+
+	existing, ok := s.store.ConnectionSession(sessionID)
+	if !ok {
+		err := status.Error(codes.NotFound, "session not found")
+		s.auditSession("session.renew", nil, err, zap.String("session_id", sessionID))
+		return nil, err
+	}
+
+	subject := subjectFromContext(ctx)
+	if !validSubject(subject) {
+		err := status.Error(codes.PermissionDenied, "authenticated subject required")
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+	if !strings.EqualFold(existing.Subject, subject) {
+		err := status.Error(codes.PermissionDenied, "session owned by different subject")
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+	if existing.Revoked {
+		err := status.Error(codes.FailedPrecondition, "session revoked")
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+	if existing.Used {
+		err := status.Error(codes.FailedPrecondition, "session already used")
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+
+	ctxData, err := s.buildSessionContext(ctx, existing.WorkloadID)
+	if err != nil {
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.connectionTokenTTL())
+	jti := fmt.Sprintf("jti-%s", randomHex(8))
 	claims := proxyClaims{
 		Sub:     subject,
-		Wid:     w.GetId(),
-		Dest:    dest,
-		Cluster: w.GetClusterId(),
+		Wid:     existing.WorkloadID,
+		Dest:    ctxData.dest,
+		DNS:     ctxData.internalHost,
+		Cluster: ctxData.workload.GetClusterId(),
+		OneTime: true,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   subject,
 			Audience:  jwt.ClaimStrings{s.proxyAudience},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
-			ID:        RandID(),
+			ID:        jti,
 		},
 	}
 
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.proxySecret)
-	if err != nil {
-		s.log.Error("failed to sign workspace proxy token", zap.Error(err), zap.String("workload_id", w.GetId()))
+	token, signErr := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.proxySecret)
+	if signErr != nil {
+		s.auditSession("session.renew", existing, signErr)
 		return nil, status.Error(codes.Internal, "failed to sign token")
 	}
 
-	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
-	s.log.Info("workspace proxy token issued",
-		zap.String("workload_id", w.GetId()),
-		zap.String("dest", dest),
-		zap.String("cluster_id", w.GetClusterId()),
-		zap.String("subject", subject),
-		zap.Time("expires_at", expiresAt),
-	)
+	sshUser := deriveSSHUser(ctxData.workspace, subject)
+	sshConfig := buildSSHConfig(ctxData.alias, ctxData.internalHost, sshUser, ctxData.proxyURL, token, ctxData.port)
+	vsURI := buildVSCodeURI(ctxData.alias)
 
-	return &aegis.GetWorkspaceConnectionDetailsResponse{
-		ProxyUrl:     proxyURL,
-		Token:        token,
-		SshHostAlias: serviceName,
-		SshUsername:  s.proxyDefaultUser,
-		InternalHost: internalHost,
-		DestPort:     port,
-		ExpiresAtUtc: expiresAt.Format(time.RFC3339),
-	}, nil
+	updated, updErr := s.store.UpdateConnectionSession(existing.SessionID, func(sess *store.ConnectionSession) error {
+		sess.JTI = jti
+		sess.Token = token
+		sess.ExpiresAt = expiresAt
+		sess.InternalHost = ctxData.internalHost
+		sess.SSHHostAlias = ctxData.alias
+		sess.Port = ctxData.port
+		sess.ProxyURL = ctxData.proxyURL
+		sess.SSHConfig = sshConfig
+		sess.VSCodeURI = vsURI
+		sess.SSHUser = sshUser
+		sess.Used = false
+		sess.Revoked = false
+		return nil
+	})
+	if updErr != nil {
+		s.auditSession("session.renew", existing, updErr)
+		return nil, status.Error(codes.Internal, "failed to update session")
+	}
+
+	s.auditSession("session.renew", updated, nil)
+	return sessionToProto(updated), nil
+}
+
+func (s *Server) RevokeConnectionSession(ctx context.Context, req *aegis.RevokeConnectionSessionRequest) (*emptypb.Empty, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	sessionID := strings.TrimSpace(req.GetSessionId())
+	if sessionID == "" {
+		return nil, status.Error(codes.InvalidArgument, "session id required")
+	}
+
+	existing, ok := s.store.ConnectionSession(sessionID)
+	if !ok {
+		err := status.Error(codes.NotFound, "session not found")
+		s.auditSession("session.revoke", nil, err, zap.String("session_id", sessionID))
+		return nil, err
+	}
+
+	subject := subjectFromContext(ctx)
+	if !validSubject(subject) {
+		err := status.Error(codes.PermissionDenied, "authenticated subject required")
+		s.auditSession("session.revoke", existing, err)
+		return nil, err
+	}
+	if !strings.EqualFold(existing.Subject, subject) {
+		err := status.Error(codes.PermissionDenied, "session owned by different subject")
+		s.auditSession("session.revoke", existing, err)
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	updated, err := s.store.UpdateConnectionSession(sessionID, func(sess *store.ConnectionSession) error {
+		sess.Revoked = true
+		sess.Used = true
+		sess.Token = ""
+		sess.ExpiresAt = now
+		return nil
+	})
+	if err != nil {
+		s.auditSession("session.revoke", existing, err)
+		return nil, status.Error(codes.Internal, "failed to revoke session")
+	}
+
+	if existing.JTI != "" {
+		s.store.MarkJTIUsed(existing.JTI)
+	}
+
+	s.auditSession("session.revoke", updated, nil)
+	return &emptypb.Empty{}, nil
 }
 
 func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.Client, w *aegis.Workload) {
@@ -637,6 +774,295 @@ func jobUiStatus(job *batchv1.Job, fallback string) (string, string) {
 		return "RUNNING", message
 	}
 	return uiStatusSubmitted, message
+}
+
+func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, subject string) (*store.ConnectionSession, error) {
+	if workloadID == "" {
+		return nil, status.Error(codes.InvalidArgument, "workload id required")
+	}
+	if len(s.proxySecret) == 0 || s.proxyBaseURL == "" {
+		return nil, status.Error(codes.FailedPrecondition, "proxy configuration not available")
+	}
+
+	ctxData, err := s.buildSessionContext(ctx, workloadID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.connectionTokenTTL())
+	if !expiresAt.After(now) {
+		expiresAt = now.Add(maxSessionTTL)
+	}
+
+	jti := fmt.Sprintf("jti-%s", randomHex(8))
+	claims := proxyClaims{
+		Sub:     subject,
+		Wid:     ctxData.workload.GetId(),
+		Dest:    ctxData.dest,
+		DNS:     ctxData.internalHost,
+		Cluster: ctxData.workload.GetClusterId(),
+		OneTime: true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   subject,
+			Audience:  jwt.ClaimStrings{s.proxyAudience},
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        jti,
+		},
+	}
+
+	token, signErr := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.proxySecret)
+	if signErr != nil {
+		return nil, status.Error(codes.Internal, "failed to sign token")
+	}
+
+	sshUser := deriveSSHUser(ctxData.workspace, subject)
+	sshConfig := buildSSHConfig(ctxData.alias, ctxData.internalHost, sshUser, ctxData.proxyURL, token, ctxData.port)
+	sessionID := fmt.Sprintf("sess-%s", randomHex(8))
+
+	record := &store.ConnectionSession{
+		SessionID:    sessionID,
+		WorkloadID:   ctxData.workload.GetId(),
+		Subject:      subject,
+		Client:       client,
+		JTI:          jti,
+		Token:        token,
+		SSHUser:      sshUser,
+		SSHHostAlias: ctxData.alias,
+		InternalHost: ctxData.internalHost,
+		Port:         ctxData.port,
+		SSHConfig:    sshConfig,
+		ProxyURL:     ctxData.proxyURL,
+		VSCodeURI:    buildVSCodeURI(ctxData.alias),
+		ExpiresAt:    expiresAt,
+		OneTime:      true,
+		Used:         false,
+		Revoked:      false,
+	}
+
+	s.store.PurgeExpiredSessions(now)
+	stored := s.store.PutConnectionSession(record)
+	return stored, nil
+}
+
+func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*sessionContext, error) {
+	w := s.store.GetWorkload(workloadID)
+	if w == nil {
+		return nil, status.Error(codes.NotFound, "workload not found")
+	}
+
+	wk, ok := w.GetKind().(*aegis.Workload_Workspace)
+	if !ok || wk.Workspace == nil {
+		return nil, status.Error(codes.FailedPrecondition, "workload is not a workspace")
+	}
+	if !wk.Workspace.GetInteractive() {
+		return nil, status.Error(codes.FailedPrecondition, "workspace is not interactive")
+	}
+	if w.GetStatus() != statusRunning {
+		return nil, status.Errorf(codes.FailedPrecondition, "workspace status %s is not running", w.GetStatus())
+	}
+	if w.GetClusterId() == "" {
+		return nil, status.Error(codes.FailedPrecondition, "workspace cluster not assigned yet")
+	}
+
+	port := selectWorkspacePort(wk.Workspace)
+	alias := buildHostAlias(w.GetId())
+	internalHost := fmt.Sprintf("%s.%s%s", alias, s.targetNamespace, svcClusterDomainSuffix)
+	dest := fmt.Sprintf("%s:%d", internalHost, port)
+	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
+
+	return &sessionContext{
+		workload:     w,
+		workspace:    wk.Workspace,
+		port:         port,
+		alias:        alias,
+		internalHost: internalHost,
+		dest:         dest,
+		proxyURL:     proxyURL,
+	}, nil
+}
+
+func (s *Server) connectionTokenTTL() time.Duration {
+	ttl := s.proxyTokenTTL
+	if ttl <= 0 {
+		ttl = time.Duration(defaultProxyTokenTTLSeconds) * time.Second
+	}
+	if ttl > maxSessionTTL {
+		ttl = maxSessionTTL
+	}
+	return ttl
+}
+
+func sessionToProto(session *store.ConnectionSession) *aegis.ConnectionSession {
+	if session == nil {
+		return nil
+	}
+	return &aegis.ConnectionSession{
+		SessionId:    session.SessionID,
+		Token:        session.Token,
+		SshUser:      session.SSHUser,
+		SshHostAlias: session.SSHHostAlias,
+		VscodeUri:    session.VSCodeURI,
+		SshConfig:    session.SSHConfig,
+		ProxyUrl:     session.ProxyURL,
+		ExpiresAtUtc: session.ExpiresAt.UTC().Format(time.RFC3339),
+		OneTime:      session.OneTime,
+	}
+}
+
+func (s *Server) auditSession(action string, session *store.ConnectionSession, err error, extra ...zap.Field) {
+	fields := []zap.Field{zap.String("action", action)}
+	if session != nil {
+		fields = append(fields,
+			zap.String("session_id", session.SessionID),
+			zap.String("workload_id", session.WorkloadID),
+			zap.String("subject", session.Subject),
+			zap.String("client", session.Client),
+			zap.Bool("one_time", session.OneTime),
+			zap.Bool("used", session.Used),
+			zap.Bool("revoked", session.Revoked),
+			zap.Time("expires_at", session.ExpiresAt.UTC()),
+			zap.String("jti", session.JTI),
+		)
+	}
+	fields = append(fields, extra...)
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+		s.log.Warn("connection session event", fields...)
+		return
+	}
+	s.log.Info("connection session event", fields...)
+}
+
+func normalizeClient(raw string) (string, error) {
+	val := strings.TrimSpace(strings.ToLower(raw))
+	if val == "" {
+		return "cli", nil
+	}
+	switch val {
+	case "vscode", "ssh", "cli":
+		return val, nil
+	default:
+		return "", fmt.Errorf("unsupported client %q", raw)
+	}
+}
+
+func validSubject(sub string) bool {
+	cleaned := strings.TrimSpace(sub)
+	if cleaned == "" {
+		return false
+	}
+	return !strings.EqualFold(cleaned, "unknown")
+}
+
+func randomHex(n int) string {
+	if n <= 0 {
+		return RandID()
+	}
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return RandID()
+	}
+	return hex.EncodeToString(buf)
+}
+
+func deriveSSHUser(workspace *aegis.WorkspaceSpec, subject string) string {
+	if workspace != nil {
+		if candidate, ok := workspace.Env["AEGIS_SSH_USER"]; ok {
+			if sanitized := sanitizeSSHUser(candidate); sanitized != "" {
+				return sanitized
+			}
+		}
+		if candidate, ok := workspace.Env["USER_NAME"]; ok {
+			if sanitized := sanitizeSSHUser(candidate); sanitized != "" {
+				return sanitized
+			}
+		}
+	}
+	return buildSSHUser(subject)
+}
+
+func sanitizeSSHUser(raw string) string {
+	cleaned := strings.TrimSpace(strings.ToLower(raw))
+	if cleaned == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range cleaned {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			if b.Len() == 0 {
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	user := b.String()
+	if user == "" || strings.HasPrefix(user, "-") || user == "root" {
+		return ""
+	}
+	const maxSSHUserLen = 32
+	if len(user) > maxSSHUserLen {
+		user = user[:maxSSHUserLen]
+	}
+	return user
+}
+
+func buildSSHUser(subject string) string {
+	cleaned := strings.TrimSpace(strings.ToLower(subject))
+	if cleaned == "" || cleaned == "unknown" {
+		return fmt.Sprintf("aegis-%s", randomHex(4))
+	}
+	sum := sha256.Sum256([]byte(cleaned))
+	return fmt.Sprintf("aegis-%x", sum[:4])
+}
+
+func buildHostAlias(workloadID string) string {
+	const prefix = "aegis-w-"
+	cleaned := strings.TrimSpace(strings.ToLower(workloadID))
+	if cleaned == "" {
+		return prefix + randomHex(4)
+	}
+	var b strings.Builder
+	b.Grow(len(prefix) + len(cleaned))
+	b.WriteString(prefix)
+	lastHyphen := false
+	for _, r := range cleaned {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastHyphen = false
+		default:
+			if !lastHyphen {
+				b.WriteByte('-')
+				lastHyphen = true
+			}
+		}
+	}
+	alias := b.String()
+	alias = strings.TrimRight(alias, "-")
+	if len(alias) <= len(prefix) {
+		alias = prefix + randomHex(4)
+	}
+	if len(alias) > 63 {
+		alias = alias[:63]
+	}
+	return alias
+}
+
+func buildVSCodeURI(alias string) string {
+	return fmt.Sprintf("vscode://vscode-remote/ssh-remote+%s", alias)
+}
+
+func buildSSHConfig(alias, internalHost, sshUser, proxyURL, token string, port int32) string {
+	if port <= 0 {
+		port = 22
+	}
+	return fmt.Sprintf("Host %s\n  HostName %s\n  User %s\n  Port %d\n  ProxyCommand aegis-connect --proxy=%s --token=%s\n  IdentitiesOnly yes\n", alias, internalHost, sshUser, port, proxyURL, token)
 }
 
 func (s *Server) ListWorkloads(ctx context.Context, req *aegis.ListWorkloadsRequest) (*aegis.ListWorkloadsResponse, error) {
@@ -1154,14 +1580,58 @@ func subjectFromContext(ctx context.Context) string {
 		return "unknown"
 	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for _, key := range []string{"x-aegis-user", "x-aegis-subject", "x-forwarded-user", "x-forwarded-email", "x-user-email"} {
-			if values := md.Get(key); len(values) > 0 {
+		fmt.Printf("[subjectFromContext] metadata: %#v\n", md)
+		lower := md.Copy()
+		for key, values := range lower {
+			if len(values) == 0 {
+				continue
+			}
+			lk := strings.ToLower(key)
+			if strings.Contains(lk, "x-aegis-user") || strings.Contains(lk, "x-aegis-subject") {
 				candidate := strings.TrimSpace(values[0])
 				if candidate != "" {
 					return candidate
 				}
 			}
+			if strings.Contains(lk, "authorization") {
+				token := extractBearer(values[0])
+				subject := subjectFromToken(token)
+				if subject != "" {
+					return subject
+				}
+			}
 		}
 	}
 	return "unknown"
+}
+
+func extractBearer(header string) string {
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) == 2 && !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(header)
+}
+
+func subjectFromToken(token string) string {
+	if token == "" {
+		return ""
+	}
+	parser := new(jwt.Parser)
+	claims := jwt.MapClaims{}
+	_, _, err := parser.ParseUnverified(token, claims)
+	if err != nil {
+		return ""
+	}
+	for _, key := range []string{"sub", "email", "preferred_username", "user_entity"} {
+		if v, ok := claims[key]; ok {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+	}
+	return ""
 }

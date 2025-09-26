@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -29,20 +30,255 @@ type MemStore struct {
 	cstate *clusterState
 
 	usage map[string]*budgetUsage
+
+	sessions           map[string]*ConnectionSession
+	sessionsByWorkload map[string]map[string]struct{}
+	sessionJTIs        map[string]*jtiRecord
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		projects:  map[string]*aegis.Project{},
-		budgets:   map[string]*aegis.Budget{},
-		flavors:   map[string]*aegis.Flavor{},
-		queues:    map[string]*aegis.Queue{},
-		workloads: map[string]*aegis.Workload{},
-		placedAt:  map[string]time.Time{},
-		startedAt: map[string]time.Time{},
-		estUSD:    map[string]float64{},
-		cstate:    newClusterState(),
-		usage:     map[string]*budgetUsage{},
+		projects:           map[string]*aegis.Project{},
+		budgets:            map[string]*aegis.Budget{},
+		flavors:            map[string]*aegis.Flavor{},
+		queues:             map[string]*aegis.Queue{},
+		workloads:          map[string]*aegis.Workload{},
+		placedAt:           map[string]time.Time{},
+		startedAt:          map[string]time.Time{},
+		estUSD:             map[string]float64{},
+		cstate:             newClusterState(),
+		usage:              map[string]*budgetUsage{},
+		sessions:           map[string]*ConnectionSession{},
+		sessionsByWorkload: map[string]map[string]struct{}{},
+		sessionJTIs:        map[string]*jtiRecord{},
+	}
+}
+
+var (
+	// ErrSessionNotFound is returned when the requested connection session cannot be located.
+	ErrSessionNotFound = errors.New("connection session not found")
+)
+
+// ConnectionSession captures the persisted state for a single-use remote access token.
+type ConnectionSession struct {
+	SessionID    string
+	WorkloadID   string
+	Subject      string
+	Client       string
+	JTI          string
+	Token        string
+	SSHUser      string
+	SSHHostAlias string
+	InternalHost string
+	Port         int32
+	SSHConfig    string
+	ProxyURL     string
+	VSCodeURI    string
+	ExpiresAt    time.Time
+	OneTime      bool
+	Used         bool
+	Revoked      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type jtiRecord struct {
+	SessionID string
+	Used      bool
+	ExpiresAt time.Time
+}
+
+func copySession(in *ConnectionSession) *ConnectionSession {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+// PutConnectionSession upserts the provided session and returns an immutable copy of the stored value.
+func (s *MemStore) PutConnectionSession(sess *ConnectionSession) *ConnectionSession {
+	if sess == nil || sess.SessionID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	existing, found := s.sessions[sess.SessionID]
+	if found {
+		sess.CreatedAt = existing.CreatedAt
+	} else if sess.CreatedAt.IsZero() {
+		sess.CreatedAt = now
+	}
+	sess.UpdatedAt = now
+
+	stored := copySession(sess)
+	s.sessions[sess.SessionID] = stored
+
+	if _, ok := s.sessionsByWorkload[sess.WorkloadID]; !ok {
+		s.sessionsByWorkload[sess.WorkloadID] = map[string]struct{}{}
+	}
+	s.sessionsByWorkload[sess.WorkloadID][sess.SessionID] = struct{}{}
+
+	if sess.JTI != "" {
+		s.sessionJTIs[sess.JTI] = &jtiRecord{SessionID: sess.SessionID, Used: sess.Used, ExpiresAt: sess.ExpiresAt}
+	}
+
+	return copySession(stored)
+}
+
+// ConnectionSession returns a copy of the stored session for the provided identifier.
+func (s *MemStore) ConnectionSession(id string) (*ConnectionSession, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[id]
+	return copySession(sess), ok
+}
+
+// ConnectionSessionByJTI resolves a session by JWT ID for audit and invalidation flows.
+func (s *MemStore) ConnectionSessionByJTI(jti string) (*ConnectionSession, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rec, ok := s.sessionJTIs[jti]
+	if !ok {
+		return nil, false
+	}
+	sess, ok := s.sessions[rec.SessionID]
+	return copySession(sess), ok
+}
+
+// UpdateConnectionSession applies a mutation function while holding the lock to ensure consistency.
+func (s *MemStore) UpdateConnectionSession(id string, mutate func(*ConnectionSession) error) (*ConnectionSession, error) {
+	if mutate == nil {
+		return nil, errors.New("mutate function required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.sessions[id]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+
+	prevJTI := existing.JTI
+	if err := mutate(existing); err != nil {
+		return nil, err
+	}
+	existing.UpdatedAt = time.Now()
+
+	s.sessions[id] = existing
+
+	if prevJTI != existing.JTI {
+		delete(s.sessionJTIs, prevJTI)
+	}
+	if existing.JTI != "" {
+		s.sessionJTIs[existing.JTI] = &jtiRecord{SessionID: existing.SessionID, Used: existing.Used, ExpiresAt: existing.ExpiresAt}
+	}
+
+	return copySession(existing), nil
+}
+
+// MarkSessionUsed toggles the session usage flag and returns whether the session was present.
+func (s *MemStore) MarkSessionUsed(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return false
+	}
+	sess.Used = true
+	sess.UpdatedAt = time.Now()
+	s.sessions[id] = sess
+	if rec, ok := s.sessionJTIs[sess.JTI]; ok {
+		rec.Used = true
+	}
+	return true
+}
+
+// MarkJTIUsed marks the JTI as consumed; returns false if not tracked.
+func (s *MemStore) MarkJTIUsed(jti string) bool {
+	if jti == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.sessionJTIs[jti]
+	if !ok {
+		return false
+	}
+	rec.Used = true
+	if sess, ok := s.sessions[rec.SessionID]; ok {
+		sess.Used = true
+		sess.UpdatedAt = time.Now()
+		s.sessions[rec.SessionID] = sess
+	}
+	return true
+}
+
+// DeleteConnectionSession removes the session and its indexes.
+func (s *MemStore) DeleteConnectionSession(id string) (*ConnectionSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil, false
+	}
+	delete(s.sessions, id)
+	if sess.JTI != "" {
+		delete(s.sessionJTIs, sess.JTI)
+	}
+	if assoc, ok := s.sessionsByWorkload[sess.WorkloadID]; ok {
+		delete(assoc, id)
+		if len(assoc) == 0 {
+			delete(s.sessionsByWorkload, sess.WorkloadID)
+		}
+	}
+	return copySession(sess), true
+}
+
+// SessionsForWorkload returns active sessions for a workload ID.
+func (s *MemStore) SessionsForWorkload(workloadID string) []*ConnectionSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	assoc := s.sessionsByWorkload[workloadID]
+	if len(assoc) == 0 {
+		return nil
+	}
+	out := make([]*ConnectionSession, 0, len(assoc))
+	for sessionID := range assoc {
+		if sess, ok := s.sessions[sessionID]; ok {
+			out = append(out, copySession(sess))
+		}
+	}
+	return out
+}
+
+// PurgeExpiredSessions deletes sessions and JTIs that are past expiry.
+func (s *MemStore) PurgeExpiredSessions(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, sess := range s.sessions {
+		if sess.ExpiresAt.IsZero() {
+			continue
+		}
+		if now.After(sess.ExpiresAt.Add(5 * time.Minute)) { // grace period for audit
+			delete(s.sessions, id)
+			if sess.JTI != "" {
+				delete(s.sessionJTIs, sess.JTI)
+			}
+			if assoc, ok := s.sessionsByWorkload[sess.WorkloadID]; ok {
+				delete(assoc, id)
+				if len(assoc) == 0 {
+					delete(s.sessionsByWorkload, sess.WorkloadID)
+				}
+			}
+		}
+	}
+	for jti, rec := range s.sessionJTIs {
+		if now.After(rec.ExpiresAt.Add(5 * time.Minute)) {
+			delete(s.sessionJTIs, jti)
+		}
 	}
 }
 

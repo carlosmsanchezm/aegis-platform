@@ -13,6 +13,7 @@ type Claims struct {
 	Sub     string `json:"sub"`
 	Wid     string `json:"wid"`
 	Dest    string `json:"dest"`
+	DNS     string `json:"dns,omitempty"`
 	Cluster string `json:"cluster,omitempty"`
 	jwt.RegisteredClaims
 }
@@ -63,6 +64,11 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 	}
 	if err := claimStringNotEmpty(claims.Dest, "dest"); err != nil {
 		return nil, err
+	}
+	if claims.DNS != "" {
+		if strings.Contains(claims.DNS, ":") {
+			return nil, errors.New("dns must not include port")
+		}
 	}
 	if claims.ID == "" {
 		return nil, errors.New("jti missing")

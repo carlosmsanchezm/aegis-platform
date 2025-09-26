@@ -1,4 +1,4 @@
-import { FC, useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Page,
@@ -8,26 +8,29 @@ import {
   Progress,
   WarningPanel,
   InfoCard,
-  CopyTextButton,
   StructuredMetadataTable,
   StatusOK,
   StatusWarning,
   StatusError,
   StatusPending,
+  CopyTextButton,
 } from '@backstage/core-components';
 import { Box, Button, Typography } from '@material-ui/core';
 import {
   alertApiRef,
   discoveryApiRef,
   fetchApiRef,
+  identityApiRef,
   useApi,
 } from '@backstage/core-plugin-api';
 import ArrowBackIcon from '@material-ui/icons/ArrowBack';
 import {
   WorkloadDTO,
-  ConnectionDetails,
+  ConnectionSession,
   getWorkload,
-  getWorkspaceConnectionDetails,
+  createConnectionSession,
+  renewConnectionSession,
+  revokeConnectionSession,
   getFlavor,
   mapDisplayStatus,
   parseKubernetesUrl,
@@ -50,10 +53,37 @@ const statusChip = (status: string) => {
   }
 };
 
+const getStoredFlag = (key: string): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(key) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const setStoredFlag = (key: string, value: boolean) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value ? 'true' : 'false');
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const HELPER_FLAG = 'aegis.helper.installed';
+const SYSTEM_ACK_FLAG = 'aegis.system.use.ack';
+const RULES_ACK_FLAG = 'aegis.rules.of.behavior.ack';
+
 export const WorkloadDetailsPage: FC = () => {
   const { id } = useParams<{ id: string }>();
   const fetchApi = useApi(fetchApiRef);
   const discoveryApi = useApi(discoveryApiRef);
+  const identityApi = useApi(identityApiRef);
   const alertApi = useApi(alertApiRef);
   const navigate = useNavigate();
 
@@ -61,9 +91,15 @@ export const WorkloadDetailsPage: FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
-  const [connectLoading, setConnectLoading] = useState(false);
-  const [connectDetails, setConnectDetails] = useState<ConnectionDetails | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const [session, setSession] = useState<ConnectionSession | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [pendingSession, setPendingSession] = useState(false);
+
+  const [helperInstalled, setHelperInstalled] = useState(() => getStoredFlag(HELPER_FLAG));
+  const [systemAcked, setSystemAcked] = useState(() => getStoredFlag(SYSTEM_ACK_FLAG));
+  const [rulesAcked, setRulesAcked] = useState(() => getStoredFlag(RULES_ACK_FLAG));
 
   const load = useCallback(async () => {
     if (!id) {
@@ -73,7 +109,7 @@ export const WorkloadDetailsPage: FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await getWorkload(fetchApi, discoveryApi, id);
+      const res = await getWorkload(fetchApi, discoveryApi, identityApi, id);
       setWorkload(res);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
@@ -82,41 +118,144 @@ export const WorkloadDetailsPage: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [alertApi, discoveryApi, fetchApi, id]);
+  }, [alertApi, discoveryApi, fetchApi, identityApi, id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    setSession(null);
+  }, [id]);
+
+  const requestSession = useCallback(
+    async (client: 'cli' | 'vscode') => {
+      if (!workload?.id) {
+        alertApi.post({ message: 'Workload id is missing', severity: 'error' });
+        return;
+      }
+      try {
+        setSessionLoading(true);
+        setSessionError(null);
+        const created = await createConnectionSession(
+          fetchApi,
+          discoveryApi,
+          identityApi,
+          workload.id,
+          client,
+        );
+        setSession(created);
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        setSessionError(msg);
+        alertApi.post({ message: `Failed to create session: ${msg}`, severity: 'error' });
+      } finally {
+        setSessionLoading(false);
+        setPendingSession(false);
+      }
+    },
+    [alertApi, discoveryApi, fetchApi, identityApi, workload?.id],
+  );
+
+  useEffect(() => {
+    if (
+      pendingSession &&
+      systemAcked &&
+      rulesAcked &&
+      helperInstalled &&
+      !session &&
+      !sessionLoading
+    ) {
+      requestSession('cli');
+    }
+  }, [pendingSession, systemAcked, rulesAcked, helperInstalled, session, sessionLoading, requestSession]);
+
   const handleConnectClose = useCallback(() => {
     setConnectOpen(false);
-    setConnectLoading(false);
-    setConnectError(null);
-    setConnectDetails(null);
+    setSessionError(null);
   }, []);
 
-  const handleConnect = useCallback(async () => {
+  const handleConnect = useCallback(() => {
     if (!workload?.id) {
       alertApi.post({ message: 'Workload id is missing', severity: 'error' });
       return;
     }
-
     setConnectOpen(true);
-    setConnectLoading(true);
-    setConnectError(null);
-    setConnectDetails(null);
+    setSessionError(null);
 
+    if (session) {
+      return;
+    }
+
+    if (!systemAcked || !rulesAcked || !helperInstalled) {
+      setPendingSession(true);
+      return;
+    }
+
+    requestSession('cli');
+  }, [alertApi, helperInstalled, requestSession, rulesAcked, session, systemAcked, workload?.id]);
+
+  const handleRenew = useCallback(async () => {
+    if (!session?.sessionId) {
+      return;
+    }
     try {
-      const details = await getWorkspaceConnectionDetails(fetchApi, discoveryApi, workload.id);
-      setConnectDetails(details);
+      setSessionLoading(true);
+      setSessionError(null);
+      const renewed = await renewConnectionSession(
+        fetchApi,
+        discoveryApi,
+        identityApi,
+        session.sessionId,
+      );
+      setSession(renewed);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      setConnectError(msg);
-      alertApi.post({ message: `Failed to fetch connection details: ${msg}`, severity: 'error' });
+      setSessionError(msg);
+      alertApi.post({ message: `Failed to renew session: ${msg}`, severity: 'error' });
     } finally {
-      setConnectLoading(false);
+      setSessionLoading(false);
     }
-  }, [alertApi, discoveryApi, fetchApi, workload?.id]);
+  }, [alertApi, discoveryApi, fetchApi, identityApi, session?.sessionId]);
+
+  const handleRevoke = useCallback(async () => {
+    if (!session?.sessionId) {
+      return;
+    }
+    try {
+      setSessionLoading(true);
+      setSessionError(null);
+      await revokeConnectionSession(
+        fetchApi,
+        discoveryApi,
+        identityApi,
+        session.sessionId,
+      );
+      setSession(null);
+      alertApi.post({ message: 'Session revoked', severity: 'info' });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setSessionError(msg);
+      alertApi.post({ message: `Failed to revoke session: ${msg}`, severity: 'error' });
+    } finally {
+      setSessionLoading(false);
+    }
+  }, [alertApi, discoveryApi, fetchApi, identityApi, session?.sessionId]);
+
+  const handleSystemAck = useCallback(() => {
+    setSystemAcked(true);
+    setStoredFlag(SYSTEM_ACK_FLAG, true);
+  }, []);
+
+  const handleRulesAck = useCallback(() => {
+    setRulesAcked(true);
+    setStoredFlag(RULES_ACK_FLAG, true);
+  }, []);
+
+  const handleHelperConfirmed = useCallback(() => {
+    setHelperInstalled(true);
+    setStoredFlag(HELPER_FLAG, true);
+  }, []);
 
   const loc = parseKubernetesUrl(workload?.url);
   const kubectlCmd = buildKubectlDescribeCommand(loc);
@@ -124,19 +263,23 @@ export const WorkloadDetailsPage: FC = () => {
   const rawStatus = workload?.uiStatus ?? workload?.status ?? '';
   const canConnect = Boolean(workload?.workspace?.interactive);
   const isRunning = rawStatus === 'RUNNING' || workload?.status === 'RUNNING';
-  const connectButtonDisabled = connectLoading || !isRunning;
+  const connectButtonDisabled = sessionLoading || !isRunning;
 
-  const metadata = workload
-    ? {
-        'Workload ID': workload.id ?? '—',
-        Status: rawStatus || '—',
-        Flavor: getFlavor(workload) || '—',
-        Project: workload.projectId ?? '—',
-        Queue: workload.queue ?? '—',
-        Cluster: workload.clusterId ?? '—',
-        URL: workload.url ?? '—',
-      }
-    : {};
+  const metadata = useMemo(
+    () =>
+      workload
+        ? {
+            'Workload ID': workload.id ?? '—',
+            Status: rawStatus || '—',
+            Flavor: getFlavor(workload) || '—',
+            Project: workload.projectId ?? '—',
+            Queue: workload.queue ?? '—',
+            Cluster: workload.clusterId ?? '—',
+            URL: workload.url ?? '—',
+          }
+        : {},
+    [rawStatus, workload],
+  );
 
   return (
     <Page themeId="tool">
@@ -181,7 +324,7 @@ export const WorkloadDetailsPage: FC = () => {
                       disabled={connectButtonDisabled}
                       onClick={handleConnect}
                     >
-                      {connectLoading ? 'Requesting token…' : 'Connect'}
+                      {sessionLoading ? 'Preparing session…' : 'Connect'}
                     </Button>
                     {!isRunning && (
                       <Typography variant="caption" color="textSecondary" display="block">
@@ -225,7 +368,7 @@ export const WorkloadDetailsPage: FC = () => {
 
             {loc && (
               <Typography variant="body2">
-                View Kubernetes object:{' '}
+                View Kubernetes object{' '}
                 <RouterLink to={`/kubernetes/overview?namespace=${loc.namespace}`}>
                   {loc.kind} {loc.name}
                 </RouterLink>
@@ -237,9 +380,19 @@ export const WorkloadDetailsPage: FC = () => {
       <ConnectModal
         open={connectOpen}
         onClose={handleConnectClose}
-        loading={connectLoading}
-        error={connectError}
-        details={connectDetails}
+        loading={sessionLoading}
+        error={sessionError}
+        session={session}
+        pendingSession={pendingSession}
+        helperInstalled={helperInstalled}
+        onConfirmHelper={handleHelperConfirmed}
+        systemAcked={systemAcked}
+        onAcknowledgeSystemUse={handleSystemAck}
+        rulesAcked={rulesAcked}
+        onAcknowledgeRules={handleRulesAck}
+        onRequestSession={requestSession}
+        onRenew={handleRenew}
+        onRevoke={handleRevoke}
         workloadId={workload?.id ?? ''}
       />
     </Page>

@@ -15,6 +15,8 @@ type Config struct {
 	TokenReuseTTL    time.Duration
 	Cluster          string
 	IngressHost      string
+	TLSCertFile      string
+	TLSKeyFile       string
 }
 
 func LoadConfig() (Config, error) {
@@ -40,6 +42,12 @@ func LoadConfig() (Config, error) {
 			ttlSeconds = val
 		}
 	}
+	certFile := os.Getenv("AEGIS_PROXY_TLS_CERT")
+	keyFile := os.Getenv("AEGIS_PROXY_TLS_KEY")
+	if certFile == "" || keyFile == "" {
+		return Config{}, fmt.Errorf("AEGIS_PROXY_TLS_CERT and AEGIS_PROXY_TLS_KEY must be set")
+	}
+
 	return Config{
 		ListenAddr:       listen,
 		JWTSecret:        []byte(secret),
@@ -48,5 +56,7 @@ func LoadConfig() (Config, error) {
 		TokenReuseTTL:    time.Duration(ttlSeconds) * time.Second,
 		Cluster:          os.Getenv("AEGIS_PROXY_CLUSTER"),
 		IngressHost:      os.Getenv("AEGIS_PROXY_PUBLIC_HOST"),
+		TLSCertFile:      certFile,
+		TLSKeyFile:       keyFile,
 	}, nil
 }

@@ -61,10 +61,14 @@ const (
 	workspaceJobTTLSeconds int32 = 600
 
 	labelWorkloadID = "aegis.workload/id"
+	labelSSHManaged = "aegis.yourorg.dev/ssh-managed"
 
 	annotationStartAcked         = "aegis.yourorg.dev/start-acked"
 	annotationFinalAcked         = "aegis.yourorg.dev/final-acked"
 	annotationMaxDurationSeconds = "aegis.yourorg.dev/maxDurationSeconds"
+
+	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
+	annotationSSHTrustedCA      = "aegis.yourorg.dev/ssh-trusted-user-ca"
 )
 
 // AegisWorkloadReconciler reconciles a AegisWorkload object.
@@ -88,6 +92,7 @@ type AegisWorkloadReconciler struct {
 	proxyServiceName      string
 	proxyServicePort      int32
 	proxyIngressHost      string
+	sshBootstrapImage     string
 
 	pyTorchAPIVersion string
 	pyTorchGVR        *schema.GroupVersionResource
@@ -146,6 +151,30 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	}
 
 	flavor := spec.Flavor
+	workspaceInteractive := spec != nil && spec.Interactive
+	ports := effectiveWorkspacePorts(spec)
+	var (
+		sshSecretName   string
+		secretAvailable bool
+	)
+	if workspaceInteractive {
+		if name, exists, mutated, err := r.ensureWorkspaceSSHSecret(ctx, aw); err != nil {
+			return ctrl.Result{}, err
+		} else {
+			sshSecretName = name
+			secretAvailable = exists
+			if mutated {
+				log.V(1).Info("ssh connection secret synced", "secret", name)
+			}
+		}
+	} else {
+		if changed, err := r.cleanupWorkspaceSSHSecret(ctx, aw); err != nil {
+			return ctrl.Result{}, err
+		} else if changed {
+			log.V(1).Info("ssh connection secret removed")
+		}
+	}
+
 	jobName := builders.SanitizeName("aegis-" + aw.Name)
 	jobKey := types.NamespacedName{Name: jobName, Namespace: aw.Namespace}
 
@@ -173,8 +202,14 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			KueueEnabled:            r.kueueEnabled,
 			KueueQueue:              r.kueueQueue,
 			GPUResourceOverride:     r.gpuResourceOverride,
+			Interactive:             workspaceInteractive,
+			InteractivePorts:        ports,
+			SSHBootstrapImage:       r.sshBootstrapImage,
 			ActiveDeadlineSeconds:   maxDeadline,
 			TTLSecondsAfterFinished: ttlAfterFinished,
+		}
+		if secretAvailable {
+			opts.SSHSecretName = sshSecretName
 		}
 		obj := builders.BuildWorkspaceJob(opts)
 		if err := controllerutil.SetControllerReference(aw, obj, r.Scheme); err != nil {
@@ -201,8 +236,6 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	}
 
 	updated := false
-
-	workspaceInteractive := spec != nil && spec.Interactive
 	if workspaceInteractive {
 		if changed, err := r.ensureInteractiveResources(ctx, aw); err != nil {
 			return ctrl.Result{}, err
@@ -615,6 +648,12 @@ func (r *AegisWorkloadReconciler) ensureInteractiveResources(ctx context.Context
 	ports := effectiveWorkspacePorts(aw.Spec.Workspace)
 	changed := false
 
+	if _, _, mutated, err := r.ensureWorkspaceSSHSecret(ctx, aw); err != nil {
+		return false, err
+	} else if mutated {
+		changed = true
+	}
+
 	if svcChanged, err := r.ensureWorkspaceService(ctx, aw, ports); err != nil {
 		return false, err
 	} else if svcChanged {
@@ -632,6 +671,12 @@ func (r *AegisWorkloadReconciler) ensureInteractiveResources(ctx context.Context
 
 func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
 	changed := false
+
+	if secretDeleted, err := r.cleanupWorkspaceSSHSecret(ctx, aw); err != nil {
+		return false, err
+	} else if secretDeleted {
+		changed = true
+	}
 
 	svcName := fmt.Sprintf("aegis-w-%s", aw.Name)
 	svc := &corev1.Service{}
@@ -660,6 +705,73 @@ func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Contex
 	}
 
 	return changed, nil
+}
+
+func workspaceSSHSecretName(workloadName string) string {
+	return fmt.Sprintf("aegis-w-%s-ssh", workloadName)
+}
+
+func (r *AegisWorkloadReconciler) ensureWorkspaceSSHSecret(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (string, bool, bool, error) {
+	secretName := workspaceSSHSecretName(aw.Name)
+	annotations := aw.GetAnnotations()
+	authorized := strings.TrimSpace(annotations[annotationSSHAuthorizedKeys])
+	trusted := strings.TrimSpace(annotations[annotationSSHTrustedCA])
+	if authorized == "" && trusted == "" {
+		deleted, err := r.cleanupWorkspaceSSHSecret(ctx, aw)
+		return "", false, deleted, err
+	}
+
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: aw.Namespace}}
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		if err := controllerutil.SetControllerReference(aw, secret, r.Scheme); err != nil {
+			return err
+		}
+		if secret.Labels == nil {
+			secret.Labels = map[string]string{}
+		}
+		secret.Labels[labelWorkloadID] = aw.Name
+		secret.Labels[labelSSHManaged] = "true"
+		secret.Type = corev1.SecretTypeOpaque
+		if secret.Data == nil {
+			secret.Data = map[string][]byte{}
+		} else {
+			for k := range secret.Data {
+				delete(secret.Data, k)
+			}
+		}
+		if authorized != "" {
+			secret.Data["authorized_keys"] = []byte(authorized)
+		}
+		if trusted != "" {
+			secret.Data["trusted_user_ca_keys"] = []byte(trusted)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", false, false, err
+	}
+	return secretName, true, result != controllerutil.OperationResultNone, nil
+}
+
+func (r *AegisWorkloadReconciler) cleanupWorkspaceSSHSecret(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
+	secretName := workspaceSSHSecretName(aw.Name)
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: aw.Namespace}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !metav1.IsControlledBy(secret, aw) {
+		return false, nil
+	}
+	if err := r.Delete(ctx, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *AegisWorkloadReconciler) ensureWorkspaceService(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, ports []int32) (bool, error) {
@@ -876,6 +988,7 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.proxyServicePort = 8080
 	}
 	r.proxyIngressHost = envOrDefault("AEGIS_PROXY_INGRESS_HOST", "")
+	r.sshBootstrapImage = envOrDefault("AEGIS_SSH_BOOTSTRAP_IMAGE", "")
 	if r.kueueEnabled {
 		if ok, err := workdiscovery.DetectKueue(r.Config); err != nil {
 			ctrl.Log.WithName("operator").Error(err, "kueue detection failed")

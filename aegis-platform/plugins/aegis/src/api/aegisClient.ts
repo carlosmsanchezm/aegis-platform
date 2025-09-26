@@ -1,4 +1,22 @@
-import { DiscoveryApi, FetchApi } from '@backstage/core-plugin-api';
+import {
+  DiscoveryApi,
+  FetchApi,
+  IdentityApi,
+} from '@backstage/core-plugin-api';
+
+const base64UrlDecode = (input: string): string => {
+  const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+    return window.atob(normalized);
+  }
+  if (typeof globalThis !== 'undefined' && typeof (globalThis as any).atob === 'function') {
+    return (globalThis as any).atob(normalized);
+  }
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(normalized, 'base64').toString('utf-8');
+  }
+  throw new Error('Base64 decoding is not supported in this environment');
+};
 
 export type WorkspaceSpec = {
   flavor?: string;
@@ -27,14 +45,23 @@ export type WorkloadDTO = {
   training?: TrainingSpec;
 };
 
-export type ConnectionDetails = {
-  proxyUrl: string;
+export type ConnectionSession = {
+  sessionId: string;
   token: string;
+  sshUser?: string;
   sshHostAlias: string;
-  sshUsername?: string;
-  internalHost: string;
-  destPort: number;
+  vscodeUri?: string;
+  sshConfig?: string;
+  proxyUrl: string;
   expiresAtUtc: string;
+  oneTime?: boolean;
+};
+
+export type SubmitWorkspaceRequest = {
+  id: string;
+  projectId: string;
+  queue?: string;
+  workspace: WorkspaceSpec;
 };
 
 export type ListWorkloadsResponse = {
@@ -52,13 +79,82 @@ const buildProxyUrl = async (
 const postJson = async <TReq extends object, TRes>(
   fetchApi: FetchApi,
   discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
   method: string,
   body: TReq,
+  options?: { requireAuth?: boolean },
 ): Promise<TRes> => {
   const url = await buildProxyUrl(discoveryApi, method);
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  let identityToken: string | undefined;
+  let userEntityRef: string | undefined;
+
+  try {
+    const identity = await identityApi.getBackstageIdentity({ optional: true });
+    identityToken = identity?.token;
+    userEntityRef = identity?.userEntityRef;
+  } catch (err) {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.warn('Aegis: unable to obtain Backstage identity', err);
+    }
+  }
+
+  if (!identityToken) {
+    try {
+      const credentials = await identityApi.getCredentials();
+      identityToken = credentials.token;
+      userEntityRef = userEntityRef ?? credentials.userEntityRef;
+    } catch (err) {
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Aegis: failed to resolve credentials', err);
+      }
+    }
+  }
+
+  let subject = userEntityRef;
+
+  if (!subject && identityToken) {
+    try {
+      const [, payload] = identityToken.split('.');
+      if (payload) {
+        const json = JSON.parse(base64UrlDecode(payload));
+        subject = json.sub || json.email || json.preferred_username;
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Aegis: failed to parse identity token', err);
+      }
+    }
+  }
+
+  if (identityToken) {
+    headers.Authorization = `Bearer ${identityToken}`;
+    headers['Grpc-Metadata-Authorization'] = `Bearer ${identityToken}`;
+    headers['grpc-metadata-authorization'] = `Bearer ${identityToken}`;
+  } else if (options?.requireAuth) {
+    throw new Error(
+      'Authentication is required to mint a connection session. Refresh the page and sign in.',
+    );
+  }
+
+  if (!subject) {
+    subject = 'user:default/guest';
+  }
+
+  if (subject) {
+    headers['x-aegis-user'] = subject;
+    headers['Grpc-Metadata-X-Aegis-User'] = subject;
+    headers['grpc-metadata-x-aegis-user'] = subject;
+  }
+
   const response = await fetchApi.fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -73,13 +169,16 @@ const postJson = async <TReq extends object, TRes>(
 export const listWorkloads = async (
   fetchApi: FetchApi,
   discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
   projectId: string,
 ): Promise<WorkloadDTO[]> => {
   const res = await postJson<{ projectId: string }, ListWorkloadsResponse>(
     fetchApi,
     discoveryApi,
+    identityApi,
     'aegis.v1.AegisPlatform/ListWorkloads',
     { projectId },
+    { requireAuth: false },
   );
   return res.items ?? [];
 };
@@ -87,26 +186,92 @@ export const listWorkloads = async (
 export const getWorkload = async (
   fetchApi: FetchApi,
   discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
   id: string,
 ): Promise<WorkloadDTO> =>
   postJson<{ id: string }, WorkloadDTO>(
     fetchApi,
     discoveryApi,
+    identityApi,
     'aegis.v1.AegisPlatform/GetWorkload',
     { id },
+    { requireAuth: false },
   );
 
-export const getWorkspaceConnectionDetails = async (
+export const createConnectionSession = async (
   fetchApi: FetchApi,
   discoveryApi: DiscoveryApi,
-  id: string,
-): Promise<ConnectionDetails> =>
-  postJson<{ id: string }, ConnectionDetails>(
+  identityApi: IdentityApi,
+  workloadId: string,
+  client: 'cli' | 'ssh' | 'vscode' = 'cli',
+): Promise<ConnectionSession> =>
+  postJson<{ workloadId: string; client: string }, ConnectionSession>(
     fetchApi,
     discoveryApi,
-    'aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails',
-    { id },
+    identityApi,
+    'aegis.v1.AegisPlatform/CreateConnectionSession',
+    { workloadId, client },
+    { requireAuth: true },
   );
+
+export const renewConnectionSession = async (
+  fetchApi: FetchApi,
+  discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
+  sessionId: string,
+): Promise<ConnectionSession> =>
+  postJson<{ sessionId: string }, ConnectionSession>(
+    fetchApi,
+    discoveryApi,
+    identityApi,
+    'aegis.v1.AegisPlatform/RenewConnectionSession',
+    { sessionId },
+    { requireAuth: true },
+  );
+
+export const revokeConnectionSession = async (
+  fetchApi: FetchApi,
+  discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
+  sessionId: string,
+): Promise<void> => {
+  await postJson<{ sessionId: string }, unknown>(
+    fetchApi,
+    discoveryApi,
+    identityApi,
+    'aegis.v1.AegisPlatform/RevokeConnectionSession',
+    { sessionId },
+    { requireAuth: true },
+  );
+};
+
+export const submitWorkspace = async (
+  fetchApi: FetchApi,
+  discoveryApi: DiscoveryApi,
+  identityApi: IdentityApi,
+  req: SubmitWorkspaceRequest,
+): Promise<WorkloadDTO> => {
+  const body = {
+    workload: {
+      id: req.id,
+      projectId: req.projectId,
+      queue: req.queue,
+      kind: {
+        workspace: {
+          ...req.workspace,
+        },
+      },
+    },
+  };
+  return postJson<typeof body, WorkloadDTO>(
+    fetchApi,
+    discoveryApi,
+    identityApi,
+    'aegis.v1.AegisPlatform/SubmitWorkload',
+    body,
+    { requireAuth: true },
+  );
+};
 
 export const getFlavor = (w: WorkloadDTO): string =>
   w?.workspace?.flavor ?? w?.training?.flavor ?? '';

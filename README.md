@@ -62,6 +62,69 @@ This is where you will interact with the system. Before submitting workloads, wa
 
 -----
 
+## Interactive Workspace UI & VS Code Workflow
+
+The Backstage plugin now lets you submit interactive workspaces and connect to
+them from VS Code without hand-editing SSH configs. The same flow works for
+local Docker Desktop clusters and remote GPU clusters.
+
+1. **Build and publish the VS Code-ready image** (one time):
+
+   ```bash
+   docker build -t aegis-workspace:latest workspace-images/openssh-vscode
+   docker tag aegis-workspace:latest carlosmsanchez/aegis-workspace-vscode:latest
+   docker push carlosmsanchez/aegis-workspace-vscode:latest
+   ```
+
+2. **Run the platform API and operator** as described in the quickstart above
+   (Terminals A and B). Wait for the operator to register before continuing.
+
+3. **Start the Backstage UI** in a new terminal:
+
+   ```bash
+   cd aegis-platform
+   yarn start
+   ```
+
+   This serves the app at <http://localhost:3000>.
+
+4. **Launch a workspace from the UI**:
+
+   - Open <http://localhost:3000/aegis/workspaces/launch>.
+   - Fill in the form (example values):
+     - Workload ID: `w-demo`
+     - Project ID: `p-demo`
+     - Queue: `default`
+     - Flavor: `cpu-small`
+     - Image: `carlosmsanchez/aegis-workspace-vscode:latest`
+     - Ports: `2222`
+     - Environment variables: leave empty unless you need overrides.
+   - Submit the form. The page shows the created workload summary.
+
+5. **Track the workspace**:
+
+   - Navigate to <http://localhost:3000/aegis/workloads> to see the list.
+   - Click the workload ID to open the details view. The live status, pod ID, and
+     VS Code connection helpers appear once the pod is running.
+
+6. **Connect from VS Code**:
+
+   - In the workload details panel, click *Connect*.
+   - The modal shows ready-to-run snippets:
+     - `ssh` command with the `aegis-connect` proxy wrapper.
+     - A downloadable `~/.ssh/config` fragment.
+     - A “Open in VS Code” link (`vscode://` URI) that launches Remote-SSH.
+   - Accept the password prompt (`aegis123` in the sample env) and the VS Code
+     server installs automatically (the workspace image already bundles
+     `libstdc++` and `libgcc`).
+
+To double-check connectivity, `kubectl exec` into the workspace pod and confirm
+`/config/sshd/sshd_config` contains `AllowTcpForwarding yes`. You can also list
+open sessions with `kubectl logs` on the proxy to watch the one-time JWTs being
+consumed.
+
+-----
+
 ## Validation Scenarios
 
 The following scenarios validate the full functionality of the refactored system, mapped to the original project prompts.

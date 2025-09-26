@@ -15,3 +15,9 @@ export const workloadDetailsRouteRef = createSubRouteRef({
 	parent: rootRouteRef,
 	path: '/workloads/:id',
 });
+
+export const launchWorkspaceRouteRef = createSubRouteRef({
+	id: 'aegis-launch-workspace',
+	parent: rootRouteRef,
+	path: '/workspaces/launch',
+});

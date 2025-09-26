@@ -19,6 +19,7 @@ import {
   alertApiRef,
   discoveryApiRef,
   fetchApiRef,
+  identityApiRef,
   useApi,
 } from '@backstage/core-plugin-api';
 import {
@@ -64,6 +65,7 @@ type StatusFilter = 'all' | 'active' | 'terminal';
 export const WorkloadListPage: FC = () => {
   const fetchApi = useApi(fetchApiRef);
   const discoveryApi = useApi(discoveryApiRef);
+  const identityApi = useApi(identityApiRef);
   const alertApi = useApi(alertApiRef);
   const navigate = useNavigate();
 
@@ -83,7 +85,12 @@ export const WorkloadListPage: FC = () => {
           setLoading(true);
         }
         setError(null);
-        const items = await listWorkloads(fetchApi, discoveryApi, projectId);
+        const items = await listWorkloads(
+          fetchApi,
+          discoveryApi,
+          identityApi,
+          projectId,
+        );
         const mapped: WorkloadRow[] = items.map(w => ({
           ...w,
           displayStatus: w.uiStatus ?? w.status ?? 'PLACED',
@@ -101,7 +108,7 @@ export const WorkloadListPage: FC = () => {
         }
       }
     },
-    [alertApi, discoveryApi, fetchApi, projectId],
+    [alertApi, discoveryApi, fetchApi, identityApi, projectId],
   );
 
   useEffect(() => {

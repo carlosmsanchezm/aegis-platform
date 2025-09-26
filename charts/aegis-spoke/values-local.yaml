@@ -1,0 +1,4 @@
+# Overrides for local development.
+proxy:
+  tls:
+    terminateAtIngress: false

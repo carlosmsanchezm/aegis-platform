@@ -123,6 +123,121 @@ To double-check connectivity, `kubectl exec` into the workspace pod and confirm
 open sessions with `kubectl logs` on the proxy to watch the one-time JWTs being
 consumed.
 
+### Proxy TLS configuration
+
+Both the platform API and `aegis-connect` expect to speak HTTPS to the proxy.
+The proxy Deployment therefore mounts a TLS certificate from the
+`my-aegis-spoke-aegis-spoke-proxy-secret` Secret. The certificate **must** carry
+the hostname specified in `values.yaml` (`proxy.ingress.hostname`) as a Subject
+Alternative Name, otherwise modern Go clients (including `aegis-connect`) will
+refuse the handshake with `x509: certificate relies on legacy Common Name
+field`.
+
+To generate and load a SAN-enabled certificate for local development:
+
+```bash
+cat <<'EOF' >/tmp/proxy.cnf
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+req_extensions = req_ext
+distinguished_name = dn
+
+[dn]
+CN = proxy.localtest.me
+
+[req_ext]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = proxy.localtest.me
+EOF
+
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /tmp/aegis-proxy.key \
+  -out /tmp/aegis-proxy.crt \
+  -config /tmp/proxy.cnf \
+  -extensions req_ext
+
+# Convert to PKCS#1 for Go's TLS loader
+openssl rsa -in /tmp/aegis-proxy.key -out /tmp/aegis-proxy.key.pkcs1
+
+# Update the Helm chart with the new cert/key
+helm upgrade my-aegis-spoke charts/aegis-spoke -n aegis-spoke \
+  --set-file proxy.tls.cert=/tmp/aegis-proxy.crt \
+  --set-file proxy.tls.key=/tmp/aegis-proxy.key.pkcs1
+
+# Bounce the proxy pods so they pick up the secret
+kubectl -n aegis-spoke rollout restart deployment/my-aegis-spoke-aegis-spoke-proxy
+kubectl -n aegis-spoke rollout status deployment/my-aegis-spoke-aegis-spoke-proxy
+
+# Trust the certificate on macOS so aegis-connect (and VS Code) accept it
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  /tmp/aegis-proxy.crt
+```
+
+In local development we leave `proxy.tls.terminateAtIngress=false`, so the proxy
+terminates TLS itself. When you deploy to a managed cluster, flip that value to
+`true` (or use a separate `values-cloud.yaml`) so the Ingress or cloud load
+balancer handles TLS and the proxy listens on plain HTTP behind the service.
+
+We keep two convenience values files in the chart:
+
+* `values-local.yaml` – TLS terminates inside the proxy (the default local flow).
+* `values-cloud.yaml` – TLS terminates at the ingress/load balancer.
+
+Pick the right one when installing:
+
+```bash
+# local (proxy terminates TLS and mounts the inline secret)
+helm upgrade --install my-aegis-spoke charts/aegis-spoke \
+  -n aegis-spoke \\
+  -f charts/aegis-spoke/values-local.yaml \\
+  --set-file proxy.tls.cert=/tmp/aegis-proxy.crt \\
+  --set-file proxy.tls.key=/tmp/aegis-proxy.key.pkcs1
+
+# cloud (ingress terminates TLS; either --set-file here or rely on cert-manager)
+helm upgrade --install my-aegis-spoke charts/aegis-spoke \
+  -n aegis-spoke \\
+  -f charts/aegis-spoke/values-cloud.yaml \\
+  --set-file proxy.tls.cert=/path/to/cert.crt \\
+  --set-file proxy.tls.key=/path/to/cert.key
+```
+
+The chart leaves `proxy.tls.cert` and `proxy.tls.key` empty on purpose; always
+inject real material via `--set-file …` or rely on your secret manager / cert-
+manager. Never check TLS private keys into git.
+
+In other words, both overlays inherit every base value except the single flag
+`proxy.tls.terminateAtIngress`. Setting it to `false` keeps the inline
+`proxy-secret` with `tls.crt/tls.key`, mounts that secret into the proxy pod, and
+sets `AEGIS_PROXY_TLS_*` so the proxy speaks HTTPS itself. Setting it to `true`
+renders a separate `kubernetes.io/tls` secret, references it from the Ingress,
+and leaves the proxy listening on plain HTTP behind the service (suitable for
+cloud load balancers).
+
+For local development, once the chart is updated, expose the proxy and restart
+the platform API with the HTTPS base URL:
+
+```bash
+# In one terminal
+kubectl -n aegis-spoke port-forward svc/my-aegis-spoke-aegis-spoke-proxy 8085:8085
+
+# In another terminal
+export AEGIS_PROXY_JWT_SECRET="a-very-secret-key-for-local-dev-must-be-32-chars"
+export AEGIS_PROXY_EXPECTED_AUDIENCE="aegis-proxy"
+export AEGIS_PROXY_BASE_URL="https://proxy.localtest.me:8085"
+make run-api ALLOW_SOCKETS=1
+```
+
+With those pieces in place, the Backstage “Connect in VS Code” workflow tunnels
+through the TLS-enabled proxy without any manual `apk add` or SSH forwarding
+tweaks. For cloud environments, replace the inline certificate with your
+preferred mechanism (cert-manager, ACM, etc.) and update `values.yaml` or
+`--set-file` accordingly; the agent and hub wiring stay the same.
+
 -----
 
 ## Validation Scenarios

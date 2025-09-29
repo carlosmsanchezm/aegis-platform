@@ -1,0 +1,24 @@
+{
+  "changed": true,
+  "diffs": {
+    "services/proxy/deploy/deployment.yaml": "",
+    "services/proxy/internal/server/config.go": "",
+    "services/proxy/internal/server/server.go": "--- a/services/proxy/internal/server/server.go\n+++ b/services/proxy/internal/server/server.go\n@@ -262,10 +262,20 @@\n \t}\n \n \tstart := time.Now()\n+\t// Audit mTLS subject and serial on session.start\n+\tvar mtlsSubject, mtlsSerial string\n+\tconnState := getTLSConnectionState(r)\n+\tif connState != nil && len(connState.PeerCertificates) > 0 {\n+\t\tcert := connState.PeerCertificates[0]\n+\t\tmtlsSubject = cert.Subject.String()\n+\t\tmtlsSerial = cert.SerialNumber.String()\n+\t}\n \ts.auditEvent(\"session.start\", claims, false,\n \t\tzap.String(\"remote\", r.RemoteAddr),\n \t\tzap.String(\"dest\", dest),\n \t\tzap.String(\"mode\", \"connect\"),\n+\t\tzap.String(\"mtls_subject\", mtlsSubject),\n+\t\tzap.String(\"mtls_serial\", mtlsSerial),\n \t)\n \n \tvar txBytes, rxBytes uint64\n@@ -331,10 +341,20 @@\n \t}\n \n \tstart := time.Now()\n+\t// Audit mTLS subject and serial on session.start\n+\tvar mtlsSubject, mtlsSerial string\n+\tconnState := getTLSConnectionState(r)\n+\tif connState != nil && len(connState.PeerCertificates) > 0 {\n+\t\tcert := connState.PeerCertificates[0]\n+\t\tmtlsSubject = cert.Subject.String()\n+\t\tmtlsSerial = cert.SerialNumber.String()\n+\t}\n \ts.auditEvent(\"session.start\", claims, false,\n \t\tzap.String(\"remote\", r.RemoteAddr),\n \t\tzap.String(\"dest\", dest),\n \t\tzap.String(\"mode\", \"websocket\"),\n+\t\tzap.String(\"mtls_subject\", mtlsSubject),\n+\t\tzap.String(\"mtls_serial\", mtlsSerial),\n \t)\n \n \tvar txBytes, rxBytes atomic.Uint64\n@@ -514,6 +534,25 @@\n \tclientCAPool := x509.NewCertPool()\n \tif !clientCAPool.AppendCertsFromPEM(clientCA) {\n \t\treturn fmt.Errorf(\"failed to parse client CA certs\")\n+\t}\n+\n+\t// Add VerifyConnection hook to enforce SAN suffix allow-list at TLS handshake\n+\tverifyConnection := func(cs tls.ConnectionState) error {\n+\t\tif len(s.cfg.ClientCertSANSuffixAllowList) == 0 {\n+\t\t\treturn nil\n+\t\t}\n+\t\tif len(cs.PeerCertificates) == 0 {\n+\t\t\treturn errors.New(\"no client certificate presented\")\n+\t\t}\n+\t\tcert := cs.PeerCertificates[0]\n+\t\tfor _, san := range cert.DNSNames {\n+\t\t\tfor _, suffix := range s.cfg.ClientCertSANSuffixAllowList {\n+\t\t\t\tif strings.HasSuffix(san, suffix) {\n+\t\t\t\t\treturn nil\n+\t\t\t\t}\n+\t\t\t}\n+\t\t}\n+\t\treturn fmt.Errorf(\"client certificate SAN does not match allowed suffixes: %v\", s.cfg.ClientCertSANSuffixAllowList)\n \t}\n \n \ttlsConfig := &tls.Config{\n@@ -532,6 +571,7 @@\n \t\t},\n \t\tClientAuth:   tls.RequireAndVerifyClientCert,\n \t\tClientCAs:    clientCAPool,\n+\t\tVerifyConnection: verifyConnection,\n \t}\n \n \tserver := &http.Server{\n"
+  },
+  "files": [
+    "services/proxy/internal/server/server.go",
+    "services/proxy/internal/server/config.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "review": {
+    "comments": [
+      "Client-cert SAN suffix policy is implemented: config.go parses AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX, exposes it in config, and server.go enforces it both at HTTP request entry and at the TLS handshake (VerifyConnection).",
+      "Audit logging of client-cert subject and serial is present: session.start events in both handleConnect and handleWebSocket now log mtls_subject and mtls_serial, and there is a dedicated logClientCertAudit for additional audit.",
+      "No regression of TLS1.2+, mTLS, or cipher suite restrictions: server.go still sets MinVersion: tls.VersionTLS12, requires client certs, and restricts cipher suites and curves as before.",
+      "Deployment wires the new env var: deployment.yaml includes AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX in the container env list, with documentation.",
+      "General code quality is good; enforcement is at both handshake and request time, and config is surfaced and documented."
+    ],
+    "must_fix": [],
+    "pass": true
+  }
+}

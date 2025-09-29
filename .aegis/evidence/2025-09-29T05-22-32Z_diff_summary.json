@@ -1,0 +1,23 @@
+{
+  "changed": true,
+  "diffs": {
+    "services/proxy/deploy/deployment.yaml": "",
+    "services/proxy/internal/server/config.go": "--- a/services/proxy/internal/server/config.go\n+++ b/services/proxy/internal/server/config.go\n@@ -28,6 +28,7 @@\n //\n // AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX: Optional, comma-separated list of allowed client certificate SAN suffixes.\n //   If set, only client certificates with at least one SAN ending with one of these suffixes will be allowed.\n+//   If empty, disables the allow-list policy (no suffix restriction).\n func LoadConfig() (Config, error) {\n \tsecret := os.Getenv(\"AEGIS_PROXY_JWT_SECRET\")\n \tif secret == \"\" {\n",
+    "services/proxy/internal/server/server.go": "--- a/services/proxy/internal/server/server.go\n+++ b/services/proxy/internal/server/server.go\n@@ -545,14 +545,38 @@\n \t\t\treturn errors.New(\"no client certificate presented\")\n \t\t}\n \t\tcert := cs.PeerCertificates[0]\n+\t\tallowed := false\n \t\tfor _, san := range cert.DNSNames {\n \t\t\tfor _, suffix := range s.cfg.ClientCertSANSuffixAllowList {\n \t\t\t\tif strings.HasSuffix(san, suffix) {\n-\t\t\t\t\treturn nil\n+\t\t\t\t\tallowed = true\n+\t\t\t\t\tbreak\n \t\t\t\t}\n \t\t\t}\n-\t\t}\n-\t\treturn fmt.Errorf(\"client certificate SAN does not match allowed suffixes: %v\", s.cfg.ClientCertSANSuffixAllowList)\n+\t\t\tif allowed {\n+\t\t\t\tbreak\n+\t\t\t}\n+\t\t}\n+\t\tif !allowed {\n+\t\t\tfor _, uri := range cert.URIs {\n+\t\t\t\tif uri == nil {\n+\t\t\t\t\tcontinue\n+\t\t\t\t}\n+\t\t\t\tfor _, suffix := range s.cfg.ClientCertSANSuffixAllowList {\n+\t\t\t\t\tif strings.HasSuffix(uri.String(), suffix) {\n+\t\t\t\t\t\tallowed = true\n+\t\t\t\t\t\tbreak\n+\t\t\t\t\t}\n+\t\t\t\t}\n+\t\t\t\tif allowed {\n+\t\t\t\t\tbreak\n+\t\t\t\t}\n+\t\t\t}\n+\t\t}\n+\t\tif !allowed {\n+\t\t\treturn fmt.Errorf(\"client certificate SAN does not match allowed suffixes: %v\", s.cfg.ClientCertSANSuffixAllowList)\n+\t\t}\n+\t\treturn nil\n \t}\n \n \ttlsConfig := &tls.Config{\n"
+  },
+  "files": [
+    "services/proxy/internal/server/server.go",
+    "services/proxy/internal/server/config.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "review": {
+    "comments": [
+      "Client-cert SAN suffix policy is implemented and enforced via the AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX env var, with config surface in config.go, enforcement in server.go (both at HTTP and TLS handshake), and deployment.yaml wires the env var.",
+      "Client-cert subject and serial audit logging is present on session.start in both CONNECT and WebSocket paths (logClientCertAudit and direct logging in session.start events).",
+      "TLS 1.2+, mTLS, and cipher suite restrictions are preserved in tls.Config (MinVersion, CipherSuites, ClientAuth, ClientCAs).",
+      "Deployment manifest includes the new env var with documentation and default empty value (no restriction)."
+    ],
+    "must_fix": [],
+    "pass": true
+  }
+}

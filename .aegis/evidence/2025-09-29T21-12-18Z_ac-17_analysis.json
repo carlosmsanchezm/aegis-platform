@@ -1,0 +1,44 @@
+{
+  "controls": [
+    "AC-17"
+  ],
+  "files_targeted": [
+    "services/proxy/internal/server/server.go",
+    "services/proxy/internal/server/config.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "plan": {
+    "edits": [
+      {
+        "instructions": [
+          "Add a new string slice field to the server configuration struct, e.g., `ClientCertSanSuffixAllowList []string`.",
+          "In the configuration loader, read the `AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX` environment variable. If set, split its value by comma and populate the allow-list field.",
+          "Document the new configuration option in code comments and any relevant configuration documentation."
+        ],
+        "path": "services/proxy/internal/server/config.go",
+        "rationale": "Adding a configuration field for the SAN suffix allow-list enables administrators to define and document remote access restrictions, supporting AC-17a.[01]-[03]. Wiring this to an environment variable ensures configuration/connection requirements are established and manageable."
+      },
+      {
+        "instructions": [
+          "During TLS handshake or session initiation, extract the SANs from the presented client certificate.",
+          "If the allow-list is non-empty, check that at least one SAN in the client certificate ends with an allowed suffix. Reject the connection if not.",
+          "On session start, log the subject and serial number of the client certificate using the existing logging framework, ensuring the log entry is associated with the session.start event.",
+          "Ensure logs are structured and include enough context for audit and investigation."
+        ],
+        "path": "services/proxy/internal/server/server.go",
+        "rationale": "Enforcing a SAN suffix allow-list on client certificates ensures only authorized remote clients can connect, directly supporting AC-17b. Logging the subject and serial of client certificates on session start provides an auditable record of remote access, supporting AC-17a.[01] and AC-17a.[03]."
+      },
+      {
+        "instructions": [
+          "Add a new environment variable entry for `AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX` in the proxy container spec.",
+          "Document the purpose of this variable in deployment notes or comments.",
+          "Ensure the variable is optional (can be unset or empty for no restriction)."
+        ],
+        "path": "services/proxy/deploy/deployment.yaml",
+        "rationale": "Wiring the `AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX` environment variable into the deployment manifest ensures the allow-list policy is managed as part of the deployment configuration, supporting documented and authorized remote access per AC-17."
+      }
+    ],
+    "summary": "To strengthen compliance with NIST AC-17 and FedRAMP High for remote access controls, the proxy service will introduce a client certificate SAN suffix allow-list policy, log client certificate details on session start, and wire the allow-list policy to deployment configuration. These changes further restrict and document remote access, provide enhanced auditability, and ensure configuration is managed and authorized per AC-17 requirements."
+  },
+  "summary": "To strengthen compliance with NIST AC-17 and FedRAMP High for remote access controls, the proxy service will introduce a client certificate SAN suffix allow-list policy, log client certificate details on session start, and wire the allow-list policy to deployment configuration. These changes further restrict and document remote access, provide enhanced auditability, and ensure configuration is managed and authorized per AC-17 requirements."
+}

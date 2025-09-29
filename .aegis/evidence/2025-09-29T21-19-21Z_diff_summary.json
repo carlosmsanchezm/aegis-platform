@@ -1,0 +1,26 @@
+{
+  "changed": true,
+  "diffs": {
+    "services/proxy/deploy/deployment.yaml": "",
+    "services/proxy/internal/server/config.go": "",
+    "services/proxy/internal/server/server.go": "--- a/services/proxy/internal/server/server.go\n+++ b/services/proxy/internal/server/server.go\n@@ -443,6 +443,8 @@\n \t\textra = append(extra,\n \t\t\tzap.String(\"client_cert_subject\", clientCert.Subject.String()),\n \t\t\tzap.String(\"client_cert_serial\", clientCert.SerialNumber.Text(16)),\n+\t\t\tzap.String(\"mtls_subject\", clientCert.Subject.String()),\n+\t\t\tzap.String(\"mtls_serial\", clientCert.SerialNumber.Text(16)),\n \t\t)\n \t\tif len(clientCert.DNSNames) > 0 {\n \t\t\textra = append(extra, zap.Strings(\"client_cert_sans\", clientCert.DNSNames))\n@@ -492,6 +494,7 @@\n \tif err != nil {\n \t\treturn fmt.Errorf(\"load tls certificate: %w\", err)\n \t}\n+\n \ttlsConfig := &tls.Config{\n \t\tCertificates:             []tls.Certificate{cert},\n \t\tMinVersion:               tls.VersionTLS12,\n@@ -510,6 +513,32 @@\n \t\tClientAuth: tls.RequireAndVerifyClientCert,\n \t}\n \n+\t// Add VerifyConnection to enforce SAN suffix allow-list at handshake time (AC-17b)\n+\tif len(s.cfg.ClientCertSanSuffixAllowList) > 0 {\n+\t\ttlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {\n+\t\t\tif len(cs.PeerCertificates) == 0 {\n+\t\t\t\treturn errors.New(\"no client certificate presented\")\n+\t\t\t}\n+\t\t\tcert := cs.PeerCertificates[0]\n+\t\t\tallowed := false\n+\t\t\tfor _, san := range cert.DNSNames {\n+\t\t\t\tfor _, suffix := range s.cfg.ClientCertSanSuffixAllowList {\n+\t\t\t\t\tif strings.HasSuffix(san, suffix) {\n+\t\t\t\t\t\tallowed = true\n+\t\t\t\t\t\tbreak\n+\t\t\t\t\t}\n+\t\t\t\t}\n+\t\t\t\tif allowed {\n+\t\t\t\t\tbreak\n+\t\t\t\t}\n+\t\t\t}\n+\t\t\tif !allowed {\n+\t\t\t\treturn fmt.Errorf(\"client certificate SANs %v do not match allowed suffixes %v\", cert.DNSNames, s.cfg.ClientCertSanSuffixAllowList)\n+\t\t\t}\n+\t\t\treturn nil\n+\t\t}\n+\t}\n+\n \tserver := &http.Server{\n \t\tAddr:              s.cfg.ListenAddr,\n \t\tHandler:           s,\n"
+  },
+  "files": [
+    "services/proxy/internal/server/server.go",
+    "services/proxy/internal/server/config.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "review": {
+    "comments": [
+      "Client-cert SAN suffix policy is implemented:",
+      "- Config surface: Config struct and LoadConfig() in config.go add ClientCertSanSuffixAllowList, loaded from AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX.",
+      "- Enforcement: server.go enforces the policy both at HTTP request entry (enforceClientCertSanSuffixPolicy) and at TLS handshake (tls.Config.VerifyConnection).",
+      "Client-cert subject/serial audit logging on session.start is present: auditSessionStart logs client_cert_subject and client_cert_serial (and also mtls_* fields for redundancy).",
+      "No regression of TLS1.2+/mTLS/cipher suite restrictions: TLS config still enforces MinVersion TLS1.2, explicit cipher suites, and ClientAuth: RequireAndVerifyClientCert.",
+      "Deployment wires the new env var: deployment.yaml adds AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX with documentation.",
+      "No issues found; implementation is robust and covers all requirements. The duplicate mtls_* fields in audit logs are redundant but harmless."
+    ],
+    "must_fix": [],
+    "pass": true
+  }
+}

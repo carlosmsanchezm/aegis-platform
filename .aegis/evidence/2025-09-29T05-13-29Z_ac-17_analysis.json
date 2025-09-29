@@ -1,0 +1,44 @@
+{
+  "controls": [
+    "AC-17"
+  ],
+  "files_targeted": [
+    "services/proxy/internal/server/server.go",
+    "services/proxy/internal/server/config.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "plan": {
+    "edits": [
+      {
+        "instructions": [
+          "Add a new string slice field to the server configuration struct, e.g., `ClientCertSanSuffixAllowList []string`.",
+          "In the configuration loading logic, read the environment variable `AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX` (comma-separated list). If set, split and populate the allow-list field; if empty, treat as no restriction.",
+          "Document this configuration option in code comments and any relevant configuration documentation."
+        ],
+        "path": "services/proxy/internal/server/config.go",
+        "rationale": "Adding a configuration option for allowed client certificate SAN suffixes enables explicit, documented connection requirements for remote access, as required by AC-17. This allows the organization to restrict remote access to clients with certificates matching approved domains or patterns, supporting both usage restrictions and authorization."
+      },
+      {
+        "instructions": [
+          "During TLS client certificate validation, extract the SANs from the client certificate.",
+          "If the allow-list is non-empty, check that at least one SAN ends with an allowed suffix. Reject the connection if none match.",
+          "On session start (e.g., after successful handshake), log the client certificate's subject DN and serial number as part of the session.start event. Ensure logs are structured and include enough context for auditability.",
+          "Update error handling and logging to clearly indicate when a connection is rejected due to SAN suffix policy."
+        ],
+        "path": "services/proxy/internal/server/server.go",
+        "rationale": "Enforcing the SAN suffix allow-list at the point of client certificate validation ensures only authorized remote clients can connect, directly supporting AC-17's requirement for prior authorization and documented connection requirements. Logging client certificate subject and serial on session start provides traceability and supports audit requirements for remote access events."
+      },
+      {
+        "instructions": [
+          "Add a new environment variable entry for `AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX` to the container spec.",
+          "Document the purpose of this variable in the manifest (e.g., comment that it controls allowed client certificate SAN suffixes for remote access).",
+          "Ensure the variable is optional and defaults to empty if not set."
+        ],
+        "path": "services/proxy/deploy/deployment.yaml",
+        "rationale": "Wiring the new environment variable into the deployment manifest ensures the allow-list policy can be managed operationally, supporting configuration management and enabling documented, auditable remote access restrictions as required by AC-17."
+      }
+    ],
+    "summary": "To strengthen compliance with NIST AC-17 and FedRAMP High for remote access, the proxy service will (1) enforce an allow-list policy for client certificate SAN suffixes via a configurable environment variable, (2) log client certificate subject and serial on session start events for auditability, and (3) wire the new environment variable into the deployment manifest. These changes provide explicit, configurable connection requirements and enhance monitoring and authorization of remote access, directly supporting AC-17's requirements for documented restrictions, configuration, and authorization."
+  },
+  "summary": "To strengthen compliance with NIST AC-17 and FedRAMP High for remote access, the proxy service will (1) enforce an allow-list policy for client certificate SAN suffixes via a configurable environment variable, (2) log client certificate subject and serial on session start events for auditability, and (3) wire the new environment variable into the deployment manifest. These changes provide explicit, configurable connection requirements and enhance monitoring and authorization of remote access, directly supporting AC-17's requirements for documented restrictions, configuration, and authorization."
+}

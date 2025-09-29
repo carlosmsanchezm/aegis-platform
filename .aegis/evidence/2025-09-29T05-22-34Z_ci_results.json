@@ -1,0 +1,13 @@
+{
+  "cmd": [
+    "go",
+    "build",
+    "-o",
+    "/Users/carlossanchez/code/aegis/out/aegis-auth-proxy",
+    "./services/proxy/cmd/aegis-auth-proxy"
+  ],
+  "mode": "local",
+  "ok": true,
+  "stderr": "\n",
+  "stdout": "\n"
+}

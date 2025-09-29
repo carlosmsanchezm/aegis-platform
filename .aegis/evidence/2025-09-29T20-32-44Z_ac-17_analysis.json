@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "toolUseId": "fs-read-.aegis/evidence/2025-09-29T20-32-44Z_ac-17_analysis.json",
+  "content": [
+    {
+      "text": "{\n  \"controls\": [\n    \"AC-17\"\n  ],\n  \"files_modified\": [\n    \"services/proxy/deploy/deployment.yaml\",\n    \"services/proxy/internal/server/config.go\",\n    \"services/proxy/internal/server/server.go\"\n  ],\n  \"required_evidence\": [\n    \"Access control policy\",\n    \"Procedures addressing remote access implementation and usage (including restrictions)\",\n    \"Configuration management plan\",\n    \"System configuration settings and associated documentation\",\n    \"Remote access authorizations\",\n    \"System audit records\",\n    \"System security plan\",\n    \"Other relevant documents or records\",\n    \"Interviews with personnel responsible for managing remote access\",\n    \"Interviews with system/network administrators\",\n    \"Interviews with personnel with information security responsibilities\",\n    \"Demonstration or test of remote access management capability\"\n  ],\n  \"summary\": \"AC-17 (Remote Access) requires organizations to establish, document, and enforce usage restrictions, configuration/connection requirements, and implementation guidance for every type of remote access permitted to their systems. Additionally, each type of remote access must be explicitly authorized before it is allowed. The intent is to ensure that remote access is controlled, secure, and only permitted under defined and approved conditions, reducing the risk of unauthorized or insecure remote connections.\"\n}"
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+# Local development values for aegis-services
+# This configuration is optimized for local development environments
+# such as minikube, kind, or Docker Desktop Kubernetes
+
+#################################################################
+# Platform API Configuration - Local
+#################################################################
+platformApi:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: aegis/platform-api
+    tag: "latest"
+    pullPolicy: Never  # Use local images
+
+  service:
+    type: NodePort
+    grpcPort: 8081
+    httpPort: 8080
+    grpcNodePort: 30081
+    httpNodePort: 30080
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    hosts:
+      - host: platform-api.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: "http"
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: "grpc"
+
+  # Local development environment variables
+  env:
+    LOG_LEVEL: "debug"
+
+  # Local kubeconfig directory
+  kubeConfigsDir: "/tmp/kubeconfigs"
+  targetNamespace: "default"
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+  # Relaxed probes for local development
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+#################################################################
+# Proxy Configuration - Local
+#################################################################
+proxy:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: aegis/proxy
+    tag: "latest"
+    pullPolicy: Never  # Use local images
+
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30085
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
+    hosts:
+      - host: proxy.localtest.me
+        paths:
+          - path: /proxy(/|$)(.*)
+            pathType: Prefix
+
+  # Local development JWT secret (32+ chars)
+  jwtSecret: "local-development-jwt-secret-key-32-chars-min"
+  expectedAudience: "aegis-proxy"
+  allowedSuffix: ".svc.cluster.local"
+  publicHost: "proxy.localtest.me"
+
+  # TLS disabled for local development (ingress handles it)
+  tls:
+    enabled: false
+
+  # Local development environment variables
+  env:
+    LOG_LEVEL: "debug"
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+
+  # Relaxed probes for local development
+  livenessProbe:
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  readinessProbe:
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5

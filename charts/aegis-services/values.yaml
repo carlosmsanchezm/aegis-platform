@@ -1,0 +1,288 @@
+# Default values for aegis-services.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global configuration
+global:
+  # Image pull secrets to use for all services
+  imagePullSecrets: []
+
+#################################################################
+# Platform API Configuration
+#################################################################
+platformApi:
+  # Enable/disable platform-api deployment
+  enabled: true
+
+  # Number of replicas
+  replicaCount: 1
+
+  # Image configuration
+  image:
+    repository: aegis/platform-api
+    pullPolicy: IfNotPresent
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: ""
+
+  # Image pull secrets specific to platform-api
+  imagePullSecrets: []
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    grpcPort: 8081
+    httpPort: 8080
+    annotations: {}
+    # For NodePort or LoadBalancer types
+    # grpcNodePort: 30081
+    # httpNodePort: 30080
+    # loadBalancerIP: ""
+    # loadBalancerSourceRanges: []
+
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: platform-api.local
+        paths:
+          - path: /
+            pathType: Prefix
+            service: "http"  # or "grpc"
+    tls: []
+    #  - secretName: platform-api-tls
+    #    hosts:
+    #      - platform-api.local
+
+  # Environment variables
+  env: {}
+    # Example:
+    # CUSTOM_VAR: "value"
+
+  # Environment variables from secrets
+  envFromSecret: {}
+    # Example:
+    # DATABASE_PASSWORD: "db-password"
+
+  # Application-specific configuration
+  kubeConfigsDir: "/tmp/kubeconfigs"
+  targetNamespace: "default"
+
+  # Secrets to create
+  secrets: {}
+    # Example:
+    # db-password: "secretvalue"
+
+  # Volume mounts
+  volumeMounts: []
+    # Example:
+    # - name: kubeconfigs
+    #   mountPath: /tmp/kubeconfigs
+    #   readOnly: true
+
+  # Volumes
+  volumes: []
+    # Example:
+    # - name: kubeconfigs
+    #   configMap:
+    #     name: kubeconfigs
+
+  # Resource limits and requests
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+
+  # Liveness probe
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Security context for the pod
+  securityContext: {}
+    # fsGroup: 2000
+
+  # Security context for the container
+  containerSecurityContext: {}
+    # allowPrivilegeEscalation: false
+    # capabilities:
+    #   drop:
+    #   - ALL
+    # readOnlyRootFilesystem: true
+    # runAsNonRoot: true
+    # runAsUser: 1000
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod labels
+  podLabels: {}
+
+#################################################################
+# Proxy Configuration
+#################################################################
+proxy:
+  # Enable/disable proxy deployment
+  enabled: true
+
+  # Number of replicas
+  replicaCount: 1
+
+  # Image configuration
+  image:
+    repository: aegis/proxy
+    pullPolicy: IfNotPresent
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: ""
+
+  # Image pull secrets specific to proxy
+  imagePullSecrets: []
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+    # For NodePort or LoadBalancer types
+    # nodePort: 30080
+    # loadBalancerIP: ""
+    # loadBalancerSourceRanges: []
+
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: proxy.local
+        paths:
+          - path: /proxy
+            pathType: Prefix
+    tls: []
+    #  - secretName: proxy-tls
+    #    hosts:
+    #      - proxy.local
+
+  # Environment variables
+  env: {}
+    # Example:
+    # CUSTOM_VAR: "value"
+
+  # Environment variables from secrets
+  envFromSecret: {}
+    # Example:
+    # CUSTOM_SECRET: "secret-key"
+
+  # Proxy-specific configuration
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+  expectedAudience: "aegis-proxy"
+  allowedSuffix: ".svc.cluster.local"
+  cluster: ""  # Optional cluster identifier
+  publicHost: ""  # Optional public hostname
+
+  # Additional secrets to create
+  secrets: {}
+    # Example:
+    # custom-secret: "value"
+
+  # TLS configuration
+  tls:
+    enabled: false
+    cert: ""  # TLS certificate content (use --set-file)
+    key: ""   # TLS private key content (use --set-file)
+
+  # Volume mounts
+  volumeMounts: []
+    # Example:
+    # - name: custom-config
+    #   mountPath: /etc/config
+    #   readOnly: true
+
+  # Volumes
+  volumes: []
+    # Example:
+    # - name: custom-config
+    #   configMap:
+    #     name: custom-config
+
+  # Resource limits and requests
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+
+  # Liveness probe
+  livenessProbe:
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Readiness probe
+  readinessProbe:
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Security context for the pod
+  securityContext: {}
+    # fsGroup: 2000
+
+  # Security context for the container
+  containerSecurityContext: {}
+    # allowPrivilegeEscalation: false
+    # capabilities:
+    #   drop:
+    #   - ALL
+    # readOnlyRootFilesystem: true
+    # runAsNonRoot: true
+    # runAsUser: 1000
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod labels
+  podLabels: {}

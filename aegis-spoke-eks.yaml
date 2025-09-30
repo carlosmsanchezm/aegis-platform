@@ -1,0 +1,29 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: aegis-spoke-prod
+  region: us-east-1
+  version: "1.33"
+
+managedNodeGroups:
+  - name: cpu-workers
+    instanceType: t3.medium
+    desiredCapacity: 1
+    spot: true
+
+  - name: gpu-workers-g4
+    instanceType: g4dn.xlarge
+    desiredCapacity: 0
+    minSize: 0
+    maxSize: 2
+    spot: true
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+    labels:
+      aegis.io/gpu-flavor: nvidia-tesla-t4
+    taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule

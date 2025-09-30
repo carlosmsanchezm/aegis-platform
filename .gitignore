@@ -51,3 +51,12 @@ coverage/
 
 # Misc frontend artifacts
 *.tsbuildinfo
+git status
+scripts/
+agents/strands/
+docs
+policy
+servers
+third_party
+.aegis
+out

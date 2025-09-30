@@ -1,0 +1,31 @@
+{
+  "controls": [
+    "SC-10"
+  ],
+  "baseline": "moderate",
+  "summary": "Implement SC-10 Network Disconnect compliance by adding inactivity-based session termination to the proxy server. Track last activity per session (keyed by JTI), check inactivity timeout before processing each authenticated request, and terminate sessions exceeding configurable limits. Differentiate between privileged users (10-minute timeout) and standard users (15-minute timeout) based on JWT claims. Add configuration via environment variables and update Kubernetes deployment manifests.",
+  "targets": [
+    "services/proxy/internal/server/config.go",
+    "services/proxy/internal/jwtutil/claims.go",
+    "services/proxy/internal/server/server.go",
+    "services/proxy/deploy/deployment.yaml"
+  ],
+  "edits": [
+    {
+      "path": "services/proxy/internal/server/config.go",
+      "instructions": "Add two new fields to the Config struct: PrivilegedSessionTimeout time.Duration and StandardSessionTimeout time.Duration. In LoadConfig(), read environment variables AEGIS_PROXY_PRIVILEGED_TIMEOUT (default: 10 minutes) and AEGIS_PROXY_STANDARD_TIMEOUT (default: 15 minutes) using time.ParseDuration. Add validation to ensure both timeouts are positive values. Document these settings in the configuration comments at the bottom of the file, explaining they enforce SC-10 Network Disconnect requirements."
+    },
+    {
+      "path": "services/proxy/internal/jwtutil/claims.go",
+      "instructions": "Add a new field 'Groups []string `json:\"groups,omitempty\"`' to the Claims struct to capture user group memberships from the JWT. Add a helper method 'func (c *Claims) IsPrivileged() bool' that returns true if the Groups slice contains a privileged indicator (e.g., 'admin', 'privileged', or 'elevated'). This method will be used to determine which inactivity timeout applies. Document that this supports SC-10 differentiated timeout requirements."
+    },
+    {
+      "path": "services/proxy/internal/server/server.go",
+      "instructions": "1. Add a new sessionActivity struct with fields: lastActivity time.Time and mutex sync.RWMutex. 2. Add a sessionStore field (type: *sync.Map) to ProxyServer struct, initialized in NewProxyServer. 3. Create a method checkSessionActivity(jti string, isPrivileged bool) error that: (a) retrieves or creates session entry in sessionStore keyed by JTI, (b) checks if time.Since(lastActivity) exceeds the appropriate timeout (cfg.PrivilegedSessionTimeout or cfg.StandardSessionTimeout based on isPrivileged flag), (c) returns an error if timeout exceeded, (d) updates lastActivity to time.Now() if valid. 4. In ServeHTTP, after JWT verification and before workload authorization (after line 104), call checkSessionActivity(claims.ID, claims.IsPrivileged()). If it returns an error, log an audit event 'session.timeout' and return HTTP 401 Unauthorized with message 'session terminated due to inactivity'. 5. Add cleanup goroutine in NewProxyServer to periodically purge expired sessions from sessionStore (run every 5 minutes, remove entries older than max(PrivilegedSessionTimeout, StandardSessionTimeout) + 5 minutes)."
+    },
+    {
+      "path": "services/proxy/deploy/deployment.yaml",
+      "instructions": "Add two new environment variable entries in the container env section after AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX: (1) AEGIS_PROXY_PRIVILEGED_TIMEOUT with value '10m' and a comment explaining it sets the inactivity timeout for privileged user sessions per SC-10, (2) AEGIS_PROXY_STANDARD_TIMEOUT with value '15m' and a comment explaining it sets the inactivity timeout for standard user sessions per SC-10. Include a note that these values enforce FedRAMP Moderate baseline SC-10 Network Disconnect requirements."
+    }
+  ]
+}

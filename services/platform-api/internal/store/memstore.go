@@ -54,33 +54,7 @@ func NewMemStore() *MemStore {
 	}
 }
 
-var (
-	// ErrSessionNotFound is returned when the requested connection session cannot be located.
-	ErrSessionNotFound = errors.New("connection session not found")
-)
-
-// ConnectionSession captures the persisted state for a single-use remote access token.
-type ConnectionSession struct {
-	SessionID    string
-	WorkloadID   string
-	Subject      string
-	Client       string
-	JTI          string
-	Token        string
-	SSHUser      string
-	SSHHostAlias string
-	InternalHost string
-	Port         int32
-	SSHConfig    string
-	ProxyURL     string
-	VSCodeURI    string
-	ExpiresAt    time.Time
-	OneTime      bool
-	Used         bool
-	Revoked      bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
+// memstore implementation uses the ConnectionSession type from store.go
 
 type jtiRecord struct {
 	SessionID string
@@ -310,12 +284,7 @@ func monthStartUTC(t time.Time) time.Time {
 
 func monthEndUTC(t time.Time) time.Time { return monthStartUTC(t).AddDate(0, 1, 0) }
 
-type BudgetUsageView struct {
-	ReservedUSD float64
-	ActualUSD   float64
-	PeriodStart time.Time
-	PeriodEnd   time.Time
-}
+// BudgetUsageView is defined in store.go
 
 func (s *MemStore) PutBudget(b *aegis.Budget) {
 	s.mu.Lock()

@@ -33,6 +33,10 @@ spec:
               value: :8080
             - name: AEGIS_PROXY_ALLOWED_SUFFIX
               value: .svc.cluster.local
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: ""
+              # Comma-separated list of allowed SAN suffixes for client certificates. Example: ".trusted.example.com,.corp.local"
+              # If set, only clients with at least one SAN ending with an allowed suffix may connect. Supports NIST AC-17 compliance.
           readinessProbe:
             tcpSocket:
               port: 8080

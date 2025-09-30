@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,10 @@ type Config struct {
 	IngressHost      string
 	TLSCertFile      string
 	TLSKeyFile       string
+	// ClientCertSanSuffixAllowList is a list of allowed SAN suffixes for client certificates.
+	// If non-empty, at least one SAN in the client certificate must end with one of these suffixes.
+	// Controlled by the AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX environment variable (comma-separated).
+	ClientCertSanSuffixAllowList []string
 }
 
 func LoadConfig() (Config, error) {
@@ -48,6 +53,17 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("AEGIS_PROXY_TLS_CERT and AEGIS_PROXY_TLS_KEY must be set")
 	}
 
+	// Load client cert SAN suffix allow-list from env var
+	var sanSuffixAllowList []string
+	if v := os.Getenv("AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				sanSuffixAllowList = append(sanSuffixAllowList, s)
+			}
+		}
+	}
+
 	return Config{
 		ListenAddr:       listen,
 		JWTSecret:        []byte(secret),
@@ -58,5 +74,11 @@ func LoadConfig() (Config, error) {
 		IngressHost:      os.Getenv("AEGIS_PROXY_PUBLIC_HOST"),
 		TLSCertFile:      certFile,
 		TLSKeyFile:       keyFile,
+		ClientCertSanSuffixAllowList: sanSuffixAllowList,
 	}, nil
 }
+
+//
+// Configuration options:
+//   - AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX: Comma-separated list of allowed SAN suffixes for client certificates. If set, only clients with at least one SAN ending with an allowed suffix may connect. Example: ".trusted.example.com,.corp.local"
+//

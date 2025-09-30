@@ -1,0 +1,104 @@
+{{- if .Values.platformApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-services.platformApi.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+spec:
+  replicas: {{ .Values.platformApi.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aegis-services.platformApi.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.platformApi.secrets }}
+        checksum/secret: {{ include (print $.Template.BasePath "/platform-api-secret.yaml") . | sha256sum }}
+        {{- end }}
+      labels:
+        {{- include "aegis-services.platformApi.selectorLabels" . | nindent 8 }}
+        {{- with .Values.platformApi.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.platformApi.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: platform-api
+          image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.platformApi.image.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.platformApi.service.grpcPort }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.platformApi.service.httpPort }}
+              protocol: TCP
+          env:
+            - name: GRPC_ADDR
+              value: ":{{ .Values.platformApi.service.grpcPort }}"
+            - name: HTTP_ADDR
+              value: ":{{ .Values.platformApi.service.httpPort }}"
+            - name: KUBECONFIGS_DIR
+              value: {{ .Values.platformApi.kubeConfigsDir | quote }}
+            - name: AEGIS_NAMESPACE
+              value: {{ .Values.platformApi.targetNamespace | quote }}
+            {{- range $key, $value := .Values.platformApi.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.platformApi.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aegis-services.platformApi.secretName" $ }}
+                  key: {{ $value }}
+            {{- end }}
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
+          {{- if .Values.platformApi.volumeMounts }}
+          volumeMounts:
+            {{- toYaml .Values.platformApi.volumeMounts | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.platformApi.volumes }}
+      volumes:
+        {{- toYaml .Values.platformApi.volumes | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

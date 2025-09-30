@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -76,6 +78,13 @@ func NewProxyServer(log *zap.Logger, cfg Config) *ProxyServer {
 }
 
 func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Enforce client certificate SAN suffix allow-list policy (AC-17a/b)
+	if err := s.enforceClientCertSanSuffixPolicy(r); err != nil {
+		s.log.Warn("proxy.audit", zap.String("event", "session.deny"), zap.String("remote", r.RemoteAddr), zap.String("reason", "client_cert_san_suffix_denied"), zap.Error(err))
+		http.Error(w, "client certificate SAN suffix not allowed", http.StatusForbidden)
+		return
+	}
+
 	wid := extractWorkloadID(r.URL.Path)
 	if wid == "" {
 		http.NotFound(w, r)
@@ -103,7 +112,6 @@ func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, r, claims, wid, "cluster_mismatch", errors.New("token cluster mismatch"))
 		return
 	}
-
 	destAddr, err := s.resolveDestination(claims)
 	if err != nil {
 		s.deny(w, r, claims, wid, "dest_invalid", err)
@@ -115,11 +123,13 @@ func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessCert := s.extractClientCert(r)
+
 	switch {
 	case r.Method == http.MethodConnect:
-		s.handleConnect(w, r, claims, destAddr)
+		s.handleConnect(w, r, claims, destAddr, sessCert)
 	case isWebSocketRequest(r):
-		s.handleWebSocket(w, r, claims, destAddr)
+		s.handleWebSocket(w, r, claims, destAddr, sessCert)
 	default:
 		s.auditEvent("session.deny", claims, true,
 			zap.String("wid", wid),
@@ -131,7 +141,52 @@ func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *ProxyServer) handleConnect(w http.ResponseWriter, r *http.Request, claims *jwtutil.Claims, dest string) {
+// enforceClientCertSanSuffixPolicy checks the client certificate SANs against the configured allow-list.
+func (s *ProxyServer) enforceClientCertSanSuffixPolicy(r *http.Request) error {
+	if len(s.cfg.ClientCertSanSuffixAllowList) == 0 {
+		return nil // No policy enforced
+	}
+	connState := getTLSConnectionState(r)
+	if connState == nil || len(connState.PeerCertificates) == 0 {
+		return errors.New("no client certificate presented")
+	}
+	cert := connState.PeerCertificates[0]
+	allowed := false
+	for _, san := range cert.DNSNames {
+		for _, suffix := range s.cfg.ClientCertSanSuffixAllowList {
+			if strings.HasSuffix(san, suffix) {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("client certificate SANs %v do not match allowed suffixes %v", cert.DNSNames, s.cfg.ClientCertSanSuffixAllowList)
+	}
+	return nil
+}
+
+// extractClientCert returns the verified client certificate (if present) from the request.
+func (s *ProxyServer) extractClientCert(r *http.Request) *x509.Certificate {
+	connState := getTLSConnectionState(r)
+	if connState == nil || len(connState.PeerCertificates) == 0 {
+		return nil
+	}
+	return connState.PeerCertificates[0]
+}
+
+// getTLSConnectionState extracts the TLS connection state from the request.
+func getTLSConnectionState(r *http.Request) *tls.ConnectionState {
+	if r == nil || r.TLS == nil {
+		return nil
+	}
+	return r.TLS
+}
+
+func (s *ProxyServer) handleConnect(w http.ResponseWriter, r *http.Request, claims *jwtutil.Claims, dest string, clientCert *x509.Certificate) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
@@ -179,11 +234,7 @@ func (s *ProxyServer) handleConnect(w http.ResponseWriter, r *http.Request, clai
 	}
 
 	start := time.Now()
-	s.auditEvent("session.start", claims, false,
-		zap.String("remote", r.RemoteAddr),
-		zap.String("dest", dest),
-		zap.String("mode", "connect"),
-	)
+	s.auditSessionStart("session.start", claims, false, r.RemoteAddr, dest, "connect", clientCert)
 
 	var txBytes, rxBytes uint64
 	sessErr := &sessionError{}
@@ -223,7 +274,7 @@ func (s *ProxyServer) handleConnect(w http.ResponseWriter, r *http.Request, clai
 	rxBytes = upstreamReader.total
 }
 
-func (s *ProxyServer) handleWebSocket(w http.ResponseWriter, r *http.Request, claims *jwtutil.Claims, dest string) {
+func (s *ProxyServer) handleWebSocket(w http.ResponseWriter, r *http.Request, claims *jwtutil.Claims, dest string, clientCert *x509.Certificate) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.auditEvent("session.deny", claims, true,
@@ -248,11 +299,7 @@ func (s *ProxyServer) handleWebSocket(w http.ResponseWriter, r *http.Request, cl
 	}
 
 	start := time.Now()
-	s.auditEvent("session.start", claims, false,
-		zap.String("remote", r.RemoteAddr),
-		zap.String("dest", dest),
-		zap.String("mode", "websocket"),
-	)
+	s.auditSessionStart("session.start", claims, false, r.RemoteAddr, dest, "websocket", clientCert)
 
 	var txBytes, rxBytes atomic.Uint64
 	sessErr := &sessionError{}
@@ -272,7 +319,6 @@ func (s *ProxyServer) handleWebSocket(w http.ResponseWriter, r *http.Request, cl
 		upstream.Close()
 		conn.Close()
 	}()
-
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -385,6 +431,33 @@ func (s *ProxyServer) auditEvent(event string, claims *jwtutil.Claims, warn bool
 	}
 }
 
+// auditSessionStart logs session.start with client certificate details for audit (AC-17a.03, AC-17b)
+func (s *ProxyServer) auditSessionStart(event string, claims *jwtutil.Claims, warn bool, remote, dest, mode string, clientCert *x509.Certificate) {
+	extra := []zap.Field{
+		zap.String("remote", remote),
+		zap.String("dest", dest),
+		zap.String("mode", mode),
+	}
+	if clientCert != nil {
+		extra = append(extra,
+			zap.String("client_cert_subject", clientCert.Subject.String()),
+			zap.String("client_cert_serial", clientCert.SerialNumber.Text(16)),
+			zap.String("mtls_subject", clientCert.Subject.String()),
+			zap.String("mtls_serial", clientCert.SerialNumber.Text(16)),
+		)
+		if len(clientCert.DNSNames) > 0 {
+			extra = append(extra, zap.Strings("client_cert_sans", clientCert.DNSNames))
+		}
+		if len(clientCert.Subject.CommonName) > 0 {
+			extra = append(extra, zap.String("client_cert_cn", clientCert.Subject.CommonName))
+		}
+		if len(clientCert.AuthorityKeyId) > 0 {
+			extra = append(extra, zap.String("client_cert_akid", hex.EncodeToString(clientCert.AuthorityKeyId)))
+		}
+	}
+	s.auditEvent(event, claims, warn, extra...)
+}
+
 var errBadTokenFormat = errors.New("authorization header must be Bearer token")
 
 func bearerToken(header string) (string, error) {
@@ -420,6 +493,7 @@ func (s *ProxyServer) Start() error {
 	if err != nil {
 		return fmt.Errorf("load tls certificate: %w", err)
 	}
+
 	tlsConfig := &tls.Config{
 		Certificates:             []tls.Certificate{cert},
 		MinVersion:               tls.VersionTLS12,
@@ -434,6 +508,34 @@ func (s *ProxyServer) Start() error {
 			tls.CurveP256,
 			tls.CurveP384,
 		},
+		// Enforce client certificate authentication
+		ClientAuth: tls.RequireAndVerifyClientCert,
+	}
+
+	// Add VerifyConnection to enforce SAN suffix allow-list at handshake time (AC-17b)
+	if len(s.cfg.ClientCertSanSuffixAllowList) > 0 {
+		tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("no client certificate presented")
+			}
+			cert := cs.PeerCertificates[0]
+			allowed := false
+			for _, san := range cert.DNSNames {
+				for _, suffix := range s.cfg.ClientCertSanSuffixAllowList {
+					if strings.HasSuffix(san, suffix) {
+						allowed = true
+						break
+					}
+				}
+				if allowed {
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("client certificate SANs %v do not match allowed suffixes %v", cert.DNSNames, s.cfg.ClientCertSanSuffixAllowList)
+			}
+			return nil
+		}
 	}
 
 	server := &http.Server{

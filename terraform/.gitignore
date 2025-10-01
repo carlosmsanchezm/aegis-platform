@@ -48,3 +48,5 @@ Thumbs.db
 # Helm values generated from Terraform
 helm_values.json
 aegis-services-values.yaml
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup

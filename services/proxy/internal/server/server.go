@@ -22,12 +22,19 @@ import (
 	"github.com/yourorg/aegis/services/proxy/internal/jwtutil"
 )
 
+// sessionActivity tracks the last activity timestamp for a session.
+type sessionActivity struct {
+	lastActivity time.Time
+	mu           sync.RWMutex
+}
+
 type ProxyServer struct {
-	log      *zap.Logger
-	cfg      Config
-	verifier *jwtutil.Verifier
-	jtiStore *jti.Store
-	upgrader websocket.Upgrader
+	log          *zap.Logger
+	cfg          Config
+	verifier     *jwtutil.Verifier
+	jtiStore     *jti.Store
+	upgrader     websocket.Upgrader
+	sessionStore *sync.Map // map[string]*sessionActivity keyed by JTI
 }
 
 type countingReader struct {
@@ -66,15 +73,74 @@ func (s *sessionError) get() error {
 func NewProxyServer(log *zap.Logger, cfg Config) *ProxyServer {
 	store := jti.New(cfg.TokenReuseTTL)
 	verifier := jwtutil.NewVerifier(cfg.JWTSecret).WithAudience(cfg.ExpectedAudience)
-	return &ProxyServer{
-		log:      log,
-		cfg:      cfg,
-		verifier: verifier,
-		jtiStore: store,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(*http.Request) bool { return true },
-		},
+	srv := &ProxyServer{
+		log:          log,
+		cfg:          cfg,
+		verifier:     verifier,
+		jtiStore:     store,
+		upgrader:     websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+		sessionStore: &sync.Map{},
 	}
+
+	// Start background cleanup goroutine for expired sessions
+	go srv.cleanupExpiredSessions()
+
+	return srv
+}
+
+// cleanupExpiredSessions periodically removes expired session entries from sessionStore.
+func (s *ProxyServer) cleanupExpiredSessions() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		maxTimeout := s.cfg.StandardSessionTimeout
+		if s.cfg.PrivilegedSessionTimeout > maxTimeout {
+			maxTimeout = s.cfg.PrivilegedSessionTimeout
+		}
+		expiryCutoff := time.Now().Add(-(maxTimeout + 5*time.Minute))
+		s.sessionStore.Range(func(key, value interface{}) bool {
+			if sess, ok := value.(*sessionActivity); ok {
+				sess.mu.RLock()
+				if sess.lastActivity.Before(expiryCutoff) {
+					sess.mu.RUnlock()
+					s.sessionStore.Delete(key)
+				} else {
+					sess.mu.RUnlock()
+				}
+			}
+			return true
+		})
+	}
+}
+
+// checkSessionActivity verifies that the session has not exceeded its inactivity timeout.
+// Returns an error if the session is timed out, otherwise updates the last activity timestamp.
+func (s *ProxyServer) checkSessionActivity(jti string, isPrivileged bool) error {
+	if jti == "" {
+		return errors.New("jti required for session activity tracking")
+	}
+
+	var timeout time.Duration
+	if isPrivileged {
+		timeout = s.cfg.PrivilegedSessionTimeout
+	} else {
+		timeout = s.cfg.StandardSessionTimeout
+	}
+
+	now := time.Now()
+	val, _ := s.sessionStore.LoadOrStore(jti, &sessionActivity{lastActivity: now})
+	sess := val.(*sessionActivity)
+
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+
+	if time.Since(sess.lastActivity) > timeout {
+		return fmt.Errorf("session timed out after %v of inactivity", timeout)
+	}
+
+	// Update last activity
+	sess.lastActivity = now
+	return nil
 }
 
 func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +166,18 @@ func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.verifier.Verify(tokenStr)
 	if err != nil {
 		s.deny(w, r, nil, wid, "invalid_token", err)
+		return
+	}
+
+	// Check session inactivity timeout (SC-10 Network Disconnect)
+	if err := s.checkSessionActivity(claims.ID, claims.IsPrivileged()); err != nil {
+		s.auditEvent("session.timeout", claims, true,
+			zap.String("remote", r.RemoteAddr),
+			zap.String("wid", wid),
+			zap.Bool("privileged", claims.IsPrivileged()),
+			zap.Error(err),
+		)
+		http.Error(w, "session terminated due to inactivity", http.StatusUnauthorized)
 		return
 	}
 
@@ -421,6 +499,9 @@ func (s *ProxyServer) auditEvent(event string, claims *jwtutil.Claims, warn bool
 		}
 		if claims.Cluster != "" {
 			fields = append(fields, zap.String("cluster", claims.Cluster))
+		}
+		if len(claims.Groups) > 0 {
+			fields = append(fields, zap.Strings("groups", claims.Groups))
 		}
 	}
 	fields = append(fields, extra...)

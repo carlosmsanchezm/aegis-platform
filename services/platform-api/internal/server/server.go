@@ -41,7 +41,7 @@ import (
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
 	log             *zap.Logger
-	store           *store.MemStore
+	store           store.Store
 	kubeClients     *kubeclients.Manager
 	targetNamespace string
 	proxyBaseURL    string
@@ -127,7 +127,7 @@ var (
 	)
 )
 
-func New(log *zap.Logger, st *store.MemStore, clients *kubeclients.Manager, namespace string) *Server {
+func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string) *Server {
 	if namespace == "" {
 		namespace = "default"
 	}

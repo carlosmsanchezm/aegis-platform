@@ -19,7 +19,7 @@ data:
 {{- else }}
 {{- range $path, $file := $files }}
   {{ base $path }}: |
-{{ $file | indent 4 }}
+{{ $.Files.Get $path | indent 4 }}
 {{- end }}
 {{- end }}
 {{- end }}

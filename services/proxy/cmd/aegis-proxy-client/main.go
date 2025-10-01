@@ -39,7 +39,7 @@ func main() {
 
     var conn net.Conn
     if u.Scheme == "https" {
-        conn, err = tls.Dial("tcp", host, &tls.Config{MinVersion: tls.VersionTLS12})
+        conn, err = tls.Dial("tcp", host, &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true})
     } else {
         conn, err = net.Dial("tcp", host)
     }

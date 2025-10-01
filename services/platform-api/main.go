@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/server"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	"github.com/yourorg/aegis/services/platform-api/internal/store/postgres"
 )
 
 func main() {
@@ -19,7 +21,22 @@ func main() {
 	grpcAddr := getenv("GRPC_ADDR", ":8081")
 	httpAddr := getenv("HTTP_ADDR", ":8080")
 
-	st := store.NewMemStore()
+	// Initialize store based on AEGIS_STORE_BACKEND environment variable
+	var st store.Store
+	storeBackend := getenv("AEGIS_STORE_BACKEND", "memory")
+	if storeBackend == "postgres" {
+		dsn := buildPostgresDSN()
+		var err error
+		st, err = postgres.New(dsn, logger)
+		if err != nil {
+			logger.Fatal("failed to initialize postgres store", zap.Error(err))
+		}
+		logger.Info("using PostgreSQL store", zap.String("backend", "postgres"))
+	} else {
+		st = store.NewMemStore()
+		logger.Info("using in-memory store", zap.String("backend", "memory"))
+	}
+
 	kubeconfigsDir := getenv("KUBECONFIGS_DIR", "/tmp/kubeconfigs")
 	targetNamespace := getenv("AEGIS_NAMESPACE", "default")
 	kubeClientManager := kubeclients.New(kubeconfigsDir)
@@ -39,4 +56,16 @@ func getenv(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func buildPostgresDSN() string {
+	host := getenv("DB_HOST", "localhost")
+	port := getenv("DB_PORT", "5432")
+	user := getenv("DB_USER", "postgres")
+	password := os.Getenv("DB_PASSWORD") // Required, no default
+	dbname := getenv("DB_NAME", "postgres")
+	sslmode := getenv("DB_SSLMODE", "disable")
+
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		user, password, host, port, dbname, sslmode)
 }

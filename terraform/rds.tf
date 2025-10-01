@@ -4,6 +4,11 @@
 resource "random_password" "db_password" {
   length  = 32
   special = true
+
+  # Force new password generation
+  keepers = {
+    reset = "2025-09-30"
+  }
 }
 
 # Store database password in AWS Secrets Manager
@@ -124,6 +129,9 @@ module "rds" {
 
   # Enable automated minor version upgrades
   auto_minor_version_upgrade = true
+
+  # Apply changes immediately (for password updates)
+  apply_immediately = true
 
   # Database parameters
   create_db_parameter_group = true

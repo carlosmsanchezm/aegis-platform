@@ -42,6 +42,14 @@ platformApi:
     failureThreshold: 3
     httpGet: null  # Remove httpGet
 
+  # Enable database migrations
+  migrations:
+    enabled: true
+    image:
+      repository: ghcr.io/golang-migrate/migrate
+      tag: v4.16.2
+      pullPolicy: IfNotPresent
+
 proxy:
   enabled: true
   replicaCount: 1

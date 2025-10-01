@@ -9,13 +9,32 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// Claims represents the JWT claims structure with user metadata.
 type Claims struct {
-	Sub     string `json:"sub"`
-	Wid     string `json:"wid"`
-	Dest    string `json:"dest"`
-	DNS     string `json:"dns,omitempty"`
-	Cluster string `json:"cluster,omitempty"`
+	Sub     string   `json:"sub"`
+	Wid     string   `json:"wid"`
+	Dest    string   `json:"dest"`
+	DNS     string   `json:"dns,omitempty"`
+	Cluster string   `json:"cluster,omitempty"`
+	// Groups captures user group memberships from the JWT (e.g., admin, privileged).
+	// Used to determine session inactivity timeout per SC-10 requirements.
+	Groups []string `json:"groups,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// IsPrivileged returns true if the user belongs to a privileged group.
+// Privileged users are subject to stricter inactivity timeouts (SC-10 Network Disconnect).
+func (c *Claims) IsPrivileged() bool {
+	if c == nil {
+		return false
+	}
+	for _, g := range c.Groups {
+		g = strings.ToLower(strings.TrimSpace(g))
+		if g == "admin" || g == "privileged" || g == "elevated" {
+			return true
+		}
+	}
+	return false
 }
 
 type Verifier struct {

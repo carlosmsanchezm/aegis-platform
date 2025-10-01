@@ -37,6 +37,14 @@ spec:
               value: ""
               # Comma-separated list of allowed SAN suffixes for client certificates. Example: ".trusted.example.com,.corp.local"
               # If set, only clients with at least one SAN ending with an allowed suffix may connect. Supports NIST AC-17 compliance.
+            # SC-10 Network Disconnect: Inactivity timeout for privileged user sessions (default: 10m)
+            # Enforces FedRAMP Moderate baseline SC-10 requirement for automatic session termination
+            - name: AEGIS_PROXY_PRIVILEGED_TIMEOUT
+              value: "10m"
+            # SC-10 Network Disconnect: Inactivity timeout for standard user sessions (default: 15m)
+            # Enforces FedRAMP Moderate baseline SC-10 requirement for automatic session termination
+            - name: AEGIS_PROXY_STANDARD_TIMEOUT
+              value: "15m"
           readinessProbe:
             tcpSocket:
               port: 8080

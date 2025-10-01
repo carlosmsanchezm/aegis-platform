@@ -56,6 +56,7 @@ import (
 const (
 	backendWorkspace = "workspace"
 	backendPyTorch   = "pytorch_v1"
+	backendJob       = "job_v1"
 
 	requeuePending               = 10 * time.Second
 	workspaceJobTTLSeconds int32 = 600
@@ -508,48 +509,40 @@ func (r *AegisWorkloadReconciler) reconcileTraining(ctx context.Context, aw *aeg
 	if workers <= 0 {
 		workers = 1
 	}
-	gpusPer := int(spec.GpusPerWorker)
-	if gpusPer <= 0 {
-		gpusPer = 1
-	}
-
-	if err := r.ensureTrainingDiscovery(); err != nil {
-		log.Error(err, "training CRDs unavailable")
-		return ctrl.Result{}, err
-	}
 
 	name := builders.SanitizeName("aegis-" + aw.Name)
-	resource := r.Dynamic.Resource(*r.pyTorchGVR).Namespace(aw.Namespace)
 
-	pyJob, err := resource.Get(ctx, name, metav1.GetOptions{})
+	// Use simple Kubernetes Jobs instead of PyTorchJob
+	var existingJob batchv1.Job
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: aw.Namespace}, &existingJob)
 	if apierrors.IsNotFound(err) {
-		obj := builders.BuildPyTorchJob(builders.TrainingOptions{
-			APIVersion:    r.pyTorchAPIVersion,
-			Namespace:     aw.Namespace,
-			Name:          name,
-			Image:         image,
-			Command:       spec.Command,
-			Flavor:        spec.Flavor,
-			Workers:       workers,
-			GPUsPerWorker: gpusPer,
-			DryRun:        r.dryRun,
-			Hints:         convertSpecHints(aw.Spec.Hints),
+		// Create new Job
+		job := builders.BuildTrainingJob(builders.TrainingOptions{
+			Namespace: aw.Namespace,
+			Name:      name,
+			Image:     image,
+			Command:   spec.Command,
+			Flavor:    spec.Flavor,
+			Workers:   workers,
+			DryRun:    r.dryRun,
+			Hints:     convertSpecHints(aw.Spec.Hints),
 		})
-		if err := controllerutil.SetControllerReference(aw, obj, r.Scheme); err != nil {
+
+		if err := controllerutil.SetControllerReference(aw, job, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
-		if _, err := resource.Create(ctx, obj, metav1.CreateOptions{}); err != nil {
+		if err := r.Create(ctx, job); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		log.Info("pytorchjob created", "name", name)
-		r.Recorder.Eventf(aw, corev1.EventTypeNormal, "Submitted", "PyTorchJob %s created", name)
+		log.Info("training job created", "name", name)
+		r.Recorder.Eventf(aw, corev1.EventTypeNormal, "Submitted", "Training Job %s created", name)
 
 		if err := r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
 			st.Phase = aegisv1alpha1.PhaseSubmitted
-			st.Backend = backendPyTorch
-			st.JobRef = &aegisv1alpha1.JobRef{APIVersion: r.pyTorchAPIVersion, Kind: "PyTorchJob", Name: name, Namespace: aw.Namespace}
-			st.URL = fmt.Sprintf("k8s://%s/pytorchjob/%s", aw.Namespace, name)
+			st.Backend = backendJob
+			st.JobRef = &aegisv1alpha1.JobRef{APIVersion: "batch/v1", Kind: "Job", Name: name, Namespace: aw.Namespace}
+			st.URL = fmt.Sprintf("k8s://%s/job/%s", aw.Namespace, name)
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -559,15 +552,17 @@ func (r *AegisWorkloadReconciler) reconcileTraining(ctx context.Context, aw *aeg
 		return ctrl.Result{}, err
 	}
 
+	// Job exists, check status
 	if aw.Status.JobRef == nil {
 		if err := r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
-			st.JobRef = &aegisv1alpha1.JobRef{APIVersion: r.pyTorchAPIVersion, Kind: "PyTorchJob", Name: name, Namespace: aw.Namespace}
+			st.JobRef = &aegisv1alpha1.JobRef{APIVersion: "batch/v1", Kind: "Job", Name: name, Namespace: aw.Namespace}
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	r.applyTrainingTransitions(ctx, aw, pyJob)
+	// Apply status transitions based on Job state
+	r.applyJobTransitions(ctx, aw, &existingJob, backendJob)
 
 	return ctrl.Result{RequeueAfter: requeuePending}, nil
 }

@@ -304,6 +304,18 @@ func gpuResourceRequests(opts WorkspaceOptions) corev1.ResourceList {
 		return nil
 	}
 
+	// First check hints for explicit GPU count
+	count := int32(0)
+	if opts.Hints != nil {
+		count = opts.Hints.GPUCount
+	}
+
+	// If count is explicitly 0, don't request GPUs
+	if count == 0 {
+		return nil
+	}
+
+	// Determine GPU resource name
 	resName := opts.GPUResourceOverride
 	if opts.Hints != nil && opts.Hints.ResourceName != "" {
 		resName = opts.Hints.ResourceName
@@ -313,14 +325,6 @@ func gpuResourceRequests(opts WorkspaceOptions) corev1.ResourceList {
 	}
 	if resName == "" {
 		return nil
-	}
-
-	count := int32(1)
-	if opts.Hints != nil && opts.Hints.GPUCount > 0 {
-		count = opts.Hints.GPUCount
-	}
-	if count <= 0 {
-		count = 1
 	}
 
 	quantity := resource.MustParse(strconv.Itoa(int(count)))

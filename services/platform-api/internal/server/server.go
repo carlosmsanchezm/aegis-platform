@@ -1055,7 +1055,13 @@ func buildHostAlias(workloadID string) string {
 }
 
 func buildVSCodeURI(alias string) string {
-	return fmt.Sprintf("vscode://vscode-remote/ssh-remote+%s", alias)
+	// Use aegis.aegis-remote protocol instead of ssh-remote
+	// Extract workload ID from alias (format: aegis-w-w-{id})
+	workloadID := alias
+	if len(alias) > 8 && alias[:8] == "aegis-w-" {
+		workloadID = alias[8:] // Remove "aegis-w-" prefix to get "w-{id}"
+	}
+	return fmt.Sprintf("vscode://aegis.aegis-remote/aegis+%s", workloadID)
 }
 
 func buildSSHConfig(alias, internalHost, sshUser, proxyURL, token string, port int32) string {

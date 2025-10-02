@@ -8,10 +8,11 @@
 platformApi:
   enabled: true
   replicaCount: 2  # High availability
+  serviceAccountName: aegis-platform-api
 
   image:
-    repository: YOUR_ECR_REGISTRY/aegis/platform-api
-    tag: "v1.0.0"  # Use specific version tags in production
+    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
+    tag: "latest"  # TODO: Use specific version tags in production
     pullPolicy: IfNotPresent
 
   service:
@@ -162,8 +163,8 @@ proxy:
   replicaCount: 1  # Until shared JTI backend is deployed
 
   image:
-    repository: YOUR_ECR_REGISTRY/aegis/proxy
-    tag: "v1.0.0"  # Use specific version tags in production
+    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
+    tag: "latest"  # TODO: Use specific version tags in production
     pullPolicy: IfNotPresent
 
   service:

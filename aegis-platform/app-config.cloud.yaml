@@ -1,0 +1,13 @@
+# Cloud deployment configuration - points to AWS EKS Load Balancer
+
+proxy:
+  endpoints:
+    '/aegis':
+      target: 'http://ac992ddcad7d1400fb9d13c54e789908-385570757.us-east-1.elb.amazonaws.com:8080'
+      changeOrigin: true
+      credentials: forward
+      allowedHeaders:
+        - authorization
+        - Authorization
+        - x-aegis-user
+        - X-Aegis-User

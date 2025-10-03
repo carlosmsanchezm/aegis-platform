@@ -1,0 +1,13 @@
+# Local development configuration - points to local platform-api
+
+proxy:
+  endpoints:
+    '/aegis':
+      target: 'http://localhost:8080'
+      changeOrigin: true
+      credentials: forward
+      allowedHeaders:
+        - authorization
+        - Authorization
+        - x-aegis-user
+        - X-Aegis-User

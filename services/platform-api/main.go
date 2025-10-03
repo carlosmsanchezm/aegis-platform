@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 
 	"go.uber.org/zap"
@@ -66,6 +67,9 @@ func buildPostgresDSN() string {
 	dbname := getenv("DB_NAME", "postgres")
 	sslmode := getenv("DB_SSLMODE", "disable")
 
+	// URL-encode password to handle special characters
+	encodedPassword := url.QueryEscape(password)
+
 	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		user, password, host, port, dbname, sslmode)
+		user, encodedPassword, host, port, dbname, sslmode)
 }

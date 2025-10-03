@@ -66,3 +66,4 @@ terraform.tfstate.backup
 agents/claude/
 plans/
 backups/
+CREDENTIALS-CHEATSHEET.md

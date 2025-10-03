@@ -7,7 +7,7 @@
 #################################################################
 platformApi:
   enabled: true
-  replicaCount: 2  # High availability
+  replicaCount: 1  # Single instance for resource constraints
   serviceAccountName: aegis-platform-api
 
   image:
@@ -95,39 +95,39 @@ platformApi:
       cpu: "500m"
       memory: "512Mi"
 
-  # Production-grade probes
-  livenessProbe:
-    httpGet:
-      path: /healthz
-      port: 8080
-    initialDelaySeconds: 60
-    periodSeconds: 30
-    timeoutSeconds: 10
-    failureThreshold: 3
+  # Production-grade probes (disabled - health endpoints not implemented yet)
+  # livenessProbe:
+  #   httpGet:
+  #     path: /healthz
+  #     port: 8080
+  #   initialDelaySeconds: 60
+  #   periodSeconds: 30
+  #   timeoutSeconds: 10
+  #   failureThreshold: 3
 
-  readinessProbe:
-    httpGet:
-      path: /readyz
-      port: 8080
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 3
+  # readinessProbe:
+  #   httpGet:
+  #     path: /readyz
+  #     port: 8080
+  #   initialDelaySeconds: 10
+  #   periodSeconds: 10
+  #   timeoutSeconds: 5
+  #   failureThreshold: 3
 
-  # Security context
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 2000
+  # Security context (disabled for now - binary permissions issue)
+  # securityContext:
+  #   runAsNonRoot: true
+  #   runAsUser: 1000
+  #   fsGroup: 2000
 
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 1000
+  # containerSecurityContext:
+  #   allowPrivilegeEscalation: false
+  #   capabilities:
+  #     drop:
+  #       - ALL
+  #   readOnlyRootFilesystem: true
+  #   runAsNonRoot: true
+  #   runAsUser: 1000
 
   # Spread across zones for availability
   affinity:
@@ -198,8 +198,8 @@ proxy:
   publicHost: "proxy.yourdomain.com"
 
   # Production secrets (configure externally)
-  envFromSecret:
-    JWT_SECRET: "proxy-jwt-secret"
+  # envFromSecret:
+  #   JWT_SECRET: "jwt-secret"  # Not needed - already set via AEGIS_PROXY_JWT_SECRET in template
 
   # Additional secrets for production
   secrets: {}
@@ -242,20 +242,20 @@ proxy:
     timeoutSeconds: 3
     failureThreshold: 3
 
-  # Security context
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 2000
+  # Security context (disabled for now - binary permissions issue)
+  # securityContext:
+  #   runAsNonRoot: true
+  #   runAsUser: 1000
+  #   fsGroup: 2000
 
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 1000
+  # containerSecurityContext:
+  #   allowPrivilegeEscalation: false
+  #   capabilities:
+  #     drop:
+  #       - ALL
+  #   readOnlyRootFilesystem: true
+  #   runAsNonRoot: true
+  #   runAsUser: 1000
 
   # Spread across zones for availability
   affinity:

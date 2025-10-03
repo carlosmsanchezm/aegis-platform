@@ -9,7 +9,7 @@ Expand the name of the chart.
 Create a default fully qualified app name.
 */}}
 {{- define "aegis-services.fullname" -}}
-{{- printf "%s-%s" .Release.Name (include "aegis-services.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*

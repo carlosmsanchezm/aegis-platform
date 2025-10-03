@@ -66,8 +66,6 @@ spec:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
             {{- end }}
-            - name: DATABASE_URL
-              value: "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
           {{- if .Values.platformApi.volumeMounts }}
           volumeMounts:
             {{- toYaml .Values.platformApi.volumeMounts | nindent 12 }}

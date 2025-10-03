@@ -157,6 +157,139 @@ output "helm_values" {
   }
 }
 
+# Helm values for aegis-services chart (control plane / hub)
+output "helm_values_aegis_services" {
+  description = "Ready-to-use values for aegis-services Helm chart (control plane)"
+  sensitive   = true
+  value = <<-EOT
+  # Auto-generated from Terraform - aegis-services (Control Plane / Hub)
+  # Cluster: ${module.eks.cluster_name}
+  # Region: ${var.aws_region}
+  # Generated: ${timestamp()}
+
+  platformApi:
+    image:
+      repository: ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/platform-api
+      tag: "latest"  # TODO: Use specific version tags
+
+    env:
+      DB_HOST: "${split(":", module.rds.db_instance_endpoint)[0]}"
+      DB_PORT: "${module.rds.db_instance_port}"
+      DB_NAME: "${module.rds.db_instance_name}"
+      DB_USER: "${module.rds.db_instance_username}"
+      DB_SSLMODE: "require"
+      AEGIS_PROXY_BASE_URL: "https://proxy.yourdomain.com"  # TODO: Update domain
+      AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
+      AEGIS_STORE_BACKEND: "postgres"
+
+    # Secrets - retrieve with: terraform output -raw db_password_secret_value
+    # kubectl create secret generic aegis-platform-secrets \
+    #   --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
+    #   --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)"
+
+    ingress:
+      enabled: true
+      hosts:
+        - host: platform-api.yourdomain.com  # TODO: Update domain
+          paths:
+            - path: /
+              pathType: Prefix
+              service: "http"
+        - host: platform-api-grpc.yourdomain.com  # TODO: Update domain
+          paths:
+            - path: /
+              pathType: Prefix
+              service: "grpc"
+
+  proxy:
+    image:
+      repository: ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/proxy
+      tag: "latest"  # TODO: Use specific version tags
+
+    publicHost: "proxy.yourdomain.com"  # TODO: Update domain
+
+    ingress:
+      enabled: true
+      hosts:
+        - host: proxy.yourdomain.com  # TODO: Update domain
+          paths:
+            - path: /proxy
+              pathType: Prefix
+  EOT
+}
+
+# Helm values for aegis-spoke chart (workload cluster)
+output "helm_values_aegis_spoke" {
+  description = "Ready-to-use values for aegis-spoke Helm chart (workload cluster)"
+  sensitive   = true
+  value = <<-EOT
+  # Auto-generated from Terraform - aegis-spoke (Workload Cluster)
+  # Cluster: ${module.eks.cluster_name}
+  # Region: ${var.aws_region}
+  # Generated: ${timestamp()}
+
+  k8sAgent:
+    image:
+      repository: ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/k8s-agent
+      tag: "latest"  # TODO: Use specific version tags
+
+    env:
+      AEGIS_CP_GRPC: "aegis-platform-api.aegis-system.svc.cluster.local:8081"
+      AEGIS_PROXY_INGRESS_HOST: "proxy.yourdomain.com"  # TODO: Update domain
+      AEGIS_CLUSTER_ID: "aws-${var.aws_region}-${var.environment}"
+
+  proxy:
+    enabled: false  # Use aegis-services proxy for hub/spoke architecture
+  EOT
+}
+
+# Secret values (sensitive outputs)
+output "db_password_secret_value" {
+  description = "Database password (use to create k8s secret)"
+  value       = var.create_secrets ? nonsensitive(random_password.db_password.result) : "not-created"
+  sensitive   = true
+}
+
+# Complete database connection information
+output "database_connection_info" {
+  description = "Complete database connection information for platform-api"
+  sensitive   = true
+  value = {
+    host     = split(":", module.rds.db_instance_endpoint)[0]
+    port     = module.rds.db_instance_port
+    database = module.rds.db_instance_name
+    username = module.rds.db_instance_username
+    password = var.create_secrets ? nonsensitive(random_password.db_password.result) : "not-created"
+    sslmode  = "require"
+    # Connection string for reference
+    connection_string = "postgres://${module.rds.db_instance_username}:<PASSWORD>@${split(":", module.rds.db_instance_endpoint)[0]}:${module.rds.db_instance_port}/${module.rds.db_instance_name}?sslmode=require"
+  }
+}
+
+output "jwt_secret_value" {
+  description = "JWT secret for proxy (use to create k8s secret)"
+  value       = var.create_secrets ? nonsensitive(random_password.jwt_secret.result) : "not-created"
+  sensitive   = true
+}
+
+# Convenience output for creating K8s secrets
+output "k8s_secret_commands" {
+  description = "Commands to create Kubernetes secrets from Terraform outputs"
+  value = <<-EOT
+  # Create secrets in Kubernetes from Terraform outputs:
+
+  # 1. For aegis-services (control plane):
+  kubectl create secret generic aegis-platform-secrets \
+    --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
+    --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)" \
+    --namespace aegis-system
+
+  # 2. AWS Secrets Manager ARNs (for External Secrets Operator):
+  # DB Password: ${var.create_secrets ? aws_secretsmanager_secret.db_password[0].arn : "not-created"}
+  # JWT Secret: ${var.create_secrets ? aws_secretsmanager_secret.jwt_secret[0].arn : "not-created"}
+  EOT
+}
+
 # AWS Account Information
 data "aws_caller_identity" "current" {}
 

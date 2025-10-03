@@ -18,7 +18,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 
 # Copy the binary from builder stage
-COPY --from=builder /app/services/platform-api/platform-api .
+COPY --from=builder --chown=1000:1000 /app/services/platform-api/platform-api .
 
 # Copy migrations if they exist
 COPY --from=builder /app/services/platform-api/migrations ./migrations

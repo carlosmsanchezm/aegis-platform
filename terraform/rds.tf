@@ -4,10 +4,12 @@
 resource "random_password" "db_password" {
   length  = 32
   special = true
+  # RDS doesn't allow: / @ " (space)
+  override_special = "!#$%&*()-_=+[]{}<>:?"
 
   # Force new password generation
   keepers = {
-    reset = "2025-09-30"
+    reset = "2025-10-03"
   }
 }
 
@@ -103,6 +105,9 @@ module "rds" {
   username = "aegis_api"
   password = random_password.db_password.result
   port     = 5432
+
+  # Use Terraform-managed password instead of AWS-managed
+  manage_master_user_password = false
 
   # Network configuration
   db_subnet_group_name   = module.vpc.database_subnet_group_name

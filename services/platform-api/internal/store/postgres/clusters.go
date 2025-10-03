@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -53,45 +52,9 @@ ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.regio
 }
 
 func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
-	if hb == nil || hb.GetClusterId() == "" {
-		return
-	}
-	ctx, cancel := s.withTimeout(context.Background())
-	defer cancel()
-
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		s.logExecError("cluster_hb_begin", err)
-		return
-	}
-	defer tx.Rollback(ctx)
-
-	now := time.Now().UTC()
-	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, ttf_gpu_seconds_p50, last_heartbeat, created_at, updated_at)
-VALUES ($1, $2, $3, now(), now())
-ON CONFLICT (id) DO UPDATE SET ttf_gpu_seconds_p50=EXCLUDED.ttf_gpu_seconds_p50, last_heartbeat=EXCLUDED.last_heartbeat, updated_at=now()`, hb.GetClusterId(), hb.GetTtfGpuSecondsP50(), now); err != nil {
-		s.logExecError("cluster_hb_upsert", err, zap.String("cluster_id", hb.GetClusterId()))
-		return
-	}
-
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_flavors WHERE cluster_id=$1`, hb.GetClusterId()); err != nil {
-		s.logExecError("cluster_hb_delete_flavors", err, zap.String("cluster_id", hb.GetClusterId()))
-		return
-	}
-	for _, fl := range hb.GetAvailableFlavors() {
-		name := fl.GetName()
-		if name == "" {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO cluster_flavors (cluster_id, flavor) VALUES ($1, $2)`, hb.GetClusterId(), name); err != nil {
-			s.logExecError("cluster_hb_insert_flavor", err, zap.String("cluster_id", hb.GetClusterId()), zap.String("flavor", name))
-			return
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		s.logExecError("cluster_hb_commit", err, zap.String("cluster_id", hb.GetClusterId()))
-	}
+	// Heartbeats are ephemeral operational metrics - no need to persist to database
+	// Cluster registration handles persistence of cluster metadata
+	return
 }
 
 func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {

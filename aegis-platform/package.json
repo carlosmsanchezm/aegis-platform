@@ -6,8 +6,8 @@
     "node": "20 || 22"
   },
   "scripts": {
-    "dev": "backstage-cli repo start --config app-config.yaml --config app-config.local-dev.yaml",
-    "dev:cloud": "backstage-cli repo start --config app-config.yaml --config app-config.cloud.yaml",
+    "dev": "cp app-config.local-dev.yaml app-config.local.yaml && backstage-cli repo start",
+    "dev:cloud": "cp app-config.cloud.yaml app-config.local.yaml && backstage-cli repo start",
     "start": "backstage-cli repo start",
     "build:backend": "yarn workspace backend build",
     "build:all": "backstage-cli repo build --all",

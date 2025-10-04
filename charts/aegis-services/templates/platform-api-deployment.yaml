@@ -55,6 +55,11 @@ spec:
               value: {{ .Values.platformApi.kubeConfigsDir | quote }}
             - name: AEGIS_NAMESPACE
               value: {{ .Values.platformApi.targetNamespace | quote }}
+            {{- if and .Values.proxy.enabled (not (hasKey .Values.platformApi.env "AEGIS_PROXY_BASE_URL")) }}
+            # Automatically set proxy base URL to internal service DNS
+            - name: AEGIS_PROXY_BASE_URL
+              value: "http://{{ include "aegis-services.proxy.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.proxy.service.port }}"
+            {{- end }}
             {{- range $key, $value := .Values.platformApi.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -65,6 +70,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
+            {{- end }}
+            {{- if .Values.proxy.enabled }}
+            # Reference the same JWT secret that the proxy uses
+            - name: AEGIS_PROXY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aegis-services.proxy.secretName" . }}
+                  key: jwt-secret
             {{- end }}
           {{- if .Values.platformApi.volumeMounts }}
           volumeMounts:

@@ -211,10 +211,7 @@ func configureInteractivePod(job *batchv1.Job, opts WorkspaceOptions) {
 		bootstrapImage = os.Getenv("AEGIS_SSH_BOOTSTRAP_IMAGE")
 	}
 	if bootstrapImage == "" {
-		bootstrapImage = opts.Image
-	}
-	if bootstrapImage == "" {
-		bootstrapImage = "busybox:1.36"
+		bootstrapImage = "busybox:1.36"  // Use busybox by default instead of the workspace image
 	}
 
 	script := `set -eu

@@ -589,8 +589,9 @@ func (s *ProxyServer) Start() error {
 			tls.CurveP256,
 			tls.CurveP384,
 		},
-		// Enforce client certificate authentication
-		ClientAuth: tls.RequireAndVerifyClientCert,
+		// TODO: Enable client certificate authentication when platform-api issues client certs
+		// For now, allow connections without client certificates (JWT-based auth only)
+		ClientAuth: tls.NoClientCert,
 	}
 
 	// Add VerifyConnection to enforce SAN suffix allow-list at handshake time (AC-17b)

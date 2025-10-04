@@ -13,7 +13,7 @@ cluster_version    = "1.32"
 # Instance types and capacity (matching your script setup)
 cpu_instance_type    = "t3.medium"
 gpu_instance_type    = "g4dn.xlarge"
-cpu_desired_capacity = 1
+cpu_desired_capacity = 2
 gpu_desired_capacity = 0  # Start with 0 for cost savings
 gpu_max_capacity     = 2
 use_spot_instances   = true  # Cost optimization

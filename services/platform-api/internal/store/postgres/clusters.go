@@ -52,9 +52,47 @@ ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.regio
 }
 
 func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
-	// Heartbeats are ephemeral operational metrics - no need to persist to database
-	// Cluster registration handles persistence of cluster metadata
-	return
+	if hb == nil || hb.GetClusterId() == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		s.logExecError("heartbeat_begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Update TTFG metric and last heartbeat timestamp
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now() WHERE id=$2`,
+		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
+		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
+		return
+	}
+
+	// Update available flavors
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_flavors WHERE cluster_id=$1`, hb.GetClusterId()); err != nil {
+		s.logExecError("heartbeat_delete_flavors", err, zap.String("cluster_id", hb.GetClusterId()))
+		return
+	}
+	for _, f := range hb.GetAvailableFlavors() {
+		if f.GetName() == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO cluster_flavors (cluster_id, flavor) VALUES ($1, $2)`,
+			hb.GetClusterId(), f.GetName()); err != nil {
+			s.logExecError("heartbeat_insert_flavor", err,
+				zap.String("cluster_id", hb.GetClusterId()),
+				zap.String("flavor", f.GetName()))
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		s.logExecError("heartbeat_commit", err, zap.String("cluster_id", hb.GetClusterId()))
+	}
 }
 
 func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {

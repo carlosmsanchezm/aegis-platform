@@ -102,7 +102,7 @@ variable "db_max_allocated_storage" {
 variable "db_postgres_version" {
   description = "PostgreSQL version"
   type        = string
-  default     = "15.4"
+  default     = "15.12"
 }
 
 variable "db_backup_retention" {
@@ -129,11 +129,17 @@ variable "db_skip_final_snapshot" {
   default     = false
 }
 
+variable "db_deletion_protection" {
+  description = "Enable deletion protection on the database"
+  type        = bool
+  default     = false
+}
+
 # ECR Configuration
 variable "ecr_repositories" {
   description = "List of ECR repositories to create"
   type        = list(string)
-  default     = ["aegis/k8s-agent", "aegis/proxy", "aegis/platform-api"]
+  default     = ["aegis/k8s-agent", "aegis/proxy", "aegis/platform-api", "aegis/workspace-vscode"]
 }
 
 # Secrets Configuration
@@ -141,4 +147,17 @@ variable "create_secrets" {
   description = "Create AWS Secrets Manager secrets"
   type        = bool
   default     = true
+}
+
+# Route53 Configuration
+variable "platform_api_lb_hostname" {
+  description = "Platform API LoadBalancer hostname (populated after K8s deployment)"
+  type        = string
+  default     = ""
+}
+
+variable "proxy_lb_hostname" {
+  description = "Proxy LoadBalancer hostname (populated after K8s deployment)"
+  type        = string
+  default     = ""
 }

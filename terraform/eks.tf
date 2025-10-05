@@ -8,13 +8,13 @@ module "eks" {
   cluster_version = var.cluster_version
 
   # Network configuration
-  vpc_id                    = module.vpc.vpc_id
-  subnet_ids                = module.vpc.private_subnets
-  control_plane_subnet_ids  = module.vpc.private_subnets
+  vpc_id                   = module.vpc.vpc_id
+  subnet_ids               = module.vpc.private_subnets
+  control_plane_subnet_ids = module.vpc.private_subnets
 
   # Cluster endpoint configuration
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_private_access      = true
   cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
   # OIDC Identity provider
@@ -27,13 +27,13 @@ module "eks" {
   eks_managed_node_groups = {
     # CPU Workers (similar to your t3.medium setup)
     cpu_workers = {
-      name            = "cpu-workers"
-      instance_types  = [var.cpu_instance_type]
-      capacity_type   = var.use_spot_instances ? "SPOT" : "ON_DEMAND"
+      name           = "cpu-workers"
+      instance_types = [var.cpu_instance_type]
+      capacity_type  = var.use_spot_instances ? "SPOT" : "ON_DEMAND"
 
-      min_size        = 1
-      max_size        = 3
-      desired_size    = var.cpu_desired_capacity
+      min_size     = 1
+      max_size     = 3
+      desired_size = var.cpu_desired_capacity
 
       # Launch template configuration
       create_launch_template = true
@@ -67,13 +67,13 @@ module "eks" {
 
     # GPU Workers (similar to your g4dn.xlarge setup)
     gpu_workers = {
-      name            = "gpu-workers-g4"
-      instance_types  = [var.gpu_instance_type]
-      capacity_type   = var.use_spot_instances ? "SPOT" : "ON_DEMAND"
+      name           = "gpu-workers-g4"
+      instance_types = [var.gpu_instance_type]
+      capacity_type  = var.use_spot_instances ? "SPOT" : "ON_DEMAND"
 
-      min_size        = 0
-      max_size        = var.gpu_max_capacity
-      desired_size    = var.gpu_desired_capacity
+      min_size     = 0
+      max_size     = var.gpu_max_capacity
+      desired_size = var.gpu_desired_capacity
 
       # Launch template configuration
       create_launch_template = true
@@ -83,7 +83,7 @@ module "eks" {
       ami_type = "AL2_x86_64_GPU"
 
       # Instance configuration
-      disk_size = 100  # Larger disk for GPU workloads
+      disk_size = 100 # Larger disk for GPU workloads
 
       # Network configuration
       subnet_ids = module.vpc.private_subnets
@@ -93,8 +93,8 @@ module "eks" {
 
       # Labels (matching your eksctl config)
       labels = {
-        Environment = var.environment
-        NodeType    = "gpu-worker"
+        Environment           = var.environment
+        NodeType              = "gpu-worker"
         "aegis.io/gpu-flavor" = "nvidia-tesla-t4"
       }
 
@@ -137,9 +137,6 @@ module "eks" {
           WARM_PREFIX_TARGET       = "1"
         }
       })
-    }
-    aws-ebs-csi-driver = {
-      most_recent = true
     }
   }
 

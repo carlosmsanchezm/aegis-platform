@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -1421,7 +1424,11 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	if err != nil {
 		return err
 	}
-	gs := grpc.NewServer()
+	opts, err := grpcServerOptionsFromEnv(log)
+	if err != nil {
+		return err
+	}
+	gs := grpc.NewServer(opts...)
 	reflection.Register(gs)
 	aegis.RegisterAegisPlatformServer(gs, svc)
 
@@ -1453,6 +1460,40 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		return err
 	}
 	return nil
+}
+
+func grpcServerOptionsFromEnv(log *zap.Logger) ([]grpc.ServerOption, error) {
+	certPath := os.Getenv("AEGIS_GRPC_TLS_CERT")
+	keyPath := os.Getenv("AEGIS_GRPC_TLS_KEY")
+	if certPath == "" && keyPath == "" {
+		return nil, nil
+	}
+	if certPath == "" || keyPath == "" {
+		return nil, fmt.Errorf("both AEGIS_GRPC_TLS_CERT and AEGIS_GRPC_TLS_KEY must be set")
+	}
+	certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gRPC TLS certificate: %w", err)
+	}
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+	}
+	if caPath := os.Getenv("AEGIS_GRPC_TLS_CLIENT_CA"); caPath != "" {
+		caPEM, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read AEGIS_GRPC_TLS_CLIENT_CA: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse certificates from AEGIS_GRPC_TLS_CLIENT_CA")
+		}
+		tlsConfig.ClientCAs = pool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		log.Info("gRPC TLS client authentication enabled")
+	} else {
+		log.Info("gRPC TLS enabled")
+	}
+	return []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsConfig))}, nil
 }
 
 func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.AegisWorkload {

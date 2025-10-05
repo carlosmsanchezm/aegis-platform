@@ -40,6 +40,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-platform-api-secret" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "aegis-services.platformApi.tlsSecretName" -}}
+{{- printf "%s-platform-api-tls" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{/* Proxy component names */}}
 {{- define "aegis-services.proxy.fullname" -}}
 {{- printf "%s-proxy" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}

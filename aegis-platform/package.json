@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "cp app-config.local-dev.yaml app-config.local.yaml && backstage-cli repo start",
     "dev:cloud": "cp app-config.cloud.yaml app-config.local.yaml && backstage-cli repo start",
+    "dev:cloud-tls": "cp app-config.cloud-tls.yaml app-config.local.yaml && backstage-cli repo start",
     "start": "backstage-cli repo start",
     "build:backend": "yarn workspace backend build",
     "build:all": "backstage-cli repo build --all",

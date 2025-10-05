@@ -4,12 +4,12 @@
 resource "random_password" "db_password" {
   length  = 32
   special = true
-  # RDS doesn't allow: / @ " (space)
-  override_special = "!#$%&*()-_=+[]{}<>:?"
+  # RDS doesn't allow: / @ " (space) and the connection string breaks on ':' or '?'
+  override_special = "!#$%&*()-_=+[]{}<>"
 
   # Force new password generation
   keepers = {
-    reset = "2025-10-03"
+    reset = "2025-10-04"
   }
 }
 
@@ -115,8 +115,8 @@ module "rds" {
 
   # Backup configuration
   backup_retention_period = var.db_backup_retention
-  backup_window          = var.db_backup_window
-  maintenance_window     = var.db_maintenance_window
+  backup_window           = var.db_backup_window
+  maintenance_window      = var.db_maintenance_window
 
   # Monitoring
   monitoring_interval    = 60
@@ -124,12 +124,12 @@ module "rds" {
   create_monitoring_role = true
 
   # Performance Insights
-  performance_insights_enabled = true
+  performance_insights_enabled          = true
   performance_insights_retention_period = 7
 
   # Deletion protection
-  deletion_protection = !var.db_skip_final_snapshot
-  skip_final_snapshot = var.db_skip_final_snapshot
+  deletion_protection              = var.db_deletion_protection
+  skip_final_snapshot              = var.db_skip_final_snapshot
   final_snapshot_identifier_prefix = var.db_skip_final_snapshot ? null : "${local.cluster_name}-final-snapshot"
 
   # Enable automated minor version upgrades
@@ -140,7 +140,7 @@ module "rds" {
 
   # Database parameters
   create_db_parameter_group = true
-  parameter_group_name     = "${local.cluster_name}-postgres-params"
+  parameter_group_name      = "${local.cluster_name}-postgres-params"
   parameters = [
     {
       name  = "log_statement"
@@ -148,7 +148,7 @@ module "rds" {
     },
     {
       name  = "log_min_duration_statement"
-      value = "1000"  # Log queries taking more than 1 second
+      value = "1000" # Log queries taking more than 1 second
     },
     {
       name  = "shared_preload_libraries"

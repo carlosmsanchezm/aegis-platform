@@ -90,6 +90,13 @@ platformApi:
     #   configMap:
     #     name: kubeconfigs
 
+  # TLS configuration for gRPC endpoint
+  tls:
+    enabled: false
+    cert: ""
+    key: ""
+    clientCA: ""
+
   # Resource limits and requests
   resources: {}
     # limits:

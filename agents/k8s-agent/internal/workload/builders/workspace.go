@@ -93,11 +93,10 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		container.Resources = resources
 	}
 
+	// Only override command if explicitly provided in workload spec
+	// Otherwise, use the image's default ENTRYPOINT and CMD
 	if len(opts.Command) > 0 {
 		container.Command = opts.Command
-	} else {
-		container.Command = []string{"/bin/sh", "-c"}
-		container.Args = []string{opts.DefaultCommand}
 	}
 
 	if opts.Interactive {

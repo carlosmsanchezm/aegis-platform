@@ -79,9 +79,26 @@ spec:
                   name: {{ include "aegis-services.proxy.secretName" . }}
                   key: jwt-secret
             {{- end }}
-          {{- if .Values.platformApi.volumeMounts }}
+            {{- if .Values.platformApi.tls.enabled }}
+            - name: AEGIS_GRPC_TLS_CERT
+              value: "/etc/aegis-platform-api/tls/tls.crt"
+            - name: AEGIS_GRPC_TLS_KEY
+              value: "/etc/aegis-platform-api/tls/tls.key"
+            {{- if .Values.platformApi.tls.clientCA }}
+            - name: AEGIS_GRPC_TLS_CLIENT_CA
+              value: "/etc/aegis-platform-api/tls/ca.crt"
+            {{- end }}
+            {{- end }}
+          {{- if or .Values.platformApi.volumeMounts .Values.platformApi.tls.enabled }}
           volumeMounts:
-            {{- toYaml .Values.platformApi.volumeMounts | nindent 12 }}
+            {{- if .Values.platformApi.tls.enabled }}
+            - name: platform-api-tls
+              mountPath: /etc/aegis-platform-api/tls
+              readOnly: true
+            {{- end }}
+            {{- with .Values.platformApi.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.platformApi.resources }}
           resources:
@@ -99,9 +116,16 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.platformApi.volumes }}
+      {{- if or .Values.platformApi.volumes .Values.platformApi.tls.enabled }}
       volumes:
-        {{- toYaml .Values.platformApi.volumes | nindent 8 }}
+        {{- if .Values.platformApi.tls.enabled }}
+        - name: platform-api-tls
+          secret:
+            secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}
+        {{- end }}
+        {{- with .Values.platformApi.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.platformApi.nodeSelector }}
       nodeSelector:

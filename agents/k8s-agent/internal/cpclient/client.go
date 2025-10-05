@@ -2,12 +2,14 @@ package cpclient
 
 import (
 	"context"
+	"crypto/tls"
 	"os"
 	"strconv"
 	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
@@ -18,7 +20,21 @@ type Client struct {
 }
 
 func New(endpoint string) (*Client, error) {
-	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var opts []grpc.DialOption
+
+	// Check if TLS should be used (default: insecure for backward compatibility)
+	if os.Getenv("AEGIS_CP_GRPC_INSECURE") != "false" {
+		// Use insecure connection (default for in-cluster communication)
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		// Use TLS with system cert pool and skip verification for self-signed certs
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true, // For self-signed certificates
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	}
+
+	conn, err := grpc.Dial(endpoint, opts...)
 	if err != nil {
 		return nil, err
 	}

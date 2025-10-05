@@ -1,0 +1,21 @@
+# TLS overlay for platform-api gRPC endpoint and proxy service
+# Apply alongside values-cloud.yaml when deploying in TLS mode via generate-helm-values.sh --tls
+
+platformApi:
+  tls:
+    enabled: true
+    cert: ""
+    key: ""
+    clientCA: ""
+  service:
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+
+proxy:
+  tls:
+    enabled: true
+  service:
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"

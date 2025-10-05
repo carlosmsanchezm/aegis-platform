@@ -5,8 +5,52 @@
 
 set -e
 
+TLS_MODE=0
+
+usage() {
+cat <<'EOF'
+Usage: ./generate-helm-values.sh [--tls]
+
+Options:
+  --tls      Enable TLS for platform-api gRPC endpoint and configure Backstage
+  -h, --help Show this help message
+
+By default the script deploys using the HTTP gateway for Backstage but keeps the
+proxy (wss) secured. Use --tls when you want the platform gRPC endpoint itself
+to require TLS.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tls)
+      TLS_MODE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/../charts"
+PLATFORM_API_IMAGE_TAG=${PLATFORM_API_IMAGE_TAG:-"v1.0.6-tls2"}
+K8S_AGENT_IMAGE_TAG=${K8S_AGENT_IMAGE_TAG:-"v1.0.2-tls-20251005-amd64"}
+TLS_CERT_PATH=/tmp/proxy-cert.pem
+TLS_KEY_PATH=/tmp/proxy-key.pem
+CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
+
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "🔐 TLS mode enabled"
+  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}"
+fi
 
 echo "🚀 Generating Helm values from Terraform outputs..."
 echo "📖 See DEPLOYMENT.md for complete deployment guide"
@@ -84,6 +128,8 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "     --namespace aegis-system --create-namespace"
     echo ""
     echo "✨ Done!"
+    echo ""
+    echo "ℹ️  Tip: run ./generate-helm-values.sh --tls to deploy the TLS overlay"
     exit 0
 fi
 
@@ -115,11 +161,7 @@ kubectl create secret generic aegis-platform-secrets \
   --namespace aegis-system \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Create empty kubeconfigs secret (workload cluster kubeconfigs will be added later)
-kubectl create secret generic aegis-kubeconfigs \
-  --from-literal=.keep="" \
-  --namespace aegis-system \
-  --dry-run=client -o yaml | kubectl apply -f -
+echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
 
 echo "   ✅ Namespace and secrets created"
 
@@ -150,15 +192,35 @@ kubectl run migrate-job --rm -i --restart=Never \
 
 echo "   ✅ Migrations ready"
 
-# Step 4: Generate self-signed TLS certs for proxy (if they don't exist)
+# Step 4: Generate self-signed TLS certs using Route53 DNS names
 echo ""
-echo "4️⃣  Generating TLS certificates for proxy..."
+echo "4️⃣  Generating TLS certificates using Route53 DNS names..."
 
-if [ ! -f /tmp/proxy-cert.pem ] || [ ! -f /tmp/proxy-key.pem ]; then
-  openssl req -x509 -newkey rsa:2048 -keyout /tmp/proxy-key.pem -out /tmp/proxy-cert.pem -days 365 -nodes -subj "/CN=*.elb.amazonaws.com" 2>/dev/null
+# Get DNS hostnames from Terraform outputs
+DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
+DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
+DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
+
+echo "   📋 DNS hostnames:"
+echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
+echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
+echo "      Proxy:             ${DNS_PROXY}"
+
+if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ]; then
+  openssl req -x509 -newkey rsa:2048 \
+    -keyout "${TLS_KEY_PATH}" \
+    -out "${TLS_CERT_PATH}" \
+    -days 365 -nodes \
+    -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
+    -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" 2>/dev/null
 fi
 
-echo "   ✅ TLS certificates ready"
+if [[ $TLS_MODE -eq 1 ]]; then
+  mkdir -p "$(dirname "${CA_BUNDLE}")"
+  cat "${TLS_CERT_PATH}" > "${CA_BUNDLE}"
+  echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
+fi
+echo "   ✅ TLS certificates ready with proper DNS names"
 
 # Step 5: Deploy aegis-services using Helm (FULL deployment)
 echo ""
@@ -168,29 +230,52 @@ echo "5️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
 
 cd "${OUTPUT_DIR}"
-helm upgrade --install aegis ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
-  -f ./aegis-services/values-cloud-generated.yaml \
-  --set platformApi.enabled=true \
-  --set platformApi.image.tag=v1.0.3 \
-  --set platformApi.replicaCount=1 \
-  --set platformApi.migrations.enabled=false \
-  --set platformApi.ingress.enabled=false \
-  --set platformApi.service.type=LoadBalancer \
-  --set platformApi.env.DATABASE_URL="${DB_URL}" \
-  --set platformApi.envFromSecret=null \
-  --set platformApi.livenessProbe=null \
-  --set platformApi.readinessProbe=null \
-  --set proxy.enabled=true \
-  --set proxy.jwtSecret="${JWT_SECRET}" \
-  --set proxy.ingress.enabled=false \
-  --set proxy.service.type=LoadBalancer \
-  --set proxy.tls.enabled=true \
-  --set-file proxy.tls.cert=/tmp/proxy-cert.pem \
-  --set-file proxy.tls.key=/tmp/proxy-key.pem \
-  --set global.imagePullSecrets[0].name=ecr-registry-secret \
-  --namespace aegis-system --create-namespace \
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "   ℹ️  Including TLS overlay values (values-cloud-tls.yaml)"
+fi
+HELM_ARGS=(
+  upgrade --install aegis ./aegis-services
+  -f ./aegis-services/values-cloud.yaml
+  -f ./aegis-services/values-cloud-generated.yaml
+)
+
+if [[ $TLS_MODE -eq 1 ]]; then
+  HELM_ARGS+=( -f ./aegis-services/values-cloud-tls.yaml )
+fi
+
+HELM_ARGS+=(
+  --set platformApi.enabled=true
+  --set platformApi.replicaCount=1
+  --set platformApi.migrations.enabled=false
+  --set platformApi.ingress.enabled=false
+  --set platformApi.service.type=LoadBalancer
+  --set platformApi.envFromSecret.DB_PASSWORD=db-password
+  --set platformApi.livenessProbe=null
+  --set platformApi.readinessProbe=null
+  --set-string platformApi.env.AEGIS_PROXY_BASE_URL="wss://${DNS_PROXY}:8080"
+  --set proxy.enabled=true
+  --set proxy.image.tag="no-client-cert"
+  --set proxy.ingress.enabled=false
+  --set proxy.service.type=LoadBalancer
+  --set proxy.tls.enabled=true
+  --set global.imagePullSecrets[0].name=ecr-registry-secret
+  --namespace aegis-system --create-namespace
   --timeout 10m
+  --set platformApi.image.tag="${PLATFORM_API_IMAGE_TAG}"
+  --set-string platformApi.env.DATABASE_URL="${DB_URL}"
+  --set-string platformApi.secrets.db-password="${DB_PASSWORD}"
+  --set-string platformApi.secrets.proxy-jwt-secret="${JWT_SECRET}"
+  --set-string proxy.jwtSecret="${JWT_SECRET}"
+  --set-file proxy.tls.cert="${TLS_CERT_PATH}"
+  --set-file proxy.tls.key="${TLS_KEY_PATH}"
+)
+
+if [[ $TLS_MODE -eq 1 ]]; then
+  HELM_ARGS+=( --set-file platformApi.tls.cert="${TLS_CERT_PATH}" )
+  HELM_ARGS+=( --set-file platformApi.tls.key="${TLS_KEY_PATH}" )
+fi
+
+helm "${HELM_ARGS[@]}"
 
 echo "   ✅ aegis-services deployed"
 
@@ -200,7 +285,7 @@ echo "6️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc aegis-services-platform-api -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PLATFORM_API_LB=$(kubectl get svc aegis-platform-api -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PLATFORM_API_LB}" ]; then
     echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
     break
@@ -209,10 +294,22 @@ for i in {1..60}; do
   sleep 2
 done
 
+if [ -n "${PLATFORM_API_LB}" ]; then
+  echo "   Waiting for DNS propagation for ${PLATFORM_API_LB}..."
+  for i in {1..30}; do
+    if dig +short "${PLATFORM_API_LB}" | grep -q '^[0-9]'; then
+      echo "   ✅ DNS resolved: $(dig +short ${PLATFORM_API_LB} | head -1)"
+      break
+    fi
+    echo -n "."
+    sleep 2
+  done
+fi
+
 echo ""
 echo "   Waiting for proxy Load Balancer..."
 for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc aegis-services-proxy -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PROXY_LB=$(kubectl get svc aegis-proxy -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PROXY_LB}" ]; then
     echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
     break
@@ -221,26 +318,106 @@ for i in {1..60}; do
   sleep 2
 done
 
+if [ -n "${PROXY_LB}" ]; then
+  echo "   Waiting for DNS propagation for ${PROXY_LB}..."
+  for i in {1..30}; do
+    if dig +short "${PROXY_LB}" | grep -q '^[0-9]'; then
+      echo "   ✅ DNS resolved: $(dig +short ${PROXY_LB} | head -1)"
+      break
+    fi
+    echo -n "."
+    sleep 2
+  done
+fi
+
+if [ -n "${PROXY_LB}" ]; then
+  echo ""
+  echo "   ℹ️  Proxy endpoint configured via Helm: wss://${DNS_PROXY}:8080"
+  echo "   (No kubectl set env needed - Helm manages AEGIS_PROXY_BASE_URL)"
+fi
+
+# Update Route53 DNS records with actual LoadBalancer hostnames
+echo ""
+echo "   🌐 Updating Route53 DNS records with LoadBalancer hostnames..."
+if [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
+  cd "${SCRIPT_DIR}"
+  terraform apply -auto-approve \
+    -var="platform_api_lb_hostname=${PLATFORM_API_LB}" \
+    -var="proxy_lb_hostname=${PROXY_LB}" \
+    -target=aws_route53_record.platform_api_grpc \
+    -target=aws_route53_record.platform_api_http \
+    -target=aws_route53_record.proxy >/dev/null 2>&1 \
+    && echo "   ✅ Route53 records updated" \
+    || echo "   ⚠️  Route53 update failed; update manually"
+
+  echo "   📋 DNS Records:"
+  echo "      platform-api-grpc.aegist.dev → ${PLATFORM_API_LB}"
+  echo "      platform-api.aegist.dev      → ${PLATFORM_API_LB}"
+  echo "      proxy.aegist.dev             → ${PROXY_LB}"
+
+  # Update /etc/hosts for local DNS resolution
+  echo ""
+  echo "   🖥️  Updating /etc/hosts for local DNS resolution..."
+  PLATFORM_API_IP=$(dig +short "${PLATFORM_API_LB}" | head -1)
+  PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
+
+  if [ -n "${PLATFORM_API_IP}" ] && [ -n "${PROXY_IP}" ]; then
+    # Remove old entries
+    sudo sed -i.bak '/platform-api-grpc\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
+    sudo sed -i.bak '/platform-api\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
+    sudo sed -i.bak '/proxy\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
+
+    # Add new entries
+    echo "${PLATFORM_API_IP} platform-api-grpc.aegist.dev platform-api.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
+    echo "${PROXY_IP} proxy.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
+
+    echo "   ✅ /etc/hosts updated:"
+    echo "      ${PLATFORM_API_IP} → platform-api-grpc.aegist.dev, platform-api.aegist.dev"
+    echo "      ${PROXY_IP} → proxy.aegist.dev"
+  else
+    echo "   ⚠️  Could not resolve LoadBalancer IPs; /etc/hosts not updated"
+  fi
+
+  cd "${OUTPUT_DIR}"
+else
+  echo "   ⚠️  LoadBalancers not ready; skip Route53 update"
+fi
+
 # Step 7: Update Backstage configuration
 echo ""
 echo "7️⃣  Updating Backstage configuration..."
 
 if [ -n "${PLATFORM_API_LB}" ]; then
-  cat > "${OUTPUT_DIR}/../aegis-platform/app-config.local.yaml" <<EOF_BACKSTAGE
-# Backstage override configuration for your local development environment
+  APP_TARGET="http://${PLATFORM_API_LB}:8080"
+  SECURE_FLAG=false
+
+  # Generate Backstage proxy configuration
+  BACKSTAGE_CONFIG=$(cat <<EOF_BACKSTAGE
+# Backstage override configuration for your cloud deployment
 
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://${PLATFORM_API_LB}:8080'
+      target: '${APP_TARGET}'
       changeOrigin: true
       credentials: forward
+      secure: ${SECURE_FLAG}
       allowedHeaders:
         - authorization
         - Authorization
         - x-aegis-user
         - X-Aegis-User
 EOF_BACKSTAGE
+)
+
+  # Write to both cloud config files for convenience
+  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.cloud.yaml"
+  echo "   ✅ Updated: aegis-platform/app-config.cloud.yaml"
+
+  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.cloud-tls.yaml"
+  echo "   ✅ Updated: aegis-platform/app-config.cloud-tls.yaml"
+
+  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.local.yaml"
   echo "   ✅ Updated: aegis-platform/app-config.local.yaml"
 fi
 
@@ -249,14 +426,28 @@ echo ""
 echo "8️⃣  Deploying k8s-agent with Helm..."
 
 cd "${OUTPUT_DIR}"
-helm upgrade --install aegis-spoke ./aegis-spoke \
-  -f ./aegis-spoke/values-cloud-generated.yaml \
-  --set k8sAgent.enabled=true \
-  --set k8sAgent.image.tag=v1.0.0 \
-  --set k8sAgent.replicaCount=1 \
-  --set proxy.enabled=false \
-  --namespace aegis-system \
+
+# Build helm arguments for aegis-spoke
+SPOKE_HELM_ARGS=(
+  upgrade --install aegis-spoke ./aegis-spoke
+  -f ./aegis-spoke/values-cloud-generated.yaml
+)
+
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "   ℹ️  Including TLS overlay for k8s-agent (values-cloud-tls.yaml)"
+  SPOKE_HELM_ARGS+=( -f ./aegis-spoke/values-cloud-tls.yaml )
+fi
+
+SPOKE_HELM_ARGS+=(
+  --set k8sAgent.enabled=true
+  --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG}
+  --set k8sAgent.replicaCount=1
+  --set proxy.enabled=false
+  --namespace aegis-system
   --timeout 5m
+)
+
+helm "${SPOKE_HELM_ARGS[@]}"
 
 echo "   ✅ k8s-agent deployed"
 
@@ -267,9 +458,18 @@ echo ""
 echo "🎉 Deployment Complete!"
 echo ""
 echo "📊 Service URLs:"
-echo "   Platform API (HTTP): http://${PLATFORM_API_LB}:8080"
-echo "   Platform API (gRPC): ${PLATFORM_API_LB}:8081"
-echo "   Proxy (WSS):         wss://${PROXY_LB}:8080"
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API_HTTP}:8080"
+  echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API_GRPC}:8081"
+else
+  echo "   Platform API (HTTP): http://${DNS_PLATFORM_API_HTTP}:8080"
+  echo "   Platform API (gRPC): ${DNS_PLATFORM_API_GRPC}:8081"
+fi
+echo "   Proxy (WSS):                 wss://${DNS_PROXY}:8080"
+echo ""
+echo "🌐 LoadBalancer Endpoints:"
+echo "   Platform API: ${PLATFORM_API_LB}"
+echo "   Proxy:        ${PROXY_LB}"
 echo ""
 echo "📝 Check deployment status:"
 echo "   kubectl get pods -n aegis-system"
@@ -278,9 +478,31 @@ echo ""
 echo "🔍 View logs:"
 echo "   kubectl logs -n aegis-system -l app.kubernetes.io/component=platform-api -f"
 echo ""
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "🔐 Test gRPC with grpcurl (TLS mode):"
+  echo "   export GRPC_HOST=${DNS_PLATFORM_API_GRPC}"
+  echo "   export CA_BUNDLE=${CA_BUNDLE}"
+  echo ""
+  echo "   grpcurl -cacert \"\$CA_BUNDLE\" \\"
+  echo "     -d '{\"project\":{\"id\":\"p-demo\",\"displayName\":\"Demo\",\"ownerGroup\":\"eng\"}}' \\"
+  echo "     \${GRPC_HOST}:8081 aegis.v1.AegisPlatform/CreateProject"
+  echo ""
+  echo "📱 VSCode Extension Configuration:"
+  echo "   grpcEndpoint: \"${DNS_PLATFORM_API_GRPC}:8081\""
+  echo "   caPath: \"${CA_BUNDLE}\""
+  echo ""
+fi
 echo "🚀 Next steps:"
-echo "   1. Start Backstage UI: cd aegis-platform && yarn start"
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud-tls"
+else
+  echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud"
+fi
 echo "   2. Access at: http://localhost:3000"
-echo "   3. Backstage will connect to cloud platform-api automatically"
+echo "   3. Backstage proxy will use the configuration generated above"
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo ""
+  echo "🔐 TLS mode: gRPC clients must trust ${CA_BUNDLE}"
+fi
 echo ""
 echo "✨ Done!"

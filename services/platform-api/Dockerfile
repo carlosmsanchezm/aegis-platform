@@ -8,7 +8,7 @@ COPY . .
 
 # Build the platform-api service specifically
 WORKDIR /app/services/platform-api
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o platform-api .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o platform-api .
 
 # Final stage
 FROM alpine:latest

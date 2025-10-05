@@ -36,13 +36,13 @@ output "node_groups" {
   description = "EKS node groups information"
   value = {
     cpu_workers = {
-      node_group_id   = module.eks.eks_managed_node_groups["cpu_workers"].node_group_id
-      node_group_arn  = module.eks.eks_managed_node_groups["cpu_workers"].node_group_arn
+      node_group_id           = module.eks.eks_managed_node_groups["cpu_workers"].node_group_id
+      node_group_arn          = module.eks.eks_managed_node_groups["cpu_workers"].node_group_arn
       autoscaling_group_names = module.eks.eks_managed_node_groups["cpu_workers"].node_group_autoscaling_group_names
     }
     gpu_workers = {
-      node_group_id   = module.eks.eks_managed_node_groups["gpu_workers"].node_group_id
-      node_group_arn  = module.eks.eks_managed_node_groups["gpu_workers"].node_group_arn
+      node_group_id           = module.eks.eks_managed_node_groups["gpu_workers"].node_group_id
+      node_group_arn          = module.eks.eks_managed_node_groups["gpu_workers"].node_group_arn
       autoscaling_group_names = module.eks.eks_managed_node_groups["gpu_workers"].node_group_autoscaling_group_names
     }
   }
@@ -106,10 +106,10 @@ output "rds_arn" {
 output "secrets" {
   description = "AWS Secrets Manager secret information"
   value = var.create_secrets ? {
-    db_password_secret_arn = aws_secretsmanager_secret.db_password[0].arn
+    db_password_secret_arn  = aws_secretsmanager_secret.db_password[0].arn
     db_password_secret_name = aws_secretsmanager_secret.db_password[0].name
-    jwt_secret_secret_arn  = aws_secretsmanager_secret.jwt_secret[0].arn
-    jwt_secret_secret_name = aws_secretsmanager_secret.jwt_secret[0].name
+    jwt_secret_secret_arn   = aws_secretsmanager_secret.jwt_secret[0].arn
+    jwt_secret_secret_name  = aws_secretsmanager_secret.jwt_secret[0].name
   } : null
 }
 
@@ -132,10 +132,10 @@ output "helm_values" {
     # Platform API configuration
     platform_api = {
       image_repository = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/platform-api"
-      db_host         = split(":", module.rds.db_instance_endpoint)[0]
-      db_port         = module.rds.db_instance_port
-      db_name         = module.rds.db_instance_name
-      db_user         = module.rds.db_instance_username
+      db_host          = split(":", module.rds.db_instance_endpoint)[0]
+      db_port          = module.rds.db_instance_port
+      db_name          = module.rds.db_instance_name
+      db_user          = module.rds.db_instance_username
     }
 
     # Proxy configuration
@@ -146,7 +146,7 @@ output "helm_values" {
     # K8s Agent configuration
     k8s_agent = {
       image_repository = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/k8s-agent"
-      cluster_id      = "aws-${var.aws_region}-${var.environment}"
+      cluster_id       = "aws-${var.aws_region}-${var.environment}"
     }
 
     # Secrets configuration
@@ -161,7 +161,7 @@ output "helm_values" {
 output "helm_values_aegis_services" {
   description = "Ready-to-use values for aegis-services Helm chart (control plane)"
   sensitive   = true
-  value = <<-EOT
+  value       = <<-EOT
   # Auto-generated from Terraform - aegis-services (Control Plane / Hub)
   # Cluster: ${module.eks.cluster_name}
   # Region: ${var.aws_region}
@@ -222,7 +222,7 @@ output "helm_values_aegis_services" {
 output "helm_values_aegis_spoke" {
   description = "Ready-to-use values for aegis-spoke Helm chart (workload cluster)"
   sensitive   = true
-  value = <<-EOT
+  value       = <<-EOT
   # Auto-generated from Terraform - aegis-spoke (Workload Cluster)
   # Cluster: ${module.eks.cluster_name}
   # Region: ${var.aws_region}
@@ -275,7 +275,7 @@ output "jwt_secret_value" {
 # Convenience output for creating K8s secrets
 output "k8s_secret_commands" {
   description = "Commands to create Kubernetes secrets from Terraform outputs"
-  value = <<-EOT
+  value       = <<-EOT
   # Create secrets in Kubernetes from Terraform outputs:
 
   # 1. For aegis-services (control plane):
@@ -307,4 +307,30 @@ output "aws_region" {
 output "kubectl_config_command" {
   description = "Command to configure kubectl"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name} --profile ${var.aws_profile}"
+}
+
+# Route53 DNS Information
+output "route53_zone_id" {
+  description = "Route53 hosted zone ID for aegist.dev"
+  value       = aws_route53_zone.aegist.zone_id
+}
+
+output "route53_zone_name" {
+  description = "Route53 hosted zone name"
+  value       = aws_route53_zone.aegist.name
+}
+
+output "dns_platform_api_grpc" {
+  description = "DNS hostname for platform-api gRPC endpoint (use for VSCode extension)"
+  value       = aws_route53_record.platform_api_grpc.fqdn
+}
+
+output "dns_platform_api_http" {
+  description = "DNS hostname for platform-api HTTP gateway"
+  value       = aws_route53_record.platform_api_http.fqdn
+}
+
+output "dns_proxy" {
+  description = "DNS hostname for proxy service"
+  value       = aws_route53_record.proxy.fqdn
 }

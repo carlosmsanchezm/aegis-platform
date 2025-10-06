@@ -358,22 +358,25 @@ if [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
   # Update /etc/hosts for local DNS resolution
   echo ""
   echo "   🖥️  Updating /etc/hosts for local DNS resolution..."
-  PLATFORM_API_IP=$(dig +short "${PLATFORM_API_LB}" | head -1)
-  PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
+  # Get ALL IPs from Network Load Balancers (NLBs have multiple IPs)
+  PLATFORM_API_IPS=$(dig +short "${PLATFORM_API_LB}" | grep '^[0-9]' | tr '\n' ' ')
+  PROXY_IPS=$(dig +short "${PROXY_LB}" | grep '^[0-9]' | tr '\n' ' ')
+  # Use first IP for /etc/hosts entry
+  PLATFORM_API_IP=$(echo "${PLATFORM_API_IPS}" | awk '{print $1}')
+  PROXY_IP=$(echo "${PROXY_IPS}" | awk '{print $1}')
 
   if [ -n "${PLATFORM_API_IP}" ] && [ -n "${PROXY_IP}" ]; then
-    # Remove old entries
-    sudo sed -i.bak '/platform-api-grpc\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
-    sudo sed -i.bak '/platform-api\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
-    sudo sed -i.bak '/proxy\.aegist\.dev/d' /etc/hosts 2>/dev/null || true
+    # Remove old aegist.dev entries
+    sudo sed -i.bak '/aegist\.dev/d' /etc/hosts 2>/dev/null || true
 
-    # Add new entries
+    # Add new entries (using first IP from NLB)
     echo "${PLATFORM_API_IP} platform-api-grpc.aegist.dev platform-api.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
     echo "${PROXY_IP} proxy.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
 
     echo "   ✅ /etc/hosts updated:"
     echo "      ${PLATFORM_API_IP} → platform-api-grpc.aegist.dev, platform-api.aegist.dev"
     echo "      ${PROXY_IP} → proxy.aegist.dev"
+    echo "   📝 Note: NLB IPs (all): platform-api=${PLATFORM_API_IPS}, proxy=${PROXY_IPS}"
   else
     echo "   ⚠️  Could not resolve LoadBalancer IPs; /etc/hosts not updated"
   fi
@@ -388,7 +391,7 @@ echo ""
 echo "7️⃣  Updating Backstage configuration..."
 
 if [ -n "${PLATFORM_API_LB}" ]; then
-  APP_TARGET="http://${PLATFORM_API_LB}:8080"
+  APP_TARGET="http://${DNS_PLATFORM_API_HTTP}:8080"
   SECURE_FLAG=false
 
   # Generate Backstage proxy configuration

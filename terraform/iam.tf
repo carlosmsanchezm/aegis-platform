@@ -10,7 +10,7 @@ module "ebs_csi_driver_irsa" {
 
   oidc_providers = {
     this = {
-      provider_arn               = module.eks.oidc_provider_arn
+      provider_arn               = aws_iam_openid_connect_provider.cluster.arn
       namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
     }
   }

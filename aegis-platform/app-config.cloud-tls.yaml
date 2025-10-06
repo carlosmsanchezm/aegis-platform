@@ -3,7 +3,7 @@
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://a56fb5cdb0ef147899b114facac3727f-74a808a96b5c44e1.elb.us-east-1.amazonaws.com:8080'
+      target: 'http://platform-api.aegist.dev:8080'
       changeOrigin: true
       credentials: forward
       secure: false

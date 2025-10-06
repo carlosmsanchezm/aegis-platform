@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
+	github.com/yourorg/aegis/pkg/workspace v0.0.0-00010101000000-000000000000
 	github.com/yourorg/aegis/proto/aegis v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.68.1
@@ -99,3 +100,5 @@ require (
 )
 
 replace github.com/yourorg/aegis/proto/aegis => ../../proto/aegis
+
+replace github.com/yourorg/aegis/pkg/workspace => ../../pkg/workspace

@@ -51,6 +51,7 @@ import (
 	builders "github.com/yourorg/aegis/agents/k8s-agent/internal/workload/builders"
 	workdiscovery "github.com/yourorg/aegis/agents/k8s-agent/internal/workload/discovery"
 	workstatus "github.com/yourorg/aegis/agents/k8s-agent/internal/workload/status"
+	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 )
 
 const (
@@ -94,6 +95,8 @@ type AegisWorkloadReconciler struct {
 	proxyServicePort      int32
 	proxyIngressHost      string
 	sshBootstrapImage     string
+
+	workspaceEnvDefaults map[string]string
 
 	pyTorchAPIVersion string
 	pyTorchGVR        *schema.GroupVersionResource
@@ -188,6 +191,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	var job batchv1.Job
 	err := r.Get(ctx, jobKey, &job)
 	if apierrors.IsNotFound(err) {
+		mergedEnv := workspacecfg.MergeEnv(spec.Env, r.workspaceEnvDefaults)
 		opts := builders.WorkspaceOptions{
 			Namespace:               aw.Namespace,
 			JobName:                 jobName,
@@ -195,7 +199,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			Image:                   image,
 			Command:                 spec.Command,
 			DefaultCommand:          workspaceDefaultCommand(image),
-			Env:                     spec.Env,
+			Env:                     mergedEnv,
 			Flavor:                  flavor,
 			Queue:                   aw.Spec.Queue,
 			Hints:                   convertSpecHints(aw.Spec.Hints),
@@ -829,19 +833,10 @@ func (r *AegisWorkloadReconciler) ensureWorkspaceIngress(ctx context.Context, aw
 }
 
 func effectiveWorkspacePorts(spec *aegisv1alpha1.WorkspaceSpec) []int32 {
-	if spec == nil || len(spec.Ports) == 0 {
-		return []int32{22}
+	if spec == nil {
+		return workspacecfg.EnsureDefaultPorts(nil)
 	}
-	ports := make([]int32, 0, len(spec.Ports))
-	for _, p := range spec.Ports {
-		if p > 0 {
-			ports = append(ports, p)
-		}
-	}
-	if len(ports) == 0 {
-		return []int32{22}
-	}
-	return ports
+	return workspacecfg.EnsureDefaultPorts(spec.Ports)
 }
 
 func createIngressRule(host, path, serviceName string, backendPort networkingv1.ServiceBackendPort, pathType networkingv1.PathType) networkingv1.IngressRule {
@@ -966,13 +961,22 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Config = mgr.GetConfig()
 	r.cpClient = cpCli
 	r.clusterID = clusterID
-	r.defaultWorkspaceImage = envOrDefault("AEGIS_DEFAULT_IMAGE", "alpine:3.19")
+	r.defaultWorkspaceImage = envOrDefault("AEGIS_DEFAULT_IMAGE", workspacecfg.DefaultWorkspaceImage)
 	r.defaultTrainingImage = envOrDefault("AEGIS_TRAINING_DEFAULT_IMAGE", "pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime")
 	r.gpuResourceOverride = envOrDefault("AEGIS_GPU_RESOURCE_NAME", "")
 	r.dryRun = os.Getenv("AEGIS_DRY_RUN") == "1"
 	r.kueueEnabled = os.Getenv("AEGIS_KUEUE_ENABLED") == "1"
 	r.kueueQueue = envOrDefault("AEGIS_KUEUE_QUEUE", "")
 	r.proxyServiceName = envOrDefault("AEGIS_PROXY_SERVICE_NAME", "aegis-auth-proxy")
+	defaults := workspacecfg.DefaultEnv()
+	defaults[workspacecfg.EnvVSCodeCommit] = envOrDefault("AEGIS_VSCODE_COMMIT", defaults[workspacecfg.EnvVSCodeCommit])
+	defaults[workspacecfg.EnvVSCodeQuality] = envOrDefault("AEGIS_VSCODE_QUALITY", defaults[workspacecfg.EnvVSCodeQuality])
+	defaults[workspacecfg.EnvPUID] = envOrDefault("AEGIS_WORKSPACE_PUID", defaults[workspacecfg.EnvPUID])
+	defaults[workspacecfg.EnvPGID] = envOrDefault("AEGIS_WORKSPACE_PGID", defaults[workspacecfg.EnvPGID])
+	defaults[workspacecfg.EnvPasswordAccess] = envOrDefault("AEGIS_WORKSPACE_PASSWORD_ACCESS", defaults[workspacecfg.EnvPasswordAccess])
+	defaults[workspacecfg.EnvUserName] = envOrDefault("AEGIS_WORKSPACE_USER_NAME", defaults[workspacecfg.EnvUserName])
+	defaults[workspacecfg.EnvUserPassword] = envOrDefault("AEGIS_WORKSPACE_USER_PASSWORD", defaults[workspacecfg.EnvUserPassword])
+	r.workspaceEnvDefaults = defaults
 	if portStr := envOrDefault("AEGIS_PROXY_SERVICE_PORT", "8080"); portStr != "" {
 		if val, err := strconv.Atoi(portStr); err == nil {
 			r.proxyServicePort = int32(val)

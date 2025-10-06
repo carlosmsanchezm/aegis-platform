@@ -42,7 +42,7 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:Optional
 	Interactive bool `json:"interactive,omitempty"`
 
-	// Ports exposes additional container ports for interactive scenarios (default 22 when empty).
+	// Ports exposes additional container ports for interactive scenarios (defaults to 11111 when empty).
 	// +kubebuilder:validation:Optional
 	Ports []int32 `json:"ports,omitempty"`
 }

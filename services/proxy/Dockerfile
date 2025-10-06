@@ -12,6 +12,7 @@ COPY services/proxy/go.mod services/proxy/go.sum ./services/proxy/
 COPY services/platform-api/go.mod services/platform-api/go.sum ./services/platform-api/
 COPY agents/k8s-agent/go.mod agents/k8s-agent/go.sum ./agents/k8s-agent/
 COPY proto/aegis/go.mod proto/aegis/go.sum ./proto/aegis/
+COPY pkg/workspace/go.mod ./pkg/workspace/
 
 # Download dependencies using the workspace configuration. This keeps the
 # module sums in sync without attempting to vendor (not supported for workspaces).

@@ -67,3 +67,7 @@ agents/claude/
 plans/
 backups/
 CREDENTIALS-CHEATSHEET.md
+agents/swarm
+agents/tools
+agents/__init__.py
+agents/__pycache__

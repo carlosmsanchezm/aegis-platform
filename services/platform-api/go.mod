@@ -6,8 +6,10 @@ require (
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.24.0
+	github.com/jackc/pgx/v5 v5.7.6
 	github.com/prometheus/client_golang v1.23.2
 	github.com/yourorg/aegis/agents/k8s-agent v0.0.0-00010101000000-000000000000
+	github.com/yourorg/aegis/pkg/workspace v0.0.0-00010101000000-000000000000
 	github.com/yourorg/aegis/proto/aegis v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.68.1
@@ -20,7 +22,6 @@ require (
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 )
@@ -94,5 +95,6 @@ require (
 
 replace (
 	github.com/yourorg/aegis/agents/k8s-agent => ../../agents/k8s-agent
+	github.com/yourorg/aegis/pkg/workspace => ../../pkg/workspace
 	github.com/yourorg/aegis/proto/aegis => ../../proto/aegis
 )

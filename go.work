@@ -3,6 +3,7 @@ go 1.24.0
 use (
 	./agents/k8s-agent
 	./proto/aegis
+	./pkg/workspace
 	./services/platform-api
 	./services/proxy
 )

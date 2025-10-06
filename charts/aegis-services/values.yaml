@@ -69,7 +69,7 @@ platformApi:
 
   # Application-specific configuration
   kubeConfigsDir: "/tmp/kubeconfigs"
-  targetNamespace: "default"
+  targetNamespace: "aegis-workloads"
 
   # Secrets to create
   secrets: {}

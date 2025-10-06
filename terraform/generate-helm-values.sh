@@ -42,10 +42,18 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/../charts"
 PLATFORM_API_IMAGE_TAG=${PLATFORM_API_IMAGE_TAG:-"v1.0.6-tls2"}
+PROXY_IMAGE_TAG=${PROXY_IMAGE_TAG:-"no-client-cert"}
 K8S_AGENT_IMAGE_TAG=${K8S_AGENT_IMAGE_TAG:-"v1.0.2-tls-20251005-amd64"}
 TLS_CERT_PATH=/tmp/proxy-cert.pem
 TLS_KEY_PATH=/tmp/proxy-key.pem
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
+OVERRIDE_FILE=""
+TLS_OVERRIDE_FILE=""
+
+cleanup() {
+  rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}"
+}
+trap cleanup EXIT
 
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "🔐 TLS mode enabled"
@@ -118,14 +126,27 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo ""
     echo "   # Deploy"
     echo "   cd ${OUTPUT_DIR}"
-    echo "   helm upgrade --install aegis-services ./aegis-services \\"
+    echo "   helm upgrade --install aegis ./aegis-services \\"
     echo "     -f ./aegis-services/values-cloud.yaml \\"
     echo "     -f ./aegis-services/values-cloud-generated.yaml \\"
-    echo "     --set platformApi.ingress.enabled=false \\"
-    echo "     --set platformApi.service.type=LoadBalancer \\"
-    echo "     --set proxy.ingress.enabled=false \\"
-    echo "     --set proxy.service.type=LoadBalancer \\"
+    echo "     -f <your-overrides.yaml> \\"
     echo "     --namespace aegis-system --create-namespace"
+    echo ""
+    echo "   # Example overrides file (include secrets and image tags):"
+    echo "   cat > overrides.yaml <<'EOF'"
+    echo "   platformApi:"
+    echo "     image:"
+    echo "       tag: ${PLATFORM_API_IMAGE_TAG}"
+    echo "     env:"
+    echo "       DATABASE_URL: ${DB_URL}"
+    echo "     secrets:"
+    echo "       db-password: \$(terraform output -raw db_password_secret_value)"
+    echo "       proxy-jwt-secret: \$(terraform output -raw jwt_secret_value)"
+    echo "   proxy:"
+    echo "     image:"
+    echo "       tag: ${PROXY_IMAGE_TAG}"
+    echo "     jwtSecret: \$(terraform output -raw jwt_secret_value)"
+    echo "   EOF"
     echo ""
     echo "✨ Done!"
     echo ""
@@ -206,21 +227,23 @@ echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
 echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
 echo "      Proxy:             ${DNS_PROXY}"
 
-if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ]; then
-  openssl req -x509 -newkey rsa:2048 \
-    -keyout "${TLS_KEY_PATH}" \
-    -out "${TLS_CERT_PATH}" \
-    -days 365 -nodes \
-    -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-    -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" 2>/dev/null
-fi
-
 if [[ $TLS_MODE -eq 1 ]]; then
+  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ]; then
+    openssl req -x509 -newkey rsa:2048 \
+      -keyout "${TLS_KEY_PATH}" \
+      -out "${TLS_CERT_PATH}" \
+      -days 365 -nodes \
+      -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
+      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" 2>/dev/null
+  fi
+
   mkdir -p "$(dirname "${CA_BUNDLE}")"
   cat "${TLS_CERT_PATH}" > "${CA_BUNDLE}"
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
-echo "   ✅ TLS certificates ready with proper DNS names"
+if [[ $TLS_MODE -eq 1 ]]; then
+  echo "   ✅ TLS certificates ready with proper DNS names"
+fi
 
 # Step 5: Deploy aegis-services using Helm (FULL deployment)
 echo ""
@@ -228,6 +251,40 @@ echo "5️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 
 # Get JWT secret for proxy
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
+
+OVERRIDE_FILE=$(mktemp)
+cat > "${OVERRIDE_FILE}" <<EOF
+platformApi:
+  image:
+    tag: "${PLATFORM_API_IMAGE_TAG}"
+  env:
+    DATABASE_URL: "${DB_URL}"
+  secrets:
+    db-password: "${DB_PASSWORD}"
+    proxy-jwt-secret: "${JWT_SECRET}"
+proxy:
+  image:
+    tag: "${PROXY_IMAGE_TAG}"
+  jwtSecret: "${JWT_SECRET}"
+EOF
+
+if [[ $TLS_MODE -eq 1 ]]; then
+  TLS_OVERRIDE_FILE=$(mktemp)
+  {
+    echo "platformApi:"
+    echo "  tls:"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+    echo "proxy:"
+    echo "  tls:"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+  } > "${TLS_OVERRIDE_FILE}"
+fi
 
 cd "${OUTPUT_DIR}"
 if [[ $TLS_MODE -eq 1 ]]; then
@@ -237,45 +294,21 @@ HELM_ARGS=(
   upgrade --install aegis ./aegis-services
   -f ./aegis-services/values-cloud.yaml
   -f ./aegis-services/values-cloud-generated.yaml
+  -f "${OVERRIDE_FILE}"
 )
 
 if [[ $TLS_MODE -eq 1 ]]; then
   HELM_ARGS+=( -f ./aegis-services/values-cloud-tls.yaml )
+  HELM_ARGS+=( -f "${TLS_OVERRIDE_FILE}" )
 fi
 
 HELM_ARGS+=(
-  --set platformApi.enabled=true
-  --set platformApi.replicaCount=1
-  --set platformApi.migrations.enabled=false
-  --set platformApi.ingress.enabled=false
-  --set platformApi.service.type=LoadBalancer
-  --set platformApi.envFromSecret.DB_PASSWORD=db-password
-  --set platformApi.livenessProbe=null
-  --set platformApi.readinessProbe=null
-  --set-string platformApi.env.AEGIS_PROXY_BASE_URL="wss://${DNS_PROXY}:8080"
-  --set proxy.enabled=true
-  --set proxy.image.tag="no-client-cert"
-  --set proxy.ingress.enabled=false
-  --set proxy.service.type=LoadBalancer
-  --set proxy.tls.enabled=true
-  --set global.imagePullSecrets[0].name=ecr-registry-secret
   --namespace aegis-system --create-namespace
   --timeout 10m
-  --set platformApi.image.tag="${PLATFORM_API_IMAGE_TAG}"
-  --set-string platformApi.env.DATABASE_URL="${DB_URL}"
-  --set-string platformApi.secrets.db-password="${DB_PASSWORD}"
-  --set-string platformApi.secrets.proxy-jwt-secret="${JWT_SECRET}"
-  --set-string proxy.jwtSecret="${JWT_SECRET}"
-  --set-file proxy.tls.cert="${TLS_CERT_PATH}"
-  --set-file proxy.tls.key="${TLS_KEY_PATH}"
 )
 
-if [[ $TLS_MODE -eq 1 ]]; then
-  HELM_ARGS+=( --set-file platformApi.tls.cert="${TLS_CERT_PATH}" )
-  HELM_ARGS+=( --set-file platformApi.tls.key="${TLS_KEY_PATH}" )
-fi
-
 helm "${HELM_ARGS[@]}"
+
 
 echo "   ✅ aegis-services deployed"
 

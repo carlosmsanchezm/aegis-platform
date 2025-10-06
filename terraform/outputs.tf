@@ -157,43 +157,11 @@ output "helm_values_aegis_services" {
       DB_NAME: "${module.rds.db_instance_name}"
       DB_USER: "${module.rds.db_instance_username}"
       DB_SSLMODE: "require"
-      AEGIS_PROXY_BASE_URL: "https://proxy.yourdomain.com"  # TODO: Update domain
-      AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
-      AEGIS_STORE_BACKEND: "postgres"
-
-    # Secrets - retrieve with: terraform output -raw db_password_secret_value
-    # kubectl create secret generic aegis-platform-secrets \
-    #   --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
-    #   --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)"
-
-    ingress:
-      enabled: true
-      hosts:
-        - host: platform-api.yourdomain.com  # TODO: Update domain
-          paths:
-            - path: /
-              pathType: Prefix
-              service: "http"
-        - host: platform-api-grpc.yourdomain.com  # TODO: Update domain
-          paths:
-            - path: /
-              pathType: Prefix
-              service: "grpc"
 
   proxy:
     image:
       repository: ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/aegis/proxy
       tag: "latest"  # TODO: Use specific version tags
-
-    publicHost: "proxy.yourdomain.com"  # TODO: Update domain
-
-    ingress:
-      enabled: true
-      hosts:
-        - host: proxy.yourdomain.com  # TODO: Update domain
-          paths:
-            - path: /proxy
-              pathType: Prefix
   EOT
 }
 

@@ -5,6 +5,10 @@
 #################################################################
 # Platform API Configuration - Cloud
 #################################################################
+global:
+  imagePullSecrets:
+    - name: ecr-registry-secret
+
 platformApi:
   enabled: true
   replicaCount: 1  # Single instance for resource constraints
@@ -16,40 +20,23 @@ platformApi:
     pullPolicy: IfNotPresent
 
   service:
-    type: ClusterIP
+    type: LoadBalancer
     grpcPort: 8081
     httpPort: 8080
 
   ingress:
-    enabled: true
+    enabled: false
     className: "nginx"
-    annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-      nginx.ingress.kubernetes.io/rate-limit: "100"
-      nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-    hosts:
-      - host: platform-api.yourdomain.com
-        paths:
-          - path: /
-            pathType: Prefix
-            service: "http"
-      - host: platform-api-grpc.yourdomain.com
-        paths:
-          - path: /
-            pathType: Prefix
-            service: "grpc"
-    tls:
-      - secretName: platform-api-tls
-        hosts:
-          - platform-api.yourdomain.com
-          - platform-api-grpc.yourdomain.com
+    annotations: {}
+    hosts: []
+    tls: []
 
   # Production environment variables
   env:
     LOG_LEVEL: "info"
     ENVIRONMENT: "production"
     AEGIS_STORE_BACKEND: "postgres"
+    AEGIS_PROXY_BASE_URL: "wss://proxy.yourdomain.com:8080"
     # AEGIS_PROXY_BASE_URL is automatically set to the proxy service if proxy.enabled=true
     # For external proxy, set this to the public URL (e.g., "https://proxy.yourdomain.com")
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
@@ -105,24 +92,9 @@ platformApi:
       cpu: "500m"
       memory: "512Mi"
 
-  # Production-grade probes (disabled - health endpoints not implemented yet)
-  # livenessProbe:
-  #   httpGet:
-  #     path: /healthz
-  #     port: 8080
-  #   initialDelaySeconds: 60
-  #   periodSeconds: 30
-  #   timeoutSeconds: 10
-  #   failureThreshold: 3
-
-  # readinessProbe:
-  #   httpGet:
-  #     path: /readyz
-  #     port: 8080
-  #   initialDelaySeconds: 10
-  #   periodSeconds: 10
-  #   timeoutSeconds: 5
-  #   failureThreshold: 3
+  # Health probes disabled until endpoints available
+  livenessProbe: null
+  readinessProbe: null
 
   # Security context (disabled for now - binary permissions issue)
   # securityContext:
@@ -154,7 +126,7 @@ platformApi:
             topologyKey: topology.kubernetes.io/zone
 
   migrations:
-    enabled: true
+    enabled: false
     image:
       repository: ghcr.io/golang-migrate/migrate
       tag: v4.16.2
@@ -178,27 +150,15 @@ proxy:
     pullPolicy: IfNotPresent
 
   service:
-    type: ClusterIP
+    type: LoadBalancer
     port: 8080
 
   ingress:
-    enabled: true
+    enabled: false
     className: "nginx"
-    annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-      nginx.ingress.kubernetes.io/rate-limit: "1000"
-      nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-      nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-    hosts:
-      - host: proxy.yourdomain.com
-        paths:
-          - path: /proxy
-            pathType: Prefix
-    tls:
-      - secretName: proxy-ingress-tls
-        hosts:
-          - proxy.yourdomain.com
+    annotations: {}
+    hosts: []
+    tls: []
 
   # Production JWT secret (set via external secret management)
   jwtSecret: ""  # MUST be set via --set-string in production
@@ -217,9 +177,9 @@ proxy:
 
   # TLS enabled for production
   tls:
-    enabled: true
-    cert: ""  # Set via --set-file proxy.tls.cert=/path/to/cert
-    key: ""   # Set via --set-file proxy.tls.key=/path/to/key
+    enabled: false
+    cert: ""
+    key: ""
 
   # Production environment variables
   env:

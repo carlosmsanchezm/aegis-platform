@@ -34,7 +34,7 @@ platformApi:
 
   # Local kubeconfig directory
   kubeConfigsDir: "/tmp/kubeconfigs"
-  targetNamespace: "default"
+  targetNamespace: "aegis-workloads-local"
 
   # Resource constraints for local development
   resources:

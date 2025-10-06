@@ -1,217 +1,192 @@
-# Aegis Deployment Summary
+# Aegis Deployment Guide
 
-## ✅ What's Working (Local)
+This doc captures how to run Aegis in three modes:
 
-### Local Kubernetes Deployment
-Your local deployment is **fully functional** with the following confirmed working setup:
+1. **Local development** on Docker Desktop (no TLS)
+2. **Cloud / EKS without TLS** (plain LoadBalancers)
+3. **Cloud / EKS with TLS** (Ingress + cert-manager)
 
-#### aegis-services (Control Plane)
-- **Platform API**: Running on ports 8080 (HTTP) and 8081 (gRPC)
-- **Proxy**: Running on port 8085 with TLS enabled
-- **Authentication**: Static auth (`dev-user@example.com` / `supersecret`)
-- **JWT Secret**: `a-very-secret-key-for-local-dev-must-be-32-chars`
-- **Access Method**: Port-forward (no ingress needed)
+Everything is value-file driven—Helm commands simply choose the right overlays.
 
-#### aegis-spoke (Workload Cluster)
-- **k8s-Agent**: Connects to `aegis-services-aegis-services-platform-api.default.svc.cluster.local:8081`
-- **Proxy**: Disabled (uses hub proxy at `localhost:8085`)
+---
 
-#### VS Code Extension
-- **Extension**: Installed and working
-- **URI Handler**: Registered and functional
-- **Backstage Integration**: "Open in VS Code" button works
-- **Authentication**: Sign in with static credentials
-- **Connection**: Successfully connects to workspaces
+## 1. Local Development (Docker Desktop)
 
-### Local Values Files (Locked ✅)
-- `charts/aegis-services/values-local.yaml` ✅
-- `charts/aegis-spoke/values-local.yaml` ✅
+### Prerequisites
+- Docker Desktop with Kubernetes enabled
+- `kubectl`, `helm`, and `yarn`
+- Repo checked out locally
 
-## 🚀 Ready for Cloud Deployment
-
-### Terraform Infrastructure
-Your Terraform configuration creates:
-- ✅ EKS Cluster with CPU and GPU node groups
-- ✅ RDS PostgreSQL database
-- ✅ VPC with public, private, and database subnets
-- ✅ ECR Repositories (567751785679.dkr.ecr.us-east-1.amazonaws.com)
-- ✅ Security Groups and networking
-- ✅ AWS Secrets Manager (DB password & JWT secret)
-
-### Enhanced Terraform Outputs
-New outputs added for seamless deployment:
-
-1. **`helm_values_aegis_services`**: Complete YAML for aegis-services chart
-2. **`helm_values_aegis_spoke`**: Complete YAML for aegis-spoke chart
-3. **`db_password_secret_value`**: Database password (sensitive)
-4. **`jwt_secret_value`**: JWT secret (sensitive)
-5. **`k8s_secret_commands`**: Commands to create K8s secrets
-
-### Automation Script
-- ✅ `terraform/generate-helm-values.sh` - Auto-generates Helm values from Terraform
-
-### Cloud Values Files (Updated ✅)
-- `charts/aegis-services/values-cloud.yaml` ✅
-- `charts/aegis-spoke/values-cloud.yaml` ✅
-
-## 📋 Cloud Deployment Workflow
-
-### Step-by-Step Process
-
+### Switch kubeconfig
 ```bash
-# 1. Deploy Infrastructure
-cd terraform/
-terraform init
-terraform apply
+kubectl config use-context docker-desktop
+kubectl get nodes   # should show docker-desktop
+```
 
-# 2. Generate Helm Values
-./generate-helm-values.sh
-
-# 3. Update Domain Names
-sed -i '' 's/yourdomain.com/your-actual-domain.com/g' \
-  ../charts/aegis-services/values-cloud-generated.yaml
-sed -i '' 's/yourdomain.com/your-actual-domain.com/g' \
-  ../charts/aegis-spoke/values-cloud-generated.yaml
-
-# 4. Configure kubectl
-aws eks update-kubeconfig --region us-east-1 --name <cluster-name>
-
-# 5. Create Secrets
-kubectl create secret generic aegis-platform-secrets \
-  --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
-  --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)" \
+### Deploy the hub (platform-api + proxy)
+```bash
+helm upgrade --install aegis-services charts/aegis-services \
+  -f charts/aegis-services/values.yaml \
+  -f charts/aegis-services/values-local.yaml \
   --namespace aegis-system --create-namespace
+```
 
-# 6. Deploy Helm Charts
-helm upgrade --install aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-cloud.yaml \
-  -f ./charts/aegis-services/values-cloud-generated.yaml \
-  --namespace aegis-system --create-namespace
-
-helm upgrade --install aegis-spoke ./charts/aegis-spoke \
-  -f ./charts/aegis-spoke/values-cloud.yaml \
-  -f ./charts/aegis-spoke/values-cloud-generated.yaml \
+### Deploy the spoke (k8s-agent)
+```bash
+helm upgrade --install aegis-spoke charts/aegis-spoke \
+  -f charts/aegis-spoke/values.yaml \
+  -f charts/aegis-spoke/values-local.yaml \
   --namespace aegis-system
 ```
 
-## 🔑 Key Configuration Mappings
+> **Re-deploying?** Run `helm uninstall aegis-services aegis-spoke -n aegis-system` first.
 
-### Platform API
-| Config | Local | Cloud |
-|--------|-------|-------|
-| Image | ECR (IfNotPresent) | ECR (IfNotPresent) |
-| DB | In-memory | RDS PostgreSQL |
-| HTTP Port | 8080 | 8080 |
-| gRPC Port | 8081 | 8081 |
-| Access | Port-forward | Ingress |
-| Auth | Static | Static (TODO: OIDC) |
-| JWT Secret | 32-char local | 64-char from Terraform |
+### Port-forward for local access
+```bash
+# Platform API on http://localhost:8080 (HTTP) and :8081 (gRPC)
+kubectl -n aegis-system port-forward svc/aegis-services-platform-api 8080:8080 8081:8081
 
-### Proxy
-| Config | Local | Cloud |
-|--------|-------|-------|
-| Image | ECR (IfNotPresent) | ECR (IfNotPresent) |
-| Port | 8085 | 8080 |
-| TLS | Self-signed cert | cert-manager/manual |
-| Access | Port-forward | Ingress |
-| JWT Secret | Matches Platform API | From Terraform |
+# Proxy tunnel on http://localhost:8085/proxy/
+kubectl -n aegis-system port-forward svc/aegis-services-proxy 8085:8080
+```
 
-### k8s-Agent (Spoke)
-| Config | Local | Cloud |
-|--------|-------|-------|
-| Image | ECR (IfNotPresent) | ECR (IfNotPresent) |
-| CP gRPC | localhost:8081 (port-forward) | aegis-services DNS |
-| Proxy Host | localhost:8085 | proxy.yourdomain.com |
-| Spoke Proxy | Disabled | Disabled |
+### Start Backstage against local services
+```bash
+cd aegis-platform
+yarn dev          # copies app-config.local-dev.yaml
+```
 
-## 📝 Before Cloud Deployment Checklist
+---
 
-### DNS & TLS
-- [ ] Domain name configured
-- [ ] DNS records created:
-  - [ ] `platform-api.yourdomain.com` → Ingress
-  - [ ] `platform-api-grpc.yourdomain.com` → Ingress
-  - [ ] `proxy.yourdomain.com` → Ingress
-- [ ] cert-manager installed OR manual TLS certs ready
+## 2. Cloud / EKS (plain HTTP)
 
-### AWS Resources (from Terraform)
-- [ ] EKS cluster running
-- [ ] RDS PostgreSQL accessible from EKS
-- [ ] ECR images pushed:
-  - [ ] platform-api:latest
-  - [ ] proxy:latest
-  - [ ] k8s-agent:latest
-- [ ] Secrets Manager has DB password and JWT secret
+### Provision infra
+```bash
+cd terraform
+terraform init
+terraform apply
+```
 
-### Kubernetes Cluster
-- [ ] kubectl configured for EKS
-- [ ] NGINX Ingress Controller installed
-- [ ] Namespace `aegis-system` created (or will be created)
-- [ ] Secrets created from Terraform outputs
+### Generate value overlays
+```bash
+./generate-helm-values.sh
+```
+This creates/updates:
+- `charts/aegis-services/values-cloud-generated.yaml`
+- `charts/aegis-spoke/values-cloud-generated.yaml`
+- Prints a sample override file for secrets/image tags
 
-### Configuration Files
-- [ ] `values-cloud-generated.yaml` files created
-- [ ] Domain names updated (no `yourdomain.com`)
-- [ ] Image tags set (not `latest` for production)
-- [ ] Resource limits reviewed
+### Configure kubeconfig
+```bash
+aws eks update-kubeconfig \
+  --region us-east-1 \
+  --name aegis-spoke-prod \
+  --profile myclaude
+```
 
-## 🎯 What You Can Do Now
+### Generate Helm values (script can deploy for you)
+```bash
+./generate-helm-values.sh
+```
+When the script finishes it prompts `Do you want to deploy now?`:
 
-### Test Locally (Already Working ✅)
-1. Port-forward services
-2. Open Backstage UI (http://localhost:7008)
-3. Create workspace
-4. Click "Open in VS Code" - works!
+- **Type `y`** to let it run Helm immediately, layering the cloud value files with the overrides it just produced.
+- **Type `n`** to stop after generation; the script still writes the overlays and prints the Helm command so you can execute it manually later.
 
-### Deploy to Cloud (Next Step)
-1. Run `terraform apply` in `terraform/`
-2. Run `./generate-helm-values.sh`
-3. Update domain names
-4. Deploy with Helm
+Artifacts generated each run:
+- `charts/aegis-services/values-cloud-generated.yaml`
+- `charts/aegis-spoke/values-cloud-generated.yaml`
+- `overrides.yaml` (image tags, DATABASE_URL, secrets)
 
-### VS Code Extension (Cloud)
-Once deployed to cloud with proper domains:
-- Update extension settings to point to cloud endpoints
-- Authentication will work with same static creds (or upgrade to OIDC)
-- "Open in VS Code" will work from cloud Backstage instance
+### Create secrets (once per cluster)
+```bash
+kubectl create namespace aegis-system --dry-run=client -o yaml | kubectl apply -f -
 
-## 📚 Documentation
+kubectl create secret generic aegis-platform-secrets \
+  --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
+  --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)" \
+  --namespace aegis-system --dry-run=client -o yaml | kubectl apply -f -
+```
 
-| Document | Purpose |
-|----------|---------|
-| [TERRAFORM_TO_HELM_WORKFLOW.md](TERRAFORM_TO_HELM_WORKFLOW.md) | Complete workflow from Terraform to Helm |
-| [charts/CLOUD_DEPLOYMENT_CHECKLIST.md](charts/CLOUD_DEPLOYMENT_CHECKLIST.md) | Detailed cloud deployment checklist |
-| [terraform/README.md](terraform/README.md) | Terraform infrastructure documentation |
-| [terraform/generate-helm-values.sh](terraform/generate-helm-values.sh) | Automation script |
+### Install/upgrade via Helm
+```bash
+# Hub
+helm upgrade --install aegis-services charts/aegis-services \
+  -f charts/aegis-services/values-cloud.yaml \
+  -f charts/aegis-services/values-cloud-generated.yaml \
+  -f overrides.yaml \
+  --namespace aegis-system --create-namespace
 
-## 🔄 Local to Cloud Differences
+# Spoke
+helm upgrade --install aegis-spoke charts/aegis-spoke \
+  -f charts/aegis-spoke/values-cloud.yaml \
+  -f charts/aegis-spoke/values-cloud-generated.yaml \
+  -f overrides.yaml \
+  --namespace aegis-system
+```
+`overrides.yaml` is the small file printed by the generation script (it sets image tags, DATABASE_URL, secrets, etc.). If you answered `y` when prompted, the script already ran the Helm commands above.
 
-### Similarities (Consistent)
-- Same image repositories (ECR)
-- Same ports for services
-- Same JWT secret format (32+ chars)
-- Same k8s-agent behavior
+### Backstage against cloud HTTP
+```bash
+cd aegis-platform
+yarn dev:cloud      # copies app-config.cloud.yaml
+```
 
-### Differences (Environment-Specific)
-| Aspect | Local | Cloud |
-|--------|-------|-------|
-| **Access** | Port-forward | Ingress/DNS |
-| **Database** | In-memory | RDS PostgreSQL |
-| **TLS** | Self-signed | cert-manager/Let's Encrypt |
-| **Secrets** | Hardcoded in values | Terraform-generated |
-| **Replicas** | 1 | 2 (HA) |
-| **Resources** | Minimal | Production-sized |
-| **Probes** | Disabled | Full health checks |
-| **Security** | Relaxed | Strict contexts |
+---
 
-## 🎉 Summary
+## 3. Cloud / EKS with TLS
 
-You now have:
-1. ✅ **Working local deployment** - Fully tested and functional
-2. ✅ **Locked local values** - Reliable baseline configuration
-3. ✅ **Cloud-ready Terraform** - Infrastructure as code
-4. ✅ **Auto-generated Helm values** - No manual copying needed
-5. ✅ **Comprehensive documentation** - Step-by-step guides
-6. ✅ **VS Code extension working** - Full integration tested
+Use the same Terraform apply.
 
-Next step: Deploy to cloud and test the same workflow in a production environment!
+### Generate TLS assets + values
+```bash
+./generate-helm-values.sh --tls
+```
+The prompt behaves the same way as the non-TLS run (`y` to deploy now, `n` to just write the files). This adds:
+- `charts/aegis-services/values-cloud-tls.yaml`
+- `tls-overrides.yaml`
+
+### Deploy with TLS overlay (manual path)
+```bash
+helm upgrade --install aegis-services charts/aegis-services \
+  -f charts/aegis-services/values-cloud.yaml \
+  -f charts/aegis-services/values-cloud-generated.yaml \
+  -f overrides.yaml \
+  -f charts/aegis-services/values-cloud-tls.yaml \
+  -f tls-overrides.yaml \
+  --namespace aegis-system --create-namespace
+```
+(Spoke deployment is unchanged unless you also apply `charts/aegis-spoke/values-cloud-tls.yaml` to enforce TLS when dialing the hub.)
+
+### Backstage against cloud TLS
+```bash
+cd aegis-platform
+yarn dev:cloud-tls   # copies app-config.cloud-tls.yaml
+```
+
+---
+
+## Switching environments
+
+| Task | Command |
+|------|---------|
+| Docker Desktop → EKS | `aws eks update-kubeconfig --region us-east-1 --name aegis-spoke-prod --profile myclaude` |
+| EKS → Docker Desktop | `kubectl config use-context docker-desktop` |
+| Local Backstage | `yarn dev` |
+| Cloud Backstage (HTTP) | `yarn dev:cloud` |
+| Cloud Backstage (TLS) | `yarn dev:cloud-tls` |
+| Remove local stack | `helm uninstall aegis-services aegis-spoke -n aegis-system` |
+
+---
+
+## Handy status commands
+```bash
+kubectl get pods -n aegis-system
+kubectl logs deployment/aegis-services-platform-api -n aegis-system
+kubectl logs deployment/aegis-services-proxy -n aegis-system
+kubectl logs deployment/aegis-spoke-aegis-spoke-k8s-agent -n aegis-system
+```
+
+Need to rotate backplane secrets? Update `overrides.yaml` and rerun the Helm upgrade.
+
+That’s it—you can now develop locally, test cloud HTTP, or flip on TLS without rewriting charts.

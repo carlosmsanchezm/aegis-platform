@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
+	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
@@ -43,14 +44,15 @@ import (
 
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
-	log             *zap.Logger
-	store           store.Store
-	kubeClients     *kubeclients.Manager
-	targetNamespace string
-	proxyBaseURL    string
-	proxyAudience   string
-	proxySecret     []byte
-	proxyTokenTTL   time.Duration
+	log                  *zap.Logger
+	store                store.Store
+	kubeClients          *kubeclients.Manager
+	targetNamespace      string
+	proxyBaseURL         string
+	proxyAudience        string
+	proxySecret          []byte
+	proxyTokenTTL        time.Duration
+	workspaceEnvDefaults map[string]string
 }
 
 type proxyClaims struct {
@@ -144,15 +146,38 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	if ttlSeconds <= 0 {
 		ttlSeconds = defaultProxyTokenTTLSeconds
 	}
+	defaults := workspacecfg.DefaultEnv()
+	if commit := strings.TrimSpace(os.Getenv("AEGIS_VSCODE_COMMIT")); commit != "" {
+		defaults[workspacecfg.EnvVSCodeCommit] = commit
+	}
+	if quality := strings.TrimSpace(os.Getenv("AEGIS_VSCODE_QUALITY")); quality != "" {
+		defaults[workspacecfg.EnvVSCodeQuality] = quality
+	}
+	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_PUID")); val != "" {
+		defaults[workspacecfg.EnvPUID] = val
+	}
+	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_PGID")); val != "" {
+		defaults[workspacecfg.EnvPGID] = val
+	}
+	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_PASSWORD_ACCESS")); val != "" {
+		defaults[workspacecfg.EnvPasswordAccess] = val
+	}
+	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_USER_NAME")); val != "" {
+		defaults[workspacecfg.EnvUserName] = val
+	}
+	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_USER_PASSWORD")); val != "" {
+		defaults[workspacecfg.EnvUserPassword] = val
+	}
 	return &Server{
-		log:             log,
-		store:           st,
-		kubeClients:     clients,
-		targetNamespace: namespace,
-		proxyBaseURL:    baseURL,
-		proxyAudience:   audience,
-		proxySecret:     []byte(secret),
-		proxyTokenTTL:   time.Duration(ttlSeconds) * time.Second,
+		log:                  log,
+		store:                st,
+		kubeClients:          clients,
+		targetNamespace:      namespace,
+		proxyBaseURL:         baseURL,
+		proxyAudience:        audience,
+		proxySecret:          []byte(secret),
+		proxyTokenTTL:        time.Duration(ttlSeconds) * time.Second,
+		workspaceEnvDefaults: defaults,
 	}
 }
 
@@ -285,6 +310,10 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.FailedPrecondition, "unknown flavor: "+reqFlavor)
 	}
 	queueObj := s.store.GetQueue(w.GetQueue())
+
+	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
+		s.applyWorkspaceDefaults(wk.Workspace)
+	}
 
 	estimateUSD, maxSecs, estErr := s.estimateWorkloadUSD(w, flavorObj, queueObj)
 	if estErr != nil {
@@ -1590,13 +1619,36 @@ func stringPtr(in string) *string {
 
 func selectWorkspacePort(spec *aegis.WorkspaceSpec) int32 {
 	if spec != nil {
+		var firstPositive int32
 		for _, port := range spec.GetPorts() {
-			if port > 0 {
+			if port <= 0 {
+				continue
+			}
+			if port == workspacecfg.DefaultVSCodePort {
 				return port
 			}
+			if firstPositive == 0 {
+				firstPositive = port
+			}
+		}
+		if firstPositive > 0 {
+			return firstPositive
 		}
 	}
-	return 22
+	return workspacecfg.DefaultVSCodePort
+}
+
+func (s *Server) applyWorkspaceDefaults(ws *aegis.WorkspaceSpec) {
+	if ws == nil {
+		return
+	}
+	ws.Ports = workspacecfg.EnsureDefaultPorts(ws.GetPorts())
+	mergedEnv := workspacecfg.MergeEnv(ws.GetEnv(), s.workspaceEnvDefaults)
+	if len(mergedEnv) == 0 {
+		ws.Env = nil
+	} else {
+		ws.Env = mergedEnv
+	}
 }
 
 func requiredFlavor(w *aegis.Workload) (string, error) {

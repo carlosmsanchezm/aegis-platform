@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 )
 
 // GPUHints mirrors the control-plane hint payload.
@@ -101,7 +103,7 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 
 	if opts.Interactive {
 		if len(opts.InteractivePorts) == 0 {
-			opts.InteractivePorts = []int32{22}
+			opts.InteractivePorts = workspacecfg.EnsureDefaultPorts(nil)
 		}
 		applyInteractiveContainerSettings(&container, opts)
 	}
@@ -210,7 +212,7 @@ func configureInteractivePod(job *batchv1.Job, opts WorkspaceOptions) {
 		bootstrapImage = os.Getenv("AEGIS_SSH_BOOTSTRAP_IMAGE")
 	}
 	if bootstrapImage == "" {
-		bootstrapImage = "busybox:1.36"  // Use busybox by default instead of the workspace image
+		bootstrapImage = "busybox:1.36" // Use busybox by default instead of the workspace image
 	}
 
 	script := `set -eu

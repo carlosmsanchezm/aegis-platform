@@ -39,11 +39,4 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
-locals {
-  cluster_name = "${var.cluster_name_prefix}-${var.environment}"
-  common_tags = {
-    Project     = "aegis"
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
+# Locals moved to eks.tf

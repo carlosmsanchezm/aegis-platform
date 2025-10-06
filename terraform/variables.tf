@@ -56,10 +56,16 @@ variable "gpu_instance_type" {
   default     = "g4dn.xlarge"
 }
 
+variable "gpu_mig_instance_type" {
+  description = "Instance type for MIG-capable GPU workers"
+  type        = string
+  default     = "g5.xlarge"
+}
+
 variable "cpu_desired_capacity" {
   description = "Desired capacity for CPU worker nodes"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "gpu_desired_capacity" {
@@ -72,6 +78,18 @@ variable "gpu_max_capacity" {
   description = "Maximum capacity for GPU worker nodes"
   type        = number
   default     = 2
+}
+
+variable "gpu_mig_desired_capacity" {
+  description = "Desired capacity for MIG GPU worker nodes"
+  type        = number
+  default     = 0
+}
+
+variable "gpu_mig_max_capacity" {
+  description = "Maximum capacity for MIG GPU worker nodes"
+  type        = number
+  default     = 1
 }
 
 variable "use_spot_instances" {

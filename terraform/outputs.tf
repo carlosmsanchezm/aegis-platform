@@ -3,47 +3,26 @@
 # EKS Cluster Information
 output "cluster_name" {
   description = "Name of the EKS cluster"
-  value       = module.eks.cluster_name
+  value       = aws_eks_cluster.main.name
 }
 
-output "cluster_endpoint" {
-  description = "Endpoint for EKS control plane"
-  value       = module.eks.cluster_endpoint
-}
-
-output "cluster_security_group_id" {
-  description = "Security group ID attached to the EKS cluster"
-  value       = module.eks.cluster_security_group_id
-}
-
-output "cluster_iam_role_arn" {
-  description = "IAM role ARN associated with EKS cluster"
-  value       = module.eks.cluster_iam_role_arn
-}
-
-output "cluster_certificate_authority_data" {
-  description = "Base64 encoded certificate data required to communicate with the cluster"
-  value       = module.eks.cluster_certificate_authority_data
-}
-
-output "cluster_oidc_issuer_url" {
-  description = "The URL on the EKS cluster OIDC Issuer"
-  value       = module.eks.cluster_oidc_issuer_url
-}
+# These outputs moved to eks.tf
 
 # Node Groups
 output "node_groups" {
   description = "EKS node groups information"
   value = {
     cpu_workers = {
-      node_group_id           = module.eks.eks_managed_node_groups["cpu_workers"].node_group_id
-      node_group_arn          = module.eks.eks_managed_node_groups["cpu_workers"].node_group_arn
-      autoscaling_group_names = module.eks.eks_managed_node_groups["cpu_workers"].node_group_autoscaling_group_names
+      node_group_id  = aws_eks_node_group.cpu_workers.id
+      node_group_arn = aws_eks_node_group.cpu_workers.arn
     }
     gpu_workers = {
-      node_group_id           = module.eks.eks_managed_node_groups["gpu_workers"].node_group_id
-      node_group_arn          = module.eks.eks_managed_node_groups["gpu_workers"].node_group_arn
-      autoscaling_group_names = module.eks.eks_managed_node_groups["gpu_workers"].node_group_autoscaling_group_names
+      node_group_id  = aws_eks_node_group.gpu_workers.id
+      node_group_arn = aws_eks_node_group.gpu_workers.arn
+    }
+    gpu_mig_workers = {
+      node_group_id  = aws_eks_node_group.gpu_mig_workers.id
+      node_group_arn = aws_eks_node_group.gpu_mig_workers.arn
     }
   }
 }
@@ -163,7 +142,7 @@ output "helm_values_aegis_services" {
   sensitive   = true
   value       = <<-EOT
   # Auto-generated from Terraform - aegis-services (Control Plane / Hub)
-  # Cluster: ${module.eks.cluster_name}
+  # Cluster: ${aws_eks_cluster.main.name}
   # Region: ${var.aws_region}
   # Generated: ${timestamp()}
 
@@ -224,7 +203,7 @@ output "helm_values_aegis_spoke" {
   sensitive   = true
   value       = <<-EOT
   # Auto-generated from Terraform - aegis-spoke (Workload Cluster)
-  # Cluster: ${module.eks.cluster_name}
+  # Cluster: ${aws_eks_cluster.main.name}
   # Region: ${var.aws_region}
   # Generated: ${timestamp()}
 
@@ -306,7 +285,7 @@ output "aws_region" {
 # Kubectl configuration command
 output "kubectl_config_command" {
   description = "Command to configure kubectl"
-  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name} --profile ${var.aws_profile}"
+  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name} --profile ${var.aws_profile}"
 }
 
 # Route53 DNS Information

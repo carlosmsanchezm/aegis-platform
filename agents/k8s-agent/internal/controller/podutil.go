@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -40,9 +42,21 @@ func ApplyResourceHints(pod *corev1.PodSpec, hints *aegisv1alpha1.ResourceHints)
 	if pod.NodeSelector == nil {
 		pod.NodeSelector = map[string]string{}
 	}
-	pod.NodeSelector["aegis.io/gpu-flavor"] = "nvidia-tesla-t4"
+	flavorLabel := "nvidia-tesla-t4"
+	if strings.Contains(resourceName, "mig-1g.10gb") || strings.Contains(resourceName, "a10") {
+		flavorLabel = "nvidia-a10g-mig"
+	}
+	pod.NodeSelector["aegis.io/gpu-flavor"] = flavorLabel
 
-	if !hasToleration(pod.Tolerations, "nvidia.com/gpu") {
+	if strings.Contains(resourceName, "mig-1g.10gb") {
+		if !hasToleration(pod.Tolerations, "nvidia.com/mig-1g.10gb") {
+			pod.Tolerations = append(pod.Tolerations, corev1.Toleration{
+				Key:      "nvidia.com/mig-1g.10gb",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			})
+		}
+	} else if !hasToleration(pod.Tolerations, "nvidia.com/gpu") {
 		pod.Tolerations = append(pod.Tolerations, corev1.Toleration{
 			Key:      "nvidia.com/gpu",
 			Operator: corev1.TolerationOpExists,

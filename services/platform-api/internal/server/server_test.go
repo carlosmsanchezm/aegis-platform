@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
@@ -45,10 +46,42 @@ func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Wo
 		Kind: &aegis.Workload_Workspace{
 			Workspace: &aegis.WorkspaceSpec{
 				Interactive: interactive,
-				Ports:       []int32{22},
+				Ports:       []int32{workspacecfg.DefaultVSCodePort},
 				Env:         env,
 			},
 		},
+	}
+}
+
+func TestApplyWorkspaceDefaults(t *testing.T) {
+	srv := newTestServer(t)
+	ws := &aegis.WorkspaceSpec{
+		Ports: []int32{-1},
+		Env: map[string]string{
+			workspacecfg.EnvVSCodeCommit: "custom",
+			"CUSTOM":                     "1",
+		},
+	}
+
+	srv.applyWorkspaceDefaults(ws)
+
+	if len(ws.Ports) != 1 {
+		t.Fatalf("expected one port, got %v", ws.Ports)
+	}
+	if ws.Ports[0] != workspacecfg.DefaultVSCodePort {
+		t.Fatalf("expected port %d, got %v", workspacecfg.DefaultVSCodePort, ws.Ports)
+	}
+	if ws.Env[workspacecfg.EnvVSCodeCommit] != "custom" {
+		t.Fatalf("expected user commit to be preserved, got %q", ws.Env[workspacecfg.EnvVSCodeCommit])
+	}
+	if ws.Env[workspacecfg.EnvVSCodeQuality] == "" {
+		t.Fatalf("expected default quality to be populated, env=%v", ws.Env)
+	}
+	if ws.Env["CUSTOM"] != "1" {
+		t.Fatalf("expected custom env to survive, env=%v", ws.Env)
+	}
+	if ws.Env[workspacecfg.EnvPasswordAccess] != workspacecfg.DefaultPasswordAccess {
+		t.Fatalf("expected password access default, env=%v", ws.Env)
 	}
 }
 

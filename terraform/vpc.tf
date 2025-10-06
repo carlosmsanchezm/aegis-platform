@@ -42,4 +42,10 @@ module "vpc" {
   }
 
   tags = local.common_tags
+
+  # Ensure proper deletion order - VPC resources depend on EKS being deleted first
+  depends_on = [
+    # EKS cluster must be deleted before VPC resources
+    # This is handled by referencing the VPC in EKS module
+  ]
 }

@@ -17,8 +17,9 @@ resource "random_password" "db_password" {
 resource "aws_secretsmanager_secret" "db_password" {
   count = var.create_secrets ? 1 : 0
 
-  name        = "aegis/${var.environment}/db-password"
-  description = "PostgreSQL database password for Aegis platform-api"
+  name                    = "aegis/${var.environment}/db-password"
+  description             = "PostgreSQL database password for Aegis platform-api"
+  recovery_window_in_days = 0 # Force immediate deletion to avoid recreation issues
 
   tags = local.common_tags
 }
@@ -39,8 +40,9 @@ resource "random_password" "jwt_secret" {
 resource "aws_secretsmanager_secret" "jwt_secret" {
   count = var.create_secrets ? 1 : 0
 
-  name        = "aegis/${var.environment}/proxy-jwt-secret"
-  description = "JWT secret for Aegis proxy service"
+  name                    = "aegis/${var.environment}/proxy-jwt-secret"
+  description             = "JWT secret for Aegis proxy service"
+  recovery_window_in_days = 0 # Force immediate deletion to avoid recreation issues
 
   tags = local.common_tags
 }
@@ -52,18 +54,33 @@ resource "aws_secretsmanager_secret_version" "jwt_secret" {
   secret_string = random_password.jwt_secret.result
 }
 
+# Data source to get EKS cluster-managed security group
+data "aws_security_groups" "eks_cluster_sg" {
+  filter {
+    name   = "tag:aws:eks:cluster-name"
+    values = [local.cluster_name]
+  }
+
+  filter {
+    name   = "vpc-id"
+    values = [module.vpc.vpc_id]
+  }
+
+  depends_on = [aws_eks_cluster.main]
+}
+
 # Security group for RDS
 resource "aws_security_group" "rds" {
   name_prefix = "${local.cluster_name}-rds-"
   vpc_id      = module.vpc.vpc_id
   description = "Security group for Aegis RDS PostgreSQL instance"
 
-  # Allow PostgreSQL access from EKS nodes
+  # Allow PostgreSQL access from EKS nodes (terraform-managed SG)
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.eks_nodes.id]
+    security_groups = [aws_security_group.node.id]
     description     = "PostgreSQL access from EKS nodes"
   }
 
@@ -78,6 +95,17 @@ resource "aws_security_group" "rds" {
   tags = merge(local.common_tags, {
     Name = "${local.cluster_name}-rds-sg"
   })
+}
+
+# Additional security group rule for EKS cluster-managed security group
+resource "aws_security_group_rule" "rds_from_eks_cluster_sg" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rds.id
+  source_security_group_id = data.aws_security_groups.eks_cluster_sg.ids[0]
+  description              = "PostgreSQL access from EKS cluster-managed security group"
 }
 
 # RDS PostgreSQL instance
@@ -129,8 +157,8 @@ module "rds" {
 
   # Deletion protection
   deletion_protection              = var.db_deletion_protection
-  skip_final_snapshot              = var.db_skip_final_snapshot
-  final_snapshot_identifier_prefix = var.db_skip_final_snapshot ? null : "${local.cluster_name}-final-snapshot"
+  skip_final_snapshot              = true
+  final_snapshot_identifier_prefix = null
 
   # Enable automated minor version upgrades
   auto_minor_version_upgrade = true

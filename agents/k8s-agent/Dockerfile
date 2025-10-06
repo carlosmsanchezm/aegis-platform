@@ -7,6 +7,7 @@ WORKDIR /workspace
 # Copy the module manifests with dependencies available via local replace directives.
 COPY proto/aegis/go.mod proto/aegis/go.sum ./proto/aegis/
 COPY agents/k8s-agent/go.mod agents/k8s-agent/go.sum ./agents/k8s-agent/
+COPY pkg/workspace/go.mod ./pkg/workspace/
 
 # Download dependencies from within the operator module to take replacements into account.
 WORKDIR /workspace/agents/k8s-agent
@@ -14,6 +15,7 @@ RUN go mod download
 
 # Copy the go source along with the locally replaced modules.
 COPY proto/aegis ../../proto/aegis
+COPY pkg/workspace ../../pkg/workspace
 COPY agents/k8s-agent/cmd ./cmd
 COPY agents/k8s-agent/api ./api
 COPY agents/k8s-agent/internal ./internal

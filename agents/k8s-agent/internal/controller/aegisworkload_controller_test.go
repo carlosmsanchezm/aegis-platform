@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
+	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 )
 
 var _ = Describe("AegisWorkload Controller", func() {
@@ -88,6 +89,8 @@ var _ = Describe("AegisWorkload Controller", func() {
 				proxyIngressHost:  "proxy.test.local",
 				sshBootstrapImage: "busybox:1.36",
 			}
+			controllerReconciler.defaultWorkspaceImage = workspacecfg.DefaultWorkspaceImage
+			controllerReconciler.workspaceEnvDefaults = workspacecfg.DefaultEnv()
 
 			req := reconcile.Request{NamespacedName: typeNamespacedName}
 
@@ -95,7 +98,6 @@ var _ = Describe("AegisWorkload Controller", func() {
 			resource := &aegisv1alpha1.AegisWorkload{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
 			resource.Spec.Workspace.Interactive = true
-			resource.Spec.Workspace.Ports = []int32{2222}
 			if resource.Annotations == nil {
 				resource.Annotations = map[string]string{}
 			}
@@ -117,7 +119,7 @@ var _ = Describe("AegisWorkload Controller", func() {
 				return k8sClient.Get(ctx, svcName, svc)
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 			Expect(svc.Spec.Ports).To(HaveLen(1))
-			Expect(svc.Spec.Ports[0].Port).To(Equal(int32(2222)))
+			Expect(svc.Spec.Ports[0].Port).To(Equal(workspacecfg.DefaultVSCodePort))
 
 			ing := &networkingv1.Ingress{}
 			Eventually(func() error {

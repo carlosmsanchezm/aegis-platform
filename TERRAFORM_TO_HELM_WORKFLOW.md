@@ -127,7 +127,8 @@ cd charts/
 
 # Deploy aegis-services (control plane / hub)
 helm upgrade --install aegis-services ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --namespace aegis-system --create-namespace
 
@@ -146,12 +147,17 @@ kubectl get pods -n aegis-system
 
 ## 📊 Values File Structure
 
-### Base Values (values-cloud.yaml)
+### Base Values (values/common.yaml)
 - Static configuration
 - Production settings (replicas, resources, security contexts)
 - Ingress configuration
 - Probe settings
 - Affinity rules
+
+### Cloud Overlay (values/cloud.yaml)
+- Cloud-specific overrides (load balancers, registries, resource classes)
+- External service endpoints
+- Production secrets references
 
 ### Generated Values (values-cloud-generated.yaml)
 - Dynamic values from Terraform
@@ -162,9 +168,9 @@ kubectl get pods -n aegis-system
 
 ### Merge Strategy
 Helm merges these files with later files taking precedence:
-1. `values.yaml` (chart defaults)
-2. `values-cloud.yaml` (base cloud config)
-3. `values-cloud-generated.yaml` (terraform-generated, overrides base)
+1. `values/common.yaml` (chart defaults via symlink)
+2. `values/cloud.yaml` (cloud overlay)
+3. `values-cloud-generated.yaml` (terraform-generated overrides)
 
 ## 🔐 Security Best Practices
 
@@ -222,7 +228,8 @@ sed -i '' 's/yourdomain.com/your-actual-domain.com/g' \
 # 4. Upgrade Helm deployment
 cd ../charts/
 helm upgrade aegis-services ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --namespace aegis-system
 ```
@@ -247,7 +254,7 @@ Before deploying to cloud:
 - [ ] NGINX Ingress Controller installed
 - [ ] DNS records pointing to ingress
 - [ ] TLS certificates configured (cert-manager or manual)
-- [ ] Review resource limits in values-cloud.yaml
+- [ ] Review resource limits in values/cloud.yaml
 - [ ] Set appropriate image tags (not `latest`)
 
 ## 🆘 Troubleshooting
@@ -276,4 +283,4 @@ kubectl logs -n aegis-system -l app.kubernetes.io/component=platform-api
 
 - [Terraform README](terraform/README.md)
 - [Cloud Deployment Checklist](charts/CLOUD_DEPLOYMENT_CHECKLIST.md)
-- [Helm Chart Values](charts/aegis-services/values-cloud.yaml)
+- [Helm Chart Values](charts/aegis-services/values/cloud.yaml)

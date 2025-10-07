@@ -56,7 +56,7 @@ The password and all connection info are stored in Terraform state and can be re
 - **EKS Cluster** (`aegis-spoke-prod`)
 - **RDS PostgreSQL** with auto-generated password
 - **VPC & Networking**
-- **ECR Repositories**
+- **ECR Repositories** *(optional – set `manage_ecr_repositories = true` to let Terraform manage them)*
 - **AWS Secrets Manager** secrets
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete details.

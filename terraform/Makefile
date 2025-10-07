@@ -103,9 +103,10 @@ deploy-aegis: helm-values ## Deploy Aegis services with Helm
 		--output text \
 		--profile $(AWS_PROFILE) \
 		--region $(AWS_REGION)) && \
-	helm upgrade --install aegis-services ../charts/aegis-services \
+		helm upgrade --install aegis-services ../charts/aegis-services \
 		-n aegis-services \
-		-f ../charts/aegis-services/values-cloud.yaml \
+		-f ../charts/aegis-services/values/common.yaml \
+		-f ../charts/aegis-services/values/cloud.yaml \
 		--set-string platformApi.secrets.db-password="$$DB_PASSWORD" \
 		--set-string proxy.jwtSecret="$$JWT_SECRET" \
 		--set-string platformApi.image.repository="$$(terraform output -raw helm_values | jq -r '.platform_api.image_repository')" \

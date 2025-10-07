@@ -19,7 +19,8 @@ AEGIS_DISABLE_KUEUE ?= 1
 HEALTH_PROBE_BIND_ADDRESS ?= :8081
 AEGIS_FLAVORS ?=
 
-.PHONY: all proto tidy build test verify run-api run-operator stop
+.PHONY: all proto tidy build test verify run-api run-operator stop \
+	setup-local deploy-local port-forward dev-backstage clean-local
 
 all: proto tidy build
 
@@ -89,3 +90,37 @@ endif
 stop:
 	@pkill -f services/platform-api || true
 	@pkill -f "k8s-agent/cmd" || true
+
+setup-local:
+	@echo "Switching to docker-desktop context..."
+	@kubectl config use-context docker-desktop
+
+deploy-local: setup-local
+	@echo "Deploying Aegis services locally..."
+	@helm upgrade --install aegis-services charts/aegis-services \
+	  -f charts/aegis-services/values/common.yaml \
+	  -f charts/aegis-services/values/local.yaml \
+	  --namespace aegis-system --create-namespace
+	@helm upgrade --install aegis-spoke charts/aegis-spoke \
+	  -f charts/aegis-spoke/values.yaml \
+	  -f charts/aegis-spoke/values-local.yaml \
+	  --namespace aegis-system --create-namespace
+
+port-forward:
+	@echo "Stopping any existing port-forwards..."
+	@while pgrep -f "kubectl port-forward .*aegis-system" >/dev/null; do \
+		pkill -f "kubectl port-forward .*aegis-system" || true; \
+		sleep 1; \
+	done
+	@echo "Setting up port-forwarding..."
+	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api 10080:8080 10081:8081 &
+	@kubectl -n aegis-system port-forward svc/aegis-services-proxy 10085:8085 &
+	@echo "Port-forwarding started. Platform API on 10080/10081, proxy on 10085. Use 'pkill -f \"kubectl port-forward\"' to stop."
+
+dev-backstage:
+	@echo "Starting Backstage development server..."
+	@cd aegis-platform && yarn dev
+
+clean-local:
+	@echo "Uninstalling Aegis services..."
+	@helm uninstall aegis-services aegis-spoke -n aegis-system || true

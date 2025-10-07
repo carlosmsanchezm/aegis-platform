@@ -27,7 +27,8 @@ kubectl create secret generic aegis-platform-secrets \
 # 6. Deploy
 cd ../charts/
 helm upgrade --install aegis-services ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --namespace aegis-system --create-namespace
 
@@ -42,8 +43,8 @@ helm upgrade --install aegis-spoke ./aegis-spoke \
 ### Start Local Cluster
 ```bash
 # Port-forward services
-kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 8080:8080 8081:8081 &
-kubectl port-forward -n default svc/aegis-services-aegis-services-proxy 8085:8085 &
+kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 10080:8080 10081:8081 &
+kubectl port-forward -n default svc/aegis-services-aegis-services-proxy 10085:8085 &
 
 # Start Backstage
 cd aegis-platform/
@@ -66,7 +67,8 @@ yarn start  # Runs on http://localhost:7008
 ### Deploy Local Helm Charts
 ```bash
 helm upgrade --install aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-local.yaml \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml \
   --namespace default
 
 helm upgrade --install aegis-spoke ./charts/aegis-spoke \
@@ -148,7 +150,7 @@ grpcurl -plaintext localhost:8081 aegis.v1.AegisPlatform/ListWorkloads  # local
 grpcurl platform-api-grpc.yourdomain.com:443 aegis.v1.AegisPlatform/ListWorkloads  # cloud
 
 # Proxy
-curl -v http://localhost:8085  # local
+curl -v http://localhost:10085  # local
 curl -v https://proxy.yourdomain.com/proxy  # cloud
 ```
 
@@ -174,7 +176,8 @@ terraform apply
 ```bash
 cd charts/
 helm upgrade aegis-services ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --namespace aegis-system
 ```
@@ -191,11 +194,13 @@ npx @vscode/vsce package --out aegis-remote.vsix
 ## 📁 Important Files
 
 ### Local Configuration
-- `charts/aegis-services/values-local.yaml` - Hub config (local)
+- `charts/aegis-services/values/common.yaml` - Hub base defaults (shared)
+- `charts/aegis-services/values/local.yaml` - Hub overrides (local)
 - `charts/aegis-spoke/values-local.yaml` - Spoke config (local)
 
 ### Cloud Configuration
-- `charts/aegis-services/values-cloud.yaml` - Hub config (static)
+- `charts/aegis-services/values/common.yaml` - Hub base defaults (shared)
+- `charts/aegis-services/values/cloud.yaml` - Hub overlay (cloud)
 - `charts/aegis-services/values-cloud-generated.yaml` - Hub config (from Terraform)
 - `charts/aegis-spoke/values-cloud.yaml` - Spoke config (static)
 - `charts/aegis-spoke/values-cloud-generated.yaml` - Spoke config (from Terraform)
@@ -214,7 +219,7 @@ npx @vscode/vsce package --out aegis-remote.vsix
 ### Local
 - **Platform API HTTP**: http://localhost:8080
 - **Platform API gRPC**: localhost:8081
-- **Proxy**: http://localhost:8085
+- **Proxy**: http://localhost:10085
 - **Backstage**: http://localhost:7008
 - **Auth**: dev-user@example.com / supersecret
 - **JWT Secret**: a-very-secret-key-for-local-dev-must-be-32-chars
@@ -238,7 +243,7 @@ npx @vscode/vsce package --out aegis-remote.vsix
 ### "Can't connect to platform-api"
 ```bash
 # Check port-forward is running (local)
-kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 8080:8080 8081:8081
+kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 10080:8080 10081:8081
 
 # Check ingress (cloud)
 kubectl get ingress -n aegis-system

@@ -36,7 +36,7 @@
 
 ## Configuration Updates Needed
 
-### aegis-services/values-cloud.yaml
+### charts/aegis-services/values/cloud.yaml
 
 #### Platform API
 1. **Ingress Hosts** (lines 31-45):
@@ -106,7 +106,8 @@ DB_HOST="<your-rds-endpoint>"
 
 # Install/Upgrade
 helm upgrade --install aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-cloud.yaml \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/cloud.yaml \
   --set-string platformApi.ingress.hosts[0].host="platform-api.${DOMAIN}" \
   --set-string platformApi.ingress.hosts[1].host="platform-api-grpc.${DOMAIN}" \
   --set-string platformApi.ingress.tls[0].hosts[0]="platform-api.${DOMAIN}" \
@@ -175,7 +176,7 @@ curl -v https://proxy.${DOMAIN}/proxy
 
 The following local values files are confirmed working:
 
-### charts/aegis-services/values-local.yaml
+### charts/aegis-services/values/local.yaml
 - ✅ Platform API on port 8080 (HTTP) and 8081 (gRPC)
 - ✅ Proxy on port 8085 with TLS enabled
 - ✅ JWT secret: `a-very-secret-key-for-local-dev-must-be-32-chars`
@@ -184,7 +185,7 @@ The following local values files are confirmed working:
 
 ### charts/aegis-spoke/values-local.yaml
 - ✅ k8sAgent connects to: `aegis-services-aegis-services-platform-api.default.svc.cluster.local:8081`
-- ✅ Proxy ingress: `localhost:8085`
+- ✅ Proxy ingress: `localhost:10085`
 - ✅ Spoke proxy disabled (uses hub proxy)
 
 ## Notes

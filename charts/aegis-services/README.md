@@ -16,7 +16,9 @@ For local development with minikube, kind, or Docker Desktop:
 
 ```bash
 # Install with local configuration
-helm install aegis-services ./charts/aegis-services -f ./charts/aegis-services/values-local.yaml
+helm install aegis-services ./charts/aegis-services \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml
 
 # Access services (with ingress controller)
 curl http://platform-api.localtest.me:8080/healthz
@@ -30,7 +32,8 @@ For production deployment on cloud platforms:
 ```bash
 # Install with cloud configuration
 helm install aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-cloud.yaml \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/cloud.yaml \
   --set-string platformApi.secrets.db-password="your-secret" \
   --set-string proxy.jwtSecret="your-jwt-secret-32-chars-min" \
   --set-file proxy.tls.cert=/path/to/cert.pem \
@@ -53,11 +56,11 @@ proxy:
 
 ### Environment-Specific Values
 
-The chart includes three values files:
+The chart includes layered values files:
 
-1. **`values.yaml`** - Default configuration with comprehensive options
-2. **`values-local.yaml`** - Optimized for local development
-3. **`values-cloud.yaml`** - Production-ready cloud configuration
+1. **`values/common.yaml`** – Shared defaults (also exposed as `values.yaml` for Helm compatibility)
+2. **`values/local.yaml`** – Optimized overrides for local development
+3. **`values/cloud.yaml`** – Production-ready cloud configuration
 
 ## Platform API Configuration
 
@@ -279,11 +282,13 @@ platformApi:
 ```bash
 # Basic local development
 helm install aegis-dev ./charts/aegis-services \
-  -f ./charts/aegis-services/values-local.yaml
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml
 
 # With custom images
 helm install aegis-dev ./charts/aegis-services \
-  -f ./charts/aegis-services/values-local.yaml \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml \
   --set platformApi.image.tag=my-dev-tag \
   --set proxy.image.tag=my-dev-tag
 ```
@@ -293,7 +298,8 @@ helm install aegis-dev ./charts/aegis-services \
 ```bash
 # Full production deployment
 helm install aegis-prod ./charts/aegis-services \
-  -f ./charts/aegis-services/values-cloud.yaml \
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/cloud.yaml \
   --set-string platformApi.secrets.db-password="$(cat /path/to/db-secret)" \
   --set-string proxy.jwtSecret="$(openssl rand -base64 32)" \
   --set-file proxy.tls.cert=/path/to/production-cert.pem \
@@ -308,12 +314,14 @@ helm install aegis-prod ./charts/aegis-services \
 # Deploy only platform-api
 helm install aegis-api ./charts/aegis-services \
   --set proxy.enabled=false \
-  -f ./charts/aegis-services/values-local.yaml
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml
 
 # Deploy only proxy
 helm install aegis-proxy ./charts/aegis-services \
   --set platformApi.enabled=false \
-  -f ./charts/aegis-services/values-local.yaml
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml
 ```
 
 ## Troubleshooting
@@ -359,7 +367,8 @@ proxy:
 ```bash
 # Upgrade with new values
 helm upgrade aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-cloud.yaml
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/cloud.yaml
 
 # Check upgrade status
 helm status aegis-services
@@ -383,7 +392,8 @@ kubectl delete pvc -l app.kubernetes.io/instance=aegis-services
 ```bash
 # Generate templates for review
 helm template aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values-local.yaml
+  -f ./charts/aegis-services/values/common.yaml \
+  -f ./charts/aegis-services/values/local.yaml
 
 # Validate templates
 helm lint ./charts/aegis-services

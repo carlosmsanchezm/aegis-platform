@@ -42,7 +42,7 @@ If `AEGIS_PROXY_BASE_URL` is not explicitly set in `platformApi.env`, it default
 No manual configuration needed! Just enable both services:
 
 ```yaml
-# charts/aegis-services/values-cloud.yaml
+# charts/aegis-services/values/cloud.yaml
 platformApi:
   enabled: true
 
@@ -83,7 +83,7 @@ platformApi:
    - Added automatic `AEGIS_PROXY_JWT_SECRET` from proxy secret
    - Added automatic `AEGIS_PROXY_BASE_URL` defaulting logic
 
-2. **values-cloud.yaml**
+2. **values/cloud.yaml**
    - Removed manual `AEGIS_PROXY_JWT_SECRET` from `envFromSecret`
    - Removed placeholder `AEGIS_PROXY_BASE_URL` from `env`
    - Added documentation comments
@@ -119,7 +119,7 @@ kubectl exec -n aegis-system deployment/aegis-platform-api -- \
 
 **Fix**:
 1. Verify `proxy.enabled=true` in helm values
-2. Redeploy: `helm upgrade aegis charts/aegis-services -n aegis-system -f charts/aegis-services/values-cloud.yaml`
+2. Redeploy: `helm upgrade aegis charts/aegis-services -n aegis-system -f charts/aegis-services/values/common.yaml -f charts/aegis-services/values/cloud.yaml`
 3. Verify env vars as shown above
 
 ### Error: "invalid token signature"
@@ -148,7 +148,8 @@ If you previously configured the proxy manually (via kubectl patch or manual sec
 3. **Redeploy**:
    ```bash
    helm upgrade aegis charts/aegis-services -n aegis-system \
-     -f charts/aegis-services/values-cloud.yaml
+     -f charts/aegis-services/values/common.yaml \
+     -f charts/aegis-services/values/cloud.yaml
    ```
 
 4. **Verify**: Follow verification steps above

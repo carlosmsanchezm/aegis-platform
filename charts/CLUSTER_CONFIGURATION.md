@@ -50,7 +50,7 @@ When Platform API and workloads run in the **same cluster** (common for developm
 ### 1. Configure aegis-services helm values
 
 ```yaml
-# charts/aegis-services/values-cloud.yaml
+# charts/aegis-services/values/cloud.yaml
 platformApi:
   enabled: true
   targetNamespace: "aegis-workloads"  # Where workloads run
@@ -80,7 +80,8 @@ k8sAgent:
 # Deploy platform services
 helm upgrade --install aegis charts/aegis-services \
   -n aegis-system --create-namespace \
-  -f charts/aegis-services/values-cloud.yaml
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/cloud.yaml
 
 # Deploy spoke agent in the same cluster
 helm upgrade --install aegis-spoke charts/aegis-spoke \
@@ -129,7 +130,7 @@ When Platform API runs in one cluster and manages workloads across **multiple re
 ### 1. Configure Hub Cluster (Platform API)
 
 ```yaml
-# charts/aegis-services/values-cloud.yaml
+# charts/aegis-services/values/cloud.yaml
 platformApi:
   enabled: true
   targetNamespace: "aegis-workloads"
@@ -179,7 +180,8 @@ platformApi:
 ```bash
 helm upgrade --install aegis charts/aegis-services \
   -n aegis-system --create-namespace \
-  -f charts/aegis-services/values-cloud.yaml \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/cloud.yaml \
   --set platformApi.env.DB_HOST="aegis-rds.us-east-1.rds.amazonaws.com" \
   --set platformApi.env.DB_PASSWORD="$DB_PASSWORD"
 ```

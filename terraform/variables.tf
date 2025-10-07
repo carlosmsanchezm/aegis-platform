@@ -160,6 +160,12 @@ variable "ecr_repositories" {
   default     = ["aegis/k8s-agent", "aegis/proxy", "aegis/platform-api", "aegis/workspace-vscode"]
 }
 
+variable "manage_ecr_repositories" {
+  description = "Whether Terraform should create and manage ECR repositories"
+  type        = bool
+  default     = false
+}
+
 # Secrets Configuration
 variable "create_secrets" {
   description = "Create AWS Secrets Manager secrets"

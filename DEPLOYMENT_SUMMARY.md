@@ -26,8 +26,8 @@ kubectl get nodes   # should show docker-desktop
 ### Deploy the hub (platform-api + proxy)
 ```bash
 helm upgrade --install aegis-services charts/aegis-services \
-  -f charts/aegis-services/values.yaml \
-  -f charts/aegis-services/values-local.yaml \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/local.yaml \
   --namespace aegis-system --create-namespace
 ```
 
@@ -43,11 +43,14 @@ helm upgrade --install aegis-spoke charts/aegis-spoke \
 
 ### Port-forward for local access
 ```bash
-# Platform API on http://localhost:8080 (HTTP) and :8081 (gRPC)
-kubectl -n aegis-system port-forward svc/aegis-services-platform-api 8080:8080 8081:8081
+# Platform API on http://localhost:10080 (HTTP) and :10081 (gRPC)
+kubectl -n aegis-system port-forward svc/aegis-services-platform-api 10080:8080 10081:8081
 
-# Proxy tunnel on http://localhost:8085/proxy/
-kubectl -n aegis-system port-forward svc/aegis-services-proxy 8085:8080
+# Proxy tunnel on http://localhost:10085/proxy/
+kubectl -n aegis-system port-forward svc/aegis-services-proxy 10085:8085
+
+# Stop existing forwards if needed
+pkill -f "kubectl port-forward"  # optional cleanup
 ```
 
 ### Start Backstage against local services
@@ -112,7 +115,8 @@ kubectl create secret generic aegis-platform-secrets \
 ```bash
 # Hub
 helm upgrade --install aegis-services charts/aegis-services \
-  -f charts/aegis-services/values-cloud.yaml \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/cloud.yaml \
   -f charts/aegis-services/values-cloud-generated.yaml \
   -f overrides.yaml \
   --namespace aegis-system --create-namespace
@@ -149,7 +153,8 @@ The prompt behaves the same way as the non-TLS run (`y` to deploy now, `n` to ju
 ### Deploy with TLS overlay (manual path)
 ```bash
 helm upgrade --install aegis-services charts/aegis-services \
-  -f charts/aegis-services/values-cloud.yaml \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/cloud.yaml \
   -f charts/aegis-services/values-cloud-generated.yaml \
   -f overrides.yaml \
   -f charts/aegis-services/values-cloud-tls.yaml \

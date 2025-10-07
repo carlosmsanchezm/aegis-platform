@@ -223,12 +223,12 @@ the platform API with the HTTPS base URL:
 
 ```bash
 # In one terminal
-kubectl -n aegis-spoke port-forward svc/my-aegis-spoke-aegis-spoke-proxy 8085:8085
+kubectl -n aegis-spoke port-forward svc/my-aegis-spoke-aegis-spoke-proxy 10085:8085
 
 # In another terminal
 export AEGIS_PROXY_JWT_SECRET="a-very-secret-key-for-local-dev-must-be-32-chars"
 export AEGIS_PROXY_EXPECTED_AUDIENCE="aegis-proxy"
-export AEGIS_PROXY_BASE_URL="https://proxy.localtest.me:8085"
+export AEGIS_PROXY_BASE_URL="https://proxy.localtest.me:10085"
 make run-api ALLOW_SOCKETS=1
 ```
 

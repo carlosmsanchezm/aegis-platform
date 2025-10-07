@@ -1,10 +1,14 @@
 # ECR Repositories for Aegis container images
 
+locals {
+  ecr_repository_names = toset(var.ecr_repositories)
+}
+
 module "ecr" {
   source  = "terraform-aws-modules/ecr/aws"
   version = "~> 2.0"
 
-  for_each = toset(var.ecr_repositories)
+  for_each = var.manage_ecr_repositories ? local.ecr_repository_names : toset([])
 
   repository_name = each.value
 
@@ -84,9 +88,14 @@ module "ecr" {
   })
 }
 
-# Output ECR repository URLs for use in Helm values
+# Output ECR repository URLs for use in Helm values. When repositories are not
+# managed by Terraform, compute the URLs directly so downstream modules can
+# continue to reference the expected locations.
 locals {
-  ecr_repositories = {
+  ecr_repositories = var.manage_ecr_repositories ? {
     for repo_name, repo in module.ecr : repo_name => repo.repository_url
+  } : {
+    for repo_name in local.ecr_repository_names :
+    repo_name => "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${repo_name}"
   }
 }

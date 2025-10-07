@@ -1,0 +1,156 @@
+name: Build, Test, and Deploy Preview
+
+on:
+  pull_request:
+
+env:
+  AWS_REGION: us-east-1
+  PREVIEW_NAMESPACE: preview-${{ github.event.number }}
+  PREVIEW_RELEASE: preview-${{ github.event.number }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Images
+        run: |
+          set -euo pipefail
+          ECR_REGISTRY=$(aws ecr describe-repositories \
+            --repository-names aegis/platform-api \
+            --query "repositories[0].repositoryUri" \
+            --output text | cut -d'/' -f1)
+          PLATFORM_IMAGE="$ECR_REGISTRY/aegis/platform-api:${{ github.sha }}"
+          PROXY_IMAGE="$ECR_REGISTRY/aegis/proxy:${{ github.sha }}"
+
+          docker build -t "$PLATFORM_IMAGE" ./services/platform-api
+          docker build -t "$PROXY_IMAGE" ./services/proxy
+
+          docker push "$PLATFORM_IMAGE"
+          docker push "$PROXY_IMAGE"
+
+      - name: Run Tests
+        run: |
+          # TODO: replace placeholder with real unit/integration test commands
+          echo "Running tests..."
+
+  deploy-preview:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init and Apply
+        run: |
+          set -euo pipefail
+          cd terraform
+          terraform init
+          terraform workspace select "$PREVIEW_NAMESPACE" || terraform workspace new "$PREVIEW_NAMESPACE"
+          terraform apply -auto-approve
+
+      - name: Generate Helm Values and Deploy
+        run: |
+          set -euo pipefail
+          ./terraform/generate-helm-values.sh --non-interactive
+
+          cat > overrides.yaml <<'OVERRIDES'
+          platformApi:
+            image:
+              tag: ${{ github.sha }}
+          proxy:
+            image:
+              tag: ${{ github.sha }}
+          OVERRIDES
+
+          helm upgrade --install "$PREVIEW_RELEASE" ./charts/aegis-services \
+            -f ./charts/aegis-services/values/common.yaml \
+            -f ./charts/aegis-services/values/cloud.yaml \
+            -f ./charts/aegis-services/values-cloud-generated.yaml \
+            -f overrides.yaml \
+            --namespace "$PREVIEW_NAMESPACE" \
+            --create-namespace
+
+  e2e-test:
+    runs-on: ubuntu-latest
+    needs: deploy-preview
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run End-to-End Tests
+        run: |
+          # TODO: replace placeholder with real end-to-end test commands
+          echo "Running end-to-end tests..."
+
+  teardown-preview:
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - deploy-preview
+      - e2e-test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Destroy
+        run: |
+          set -euo pipefail
+          cd terraform
+          if terraform workspace list | grep -q "$PREVIEW_NAMESPACE"; then
+            terraform workspace select "$PREVIEW_NAMESPACE"
+            KUBECTL_CMD=$(terraform output -raw kubectl_config_command || true)
+            if [ -n "$KUBECTL_CMD" ]; then
+              eval "$KUBECTL_CMD"
+              helm uninstall "$PREVIEW_RELEASE" --namespace "$PREVIEW_NAMESPACE" || true
+              kubectl delete namespace "$PREVIEW_NAMESPACE" --ignore-not-found || true
+            fi
+            terraform destroy -auto-approve || echo "Terraform destroy failed; resources may require manual cleanup"
+            terraform workspace select default
+            terraform workspace delete "$PREVIEW_NAMESPACE" || true
+          else
+            echo "Preview workspace $PREVIEW_NAMESPACE not found; skipping terraform destroy"
+          fi

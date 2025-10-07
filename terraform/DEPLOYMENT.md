@@ -31,7 +31,7 @@ This creates:
 - EKS cluster with CPU and GPU node groups
 - RDS PostgreSQL database
 - VPC with public/private/database subnets
-- ECR repositories
+- (Optional) ECR repositories *(set `manage_ecr_repositories = true` if you want Terraform to manage them)*
 - AWS Secrets Manager secrets
 - Security groups and IAM roles
 
@@ -150,7 +150,8 @@ kubectl create secret generic aegis-platform-secrets \
 
 # Deploy aegis-services (platform-api + proxy)
 helm upgrade --install aegis ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --set platformApi.enabled=true \
   --set platformApi.image.tag=v1.0.5 \
@@ -280,7 +281,8 @@ docker buildx build --platform linux/amd64 \
 
 # 2. Update Helm deployment
 helm upgrade aegis ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   --set platformApi.image.tag=v1.0.6 \
   --namespace aegis-system
 

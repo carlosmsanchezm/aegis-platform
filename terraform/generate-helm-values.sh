@@ -6,13 +6,15 @@
 set -e
 
 TLS_MODE=0
+NON_INTERACTIVE=0
 
 usage() {
 cat <<'EOF'
-Usage: ./generate-helm-values.sh [--tls]
+Usage: ./generate-helm-values.sh [--tls] [--non-interactive]
 
 Options:
   --tls      Enable TLS for platform-api gRPC endpoint and configure Backstage
+  --non-interactive  Run without interactive prompts for CI/CD
   -h, --help Show this help message
 
 By default the script deploys using the HTTP gateway for Backstage but keeps the
@@ -25,6 +27,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --tls)
       TLS_MODE=1
+      shift
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
       shift
       ;;
     -h|--help)
@@ -106,52 +112,59 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "🚀 Deploy to Kubernetes?"
-echo ""
-read -p "Do you want to deploy now? (y/n): " -n 1 -r
-echo ""
+if [[ $NON_INTERACTIVE -eq 0 ]]; then
+    echo ""
+    echo "🚀 Deploy to Kubernetes?"
+    echo ""
+    read -p "Do you want to deploy now? (y/n): " -n 1 -r
+    echo ""
 
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "⏭️  Skipping deployment. You can deploy later with:"
+        echo ""
+        echo "   # Configure kubectl"
+        echo "   $(terraform output -raw kubectl_config_command)"
+        echo ""
+        echo "   # Create secrets"
+        echo "   kubectl create secret generic aegis-platform-secrets \\"
+        echo "     --from-literal=db-password=\"\$(terraform output -raw db_password_secret_value)\" \\"
+        echo "     --from-literal=proxy-jwt-secret=\"\$(terraform output -raw jwt_secret_value)\" \\"
+        echo "     --namespace aegis-system --create-namespace"
+        echo ""
+        echo "   # Deploy"
+        echo "   cd ${OUTPUT_DIR}"
+        echo "   helm upgrade --install aegis ./aegis-services \\"
+        echo "     -f ./aegis-services/values/common.yaml \\"
+        echo "     -f ./aegis-services/values/cloud.yaml \\"
+        echo "     -f ./aegis-services/values-cloud-generated.yaml \\"
+        echo "     -f <your-overrides.yaml> \\"
+        echo "     --namespace aegis-system --create-namespace"
+        echo ""
+        echo "   # Example overrides file (include secrets and image tags):"
+        echo "   cat > overrides.yaml <<'EOF'"
+        echo "   platformApi:"
+        echo "     image:"
+        echo "       tag: ${PLATFORM_API_IMAGE_TAG}"
+        echo "     env:"
+        echo "       DATABASE_URL: ${DB_URL}"
+        echo "     secrets:"
+        echo "       db-password: \$(terraform output -raw db_password_secret_value)"
+        echo "       proxy-jwt-secret: \$(terraform output -raw jwt_secret_value)"
+        echo "   proxy:"
+        echo "     image:"
+        echo "       tag: ${PROXY_IMAGE_TAG}"
+        echo "     jwtSecret: \$(terraform output -raw jwt_secret_value)"
+        echo "   EOF"
+        echo ""
+        echo "✨ Done!"
+        echo ""
+        echo "ℹ️  Tip: run ./generate-helm-values.sh --tls to deploy the TLS overlay"
+        exit 0
+    fi
+else
     echo ""
-    echo "⏭️  Skipping deployment. You can deploy later with:"
-    echo ""
-    echo "   # Configure kubectl"
-    echo "   $(terraform output -raw kubectl_config_command)"
-    echo ""
-    echo "   # Create secrets"
-    echo "   kubectl create secret generic aegis-platform-secrets \\"
-    echo "     --from-literal=db-password=\"\$(terraform output -raw db_password_secret_value)\" \\"
-    echo "     --from-literal=proxy-jwt-secret=\"\$(terraform output -raw jwt_secret_value)\" \\"
-    echo "     --namespace aegis-system --create-namespace"
-    echo ""
-    echo "   # Deploy"
-    echo "   cd ${OUTPUT_DIR}"
-    echo "   helm upgrade --install aegis ./aegis-services \\"
-    echo "     -f ./aegis-services/values-cloud.yaml \\"
-    echo "     -f ./aegis-services/values-cloud-generated.yaml \\"
-    echo "     -f <your-overrides.yaml> \\"
-    echo "     --namespace aegis-system --create-namespace"
-    echo ""
-    echo "   # Example overrides file (include secrets and image tags):"
-    echo "   cat > overrides.yaml <<'EOF'"
-    echo "   platformApi:"
-    echo "     image:"
-    echo "       tag: ${PLATFORM_API_IMAGE_TAG}"
-    echo "     env:"
-    echo "       DATABASE_URL: ${DB_URL}"
-    echo "     secrets:"
-    echo "       db-password: \$(terraform output -raw db_password_secret_value)"
-    echo "       proxy-jwt-secret: \$(terraform output -raw jwt_secret_value)"
-    echo "   proxy:"
-    echo "     image:"
-    echo "       tag: ${PROXY_IMAGE_TAG}"
-    echo "     jwtSecret: \$(terraform output -raw jwt_secret_value)"
-    echo "   EOF"
-    echo ""
-    echo "✨ Done!"
-    echo ""
-    echo "ℹ️  Tip: run ./generate-helm-values.sh --tls to deploy the TLS overlay"
-    exit 0
+    echo "🤖 Non-interactive mode enabled; proceeding with automated deployment"
 fi
 
 echo ""
@@ -292,7 +305,8 @@ if [[ $TLS_MODE -eq 1 ]]; then
 fi
 HELM_ARGS=(
   upgrade --install aegis ./aegis-services
-  -f ./aegis-services/values-cloud.yaml
+  -f ./aegis-services/values/common.yaml
+  -f ./aegis-services/values/cloud.yaml
   -f ./aegis-services/values-cloud-generated.yaml
   -f "${OVERRIDE_FILE}"
 )

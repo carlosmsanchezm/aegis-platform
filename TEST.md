@@ -387,14 +387,16 @@
   helm upgrade --install aegis-services-local ../charts/aegis-services \
     -n aegis-services-local \
     --create-namespace \
-    -f ../charts/aegis-services/values-local.yaml \
+    -f ../charts/aegis-services/values/common.yaml \
+    -f ../charts/aegis-services/values/local.yaml \
     --set platformApi.env.AEGIS_STORE_BACKEND=memory
 
   # Test local Helm deployment with PostgreSQL subchart
   helm upgrade --install aegis-services-local-pg ../charts/aegis-services \
     -n aegis-services-local-pg \
     --create-namespace \
-    -f ../charts/aegis-services/values-local.yaml \
+    -f ../charts/aegis-services/values/common.yaml \
+    -f ../charts/aegis-services/values/local.yaml \
     --set postgresql.enabled=true \
     --set platformApi.env.AEGIS_STORE_BACKEND=postgres
 

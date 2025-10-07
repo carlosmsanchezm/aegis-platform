@@ -52,7 +52,8 @@ cd terraform
 # Or manual deployment
 cd ../charts
 helm upgrade --install aegis ./aegis-services \
-  -f ./aegis-services/values-cloud.yaml \
+  -f ./aegis-services/values/common.yaml \
+  -f ./aegis-services/values/cloud.yaml \
   -f ./aegis-services/values-cloud-generated.yaml \
   --set platformApi.image.tag=v1.0.5 \
   --namespace aegis-system

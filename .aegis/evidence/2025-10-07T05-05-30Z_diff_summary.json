@@ -1,0 +1,10 @@
+{
+  "targets": [
+    "services/proxy/internal/server/health.go",
+    "services/proxy/README.md"
+  ],
+  "diffs": {
+    "services/proxy/internal/server/health.go": "--- a/services/proxy/internal/server/health.go\n+++ b/services/proxy/internal/server/health.go\n@@ -13,7 +13,7 @@\n // readinessCheckDuration tracks the duration of individual readiness checks\n var readinessCheckDuration = promauto.NewHistogramVec(\n \tprometheus.HistogramOpts{\n-\t\tName:    \"proxy_readiness_check_duration_seconds\",\n+\t\tName:    \"proxy.readiness.check_duration_seconds\",\n \t\tHelp:    \"Duration of readiness checks in seconds\",\n \t\tBuckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},\n \t},\n",
+    "services/proxy/README.md": "--- a/services/proxy/README.md\n+++ b/services/proxy/README.md\n@@ -18,7 +18,7 @@\n \n The proxy exports Prometheus metrics to track the health and performance of readiness checks.\n \n-#### `proxy_readiness_check_duration_seconds`\n+#### `proxy.readiness.check_duration_seconds`\n \n **Type:** Histogram  \n **Labels:**\n@@ -46,17 +46,17 @@\n \n **Average check duration by check name:**\n ```promql\n-rate(proxy_readiness_check_duration_seconds_sum[5m]) / rate(proxy_readiness_check_duration_seconds_count[5m])\n+rate(proxy.readiness.check_duration_seconds_sum[5m]) / rate(proxy.readiness.check_duration_seconds_count[5m])\n ```\n \n **95th percentile check duration:**\n ```promql\n-histogram_quantile(0.95, rate(proxy_readiness_check_duration_seconds_bucket[5m]))\n+histogram_quantile(0.95, rate(proxy.readiness.check_duration_seconds_bucket[5m]))\n ```\n \n **Check execution rate:**\n ```promql\n-rate(proxy_readiness_check_duration_seconds_count[5m])\n+rate(proxy.readiness.check_duration_seconds_count[5m])\n ```\n \n ### Alerting\n@@ -64,7 +64,7 @@\n **Example: Alert when readiness checks are slow**\n ```yaml\n alert: ProxyReadinessCheckSlow\n-expr: histogram_quantile(0.95, rate(proxy_readiness_check_duration_seconds_bucket[5m])) > 0.5\n+expr: histogram_quantile(0.95, rate(proxy.readiness.check_duration_seconds_bucket[5m])) > 0.5\n for: 5m\n labels:\n   severity: warning\n"
+  }
+}

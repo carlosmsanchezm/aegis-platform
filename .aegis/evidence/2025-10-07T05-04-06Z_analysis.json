@@ -1,0 +1,19 @@
+{
+  "controls": [],
+  "baseline": "moderate",
+  "summary": "Rename readiness check duration metric to match acceptance criteria specification (proxy.readiness.check_duration_seconds)",
+  "targets": [
+    "services/proxy/internal/server/health.go",
+    "services/proxy/README.md"
+  ],
+  "edits": [
+    {
+      "path": "services/proxy/internal/server/health.go",
+      "instructions": "Change the metric Name field on line 16 from 'proxy_readiness_check_duration_seconds' to 'proxy.readiness.check_duration_seconds' to match the acceptance criteria specification exactly"
+    },
+    {
+      "path": "services/proxy/README.md",
+      "instructions": "Update all references to the metric name from 'proxy_readiness_check_duration_seconds' to 'proxy.readiness.check_duration_seconds' in the documentation section (lines 21, 49, 50, 54, 55, 59, 67)"
+    }
+  ]
+}

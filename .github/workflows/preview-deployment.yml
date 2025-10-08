@@ -244,8 +244,8 @@ jobs:
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}"
-          scripts/e2e-platform-api.sh
+          cd "${{ github.workspace }}"
+          ./scripts/e2e-platform-api.sh
 
       - name: Create Kind cluster for operator tests
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}

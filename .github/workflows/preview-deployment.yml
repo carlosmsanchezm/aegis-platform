@@ -99,9 +99,9 @@ jobs:
           PROXY_IMAGE="${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}"
           K8S_AGENT_IMAGE="${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}"
 
-          docker build -t "${PLATFORM_IMAGE}" ./services/platform-api
-          docker build -t "${PROXY_IMAGE}" ./services/proxy
-          docker build -t "${K8S_AGENT_IMAGE}" ./agents/k8s-agent
+          docker build -t "${PLATFORM_IMAGE}" -f services/platform-api/Dockerfile .
+          docker build -t "${PROXY_IMAGE}" -f services/proxy/Dockerfile .
+          docker build -t "${K8S_AGENT_IMAGE}" -f agents/k8s-agent/Dockerfile .
 
           docker push "${PLATFORM_IMAGE}"
           docker push "${PROXY_IMAGE}"

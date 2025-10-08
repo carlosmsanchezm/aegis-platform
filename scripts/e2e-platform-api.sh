@@ -17,6 +17,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ADDR="${AEGIS_GRPC_ADDR:-127.0.0.1:10081}"
 TLS="${GRPC_TLS:-0}"
 PLATFORM_NAMESPACE="${AEGIS_PLATFORM_NAMESPACE:-aegis-system}"
+PLATFORM_SERVICE="${AEGIS_PLATFORM_SERVICE:-aegis-services-platform-api}"
 
 GRPC_ARGS=(-import-path "$REPO_ROOT/proto" -proto aegis/v1/platform.proto)
 if [[ "$TLS" == "1" ]]; then
@@ -77,7 +78,7 @@ maybe_port_forward() {
   fi
 
   FORWARD_LOG="$(mktemp)"
-  kubectl -n "${PLATFORM_NAMESPACE}" port-forward svc/aegis-services-platform-api "${port}:8081" \
+  kubectl -n "${PLATFORM_NAMESPACE}" port-forward svc/"${PLATFORM_SERVICE}" "${port}:8081" \
     >"$FORWARD_LOG" 2>&1 &
   FORWARD_PID=$!
 

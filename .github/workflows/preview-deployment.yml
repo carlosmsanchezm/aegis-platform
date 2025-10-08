@@ -243,6 +243,7 @@ jobs:
           GRPC_CA: ''
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
           AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
         run: |
           set -euo pipefail
           SCRIPT_ROOT="${{ github.workspace }}"

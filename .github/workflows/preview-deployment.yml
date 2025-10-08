@@ -206,8 +206,25 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jq
-          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          GRPCURL_VERSION=1.9.3
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64|amd64)
+              GRPCURL_PACKAGE_ARCH=linux-x86_64
+              ;;
+            arm64|aarch64)
+              GRPCURL_PACKAGE_ARCH=linux-arm64
+              ;;
+            *)
+              echo "Unsupported architecture: $ARCH" >&2
+              exit 1
+              ;;
+          esac
+          TMPDIR=$(mktemp -d)
+          curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz" -o "$TMPDIR/grpcurl.tgz"
+          tar -xzf "$TMPDIR/grpcurl.tgz" -C "$TMPDIR"
+          sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
+          rm -rf "$TMPDIR"
 
       - name: Run platform API E2E tests
         env:

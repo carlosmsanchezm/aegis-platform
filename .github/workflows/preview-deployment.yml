@@ -124,8 +124,31 @@ jobs:
           echo "proxy_image=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "k8s_agent_image=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Check if images already exist
+        id: check-images
+        env:
+          PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
+          PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          needs_build=0
+          for image in "$PLATFORM_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE"; do
+            repo="${image%:*}"
+            tag="${image##*:}"
+            repo_name="${repo#${ECR_REGISTRY}/}"
+            if ! aws ecr describe-images --repository-name "$repo_name" --image-ids imageTag="$tag" >/dev/null 2>&1; then
+              echo "Image $repo_name:$tag missing; will build"
+              needs_build=1
+            else
+              echo "Image $repo_name:$tag already exists"
+            fi
+          done
+          echo "needs_build=$needs_build" >> "$GITHUB_OUTPUT"
+
       - name: Build, tag, and push images
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
+        if: ${{ steps.check-images.outputs.needs_build == '1' || env.RUN_SUBSET == 'all' }}
         env:
           PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
           PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}

@@ -58,8 +58,15 @@ func TestWorkloadLifecycle_Postgres(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := pool.Exec(ctx, schemaDDL); err != nil {
-		t.Fatalf("apply schema: %v", err)
+	var schemaErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if _, schemaErr = pool.Exec(ctx, schemaDDL); schemaErr == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if schemaErr != nil {
+		t.Fatalf("apply schema: %v", schemaErr)
 	}
 
 	store, err := New(dsn, zap.NewNop())

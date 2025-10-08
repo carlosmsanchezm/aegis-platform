@@ -1,7 +1,6 @@
 name: Build, Test, and Deploy Preview
 
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       run_subset:

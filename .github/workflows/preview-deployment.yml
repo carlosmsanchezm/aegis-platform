@@ -2,17 +2,31 @@ name: Build, Test, and Deploy Preview
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_subset:
+        description: "Select which portion of the workflow to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - deploy
+      preview_number:
+        description: "Preview identifier (defaults to PR number or workflow run id)"
+        required: false
 
 env:
   AWS_REGION: us-east-1
-  PREVIEW_NAMESPACE: preview-${{ github.event.number }}
-  PREVIEW_RELEASE: preview-${{ github.event.number }}
+  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || 'all' }}
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
 
 concurrency:
-  group: preview-${{ github.workflow }}-${{ github.event.number }}
+  group: preview-${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -22,15 +36,22 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Skipping lint/unit for deploy-only run
+        if: env.RUN_SUBSET != 'all'
+        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping lint and unit tests."
+
       - name: Checkout code
+        if: env.RUN_SUBSET == 'all'
         uses: actions/checkout@v4
 
       - name: Set up Go
+        if: env.RUN_SUBSET == 'all'
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
 
       - name: Run Go unit & integration tests
+        if: env.RUN_SUBSET == 'all'
         run: |
           set -euo pipefail
           go work sync
@@ -44,6 +65,7 @@ jobs:
           done
 
       - name: Set up Node.js
+        if: env.RUN_SUBSET == 'all'
         uses: actions/setup-node@v4
         with:
           node-version: '18'
@@ -51,17 +73,20 @@ jobs:
           cache-dependency-path: aegis-platform/yarn.lock
 
       - name: Install frontend dependencies
+        if: env.RUN_SUBSET == 'all'
         run: |
           cd aegis-platform
           yarn install --immutable
 
       - name: Run frontend unit tests
+        if: env.RUN_SUBSET == 'all'
         run: |
           cd aegis-platform
           yarn test --watchAll=false
 
   build-and-push:
     name: Build & Push Images
+    if: env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy'
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -113,6 +138,7 @@ jobs:
 
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
+    if: env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy'
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -142,7 +168,7 @@ jobs:
 
       - name: Terraform init & apply
         env:
-          TF_WORKSPACE: preview-${{ github.event.number }}
+          TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
         run: |
           set -euo pipefail
           cd terraform
@@ -206,7 +232,7 @@ jobs:
 
   teardown-preview:
     name: Teardown Preview Environment
-    if: always()
+    if: always() && (env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy')
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:
@@ -229,7 +255,7 @@ jobs:
 
       - name: Terraform destroy
         env:
-          TF_WORKSPACE: preview-${{ github.event.number }}
+          TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
           PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke

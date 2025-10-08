@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/jackc/pgx/v5/pgxpool"
 	testcontainers "github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/nat"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
 

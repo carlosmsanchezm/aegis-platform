@@ -196,14 +196,51 @@ jobs:
           set -euo pipefail
           ./terraform/generate-helm-values.sh --non-interactive --tls
 
-          cd terraform
-          API_HOST=$(terraform output -raw dns_platform_api_grpc)
-          PROXY_HOST=$(terraform output -raw dns_proxy)
-          API_HOST=${API_HOST%.}
-          PROXY_HOST=${PROXY_HOST%.}
-          echo "preview_host=${API_HOST}" >> "$GITHUB_OUTPUT"
-          echo "preview_proxy=${PROXY_HOST}" >> "$GITHUB_OUTPUT"
+          # Extract actual LoadBalancer hostnames from Kubernetes services
+          echo "⏳ Waiting for LoadBalancers to be provisioned..."
+
+          # Wait for platform-api LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PLATFORM_LB}" ]; then
+              echo "✅ Platform API LoadBalancer ready: ${PLATFORM_LB}"
+              break
+            fi
+            echo "  Waiting for platform-api LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Wait for proxy LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PROXY_LB}" ]; then
+              echo "✅ Proxy LoadBalancer ready: ${PROXY_LB}"
+              break
+            fi
+            echo "  Waiting for proxy LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Verify LoadBalancers were obtained
+          if [ -z "${PLATFORM_LB}" ] || [ -z "${PROXY_LB}" ]; then
+            echo "❌ Failed to get LoadBalancer hostnames after 5 minutes"
+            exit 1
+          fi
+
+          # Output the actual LoadBalancer hostnames for E2E tests
+          echo "platform_api_lb=${PLATFORM_LB}" >> "$GITHUB_OUTPUT"
+          echo "proxy_lb=${PROXY_LB}" >> "$GITHUB_OUTPUT"
+          echo "grpc_addr=${PLATFORM_LB}:8081" >> "$GITHUB_OUTPUT"
+          echo "proxy_addr=${PROXY_LB}:8080" >> "$GITHUB_OUTPUT"
           echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "📋 E2E Test Endpoints:"
+          echo "   Platform API gRPC: ${PLATFORM_LB}:8081"
+          echo "   Proxy:             ${PROXY_LB}:8080"
+          echo "   CA Bundle:         ${HOME}/aegis-platform-api-ca.crt"
 
       - name: Install test tooling
         run: |
@@ -238,17 +275,24 @@ jobs:
 
       - name: Run platform API E2E tests
         env:
-          AEGIS_GRPC_ADDR: 127.0.0.1:8081
-          GRPC_TLS: '0'
-          GRPC_CA: ''
+          AEGIS_GRPC_ADDR: ${{ steps.deploy.outputs.grpc_addr }}
+          AEGIS_PROXY_HOSTNAME: ${{ steps.deploy.outputs.proxy_lb }}
+          GRPC_TLS: '1'
+          GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
           AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
+          AEGIS_PLATFORM_DEPLOYMENT: ${{ env.PREVIEW_RELEASE }}-platform-api
         run: |
           set -euo pipefail
+          echo "🧪 Running E2E tests against preview environment:"
+          echo "   gRPC Address: ${AEGIS_GRPC_ADDR}"
+          echo "   Proxy:        ${AEGIS_PROXY_HOSTNAME}"
+          echo "   Namespace:    ${AEGIS_PLATFORM_NAMESPACE}"
+          echo "   CA Bundle:    ${GRPC_CA}"
+          echo ""
+
           SCRIPT_ROOT="${{ github.workspace }}"
-          echo "Workspace: ${SCRIPT_ROOT}"
-          find "${SCRIPT_ROOT}" -maxdepth 3 -type f -name 'e2e-platform-api.sh'
           bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Create Kind cluster for operator tests

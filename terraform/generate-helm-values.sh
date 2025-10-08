@@ -7,6 +7,33 @@ set -e
 
 TLS_MODE=0
 NON_INTERACTIVE=0
+K8S_NAMESPACE=${K8S_NAMESPACE:-aegis-system}
+HELM_RELEASE=${HELM_RELEASE:-aegis}
+SKIP_ROUTE53_UPDATE=${SKIP_ROUTE53_UPDATE:-0}
+
+# Helper to split an image reference into repository and tag components
+parse_image_ref() {
+  local ref="$1"
+  local repo=""
+  local tag="$ref"
+  if [[ -n "$ref" && "$ref" == *:* ]]; then
+    repo="${ref%:*}"
+    tag="${ref##*:}"
+  fi
+  printf '%s|%s' "$repo" "$tag"
+}
+
+# Derive common resource names based on the Helm release (aligned with Helm's truncation logic)
+RELEASE_BASENAME=$(printf '%s' "${HELM_RELEASE}" | cut -c1-63)
+RELEASE_BASENAME=${RELEASE_BASENAME%-}
+PLATFORM_API_RELEASE_NAME="${RELEASE_BASENAME}-platform-api"
+PROXY_RELEASE_NAME="${RELEASE_BASENAME}-proxy"
+SPOKE_HELM_RELEASE=${SPOKE_HELM_RELEASE:-${HELM_RELEASE}-spoke}
+SPOKE_NAMESPACE=${SPOKE_NAMESPACE:-${K8S_NAMESPACE}}
+
+IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG:-}")"
+IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG:-}")"
+IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${K8S_AGENT_IMAGE_TAG:-}")"
 
 usage() {
 cat <<'EOF'
@@ -130,16 +157,16 @@ if [[ $NON_INTERACTIVE -eq 0 ]]; then
         echo "   kubectl create secret generic aegis-platform-secrets \\"
         echo "     --from-literal=db-password=\"\$(terraform output -raw db_password_secret_value)\" \\"
         echo "     --from-literal=proxy-jwt-secret=\"\$(terraform output -raw jwt_secret_value)\" \\"
-        echo "     --namespace aegis-system --create-namespace"
+        echo "     --namespace ${K8S_NAMESPACE} --create-namespace"
         echo ""
         echo "   # Deploy"
         echo "   cd ${OUTPUT_DIR}"
-        echo "   helm upgrade --install aegis ./aegis-services \\"
+        echo "   helm upgrade --install ${HELM_RELEASE} ./aegis-services \\"
         echo "     -f ./aegis-services/values/common.yaml \\"
         echo "     -f ./aegis-services/values/cloud.yaml \\"
         echo "     -f ./aegis-services/values-cloud-generated.yaml \\"
         echo "     -f <your-overrides.yaml> \\"
-        echo "     --namespace aegis-system --create-namespace"
+        echo "     --namespace ${K8S_NAMESPACE} --create-namespace"
         echo ""
         echo "   # Example overrides file (include secrets and image tags):"
         echo "   cat > overrides.yaml <<'EOF'"
@@ -168,7 +195,7 @@ else
 fi
 
 echo ""
-echo "📋 Deployment Steps:"
+echo "📋 Deployment Steps (namespace: ${K8S_NAMESPACE}, release: ${HELM_RELEASE}):"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Step 1: Configure kubectl
@@ -186,13 +213,13 @@ DB_PASSWORD=$(terraform output -raw db_password_secret_value)
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
 
 # Create namespace if it doesn't exist
-kubectl create namespace aegis-system --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 # Create or update secrets
 kubectl create secret generic aegis-platform-secrets \
   --from-literal=db-password="${DB_PASSWORD}" \
   --from-literal=proxy-jwt-secret="${JWT_SECRET}" \
-  --namespace aegis-system \
+  --namespace "${K8S_NAMESPACE}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
@@ -206,12 +233,28 @@ echo "3️⃣  Running database migrations..."
 # URL-encode the DB password for DATABASE_URL
 DB_PASSWORD_RAW=$(terraform output -raw db_password_secret_value)
 DB_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${DB_PASSWORD_RAW}', safe=''))")
-DB_URL="postgres://aegis_api:${DB_PASSWORD_ENCODED}@aegis-spoke-prod-db.cepmyey24yl0.us-east-1.rds.amazonaws.com:5432/aegis?sslmode=require"
+DB_ENDPOINT=$(terraform output -raw rds_endpoint)
+if [[ "${DB_ENDPOINT}" == *:* ]]; then
+  DB_HOST=${DB_ENDPOINT%%:*}
+  DB_PORT=${DB_ENDPOINT##*:}
+else
+  DB_HOST=${DB_ENDPOINT}
+  DB_PORT=$(terraform output -raw rds_port 2>/dev/null || echo "5432")
+fi
+DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo "aegis")
+DB_USER_FALLBACK="aegis_api"
+if terraform output -raw rds_username >/tmp/rds_user 2>/dev/null; then
+  DB_USER=$(cat /tmp/rds_user)
+  rm -f /tmp/rds_user
+else
+  DB_USER=${DB_USER_FALLBACK}
+fi
+DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
 # Run migrations using migrate/migrate image (better availability)
 kubectl run migrate-job --rm -i --restart=Never \
   --image=migrate/migrate:v4.17.0 \
-  --namespace aegis-system \
+  --namespace "${K8S_NAMESPACE}" \
   --overrides="{
     \"spec\": {
       \"containers\": [{
@@ -266,20 +309,30 @@ echo "5️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
 
 OVERRIDE_FILE=$(mktemp)
-cat > "${OVERRIDE_FILE}" <<EOF
-platformApi:
-  image:
-    tag: "${PLATFORM_API_IMAGE_TAG}"
-  env:
-    DATABASE_URL: "${DB_URL}"
-  secrets:
-    db-password: "${DB_PASSWORD}"
-    proxy-jwt-secret: "${JWT_SECRET}"
-proxy:
-  image:
-    tag: "${PROXY_IMAGE_TAG}"
-  jwtSecret: "${JWT_SECRET}"
-EOF
+{
+  echo "platformApi:"
+  echo "  image:"
+  if [[ -n "${PLATFORM_API_IMAGE_REPO}" ]]; then
+    echo "    repository: ${PLATFORM_API_IMAGE_REPO}"
+  fi
+  if [[ -n "${PLATFORM_API_IMAGE_TAG_VALUE}" ]]; then
+    echo "    tag: \"${PLATFORM_API_IMAGE_TAG_VALUE}\""
+  fi
+  echo "  env:"
+  echo "    DATABASE_URL: \"${DB_URL}\""
+  echo "  secrets:"
+  echo "    db-password: \"${DB_PASSWORD}\""
+  echo "    proxy-jwt-secret: \"${JWT_SECRET}\""
+  echo "proxy:"
+  echo "  image:"
+  if [[ -n "${PROXY_IMAGE_REPO}" ]]; then
+    echo "    repository: ${PROXY_IMAGE_REPO}"
+  fi
+  if [[ -n "${PROXY_IMAGE_TAG_VALUE}" ]]; then
+    echo "    tag: \"${PROXY_IMAGE_TAG_VALUE}\""
+  fi
+  echo "  jwtSecret: \"${JWT_SECRET}\""
+} > "${OVERRIDE_FILE}"
 
 if [[ $TLS_MODE -eq 1 ]]; then
   TLS_OVERRIDE_FILE=$(mktemp)
@@ -304,7 +357,7 @@ if [[ $TLS_MODE -eq 1 ]]; then
   echo "   ℹ️  Including TLS overlay values (values-cloud-tls.yaml)"
 fi
 HELM_ARGS=(
-  upgrade --install aegis ./aegis-services
+  upgrade --install "${HELM_RELEASE}" ./aegis-services
   -f ./aegis-services/values/common.yaml
   -f ./aegis-services/values/cloud.yaml
   -f ./aegis-services/values-cloud-generated.yaml
@@ -317,7 +370,7 @@ if [[ $TLS_MODE -eq 1 ]]; then
 fi
 
 HELM_ARGS+=(
-  --namespace aegis-system --create-namespace
+  --namespace "${K8S_NAMESPACE}" --create-namespace
   --timeout 10m
 )
 
@@ -332,7 +385,7 @@ echo "6️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc aegis-platform-api -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PLATFORM_API_LB}" ]; then
     echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
     break
@@ -356,7 +409,7 @@ fi
 echo ""
 echo "   Waiting for proxy Load Balancer..."
 for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc aegis-proxy -n aegis-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PROXY_LB}" ]; then
     echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
     break
@@ -386,7 +439,9 @@ fi
 # Update Route53 DNS records with actual LoadBalancer hostnames
 echo ""
 echo "   🌐 Updating Route53 DNS records with LoadBalancer hostnames..."
-if [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
+if [[ "${SKIP_ROUTE53_UPDATE}" == "1" ]]; then
+  echo "   ⚠️  SKIP_ROUTE53_UPDATE=1, skipping Route53 changes"
+elif [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
   cd "${SCRIPT_DIR}"
   terraform apply -auto-approve \
     -var="platform_api_lb_hostname=${PLATFORM_API_LB}" \
@@ -479,7 +534,7 @@ cd "${OUTPUT_DIR}"
 
 # Build helm arguments for aegis-spoke
 SPOKE_HELM_ARGS=(
-  upgrade --install aegis-spoke ./aegis-spoke
+  upgrade --install "${SPOKE_HELM_RELEASE}" ./aegis-spoke
   -f ./aegis-spoke/values-cloud-generated.yaml
 )
 
@@ -490,12 +545,19 @@ fi
 
 SPOKE_HELM_ARGS+=(
   --set k8sAgent.enabled=true
-  --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG}
   --set k8sAgent.replicaCount=1
   --set proxy.enabled=false
-  --namespace aegis-system
+  --namespace "${SPOKE_NAMESPACE}"
+  --create-namespace
   --timeout 5m
 )
+
+if [[ -n "${K8S_AGENT_IMAGE_REPO}" ]]; then
+  SPOKE_HELM_ARGS+=( --set k8sAgent.image.repository=${K8S_AGENT_IMAGE_REPO} )
+fi
+if [[ -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
+  SPOKE_HELM_ARGS+=( --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG_VALUE} )
+fi
 
 helm "${SPOKE_HELM_ARGS[@]}"
 
@@ -522,11 +584,11 @@ echo "   Platform API: ${PLATFORM_API_LB}"
 echo "   Proxy:        ${PROXY_LB}"
 echo ""
 echo "📝 Check deployment status:"
-echo "   kubectl get pods -n aegis-system"
-echo "   kubectl get svc -n aegis-system"
+echo "   kubectl get pods -n ${K8S_NAMESPACE}"
+echo "   kubectl get svc -n ${K8S_NAMESPACE}"
 echo ""
 echo "🔍 View logs:"
-echo "   kubectl logs -n aegis-system -l app.kubernetes.io/component=platform-api -f"
+echo "   kubectl logs -n ${K8S_NAMESPACE} -l app.kubernetes.io/component=platform-api -f"
 echo ""
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "🔐 Test gRPC with grpcurl (TLS mode):"

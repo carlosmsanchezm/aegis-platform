@@ -44,13 +44,17 @@ helm upgrade --install aegis-spoke charts/aegis-spoke \
 ### Port-forward for local access
 ```bash
 # Platform API on http://localhost:10080 (HTTP) and :10081 (gRPC)
-kubectl -n aegis-system port-forward svc/aegis-services-platform-api 10080:8080 10081:8081
+PF_PLATFORM_HTTP_PORT=10080 PF_PLATFORM_GRPC_PORT=10081 \ 
+kubectl -n aegis-system port-forward svc/aegis-services-platform-api $PF_PLATFORM_HTTP_PORT:8080 $PF_PLATFORM_GRPC_PORT:8081
 
 # Proxy tunnel on http://localhost:10085/proxy/
-kubectl -n aegis-system port-forward svc/aegis-services-proxy 10085:8085
+PF_PROXY_HTTP_PORT=10085 \ 
+kubectl -n aegis-system port-forward svc/aegis-services-proxy $PF_PROXY_HTTP_PORT:8085
 
 # Stop existing forwards if needed
 pkill -f "kubectl port-forward"  # optional cleanup
+
+> Tip: override `PF_PLATFORM_HTTP_PORT`, `PF_PLATFORM_GRPC_PORT`, or `PF_PROXY_HTTP_PORT` if those defaults are busy on your workstation.
 ```
 
 ### Start Backstage against local services
@@ -66,7 +70,14 @@ yarn dev          # copies app-config.local-dev.yaml
 ### Provision infra
 ```bash
 cd terraform
-terraform init
+# One-time bootstrap (creates the S3 bucket / DynamoDB table if needed)
+./bootstrap-remote-state.sh \\
+  --bucket <your-state-bucket> \\
+  --region us-east-1 \\
+  --dynamodb-table terraform-lock-table
+
+# Configure remote state (use backend.hcl with your bucket/key)
+terraform init -backend-config=backend.hcl
 terraform apply
 ```
 

@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -258,6 +259,131 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(metricsOutput).To(ContainSubstring(
 				"controller_runtime_reconcile_total",
 			))
+		})
+
+		It("should reconcile a workspace job for an AegisWorkload", func() {
+			workloadNamespace := fmt.Sprintf("aw-e2e-%d", time.Now().UnixNano())
+			By("creating a namespace for the workload under test")
+			cmd := exec.Command("kubectl", "create", "namespace", workloadNamespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "failed to create workload namespace")
+			DeferCleanup(func() {
+				_, _ = utils.Run(exec.Command("kubectl", "delete", "namespace", workloadNamespace, "--ignore-not-found", "--wait=true"))
+			})
+
+			workloadName := fmt.Sprintf("workspace-%d", time.Now().UnixNano())
+			manifest := fmt.Sprintf(`apiVersion: aegis.yourorg.dev/v1alpha1
+kind: AegisWorkload
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  projectId: "p-e2e"
+  queue: "default"
+  workspace:
+    flavor: "a10-mig-1g"
+    image: "alpine:3.19"
+    command:
+      - sh
+      - -c
+      - "echo hi; sleep 1"
+    interactive: false
+`, workloadName, workloadNamespace)
+
+			By("creating the AegisWorkload resource")
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(manifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "failed to apply AegisWorkload manifest")
+			DeferCleanup(func() {
+				_, _ = utils.Run(exec.Command(
+					"kubectl", "delete", "aegisworkloads.aegis.yourorg.dev", workloadName, "-n", workloadNamespace, "--ignore-not-found", "--wait=true"))
+			})
+
+			By("waiting for the operator to create the Job")
+			var jobName string
+			Eventually(func() (string, error) {
+				cmd := exec.Command("kubectl", "get", "jobs", "-n", workloadNamespace,
+					"-l", fmt.Sprintf("aegis.workload/id=%s", workloadName), "-o", "json")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return "", err
+				}
+				var jobs struct {
+					Items []struct {
+						Metadata struct {
+							Name string `json:"name"`
+						} `json:"metadata"`
+						Spec struct {
+							Template struct {
+								Spec struct {
+									Containers []struct {
+										Image string `json:"image"`
+									} `json:"containers"`
+								} `json:"spec"`
+							} `json:"template"`
+						} `json:"spec"`
+					} `json:"items"`
+				}
+				if err := json.Unmarshal([]byte(output), &jobs); err != nil {
+					return "", err
+				}
+				if len(jobs.Items) == 0 {
+					return "", fmt.Errorf("job not created yet")
+				}
+				job := jobs.Items[0]
+				if len(job.Spec.Template.Spec.Containers) == 0 {
+					return "", fmt.Errorf("job template missing containers")
+				}
+				jobName = job.Metadata.Name
+				return job.Spec.Template.Spec.Containers[0].Image, nil
+			}).Should(Equal("alpine:3.19"), "workspace job should use the requested image")
+
+			By("waiting for the workload status to progress")
+			Eventually(func() (string, error) {
+				cmd := exec.Command("kubectl", "get", "aegisworkloads.aegis.yourorg.dev", workloadName, "-n", workloadNamespace, "-o", "json")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return "", err
+				}
+				var aw struct {
+					Status struct {
+						Phase string `json:"phase"`
+					} `json:"status"`
+				}
+				if err := json.Unmarshal([]byte(output), &aw); err != nil {
+					return "", err
+				}
+				if aw.Status.Phase == "" {
+					return "", fmt.Errorf("phase not populated")
+				}
+				return aw.Status.Phase, nil
+			}).Should(Or(Equal("Running"), Equal("Succeeded")), "workload should reach Running or Succeeded phase")
+
+			By("deleting the workload to trigger cleanup")
+			cmd = exec.Command("kubectl", "delete", "aegisworkloads.aegis.yourorg.dev", workloadName, "-n", workloadNamespace, "--wait=true")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "failed to delete workload")
+
+			By("ensuring the workspace Job is garbage collected")
+			Eventually(func() (int, error) {
+				cmd := exec.Command("kubectl", "get", "jobs", "-n", workloadNamespace,
+					"-l", fmt.Sprintf("aegis.workload/id=%s", workloadName), "-o", "json")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					if strings.Contains(err.Error(), "NotFound") {
+						return 0, nil
+					}
+					return 0, err
+				}
+				var jobs struct {
+					Items []struct{} `json:"items"`
+				}
+				if err := json.Unmarshal([]byte(output), &jobs); err != nil {
+					return 0, err
+				}
+				return len(jobs.Items), nil
+			}).Should(Equal(0), "job %s should be removed", jobName)
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks

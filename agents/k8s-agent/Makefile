@@ -117,11 +117,33 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= k8s-agent-test-e2e
+KIND ?= kind
+KUBECTL ?= kubectl
+
+# Auto-detect whether Kind is available. If not, fall back to using the
+# currently selected kubeconfig context (e.g., Docker Desktop Kubernetes).
+KIND_AVAILABLE := $(shell command -v $(KIND) >/dev/null 2>&1 && echo 1 || echo 0)
+CURRENT_CONTEXT := $(shell $(KUBECTL) config current-context 2>/dev/null)
+ifeq ($(KIND_AVAILABLE),1)
+DEFAULT_USE_EXISTING_CLUSTER := false
+else
+DEFAULT_USE_EXISTING_CLUSTER := true
+endif
+USE_EXISTING_CLUSTER ?= $(DEFAULT_USE_EXISTING_CLUSTER)
 
 .PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
+setup-test-e2e: ## Prepare a cluster for e2e tests (Kind by default, or the current context if Kind is unavailable)
+ifeq ($(USE_EXISTING_CLUSTER),true)
+	@if [ -z "$(CURRENT_CONTEXT)" ]; then \
+		echo "No Kubernetes context found. Please configure kubectl before running e2e tests."; \
+		exit 1; \
+	fi
+	@echo "Using existing Kubernetes context '$(CURRENT_CONTEXT)' for e2e tests; skipping Kind provisioning."
+	@$(KUBECTL) cluster-info >/dev/null
+else
 	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
+		echo "Kind is not installed and USE_EXISTING_CLUSTER is not true."; \
+		echo "Install Kind or rerun with USE_EXISTING_CLUSTER=true."; \
 		exit 1; \
 	}
 	@case "$$($(KIND) get clusters)" in \
@@ -131,15 +153,24 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
+endif
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests against Kind or the current cluster.
 	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+	@if [ "$(USE_EXISTING_CLUSTER)" != "true" ]; then \
+		$(MAKE) cleanup-test-e2e; \
+	else \
+		echo "Skipping cluster teardown because USE_EXISTING_CLUSTER=true."; \
+	fi
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
+cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests (skipped when USE_EXISTING_CLUSTER=true)
+ifeq ($(USE_EXISTING_CLUSTER),true)
+	@echo "Skipping Kind cleanup; using existing cluster."
+else
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+endif
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -229,7 +260,6 @@ $(LOCALBIN):
 
 ## Tool Binaries
 KUBECTL ?= kubectl
-KIND ?= kind
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest

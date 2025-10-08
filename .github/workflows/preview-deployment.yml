@@ -7,60 +7,118 @@ env:
   AWS_REGION: us-east-1
   PREVIEW_NAMESPACE: preview-${{ github.event.number }}
   PREVIEW_RELEASE: preview-${{ github.event.number }}
+# Requires repository secrets:
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+
+concurrency:
+  group: preview-${{ github.workflow }}-${{ github.event.number }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  lint-and-unit-test:
+    name: Lint & Unit Test
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          go-version: '1.22.5'
+
+      - name: Run Go unit & integration tests
+        run: go test ./services/... ./pkg/...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: yarn
+          cache-dependency-path: aegis-platform/yarn.lock
+
+      - name: Install frontend dependencies
+        run: |
+          cd aegis-platform
+          yarn install --immutable
+
+      - name: Run frontend unit tests
+        run: |
+          cd aegis-platform
+          yarn test --watchAll=false
+
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: lint-and-unit-test
+    permissions:
+      contents: read
+    outputs:
+      platform_api_image: ${{ steps.build.outputs.platform_api_image }}
+      proxy_image: ${{ steps.build.outputs.proxy_image }}
+      k8s_agent_image: ${{ steps.build.outputs.k8s_agent_image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Amazon ECR
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push Docker Images
+      - name: Build, tag, and push images
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ECR_REGISTRY=$(aws ecr describe-repositories \
-            --repository-names aegis/platform-api \
-            --query "repositories[0].repositoryUri" \
-            --output text | cut -d'/' -f1)
-          PLATFORM_IMAGE="$ECR_REGISTRY/aegis/platform-api:${{ github.sha }}"
-          PROXY_IMAGE="$ECR_REGISTRY/aegis/proxy:${{ github.sha }}"
+          PLATFORM_IMAGE="${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}"
+          PROXY_IMAGE="${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}"
+          K8S_AGENT_IMAGE="${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}"
 
-          docker build -t "$PLATFORM_IMAGE" ./services/platform-api
-          docker build -t "$PROXY_IMAGE" ./services/proxy
+          docker build -t "${PLATFORM_IMAGE}" ./services/platform-api
+          docker build -t "${PROXY_IMAGE}" ./services/proxy
+          docker build -t "${K8S_AGENT_IMAGE}" ./agents/k8s-agent
 
-          docker push "$PLATFORM_IMAGE"
-          docker push "$PROXY_IMAGE"
+          docker push "${PLATFORM_IMAGE}"
+          docker push "${PROXY_IMAGE}"
+          docker push "${K8S_AGENT_IMAGE}"
 
-      - name: Run Tests
-        run: |
-          # TODO: replace placeholder with real unit/integration test commands
-          echo "Running tests..."
+          echo "platform_api_image=${PLATFORM_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "proxy_image=${PROXY_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "k8s_agent_image=${K8S_AGENT_IMAGE}" >> "$GITHUB_OUTPUT"
 
-  deploy-preview:
+  deploy-preview-and-test:
+    name: Deploy Preview & Run E2E Tests
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: build-and-push
     permissions:
       contents: read
+    outputs:
+      preview_host: ${{ steps.deploy.outputs.preview_host }}
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -70,63 +128,80 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
 
-      - name: Terraform Init and Apply
+      - name: Terraform init & apply
+        env:
+          TF_WORKSPACE: preview-${{ github.event.number }}
         run: |
           set -euo pipefail
           cd terraform
-          terraform init
-          terraform workspace select "$PREVIEW_NAMESPACE" || terraform workspace new "$PREVIEW_NAMESPACE"
+          terraform init -backend-config=backend.hcl
+          terraform workspace select "$TF_WORKSPACE" || terraform workspace new "$TF_WORKSPACE"
           terraform apply -auto-approve
 
-      - name: Generate Helm Values and Deploy
+      - name: Deploy control plane via Helm
+        id: deploy
+        env:
+          PLATFORM_API_IMAGE_TAG: ${{ needs.build-and-push.outputs.platform_api_image }}
+          PROXY_IMAGE_TAG: ${{ needs.build-and-push.outputs.proxy_image }}
+          K8S_AGENT_IMAGE_TAG: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
+          SKIP_ROUTE53_UPDATE: '1'
         run: |
           set -euo pipefail
-          ./terraform/generate-helm-values.sh --non-interactive
+          ./terraform/generate-helm-values.sh --non-interactive --tls
 
-          cat > overrides.yaml <<'OVERRIDES'
-          platformApi:
-            image:
-              tag: ${{ github.sha }}
-          proxy:
-            image:
-              tag: ${{ github.sha }}
-          OVERRIDES
+          cd terraform
+          API_HOST=$(terraform output -raw dns_platform_api_grpc)
+          PROXY_HOST=$(terraform output -raw dns_proxy)
+          API_HOST=${API_HOST%.}
+          PROXY_HOST=${PROXY_HOST%.}
+          echo "preview_host=${API_HOST}" >> "$GITHUB_OUTPUT"
+          echo "preview_proxy=${PROXY_HOST}" >> "$GITHUB_OUTPUT"
+          echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
 
-          helm upgrade --install "$PREVIEW_RELEASE" ./charts/aegis-services \
-            -f ./charts/aegis-services/values/common.yaml \
-            -f ./charts/aegis-services/values/cloud.yaml \
-            -f ./charts/aegis-services/values-cloud-generated.yaml \
-            -f overrides.yaml \
-            --namespace "$PREVIEW_NAMESPACE" \
-            --create-namespace
-
-  e2e-test:
-    runs-on: ubuntu-latest
-    needs: deploy-preview
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run End-to-End Tests
+      - name: Install test tooling
         run: |
-          # TODO: replace placeholder with real end-to-end test commands
-          echo "Running end-to-end tests..."
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Run platform API E2E tests
+        env:
+          AEGIS_GRPC_ADDR: ${{ steps.deploy.outputs.preview_host }}:8081
+          GRPC_TLS: '1'
+          GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
+          AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
+        run: |
+          scripts/e2e-platform-api.sh
+
+      - name: Create Kind cluster for operator tests
+        uses: helm/kind-action@v1.8.0
+        with:
+          cluster_name: aegis-e2e
+
+      - name: Run k8s-agent E2E tests
+        env:
+          USE_EXISTING_CLUSTER: 'true'
+        run: |
+          cd agents/k8s-agent
+          make test-e2e
 
   teardown-preview:
+    name: Teardown Preview Environment
     if: always()
     runs-on: ubuntu-latest
-    needs:
-      - deploy-preview
-      - e2e-test
+    needs: deploy-preview-and-test
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -136,21 +211,28 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
 
-      - name: Terraform Destroy
+      - name: Terraform destroy
+        env:
+          TF_WORKSPACE: preview-${{ github.event.number }}
+          PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
         run: |
           set -euo pipefail
           cd terraform
-          if terraform workspace list | grep -q "$PREVIEW_NAMESPACE"; then
-            terraform workspace select "$PREVIEW_NAMESPACE"
+          terraform init -backend-config=backend.hcl
+          if terraform workspace list | grep -q "$TF_WORKSPACE"; then
+            terraform workspace select "$TF_WORKSPACE"
             KUBECTL_CMD=$(terraform output -raw kubectl_config_command || true)
             if [ -n "$KUBECTL_CMD" ]; then
               eval "$KUBECTL_CMD"
               helm uninstall "$PREVIEW_RELEASE" --namespace "$PREVIEW_NAMESPACE" || true
+              helm uninstall "$SPOKE_HELM_RELEASE" --namespace "$PREVIEW_NAMESPACE" || true
               kubectl delete namespace "$PREVIEW_NAMESPACE" --ignore-not-found || true
             fi
-            terraform destroy -auto-approve || echo "Terraform destroy failed; resources may require manual cleanup"
+            terraform destroy -auto-approve || echo "Terraform destroy failed; manual cleanup may be required"
             terraform workspace select default
-            terraform workspace delete "$PREVIEW_NAMESPACE" || true
+            terraform workspace delete "$TF_WORKSPACE" || true
           else
-            echo "Preview workspace $PREVIEW_NAMESPACE not found; skipping terraform destroy"
+            echo "Workspace $TF_WORKSPACE not found; skipping destroy"
           fi

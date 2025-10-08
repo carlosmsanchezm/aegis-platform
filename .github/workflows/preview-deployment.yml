@@ -194,7 +194,17 @@ jobs:
           SKIP_ROUTE53_UPDATE: '1'
         run: |
           set -euo pipefail
+
+          # First, deploy with the helm script (which skips Route53 update)
           ./terraform/generate-helm-values.sh --non-interactive --tls
+
+      - name: Update Route53 and configure E2E endpoints
+        id: configure-e2e
+        env:
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+        run: |
+          set -euo pipefail
 
           # Extract actual LoadBalancer hostnames from Kubernetes services
           echo "⏳ Waiting for LoadBalancers to be provisioned..."
@@ -229,17 +239,51 @@ jobs:
             exit 1
           fi
 
-          # Output the actual LoadBalancer hostnames for E2E tests
-          echo "platform_api_lb=${PLATFORM_LB}" >> "$GITHUB_OUTPUT"
-          echo "proxy_lb=${PROXY_LB}" >> "$GITHUB_OUTPUT"
-          echo "grpc_addr=${PLATFORM_LB}:8081" >> "$GITHUB_OUTPUT"
-          echo "proxy_addr=${PROXY_LB}:8080" >> "$GITHUB_OUTPUT"
+          # Update Route53 DNS records with actual LoadBalancer hostnames
+          echo ""
+          echo "🌐 Updating Route53 DNS records..."
+          cd terraform
+          terraform apply -auto-approve \
+            -var="platform_api_lb_hostname=${PLATFORM_LB}" \
+            -var="proxy_lb_hostname=${PROXY_LB}" \
+            -target=aws_route53_record.platform_api_grpc \
+            -target=aws_route53_record.platform_api_http \
+            -target=aws_route53_record.proxy
+
+          # Get the DNS names from Terraform outputs (now updated)
+          PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
+          PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
+
+          # Remove trailing dots from DNS names if present
+          PLATFORM_DNS=${PLATFORM_DNS%.}
+          PROXY_DNS=${PROXY_DNS%.}
+
+          echo "✅ Route53 records updated:"
+          echo "   ${PLATFORM_DNS} → ${PLATFORM_LB}"
+          echo "   ${PROXY_DNS} → ${PROXY_LB}"
+
+          # Wait for DNS propagation (30 seconds should be enough for Route53)
+          echo ""
+          echo "⏳ Waiting 30s for DNS propagation..."
+          sleep 30
+
+          # Verify DNS resolution
+          echo "🔍 Verifying DNS resolution..."
+          if dig +short "${PLATFORM_DNS}" | grep -q '^[0-9]'; then
+            echo "✅ ${PLATFORM_DNS} resolves to: $(dig +short ${PLATFORM_DNS} | head -1)"
+          else
+            echo "⚠️  ${PLATFORM_DNS} not yet resolved, but continuing..."
+          fi
+
+          # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
+          echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"
+          echo "proxy_hostname=${PROXY_DNS}" >> "$GITHUB_OUTPUT"
           echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
 
           echo ""
-          echo "📋 E2E Test Endpoints:"
-          echo "   Platform API gRPC: ${PLATFORM_LB}:8081"
-          echo "   Proxy:             ${PROXY_LB}:8080"
+          echo "📋 E2E Test Endpoints (via DNS):"
+          echo "   Platform API gRPC: ${PLATFORM_DNS}:8081"
+          echo "   Proxy:             ${PROXY_DNS}:8080"
           echo "   CA Bundle:         ${HOME}/aegis-platform-api-ca.crt"
 
       - name: Install test tooling
@@ -275,21 +319,22 @@ jobs:
 
       - name: Run platform API E2E tests
         env:
-          AEGIS_GRPC_ADDR: ${{ steps.deploy.outputs.grpc_addr }}
-          AEGIS_PROXY_HOSTNAME: ${{ steps.deploy.outputs.proxy_lb }}
+          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
+          AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
           GRPC_TLS: '1'
-          GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
+          GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
           AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
           AEGIS_PLATFORM_DEPLOYMENT: ${{ env.PREVIEW_RELEASE }}-platform-api
         run: |
           set -euo pipefail
-          echo "🧪 Running E2E tests against preview environment:"
+          echo "🧪 Running E2E tests against preview environment (via DNS):"
           echo "   gRPC Address: ${AEGIS_GRPC_ADDR}"
           echo "   Proxy:        ${AEGIS_PROXY_HOSTNAME}"
           echo "   Namespace:    ${AEGIS_PLATFORM_NAMESPACE}"
           echo "   CA Bundle:    ${GRPC_CA}"
+          echo "   TLS:          Enabled"
           echo ""
 
           SCRIPT_ROOT="${{ github.workspace }}"

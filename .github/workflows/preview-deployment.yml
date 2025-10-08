@@ -238,10 +238,11 @@ jobs:
 
       - name: Run platform API E2E tests
         env:
-          AEGIS_GRPC_ADDR: ${{ steps.deploy.outputs.preview_host }}:8081
-          GRPC_TLS: '1'
-          GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
+          AEGIS_GRPC_ADDR: 127.0.0.1:8081
+          GRPC_TLS: '0'
+          GRPC_CA: ''
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
+          AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
         run: |
           set -euo pipefail
           SCRIPT_ROOT="${{ github.workspace }}"

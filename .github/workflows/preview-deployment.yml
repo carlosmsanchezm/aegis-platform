@@ -208,6 +208,7 @@ jobs:
       - name: Install test tooling
         run: |
           set -euo pipefail
+          cd "${GITHUB_WORKSPACE}"
           sudo apt-get update
           sudo apt-get install -y jq
           GRPCURL_VERSION=1.9.3
@@ -242,14 +243,18 @@ jobs:
           GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
         run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}"
           scripts/e2e-platform-api.sh
 
       - name: Create Kind cluster for operator tests
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         uses: helm/kind-action@v1.8.0
         with:
           cluster_name: aegis-e2e
 
       - name: Run k8s-agent E2E tests
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         env:
           USE_EXISTING_CLUSTER: 'true'
         run: |

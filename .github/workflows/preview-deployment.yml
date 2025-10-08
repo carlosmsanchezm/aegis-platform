@@ -215,10 +215,10 @@ jobs:
           ARCH=$(uname -m)
           case "$ARCH" in
             x86_64|amd64)
-              GRPCURL_PACKAGE_ARCH=linux-x86_64
+              GRPCURL_PACKAGE_ARCH=linux_x86_64
               ;;
             arm64|aarch64)
-              GRPCURL_PACKAGE_ARCH=linux-arm64
+              GRPCURL_PACKAGE_ARCH=linux_arm64
               ;;
             *)
               echo "Unsupported architecture: $ARCH" >&2

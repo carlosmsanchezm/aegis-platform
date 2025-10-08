@@ -242,13 +242,12 @@ jobs:
           GRPC_TLS: '1'
           GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          ls -R ./scripts || true
-          ls
-          pwd
-          ./scripts/e2e-platform-api.sh
+          SCRIPT_ROOT="${{ github.workspace }}"
+          echo "Workspace: ${SCRIPT_ROOT}"
+          find "${SCRIPT_ROOT}" -maxdepth 3 -type f -name 'e2e-platform-api.sh'
+          bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Create Kind cluster for operator tests
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}

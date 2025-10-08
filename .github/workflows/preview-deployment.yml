@@ -263,29 +263,24 @@ jobs:
           echo "   ${PROXY_DNS} → ${PROXY_LB}"
 
           echo ""
-          echo "⏳ Waiting up to 120s for DNS propagation..."
-          RESOLVED=""
-          for i in {1..20}; do
-            LOOKUP=$(dig +short "${PLATFORM_DNS}" @8.8.8.8 | head -1)
-            if echo "${LOOKUP}" | grep -q '\.'; then
-              RESOLVED="${LOOKUP}"
-              echo "✅ ${PLATFORM_DNS} resolves to ${RESOLVED} (via 8.8.8.8)"
-              break
-            fi
-            echo "  DNS not ready yet... (${i}/20)"
-            sleep 6
-          done
+          echo "🔍 Resolving LoadBalancer IPs for local overrides..."
+          PLATFORM_IP=$(dig +short "${PLATFORM_LB}" | head -1)
+          PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
 
-          if [ -z "${RESOLVED}" ]; then
-            echo "❌ DNS did not propagate for ${PLATFORM_DNS} within 120s"
-            exit 1
+          if [ -n "${PLATFORM_IP}" ]; then
+            echo "   Platform API LB IP: ${PLATFORM_IP}"
+            sudo sed -i.bak "/${PLATFORM_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PLATFORM_IP} ${PLATFORM_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          if [ -n "${PROXY_IP}" ]; then
+            echo "   Proxy LB IP: ${PROXY_IP}"
+            sudo sed -i.bak "/${PROXY_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PROXY_IP} ${PROXY_DNS}" | sudo tee -a /etc/hosts >/dev/null
           fi
 
           sudo resolvectl flush-caches || true
-          echo "🔄 Local resolver cache flushed"
-
-          LOCAL_LOOKUP=$(dig +short "${PLATFORM_DNS}" | head -1)
-          echo "🔍 Local resolver now returns: ${LOCAL_LOOKUP}"
+          echo "🔄 Local resolver cache flushed (hosts file overrides in place)"
 
           # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
           echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"

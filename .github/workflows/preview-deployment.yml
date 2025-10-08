@@ -226,8 +226,13 @@ jobs:
               ;;
           esac
           TMPDIR=$(mktemp -d)
-          curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz" -o "$TMPDIR/grpcurl.tgz"
-          tar -xzf "$TMPDIR/grpcurl.tgz" -C "$TMPDIR"
+          ASSET="grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz"
+          CURL_URL="https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/${ASSET}"
+          if ! curl -fsSL "$CURL_URL" -o "$TMPDIR/$ASSET"; then
+            echo "Failed to download grpcurl from $CURL_URL" >&2
+            exit 1
+          fi
+          tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR" grpcurl
           sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
           rm -rf "$TMPDIR"
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	testcontainers "github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/nat"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
 
@@ -293,8 +294,8 @@ func startPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.C
 			"POSTGRES_USER":     username,
 			"POSTGRES_DB":       dbName,
 		},
-		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port uint16) string {
-			return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", username, password, host, port, dbName)
+		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port nat.Port) string {
+			return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", username, password, host, port.Port(), dbName)
 		}).WithStartupTimeout(2 * time.Minute),
 	}
 

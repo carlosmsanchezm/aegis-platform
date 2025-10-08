@@ -19,6 +19,10 @@ AEGIS_DISABLE_KUEUE ?= 1
 HEALTH_PROBE_BIND_ADDRESS ?= :8081
 AEGIS_FLAVORS ?=
 
+PF_PLATFORM_HTTP_PORT ?= 10080
+PF_PLATFORM_GRPC_PORT ?= 10081
+PF_PROXY_HTTP_PORT ?= 10085
+
 .PHONY: all proto tidy build test verify run-api run-operator stop \
 	setup-local deploy-local port-forward dev-backstage clean-local
 
@@ -113,9 +117,9 @@ port-forward:
 		sleep 1; \
 	done
 	@echo "Setting up port-forwarding..."
-	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api 10080:8080 10081:8081 &
-	@kubectl -n aegis-system port-forward svc/aegis-services-proxy 10085:8085 &
-	@echo "Port-forwarding started. Platform API on 10080/10081, proxy on 10085. Use 'pkill -f \"kubectl port-forward\"' to stop."
+	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 &
+	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 &
+	@echo "Port-forwarding started. Platform API on $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT), proxy on $(PF_PROXY_HTTP_PORT). Use 'pkill -f \"kubectl port-forward\"' to stop."
 
 dev-backstage:
 	@echo "Starting Backstage development server..."

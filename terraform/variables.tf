@@ -7,9 +7,9 @@ variable "aws_region" {
 }
 
 variable "aws_profile" {
-  description = "AWS profile to use"
+  description = "AWS profile name for AWS CLI (leave blank when using environment-based auth)"
   type        = string
-  default     = "myclaude"
+  default     = ""
 }
 
 variable "environment" {

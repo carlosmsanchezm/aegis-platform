@@ -9,6 +9,17 @@ This directory contains Terraform configurations for deploying the Aegis platfor
 
 ## 🚀 Quick Start
 
+### 0. (One-time) Configure remote state
+
+1. Provision an S3 bucket (and optional DynamoDB table for locking) in AWS.
+2. Copy `backend.hcl.example` to `backend.hcl` and update the values to match your environment.
+3. Initialize Terraform using that backend file (ensure AWS credentials are available via environment variables such as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or your preferred method):
+
+```bash
+terraform init \\
+  -backend-config="backend.hcl"
+```
+
 ```bash
 # 1. Deploy infrastructure
 terraform init

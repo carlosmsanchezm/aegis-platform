@@ -6,7 +6,7 @@ WORKDIR /app
 # Copy the entire project structure since we have local dependencies
 COPY . .
 
-# Build the platform-api service specifically
+# Build the platform-api service specifica`lly
 WORKDIR /app/services/platform-api
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o platform-api .
 

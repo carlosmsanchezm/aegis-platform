@@ -43,8 +43,12 @@ helm upgrade --install aegis-spoke ./aegis-spoke \
 ### Start Local Cluster
 ```bash
 # Port-forward services
-kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 10080:8080 10081:8081 &
-kubectl port-forward -n default svc/aegis-services-aegis-services-proxy 10085:8085 &
+PF_PLATFORM_HTTP_PORT=10080 PF_PLATFORM_GRPC_PORT=10081 \\
+kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api $PF_PLATFORM_HTTP_PORT:8080 $PF_PLATFORM_GRPC_PORT:8081 &
+PF_PROXY_HTTP_PORT=10085 \\
+kubectl port-forward -n default svc/aegis-services-aegis-services-proxy $PF_PROXY_HTTP_PORT:8085 &
+
+> Adjust `PF_PLATFORM_HTTP_PORT`, `PF_PLATFORM_GRPC_PORT`, or `PF_PROXY_HTTP_PORT` if the defaults clash with other services.
 
 # Start Backstage
 cd aegis-platform/
@@ -243,7 +247,7 @@ npx @vscode/vsce package --out aegis-remote.vsix
 ### "Can't connect to platform-api"
 ```bash
 # Check port-forward is running (local)
-kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api 10080:8080 10081:8081
+kubectl port-forward -n default svc/aegis-services-aegis-services-platform-api ${PF_PLATFORM_HTTP_PORT:-10080}:8080 ${PF_PLATFORM_GRPC_PORT:-10081}:8081
 
 # Check ingress (cloud)
 kubectl get ingress -n aegis-system

@@ -262,18 +262,30 @@ jobs:
           echo "   ${PLATFORM_DNS} → ${PLATFORM_LB}"
           echo "   ${PROXY_DNS} → ${PROXY_LB}"
 
-          # Wait for DNS propagation (30 seconds should be enough for Route53)
           echo ""
-          echo "⏳ Waiting 30s for DNS propagation..."
-          sleep 30
+          echo "⏳ Waiting up to 120s for DNS propagation..."
+          RESOLVED=""
+          for i in {1..20}; do
+            LOOKUP=$(dig +short "${PLATFORM_DNS}" @8.8.8.8 | head -1)
+            if echo "${LOOKUP}" | grep -q '\.'; then
+              RESOLVED="${LOOKUP}"
+              echo "✅ ${PLATFORM_DNS} resolves to ${RESOLVED} (via 8.8.8.8)"
+              break
+            fi
+            echo "  DNS not ready yet... (${i}/20)"
+            sleep 6
+          done
 
-          # Verify DNS resolution
-          echo "🔍 Verifying DNS resolution..."
-          if dig +short "${PLATFORM_DNS}" | grep -q '^[0-9]'; then
-            echo "✅ ${PLATFORM_DNS} resolves to: $(dig +short ${PLATFORM_DNS} | head -1)"
-          else
-            echo "⚠️  ${PLATFORM_DNS} not yet resolved, but continuing..."
+          if [ -z "${RESOLVED}" ]; then
+            echo "❌ DNS did not propagate for ${PLATFORM_DNS} within 120s"
+            exit 1
           fi
+
+          sudo resolvectl flush-caches || true
+          echo "🔄 Local resolver cache flushed"
+
+          LOCAL_LOOKUP=$(dig +short "${PLATFORM_DNS}" | head -1)
+          echo "🔍 Local resolver now returns: ${LOCAL_LOOKUP}"
 
           # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
           echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"

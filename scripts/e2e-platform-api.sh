@@ -18,6 +18,7 @@ ADDR="${AEGIS_GRPC_ADDR:-127.0.0.1:10081}"
 TLS="${GRPC_TLS:-0}"
 PLATFORM_NAMESPACE="${AEGIS_PLATFORM_NAMESPACE:-aegis-system}"
 PLATFORM_SERVICE="${AEGIS_PLATFORM_SERVICE:-aegis-services-platform-api}"
+PLATFORM_DEPLOYMENT="${AEGIS_PLATFORM_DEPLOYMENT:-${PLATFORM_SERVICE}}"
 
 GRPC_ARGS=(-import-path "$REPO_ROOT/proto" -proto aegis/v1/platform.proto)
 if [[ "$TLS" == "1" ]]; then
@@ -72,6 +73,9 @@ maybe_port_forward() {
     127.0.0.1|localhost|::1) : ;;
     *) return 0 ;;
   esac
+
+  say "Waiting for deployment ${PLATFORM_DEPLOYMENT} in namespace ${PLATFORM_NAMESPACE}"
+  kubectl -n "${PLATFORM_NAMESPACE}" wait --for=condition=available --timeout=300s "deployment/${PLATFORM_DEPLOYMENT}"
 
   if port_is_ready "$host" "$port"; then
     return 0

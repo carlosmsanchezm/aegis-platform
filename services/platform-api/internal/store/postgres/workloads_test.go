@@ -286,7 +286,9 @@ func startPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.C
 			"POSTGRES_USER":     username,
 			"POSTGRES_DB":       dbName,
 		},
-		WaitingFor: wait.ForListeningPort("5432/tcp").WithStartupTimeout(2 * time.Minute),
+		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port uint16) string {
+			return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", username, password, host, port, dbName)
+		}).WithStartupTimeout(2 * time.Minute),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

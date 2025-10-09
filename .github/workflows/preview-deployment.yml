@@ -369,7 +369,7 @@ jobs:
 
       - name: Run platform API E2E tests
         env:
-          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
+          AEGIS_GRPC_ADDR: 127.0.0.1:8081
           AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
           GRPC_TLS: '1'
           GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}

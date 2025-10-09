@@ -412,7 +412,11 @@ EOF
   fi
 
   mkdir -p "$(dirname "${CA_BUNDLE}")"
-  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
+  {
+    cat "${TLS_CA_CERT_PATH}"
+    echo ""
+    cat "${TLS_CERT_PATH}"
+  } > "${CA_BUNDLE}"
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
 if [[ $TLS_MODE -eq 1 ]]; then

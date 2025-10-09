@@ -288,10 +288,17 @@ kind: Job
 metadata:
   name: ${MIGRATION_JOB}
   namespace: ${K8S_NAMESPACE}
+  labels:
+    app.kubernetes.io/component: platform-api
+    app: aegis-platform-api
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 1
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: platform-api
+        app: aegis-platform-api
     spec:
       restartPolicy: Never
       containers:
@@ -339,8 +346,7 @@ EOF
 if ! kubectl -n "${K8S_NAMESPACE}" wait --for=condition=complete "job/${MIGRATION_JOB}" --timeout=5m; then
   echo "❌ Migration job failed. Logs:"
   kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
-  kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  echo "ℹ️  Leaving ${MIGRATION_JOB} and configmap ${MIGRATION_CONFIGMAP} in place for troubleshooting"
   exit 1
 fi
 

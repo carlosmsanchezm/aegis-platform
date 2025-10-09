@@ -270,7 +270,7 @@ jobs:
             echo "Failed to fetch db_password_secret_value" >&2
             exit 1
           fi
-          popd >/dev/null || true
+          popd >/dev/null 2>&1 || true
 
           sudo apt-get update
           sudo apt-get install -y postgresql-client curl >/dev/null

@@ -43,7 +43,7 @@ if [[ -z "${CLUSTER_ID}" ]]; then
   kubeconfig_secret="${AEGIS_KUBECONFIG_SECRET_NAME:-aegis-kubeconfigs}"
   platform_ns="${AEGIS_PLATFORM_NAMESPACE:-aegis-system}"
   if kubectl get secret "${kubeconfig_secret}" -n "${platform_ns}" >/dev/null 2>&1; then
-    detected_id=$(kubectl get secret "${kubeconfig_secret}" -n "${platform_ns}" -o jsonpath='{range $k,$v := .data}{$k}{"\n"}{end}' | grep -v '^\.keep$' | head -n1)
+    detected_id=$(kubectl get secret "${kubeconfig_secret}" -n "${platform_ns}" -o jsonpath='{range $k := keys .data}{$k}{"\n"}{end}' | grep -v '^\.keep$' | head -n1)
     if [[ -n "${detected_id}" ]]; then
       CLUSTER_ID="${detected_id}"
     fi

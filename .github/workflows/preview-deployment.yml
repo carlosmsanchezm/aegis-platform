@@ -180,6 +180,8 @@ jobs:
       contents: read
     outputs:
       preview_host: ${{ steps.deploy.outputs.preview_host }}
+    env:
+      USE_EXISTING_CLUSTER: 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -395,7 +397,7 @@ jobs:
           bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Create Kind cluster for operator tests
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
+        if: ${{ (github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all') && env.USE_EXISTING_CLUSTER != 'true' }}
         uses: helm/kind-action@v1.8.0
         with:
           cluster_name: aegis-e2e
@@ -403,7 +405,7 @@ jobs:
       - name: Run k8s-agent E2E tests
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         env:
-          USE_EXISTING_CLUSTER: 'true'
+          USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}
           KIND_CLUSTER: aegis-e2e
         run: |
           cd agents/k8s-agent

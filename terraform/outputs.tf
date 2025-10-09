@@ -6,6 +6,16 @@ output "cluster_name" {
   value       = aws_eks_cluster.main.name
 }
 
+output "node_security_group_id" {
+  description = "Primary security group used by EKS worker nodes"
+  value       = aws_security_group.node.id
+}
+
+output "eks_cluster_security_group_id" {
+  description = "AWS-managed cluster security group created by EKS"
+  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+}
+
 # These outputs moved to eks.tf
 
 # Node Groups
@@ -253,7 +263,7 @@ output "aws_region" {
 # Kubectl configuration command
 output "kubectl_config_command" {
   description = "Command to configure kubectl"
-  value = var.aws_profile != "" ? "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name} --profile ${var.aws_profile}" : "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name}"
+  value       = var.aws_profile != "" ? "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name} --profile ${var.aws_profile}" : "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name}"
 }
 
 # Route53 DNS Information

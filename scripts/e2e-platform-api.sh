@@ -23,11 +23,8 @@ PLATFORM_DEPLOYMENT="${AEGIS_PLATFORM_DEPLOYMENT:-${PLATFORM_SERVICE}}"
 GRPC_ARGS=(-import-path "$REPO_ROOT/proto" -proto aegis/v1/platform.proto)
 if [[ "$TLS" == "1" ]]; then
   [[ -n "${GRPC_CA:-}" ]] && GRPC_ARGS+=(-cacert "$GRPC_CA")
-  if [[ -n "${GRPC_CERT:-}" && -n "${GRPC_KEY:-}" ]]; then
-    GRPC_ARGS+=(-cert "$GRPC_CERT" -key "$GRPC_KEY")
-  fi
   if [[ -n "${GRPC_TLS_SERVER_NAME:-}" ]]; then
-    GRPC_ARGS+=(-authority "$GRPC_TLS_SERVER_NAME" -servername "$GRPC_TLS_SERVER_NAME")
+    GRPC_ARGS+=(-authority "$GRPC_TLS_SERVER_NAME")
   fi
 else
   GRPC_ARGS+=(-plaintext)

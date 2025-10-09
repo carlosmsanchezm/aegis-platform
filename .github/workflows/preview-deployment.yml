@@ -375,6 +375,7 @@ jobs:
           GRPC_TLS: '1'
           GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
           GRPC_TLS_SERVER_NAME: ${{ steps.configure-e2e.outputs.grpc_host }}
+          GRPC_TLS_SKIP_VERIFY: '1'
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
           AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api

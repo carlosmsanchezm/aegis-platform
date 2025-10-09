@@ -84,6 +84,14 @@ resource "aws_security_group" "rds" {
     description     = "PostgreSQL access from EKS nodes"
   }
 
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_eks_cluster.main.vpc_config[0].cluster_security_group_id]
+    description     = "PostgreSQL access from EKS cluster security group"
+  }
+
   # Allow all outbound (though RDS typically doesn't need it)
   egress {
     from_port   = 0
@@ -98,16 +106,6 @@ resource "aws_security_group" "rds" {
 }
 
 # Additional security group rule for EKS cluster-managed security group
-resource "aws_security_group_rule" "rds_from_eks_cluster_sg" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.rds.id
-  source_security_group_id = data.aws_security_groups.eks_cluster_sg.ids[0]
-  description              = "PostgreSQL access from EKS cluster-managed security group"
-}
-
 # RDS PostgreSQL instance
 module "rds" {
   source  = "terraform-aws-modules/rds/aws"

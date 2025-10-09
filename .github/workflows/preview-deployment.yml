@@ -14,6 +14,7 @@ on:
       preview_number:
         description: "Preview identifier (defaults to PR number or workflow run id)"
         required: false
+  pull_request:
 
 env:
   AWS_REGION: us-east-1
@@ -32,6 +33,7 @@ concurrency:
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,7 +88,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Images
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy' || github.event.inputs.run_subset == 'deploy-no-teardown' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -171,7 +173,7 @@ jobs:
 
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy' || github.event.inputs.run_subset == 'deploy-no-teardown' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -239,12 +241,10 @@ jobs:
           set -euo pipefail
 
           # First, deploy with the helm script (which skips Route53 update)
-          ./terraform/generate-helm-values.sh --non-interactive --tls
+          SKIP_MIGRATION_PLACEHOLDER=1 ./terraform/generate-helm-values.sh --non-interactive --tls
 
       - name: Run database migrations
         env:
-          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
-          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -euo pipefail
@@ -263,77 +263,26 @@ jobs:
           else
             DB_USER="aegis_api"
           fi
-          popd >/dev/null || true
-
-          MIGRATION_CONFIGMAP="${HELM_RELEASE}-migrations"
-          MIGRATION_JOB="${HELM_RELEASE}-migrate"
-
-          kubectl -n "$K8S_NAMESPACE" create configmap "$MIGRATION_CONFIGMAP" \
-            --from-file=0001_init.sql=services/platform-api/migrations/0001_init.sql \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          kubectl -n "$K8S_NAMESPACE" delete job "$MIGRATION_JOB" --ignore-not-found >/dev/null 2>&1 || true
-
-          cat <<EOF | kubectl apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: ${MIGRATION_JOB}
-  namespace: ${K8S_NAMESPACE}
-spec:
-  ttlSecondsAfterFinished: 600
-  backoffLimit: 1
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-      - name: migrate
-        image: postgres:16-alpine
-        env:
-        - name: PGPASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: aegis-platform-secrets
-              key: db-password
-        - name: DB_USER
-          value: "${DB_USER}"
-        - name: DB_NAME
-          value: "${DB_NAME}"
-        - name: DB_HOST
-          value: "${DB_HOST}"
-        - name: DB_PORT
-          value: "${DB_PORT}"
-        - name: AWS_REGION
-          value: "${AWS_REGION}"
-        command:
-        - /bin/sh
-        - -c
-        - |
-          set -euo pipefail
-          apk add --no-cache ca-certificates curl >/dev/null 2>&1
-          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
-          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
-        volumeMounts:
-        - name: migrations
-          mountPath: /migrations
-      volumes:
-      - name: migrations
-        configMap:
-          name: ${MIGRATION_CONFIGMAP}
-EOF
-
-          if ! kubectl -n "$K8S_NAMESPACE" wait --for=condition=complete "job/${MIGRATION_JOB}" --timeout=5m; then
-            echo "❌ Migration job failed. Logs:"
-            kubectl logs job/"${MIGRATION_JOB}" -n "$K8S_NAMESPACE" || true
-            kubectl delete job "${MIGRATION_JOB}" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-            kubectl delete configmap "$MIGRATION_CONFIGMAP" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+          if terraform output -raw db_password_secret_value >/tmp/db_pass 2>/dev/null; then
+            DB_PASSWORD=$(cat /tmp/db_pass)
+            rm -f /tmp/db_pass
+          else
+            echo "Failed to fetch db_password_secret_value" >&2
             exit 1
           fi
+          popd >/dev/null 2>&1 || true
 
-          kubectl logs job/"${MIGRATION_JOB}" -n "$K8S_NAMESPACE" || true
-          kubectl delete job "${MIGRATION_JOB}" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-          kubectl delete configmap "$MIGRATION_CONFIGMAP" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client curl >/dev/null
+
+          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
+          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
+
+          PGPASSWORD="$DB_PASSWORD" psql \
+            "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" \
+            -v ON_ERROR_STOP=1 \
+            -f services/platform-api/migrations/0001_init.sql
+
           echo "   ✅ Migrations applied"
 
       - name: Update Route53 and configure E2E endpoints
@@ -503,7 +452,7 @@ EOF
 
   teardown-preview:
     name: Teardown Preview Environment
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy') }}
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:

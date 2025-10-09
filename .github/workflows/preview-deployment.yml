@@ -1,39 +1,73 @@
 name: Build, Test, and Deploy Preview
 
 on:
+  workflow_dispatch:
+    inputs:
+      run_subset:
+        description: "Select which portion of the workflow to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - deploy
+          - deploy-no-teardown
+      preview_number:
+        description: "Preview identifier (defaults to PR number or workflow run id)"
+        required: false
   pull_request:
 
 env:
   AWS_REGION: us-east-1
-  PREVIEW_NAMESPACE: preview-${{ github.event.number }}
-  PREVIEW_RELEASE: preview-${{ github.event.number }}
+  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || 'all' }}
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
 
 concurrency:
-  group: preview-${{ github.workflow }}-${{ github.event.number }}
+  group: preview-${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      - name: Skipping lint/unit for deploy-only run
+        if: ${{ env.RUN_SUBSET != 'all' }}
+        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping lint and unit tests."
+
       - name: Checkout code
+        if: ${{ env.RUN_SUBSET == 'all' }}
         uses: actions/checkout@v4
 
       - name: Set up Go
+        if: ${{ env.RUN_SUBSET == 'all' }}
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.5'
+          go-version: '1.24'
 
       - name: Run Go unit & integration tests
-        run: go test ./services/... ./pkg/...
+        if: ${{ env.RUN_SUBSET == 'all' }}
+        run: |
+          set -euo pipefail
+          go work sync
+
+          echo "Running make test in agents/k8s-agent"
+          (cd agents/k8s-agent && make test)
+
+          for module in pkg/workspace services/platform-api services/proxy; do
+            echo "Running go test in $module"
+            (cd "$module" && go test ./...)
+          done
 
       - name: Set up Node.js
+        if: ${{ env.RUN_SUBSET == 'all' }}
         uses: actions/setup-node@v4
         with:
           node-version: '18'
@@ -41,30 +75,38 @@ jobs:
           cache-dependency-path: aegis-platform/yarn.lock
 
       - name: Install frontend dependencies
+        if: ${{ env.RUN_SUBSET == 'all' }}
         run: |
           cd aegis-platform
           yarn install --immutable
 
       - name: Run frontend unit tests
+        if: ${{ env.RUN_SUBSET == 'all' }}
         run: |
           cd aegis-platform
           yarn test --watchAll=false
 
   build-and-push:
     name: Build & Push Images
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
       contents: read
     outputs:
-      platform_api_image: ${{ steps.build.outputs.platform_api_image }}
-      proxy_image: ${{ steps.build.outputs.proxy_image }}
-      k8s_agent_image: ${{ steps.build.outputs.k8s_agent_image }}
+      platform_api_image: ${{ steps.image-data.outputs.platform_api_image }}
+      proxy_image: ${{ steps.image-data.outputs.proxy_image }}
+      k8s_agent_image: ${{ steps.image-data.outputs.k8s_agent_image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Skip build for deploy-only run
+        if: ${{ env.RUN_SUBSET != 'all' }}
+        run: echo "Deploy-only run detected; skipping image build."
+
       - name: Set up Docker Buildx
+        if: ${{ env.RUN_SUBSET == 'all' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Configure AWS credentials
@@ -78,31 +120,60 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push images
-        id: build
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Determine image tags
+        if: ${{ env.RUN_SUBSET == 'all' }}
+        id: image-data
         run: |
           set -euo pipefail
-          PLATFORM_IMAGE="${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}"
-          PROXY_IMAGE="${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}"
-          K8S_AGENT_IMAGE="${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}"
+          ECR_REGISTRY='${{ steps.login-ecr.outputs.registry }}'
+          IMAGE_TAG='${{ github.sha }}'
+          echo "platform_api_image=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "proxy_image=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "k8s_agent_image=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
-          docker build -t "${PLATFORM_IMAGE}" ./services/platform-api
-          docker build -t "${PROXY_IMAGE}" ./services/proxy
-          docker build -t "${K8S_AGENT_IMAGE}" ./agents/k8s-agent
+      - name: Check if images already exist
+        if: ${{ env.RUN_SUBSET == 'all' }}
+        id: check-images
+        env:
+          PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
+          PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          needs_build=0
+          for image in "$PLATFORM_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE"; do
+            repo="${image%:*}"
+            tag="${image##*:}"
+            repo_name="${repo#${ECR_REGISTRY}/}"
+            if ! aws ecr describe-images --repository-name "$repo_name" --image-ids imageTag="$tag" >/dev/null 2>&1; then
+              echo "Image $repo_name:$tag missing; will build"
+              needs_build=1
+            else
+              echo "Image $repo_name:$tag already exists"
+            fi
+          done
+          echo "needs_build=$needs_build" >> "$GITHUB_OUTPUT"
+
+      - name: Build, tag, and push images
+        if: ${{ env.RUN_SUBSET == 'all' && steps.check-images.outputs.needs_build == '1' }}
+        env:
+          PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
+          PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
+        run: |
+          set -euo pipefail
+          docker build -t "${PLATFORM_IMAGE}" -f services/platform-api/Dockerfile .
+          docker build -t "${PROXY_IMAGE}" -f services/proxy/Dockerfile .
+          docker build -t "${K8S_AGENT_IMAGE}" -f agents/k8s-agent/Dockerfile .
 
           docker push "${PLATFORM_IMAGE}"
           docker push "${PROXY_IMAGE}"
           docker push "${K8S_AGENT_IMAGE}"
 
-          echo "platform_api_image=${PLATFORM_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "proxy_image=${PROXY_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "k8s_agent_image=${K8S_AGENT_IMAGE}" >> "$GITHUB_OUTPUT"
-
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -118,6 +189,20 @@ jobs:
         with:
           go-version: '1.22.5'
 
+      - name: Determine image URIs for deployment
+        id: image-uris
+        run: |
+          set -euo pipefail
+          if [[ "${RUN_SUBSET}" == "all" ]]; then
+            echo "platform=${{ needs.build-and-push.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
+            echo "proxy=${{ needs.build-and-push.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
+            echo "agent=${{ needs.build-and-push.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "platform=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api:v1.0.6-tls2" >> "$GITHUB_OUTPUT"
+            echo "proxy=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy:no-client-cert" >> "$GITHUB_OUTPUT"
+            echo "agent=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:v1.0.2-tls-20251005-amd64" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -127,63 +212,291 @@ jobs:
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
 
       - name: Terraform init & apply
         env:
-          TF_WORKSPACE: preview-${{ github.event.number }}
+          TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
         run: |
           set -euo pipefail
           cd terraform
           terraform init -backend-config=backend.hcl
-          terraform workspace select "$TF_WORKSPACE" || terraform workspace new "$TF_WORKSPACE"
+          TF_WS="$TF_WORKSPACE"
+          unset TF_WORKSPACE
+          terraform workspace select "$TF_WS" || terraform workspace new "$TF_WS"
           terraform apply -auto-approve
 
       - name: Deploy control plane via Helm
         id: deploy
         env:
-          PLATFORM_API_IMAGE_TAG: ${{ needs.build-and-push.outputs.platform_api_image }}
-          PROXY_IMAGE_TAG: ${{ needs.build-and-push.outputs.proxy_image }}
-          K8S_AGENT_IMAGE_TAG: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+          PLATFORM_API_IMAGE_TAG: ${{ steps.image-uris.outputs.platform }}
+          PROXY_IMAGE_TAG: ${{ steps.image-uris.outputs.proxy }}
+          K8S_AGENT_IMAGE_TAG: ${{ steps.image-uris.outputs.agent }}
           HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
           SKIP_ROUTE53_UPDATE: '1'
         run: |
           set -euo pipefail
+
+          # First, deploy with the helm script (which skips Route53 update)
           ./terraform/generate-helm-values.sh --non-interactive --tls
 
+      - name: Run database migrations
+        env:
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -euo pipefail
+
+          pushd terraform >/dev/null
+          DB_ENDPOINT=$(terraform output -raw rds_endpoint)
+          DB_HOST=${DB_ENDPOINT%:*}
+          DB_PORT=${DB_ENDPOINT##*:}
+          if [[ "$DB_HOST" == "$DB_PORT" ]]; then
+            DB_PORT="5432"
+          fi
+          DB_NAME=$(terraform output -raw rds_database_name)
+          if terraform output -raw rds_username >/tmp/rds_user 2>/dev/null; then
+            DB_USER=$(cat /tmp/rds_user)
+            rm -f /tmp/rds_user
+          else
+            DB_USER="aegis_api"
+          fi
+          popd >/dev/null || true
+
+          MIGRATION_CONFIGMAP="${HELM_RELEASE}-migrations"
+          MIGRATION_JOB="${HELM_RELEASE}-migrate"
+
+          kubectl -n "$K8S_NAMESPACE" create configmap "$MIGRATION_CONFIGMAP" \
+            --from-file=0001_init.sql=services/platform-api/migrations/0001_init.sql \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl -n "$K8S_NAMESPACE" delete job "$MIGRATION_JOB" --ignore-not-found >/dev/null 2>&1 || true
+
+          cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${MIGRATION_JOB}
+  namespace: ${K8S_NAMESPACE}
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: postgres:16-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aegis-platform-secrets
+              key: db-password
+        - name: DB_USER
+          value: "${DB_USER}"
+        - name: DB_NAME
+          value: "${DB_NAME}"
+        - name: DB_HOST
+          value: "${DB_HOST}"
+        - name: DB_PORT
+          value: "${DB_PORT}"
+        - name: AWS_REGION
+          value: "${AWS_REGION}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -euo pipefail
+          apk add --no-cache ca-certificates curl >/dev/null 2>&1
+          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
+          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
+          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+      volumes:
+      - name: migrations
+        configMap:
+          name: ${MIGRATION_CONFIGMAP}
+EOF
+
+          if ! kubectl -n "$K8S_NAMESPACE" wait --for=condition=complete "job/${MIGRATION_JOB}" --timeout=5m; then
+            echo "❌ Migration job failed. Logs:"
+            kubectl logs job/"${MIGRATION_JOB}" -n "$K8S_NAMESPACE" || true
+            kubectl delete job "${MIGRATION_JOB}" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+            kubectl delete configmap "$MIGRATION_CONFIGMAP" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+            exit 1
+          fi
+
+          kubectl logs job/"${MIGRATION_JOB}" -n "$K8S_NAMESPACE" || true
+          kubectl delete job "${MIGRATION_JOB}" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+          kubectl delete configmap "$MIGRATION_CONFIGMAP" -n "$K8S_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+          echo "   ✅ Migrations applied"
+
+      - name: Update Route53 and configure E2E endpoints
+        id: configure-e2e
+        env:
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+        run: |
+          set -euo pipefail
+
+          # Extract actual LoadBalancer hostnames from Kubernetes services
+          echo "⏳ Waiting for LoadBalancers to be provisioned..."
+
+          # Wait for platform-api LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PLATFORM_LB}" ]; then
+              echo "✅ Platform API LoadBalancer ready: ${PLATFORM_LB}"
+              break
+            fi
+            echo "  Waiting for platform-api LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Wait for proxy LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PROXY_LB}" ]; then
+              echo "✅ Proxy LoadBalancer ready: ${PROXY_LB}"
+              break
+            fi
+            echo "  Waiting for proxy LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Verify LoadBalancers were obtained
+          if [ -z "${PLATFORM_LB}" ] || [ -z "${PROXY_LB}" ]; then
+            echo "❌ Failed to get LoadBalancer hostnames after 5 minutes"
+            exit 1
+          fi
+
+          # Update Route53 DNS records with actual LoadBalancer hostnames
+          echo ""
+          echo "🌐 Updating Route53 DNS records..."
           cd terraform
-          API_HOST=$(terraform output -raw dns_platform_api_grpc)
-          PROXY_HOST=$(terraform output -raw dns_proxy)
-          API_HOST=${API_HOST%.}
-          PROXY_HOST=${PROXY_HOST%.}
-          echo "preview_host=${API_HOST}" >> "$GITHUB_OUTPUT"
-          echo "preview_proxy=${PROXY_HOST}" >> "$GITHUB_OUTPUT"
+          terraform apply -auto-approve \
+            -var="platform_api_lb_hostname=${PLATFORM_LB}" \
+            -var="proxy_lb_hostname=${PROXY_LB}" \
+            -target=aws_route53_record.platform_api_grpc \
+            -target=aws_route53_record.platform_api_http \
+            -target=aws_route53_record.proxy
+
+          # Get the DNS names from Terraform outputs (now updated)
+          PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
+          PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
+
+          # Remove trailing dots from DNS names if present
+          PLATFORM_DNS=${PLATFORM_DNS%.}
+          PROXY_DNS=${PROXY_DNS%.}
+
+          echo "✅ Route53 records updated:"
+          echo "   ${PLATFORM_DNS} → ${PLATFORM_LB}"
+          echo "   ${PROXY_DNS} → ${PROXY_LB}"
+
+          echo ""
+          echo "🔍 Resolving LoadBalancer IPs for local overrides..."
+          PLATFORM_IP=$(dig +short "${PLATFORM_LB}" | head -1)
+          PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
+
+          if [ -n "${PLATFORM_IP}" ]; then
+            echo "   Platform API LB IP: ${PLATFORM_IP}"
+            sudo sed -i.bak "/${PLATFORM_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PLATFORM_IP} ${PLATFORM_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          if [ -n "${PROXY_IP}" ]; then
+            echo "   Proxy LB IP: ${PROXY_IP}"
+            sudo sed -i.bak "/${PROXY_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PROXY_IP} ${PROXY_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          sudo resolvectl flush-caches || true
+          echo "🔄 Local resolver cache flushed (hosts file overrides in place)"
+
+          # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
+          echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"
+          echo "grpc_host=${PLATFORM_DNS}" >> "$GITHUB_OUTPUT"
+          echo "proxy_hostname=${PROXY_DNS}" >> "$GITHUB_OUTPUT"
           echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "📋 E2E Test Endpoints (via DNS):"
+          echo "   Platform API gRPC: ${PLATFORM_DNS}:8081"
+          echo "   Proxy:             ${PROXY_DNS}:8080"
+          echo "   CA Bundle:         ${HOME}/aegis-platform-api-ca.crt"
 
       - name: Install test tooling
         run: |
           set -euo pipefail
+          cd "${{ github.workspace }}"
           sudo apt-get update
           sudo apt-get install -y jq
-          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          GRPCURL_VERSION=1.9.3
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64|amd64)
+              GRPCURL_PACKAGE_ARCH=linux_x86_64
+              ;;
+            arm64|aarch64)
+              GRPCURL_PACKAGE_ARCH=linux_arm64
+              ;;
+            *)
+              echo "Unsupported architecture: $ARCH" >&2
+              exit 1
+              ;;
+          esac
+          TMPDIR=$(mktemp -d)
+          ASSET="grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz"
+          CURL_URL="https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/${ASSET}"
+          if ! curl -fsSL "$CURL_URL" -o "$TMPDIR/$ASSET"; then
+            echo "Failed to download grpcurl from $CURL_URL" >&2
+            exit 1
+          fi
+          tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR" grpcurl
+          sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
+          rm -rf "$TMPDIR"
 
       - name: Run platform API E2E tests
         env:
-          AEGIS_GRPC_ADDR: ${{ steps.deploy.outputs.preview_host }}:8081
+          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
+          AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
           GRPC_TLS: '1'
-          GRPC_CA: ${{ steps.deploy.outputs.grpc_ca }}
+          GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
+          GRPC_TLS_SERVER_NAME: ${{ steps.configure-e2e.outputs.grpc_host }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
+          AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
+          AEGIS_PLATFORM_DEPLOYMENT: ${{ env.PREVIEW_RELEASE }}-platform-api
         run: |
-          scripts/e2e-platform-api.sh
+          set -euo pipefail
+          echo "🧪 Running E2E tests against preview environment (via DNS):"
+          echo "   gRPC Address: ${AEGIS_GRPC_ADDR}"
+          echo "   Proxy:        ${AEGIS_PROXY_HOSTNAME}"
+          echo "   Namespace:    ${AEGIS_PLATFORM_NAMESPACE}"
+          echo "   CA Bundle:    ${GRPC_CA}"
+          echo "   TLS:          Enabled"
+          echo ""
+
+          SCRIPT_ROOT="${{ github.workspace }}"
+          bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Create Kind cluster for operator tests
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         uses: helm/kind-action@v1.8.0
         with:
           cluster_name: aegis-e2e
 
       - name: Run k8s-agent E2E tests
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         env:
           USE_EXISTING_CLUSTER: 'true'
         run: |
@@ -192,7 +505,7 @@ jobs:
 
   teardown-preview:
     name: Teardown Preview Environment
-    if: always()
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && (env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy') }}
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:
@@ -210,10 +523,12 @@ jobs:
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
 
       - name: Terraform destroy
         env:
-          TF_WORKSPACE: preview-${{ github.event.number }}
+          TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
           PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
@@ -221,8 +536,10 @@ jobs:
           set -euo pipefail
           cd terraform
           terraform init -backend-config=backend.hcl
-          if terraform workspace list | grep -q "$TF_WORKSPACE"; then
-            terraform workspace select "$TF_WORKSPACE"
+          TF_WS="$TF_WORKSPACE"
+          unset TF_WORKSPACE
+          if terraform workspace list | grep -q "$TF_WS"; then
+            terraform workspace select "$TF_WS"
             KUBECTL_CMD=$(terraform output -raw kubectl_config_command || true)
             if [ -n "$KUBECTL_CMD" ]; then
               eval "$KUBECTL_CMD"
@@ -232,7 +549,7 @@ jobs:
             fi
             terraform destroy -auto-approve || echo "Terraform destroy failed; manual cleanup may be required"
             terraform workspace select default
-            terraform workspace delete "$TF_WORKSPACE" || true
+            terraform workspace delete "$TF_WS" || true
           else
-            echo "Workspace $TF_WORKSPACE not found; skipping destroy"
+            echo "Workspace $TF_WS not found; skipping destroy"
           fi

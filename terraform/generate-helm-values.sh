@@ -84,6 +84,7 @@ TLS_CA_KEY_PATH=/tmp/proxy-ca-key.pem
 TLS_CERT_CSR_PATH=/tmp/proxy-cert.csr
 TLS_CERT_EXT_PATH=/tmp/proxy-cert-ext.cnf
 TLS_CERT_CHAIN_PATH=/tmp/proxy-cert-chain.pem
+PLATFORM_API_SERVICE_ACCOUNT=${PLATFORM_API_SERVICE_ACCOUNT:-aegis-platform-api}
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
@@ -221,6 +222,10 @@ JWT_SECRET=$(terraform output -raw jwt_secret_value)
 # Create namespace if it doesn't exist
 kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
+# Ensure the platform API service account exists before running migrations
+kubectl -n "${K8S_NAMESPACE}" create serviceaccount "${PLATFORM_API_SERVICE_ACCOUNT}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 # Create or update secrets
 kubectl create secret generic aegis-platform-secrets \
   --from-literal=db-password="${DB_PASSWORD}" \
@@ -267,6 +272,44 @@ if [[ -z "${AWS_REGION}" ]]; then
 fi
 
 RDS_CA_BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
+RDS_INSTANCE_ARN="$(terraform output -raw rds_arn 2>/dev/null || echo "")"
+if [[ -n "${RDS_INSTANCE_ARN}" ]]; then
+  RDS_INSTANCE_ID="${RDS_INSTANCE_ARN##*:}"
+  echo "   ⏳ Waiting for RDS instance ${RDS_INSTANCE_ID} to become available"
+  if ! aws rds wait db-instance-available --db-instance-identifier "${RDS_INSTANCE_ID}" >/dev/null 2>&1; then
+    echo "   ⚠️  aws rds wait db-instance-available failed for ${RDS_INSTANCE_ID}; continuing regardless"
+  fi
+fi
+NODE_SECURITY_GROUP="$(terraform output -raw node_security_group_id 2>/dev/null || echo "")"
+CLUSTER_SECURITY_GROUP="$(terraform output -raw cluster_security_group_id 2>/dev/null || echo "")"
+EKS_CLUSTER_MANAGED_SECURITY_GROUP="$(terraform output -raw eks_cluster_security_group_id 2>/dev/null || echo "")"
+SECURITY_GROUPS_LIST=()
+if [[ -n "${NODE_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${NODE_SECURITY_GROUP}")
+fi
+if [[ -n "${CLUSTER_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${CLUSTER_SECURITY_GROUP}")
+fi
+if [[ -n "${EKS_CLUSTER_MANAGED_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${EKS_CLUSTER_MANAGED_SECURITY_GROUP}")
+fi
+
+if (( ${#SECURITY_GROUPS_LIST[@]} > 0 )); then
+  SECURITY_GROUPS=$(IFS=','; echo "${SECURITY_GROUPS_LIST[*]}")
+  JOB_ANNOTATIONS_BLOCK=$(cat <<EOF
+  annotations:
+    vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
+EOF
+)
+  POD_ANNOTATIONS_BLOCK=$(cat <<EOF
+      annotations:
+        vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
+EOF
+)
+else
+  JOB_ANNOTATIONS_BLOCK=""
+  POD_ANNOTATIONS_BLOCK=""
+fi
 
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
   echo "   ⚠️  Skipping migration placeholder (handled externally)"
@@ -299,6 +342,7 @@ metadata:
     app.kubernetes.io/instance: ${HELM_RELEASE}
     app.kubernetes.io/component: platform-api
     app: aegis-platform-api
+${JOB_ANNOTATIONS_BLOCK}
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 1
@@ -309,7 +353,9 @@ spec:
         app.kubernetes.io/instance: ${HELM_RELEASE}
         app.kubernetes.io/component: platform-api
         app: aegis-platform-api
+${POD_ANNOTATIONS_BLOCK}
     spec:
+      serviceAccountName: "${PLATFORM_API_SERVICE_ACCOUNT}"
       restartPolicy: Never
       containers:
       - name: migrate
@@ -504,6 +550,13 @@ helm "${HELM_ARGS[@]}"
 
 
 echo "   ✅ aegis-services deployed"
+echo "   🔄 Restarting workloads to pick up latest configuration"
+kubectl rollout restart "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" >/dev/null
+kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" >/dev/null
+
+echo "   ⏳ Waiting for deployments to become ready"
+kubectl rollout status "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" --timeout=5m
+kubectl rollout status "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" --timeout=5m
 
 # Step 6: Wait for Load Balancers
 echo ""

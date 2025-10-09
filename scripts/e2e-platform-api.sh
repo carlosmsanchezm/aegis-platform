@@ -134,11 +134,25 @@ grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/Heartbeat <<JSON >
 { "clusterId": "$CLUSTER_ID", "ttfGpuSecondsP50": 5, "availableFlavors": [{"name": "$FLAVOR"}] }
 JSON
 
+sleep 2
+
 say "SubmitWorkload"
-SUBMIT_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/SubmitWorkload <<JSON
+attempt=0
+while true; do
+  if SUBMIT_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/SubmitWorkload <<JSON
 { "workload": { "projectId": "$PROJECT_ID", "queue": "$QUEUE", "workspace": { "flavor": "$FLAVOR", "image": "alpine:3.19", "command": ["sh","-c","echo hello; sleep 1"], "interactive": false } } }
 JSON
-)"
+)"; then
+    break
+  fi
+  status=$?
+  if (( attempt >= 5 )); then
+    exit "$status"
+  fi
+  attempt=$((attempt + 1))
+  echo "SubmitWorkload failed; retrying in 2s (attempt ${attempt})" >&2
+  sleep 2
+done
 
 echo "$SUBMIT_JSON" | jq '.'
 WID="$(echo "$SUBMIT_JSON" | jq -r '.id // empty')"

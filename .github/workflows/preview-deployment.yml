@@ -404,6 +404,7 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
         env:
           USE_EXISTING_CLUSTER: 'true'
+          KIND_CLUSTER: aegis-e2e
         run: |
           cd agents/k8s-agent
           make test-e2e

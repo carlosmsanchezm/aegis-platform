@@ -294,16 +294,18 @@ metadata:
   name: ${MIGRATION_JOB}
   namespace: ${K8S_NAMESPACE}
   labels:
+    app.kubernetes.io/name: aegis-services
+    app.kubernetes.io/instance: ${HELM_RELEASE}
     app.kubernetes.io/component: platform-api
-    app: aegis-platform-api
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 1
   template:
     metadata:
       labels:
+        app.kubernetes.io/name: aegis-services
+        app.kubernetes.io/instance: ${HELM_RELEASE}
         app.kubernetes.io/component: platform-api
-        app: aegis-platform-api
     spec:
       restartPolicy: Never
       containers:

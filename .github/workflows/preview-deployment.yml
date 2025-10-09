@@ -241,7 +241,7 @@ jobs:
           set -euo pipefail
 
           # First, deploy with the helm script (which skips Route53 update)
-          ./terraform/generate-helm-values.sh --non-interactive --tls
+          SKIP_MIGRATION_PLACEHOLDER=1 ./terraform/generate-helm-values.sh --non-interactive --tls
 
       - name: Run database migrations
         env:

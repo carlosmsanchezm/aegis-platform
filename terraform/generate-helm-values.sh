@@ -79,18 +79,23 @@ PROXY_IMAGE_TAG=${PROXY_IMAGE_TAG:-"no-client-cert"}
 K8S_AGENT_IMAGE_TAG=${K8S_AGENT_IMAGE_TAG:-"v1.0.2-tls-20251005-amd64"}
 TLS_CERT_PATH=/tmp/proxy-cert.pem
 TLS_KEY_PATH=/tmp/proxy-key.pem
+TLS_CA_CERT_PATH=/tmp/proxy-ca.pem
+TLS_CA_KEY_PATH=/tmp/proxy-ca-key.pem
+TLS_CERT_CSR_PATH=/tmp/proxy-cert.csr
+TLS_CERT_EXT_PATH=/tmp/proxy-cert-ext.cnf
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
 
 cleanup() {
-  rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}"
+  rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
+    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_CERT_PATH}.srl"
 }
 trap cleanup EXIT
 
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "🔐 TLS mode enabled"
-  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}"
+  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CA_CERT_PATH}.srl"
 fi
 
 echo "🚀 Generating Helm values from Terraform outputs..."
@@ -371,17 +376,41 @@ echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
 echo "      Proxy:             ${DNS_PROXY}"
 
 if [[ $TLS_MODE -eq 1 ]]; then
-  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ]; then
+  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
     openssl req -x509 -newkey rsa:2048 \
-      -keyout "${TLS_KEY_PATH}" \
-      -out "${TLS_CERT_PATH}" \
+      -keyout "${TLS_CA_KEY_PATH}" \
+      -out "${TLS_CA_CERT_PATH}" \
       -days 365 -nodes \
+      -subj "/CN=Aegis Platform API CA" \
+      -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+      -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+
+    openssl req -new -newkey rsa:2048 \
+      -keyout "${TLS_KEY_PATH}" \
+      -out "${TLS_CERT_CSR_PATH}" \
+      -nodes \
       -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" 2>/dev/null
+      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
+
+    cat <<EOF > "${TLS_CERT_EXT_PATH}"
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}
+EOF
+
+    openssl x509 -req \
+      -in "${TLS_CERT_CSR_PATH}" \
+      -CA "${TLS_CA_CERT_PATH}" \
+      -CAkey "${TLS_CA_KEY_PATH}" \
+      -CAcreateserial \
+      -out "${TLS_CERT_PATH}" \
+      -days 365 \
+      -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
   fi
 
   mkdir -p "$(dirname "${CA_BUNDLE}")"
-  cat "${TLS_CERT_PATH}" > "${CA_BUNDLE}"
+  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
 if [[ $TLS_MODE -eq 1 ]]; then

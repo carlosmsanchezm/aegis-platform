@@ -265,7 +265,7 @@ jobs:
           else
             DB_USER="aegis_api"
           fi
-          popd >/dev/null || true
+          popd >/dev/null 2>&1 || true
 
           MIGRATION_CONFIGMAP="${HELM_RELEASE}-migrations"
           MIGRATION_JOB="${HELM_RELEASE}-migrate"

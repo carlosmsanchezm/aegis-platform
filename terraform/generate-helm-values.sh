@@ -88,10 +88,12 @@ PLATFORM_API_SERVICE_ACCOUNT=${PLATFORM_API_SERVICE_ACCOUNT:-aegis-platform-api}
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
+MIGRATIONS_UP_FILE=""
 
 cleanup() {
   rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
-    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
+    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl" \
+    "${MIGRATIONS_UP_FILE}"
 }
 trap cleanup EXIT
 
@@ -333,8 +335,15 @@ if [ ! -f "${MIGRATIONS_DIR}/0001_init.sql" ]; then
   exit 1
 fi
 
+MIGRATIONS_UP_FILE=$(mktemp)
+awk '/^--[[:space:]]+\+migrate[[:space:]]+Down/{exit} {print}' "${MIGRATIONS_DIR}/0001_init.sql" > "${MIGRATIONS_UP_FILE}"
+if [[ ! -s "${MIGRATIONS_UP_FILE}" ]]; then
+  echo "❌ Failed to extract migration up statements"
+  exit 1
+fi
+
 kubectl -n "${K8S_NAMESPACE}" create configmap "${MIGRATION_CONFIGMAP}" \
-  --from-file=0001_init.sql="${MIGRATIONS_DIR}/0001_init.sql" \
+  --from-file=0001_init.sql="${MIGRATIONS_UP_FILE}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true

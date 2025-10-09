@@ -233,6 +233,26 @@ echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
 
 echo "   ✅ Namespace and secrets created"
 
+# Ensure the platform API ServiceAccount exists with Helm ownership metadata so
+# pre-deploy jobs (like migrations) can run before Helm installs the chart.
+echo "   ℹ️  Ensuring ServiceAccount ${PLATFORM_API_SERVICE_ACCOUNT} exists"
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${PLATFORM_API_SERVICE_ACCOUNT}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: aegis-services
+    app.kubernetes.io/instance: ${HELM_RELEASE}
+    app.kubernetes.io/component: platform-api
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: ${HELM_RELEASE}
+    meta.helm.sh/release-namespace: ${K8S_NAMESPACE}
+EOF
+echo "   ✅ ServiceAccount ready"
+
 # Step 3: Run database migrations manually (to avoid public image pull issues)
 echo ""
 echo "3️⃣  Running database migrations..."

@@ -37,7 +37,19 @@ EPOCH="$(date +%s)"
 PROJECT_ID="p-e2e-${EPOCH}"
 QUEUE="default"
 FLAVOR="a10-mig-1g"
-CLUSTER_ID="dev-local"
+DEFAULT_CLUSTER_ID="dev-local"
+CLUSTER_ID="${AEGIS_CLUSTER_ID:-}"
+if [[ -z "${CLUSTER_ID}" ]]; then
+  kubeconfig_secret="${AEGIS_KUBECONFIG_SECRET_NAME:-aegis-kubeconfigs}"
+  platform_ns="${AEGIS_PLATFORM_NAMESPACE:-aegis-system}"
+  if kubectl get secret "${kubeconfig_secret}" -n "${platform_ns}" >/dev/null 2>&1; then
+    detected_id=$(kubectl get secret "${kubeconfig_secret}" -n "${platform_ns}" -o jsonpath='{range $k,$v := .data}{$k}{"\n"}{end}' | grep -v '^\.keep$' | head -n1)
+    if [[ -n "${detected_id}" ]]; then
+      CLUSTER_ID="${detected_id}"
+    fi
+  fi
+fi
+CLUSTER_ID="${CLUSTER_ID:-${DEFAULT_CLUSTER_ID}}"
 TMP_LIST="$(mktemp)"
 FORWARD_LOG=""
 FORWARD_PID=""

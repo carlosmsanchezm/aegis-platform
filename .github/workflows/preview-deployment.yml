@@ -240,50 +240,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # First, deploy with the helm script (which skips Route53 update)
-          SKIP_MIGRATION_PLACEHOLDER=1 ./terraform/generate-helm-values.sh --non-interactive --tls
-
-      - name: Run database migrations
-        env:
-          AWS_REGION: ${{ env.AWS_REGION }}
-        run: |
-          set -euo pipefail
-
-          pushd terraform >/dev/null
-          DB_ENDPOINT=$(terraform output -raw rds_endpoint)
-          DB_HOST=${DB_ENDPOINT%:*}
-          DB_PORT=${DB_ENDPOINT##*:}
-          if [[ "$DB_HOST" == "$DB_PORT" ]]; then
-            DB_PORT="5432"
-          fi
-          DB_NAME=$(terraform output -raw rds_database_name)
-          if terraform output -raw rds_username >/tmp/rds_user 2>/dev/null; then
-            DB_USER=$(cat /tmp/rds_user)
-            rm -f /tmp/rds_user
-          else
-            DB_USER="aegis_api"
-          fi
-          if terraform output -raw db_password_secret_value >/tmp/db_pass 2>/dev/null; then
-            DB_PASSWORD=$(cat /tmp/db_pass)
-            rm -f /tmp/db_pass
-          else
-            echo "Failed to fetch db_password_secret_value" >&2
-            exit 1
-          fi
-          popd >/dev/null 2>&1 || true
-
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client curl >/dev/null
-
-          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
-
-          PGPASSWORD="$DB_PASSWORD" psql \
-            "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" \
-            -v ON_ERROR_STOP=1 \
-            -f services/platform-api/migrations/0001_init.sql
-
-          echo "   ✅ Migrations applied"
+          # Deploy via Terraform helper (skips Route53 update but now includes migrations)
+          ./terraform/generate-helm-values.sh --non-interactive --tls
 
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e

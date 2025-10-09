@@ -251,6 +251,10 @@ else
 fi
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
+if [[ -z "${AWS_REGION:-}" ]]; then
+  AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
+fi
+
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
   echo "   ⚠️  Skipping migration placeholder (handled externally)"
 else
@@ -290,10 +294,12 @@ spec:
         - name: PGPASSWORD
           valueFrom:
             secretKeyRef:
-              name: ${HELM_RELEASE}-platform-api-secret
+              name: aegis-platform-secrets
               key: db-password
         - name: DB_HOST
           value: "${DB_HOST}"
+        - name: DB_PORT
+          value: "${DB_PORT}"
         - name: DB_NAME
           value: "${DB_NAME}"
         - name: DB_USER
@@ -307,8 +313,8 @@ spec:
           set -euo pipefail
           apk add --no-cache ca-certificates curl >/dev/null 2>&1
           BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
-          psql "host=${DB_HOST} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+          curl -fsSL "$BUNDLE_URL" -o /tmp/rds.pem
+          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
         volumeMounts:
         - name: migrations
           mountPath: /migrations
@@ -322,11 +328,14 @@ if ! kubectl -n "${K8S_NAMESPACE}" wait --for=condition=complete "job/${MIGRATIO
   echo "❌ Migration job failed. Logs:"
   kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
   kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
   exit 1
 fi
 
+kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
 kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-echo "   ✅ Migrations ready"
+kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+echo "   ✅ Migrations applied"
 fi
 
 # Step 4: Generate self-signed TLS certs using Route53 DNS names

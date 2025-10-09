@@ -276,7 +276,7 @@ jobs:
 
           kubectl -n "$K8S_NAMESPACE" delete job "$MIGRATION_JOB" --ignore-not-found >/dev/null 2>&1 || true
 
-          cat <<EOF | kubectl apply -f -
+          kubectl apply -f - <<EOF
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -26,6 +26,9 @@ if [[ "$TLS" == "1" ]]; then
   if [[ -n "${GRPC_CERT:-}" && -n "${GRPC_KEY:-}" ]]; then
     GRPC_ARGS+=(-cert "$GRPC_CERT" -key "$GRPC_KEY")
   fi
+  if [[ -n "${GRPC_TLS_SERVER_NAME:-}" ]]; then
+    GRPC_ARGS+=(-authority "$GRPC_TLS_SERVER_NAME" -servername "$GRPC_TLS_SERVER_NAME")
+  fi
 else
   GRPC_ARGS+=(-plaintext)
 fi

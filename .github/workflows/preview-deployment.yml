@@ -327,6 +327,7 @@ jobs:
 
           # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
           echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"
+          echo "grpc_host=${PLATFORM_DNS}" >> "$GITHUB_OUTPUT"
           echo "proxy_hostname=${PROXY_DNS}" >> "$GITHUB_OUTPUT"
           echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
 
@@ -373,6 +374,7 @@ jobs:
           AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
           GRPC_TLS: '1'
           GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
+          GRPC_TLS_SERVER_NAME: ${{ steps.configure-e2e.outputs.grpc_host }}
           AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
           AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api

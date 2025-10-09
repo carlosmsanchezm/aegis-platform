@@ -251,6 +251,9 @@ else
 fi
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
+if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
+  echo "   ⚠️  Skipping migration placeholder (handled externally)"
+else
 # Run migrations using an in-cluster Job so RDS schema exists before tests
 echo "   ⚙️  Applying database schema via Kubernetes Job"
 MIGRATION_CONFIGMAP="${HELM_RELEASE}-migrations"
@@ -324,6 +327,7 @@ fi
 
 kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 echo "   ✅ Migrations ready"
+fi
 
 # Step 4: Generate self-signed TLS certs using Route53 DNS names
 echo ""

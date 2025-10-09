@@ -86,7 +86,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Images
-    if: ${{ env.RUN_SUBSET == 'all' }}
+    if: ${{ env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy' || env.RUN_SUBSET == 'deploy-no-teardown' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -99,8 +99,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Skip build for deploy-only run
+        if: ${{ env.RUN_SUBSET != 'all' }}
+        run: echo "Deploy-only run detected; skipping image build."
+
       - name: Set up Docker Buildx
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
+        if: ${{ env.RUN_SUBSET == 'all' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Configure AWS credentials
@@ -115,6 +119,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Determine image tags
+        if: ${{ env.RUN_SUBSET == 'all' }}
         id: image-data
         run: |
           set -euo pipefail
@@ -125,6 +130,7 @@ jobs:
           echo "k8s_agent_image=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Check if images already exist
+        if: ${{ env.RUN_SUBSET == 'all' }}
         id: check-images
         env:
           PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
@@ -148,7 +154,7 @@ jobs:
           echo "needs_build=$needs_build" >> "$GITHUB_OUTPUT"
 
       - name: Build, tag, and push images
-        if: ${{ steps.check-images.outputs.needs_build == '1' || env.RUN_SUBSET == 'all' }}
+        if: ${{ env.RUN_SUBSET == 'all' && steps.check-images.outputs.needs_build == '1' }}
         env:
           PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
           PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}

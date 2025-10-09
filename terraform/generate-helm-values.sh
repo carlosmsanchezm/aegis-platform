@@ -252,8 +252,15 @@ fi
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
 if [[ -z "${AWS_REGION:-}" ]]; then
-  AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "us-east-1")
+  AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
 fi
+
+if [[ -z "${AWS_REGION}" ]]; then
+  echo "❌ Unable to determine AWS region for migrations"
+  exit 1
+fi
+
+RDS_CA_BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
 
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
   echo "   ⚠️  Skipping migration placeholder (handled externally)"
@@ -306,14 +313,19 @@ spec:
           value: "${DB_USER}"
         - name: AWS_REGION
           value: "${AWS_REGION}"
+        - name: RDS_CA_BUNDLE_URL
+          value: "${RDS_CA_BUNDLE_URL}"
         command:
         - /bin/sh
         - -c
         - |
           set -euo pipefail
           apk add --no-cache ca-certificates curl >/dev/null 2>&1
-          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-          curl -fsSL "$BUNDLE_URL" -o /tmp/rds.pem
+          if [ -z "${RDS_CA_BUNDLE_URL:-}" ]; then
+            echo "Missing RDS_CA_BUNDLE_URL" >&2
+            exit 1
+          fi
+          curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /tmp/rds.pem
           psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
         volumeMounts:
         - name: migrations

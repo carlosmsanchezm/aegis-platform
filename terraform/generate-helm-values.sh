@@ -297,6 +297,7 @@ metadata:
     app.kubernetes.io/name: aegis-services
     app.kubernetes.io/instance: ${HELM_RELEASE}
     app.kubernetes.io/component: platform-api
+    app: aegis-platform-api
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 1
@@ -306,6 +307,7 @@ spec:
         app.kubernetes.io/name: aegis-services
         app.kubernetes.io/instance: ${HELM_RELEASE}
         app.kubernetes.io/component: platform-api
+        app: aegis-platform-api
     spec:
       restartPolicy: Never
       containers:

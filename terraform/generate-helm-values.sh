@@ -83,19 +83,20 @@ TLS_CA_CERT_PATH=/tmp/proxy-ca.pem
 TLS_CA_KEY_PATH=/tmp/proxy-ca-key.pem
 TLS_CERT_CSR_PATH=/tmp/proxy-cert.csr
 TLS_CERT_EXT_PATH=/tmp/proxy-cert-ext.cnf
+TLS_CERT_CHAIN_PATH=/tmp/proxy-cert-chain.pem
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
 
 cleanup() {
   rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
-    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_CERT_PATH}.srl"
+    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 }
 trap cleanup EXIT
 
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "🔐 TLS mode enabled"
-  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CA_CERT_PATH}.srl"
+  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 fi
 
 echo "🚀 Generating Helm values from Terraform outputs..."
@@ -411,14 +412,13 @@ EOF
       -out "${TLS_CERT_PATH}" \
       -days 365 \
       -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
+
+    cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
+    mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
   fi
 
   mkdir -p "$(dirname "${CA_BUNDLE}")"
-  {
-    cat "${TLS_CA_CERT_PATH}"
-    echo ""
-    cat "${TLS_CERT_PATH}"
-  } > "${CA_BUNDLE}"
+  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
 if [[ $TLS_MODE -eq 1 ]]; then
@@ -479,6 +479,8 @@ fi
 cd "${OUTPUT_DIR}"
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "   ℹ️  Including TLS overlay values (values-cloud-tls.yaml)"
+  kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 fi
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services

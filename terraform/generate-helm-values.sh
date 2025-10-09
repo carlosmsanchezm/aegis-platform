@@ -251,23 +251,83 @@ else
 fi
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
-# Run migrations using migrate/migrate image (better availability)
-kubectl run migrate-job --rm -i --restart=Never \
-  --image=migrate/migrate:v4.17.0 \
-  --namespace "${K8S_NAMESPACE}" \
-  --overrides="{
-    \"spec\": {
-      \"containers\": [{
-        \"name\": \"migrate\",
-        \"image\": \"migrate/migrate:v4.17.0\",
-        \"command\": [\"sh\", \"-c\", \"echo 'Migrations would run here. Using platform-api binary instead.'\"],
-        \"stdin\": true,
-        \"tty\": true
-      }]
-    }
-  }" 2>/dev/null || echo "   ⚠️  Migration job skipped (will run on platform-api startup)"
+if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
+  echo "   ⚠️  Skipping migration placeholder (handled externally)"
+else
+# Run migrations using an in-cluster Job so RDS schema exists before tests
+echo "   ⚙️  Applying database schema via Kubernetes Job"
+MIGRATION_CONFIGMAP="${HELM_RELEASE}-migrations"
+MIGRATION_JOB="${HELM_RELEASE}-migrate"
+MIGRATIONS_DIR="${SCRIPT_DIR}/../services/platform-api/migrations"
 
+if [ ! -f "${MIGRATIONS_DIR}/0001_init.sql" ]; then
+  echo "❌ Migration file not found at ${MIGRATIONS_DIR}/0001_init.sql"
+  exit 1
+fi
+
+kubectl -n "${K8S_NAMESPACE}" create configmap "${MIGRATION_CONFIGMAP}" \
+  --from-file=0001_init.sql="${MIGRATIONS_DIR}/0001_init.sql" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+
+cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${MIGRATION_JOB}
+  namespace: ${K8S_NAMESPACE}
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: postgres:16-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ${HELM_RELEASE}-platform-api-secret
+              key: db-password
+        - name: DB_HOST
+          value: "${DB_HOST}"
+        - name: DB_NAME
+          value: "${DB_NAME}"
+        - name: DB_USER
+          value: "${DB_USER}"
+        - name: AWS_REGION
+          value: "${AWS_REGION}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -euo pipefail
+          apk add --no-cache ca-certificates curl >/dev/null 2>&1
+          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
+          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
+          psql "host=${DB_HOST} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+      volumes:
+      - name: migrations
+        configMap:
+          name: ${MIGRATION_CONFIGMAP}
+EOF
+
+if ! kubectl -n "${K8S_NAMESPACE}" wait --for=condition=complete "job/${MIGRATION_JOB}" --timeout=5m; then
+  echo "❌ Migration job failed. Logs:"
+  kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
+  kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  exit 1
+fi
+
+kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 echo "   ✅ Migrations ready"
+fi
 
 # Step 4: Generate self-signed TLS certs using Route53 DNS names
 echo ""

@@ -407,6 +407,8 @@ jobs:
         env:
           USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}
           KIND_CLUSTER: aegis-e2e
+          K8S_AGENT_E2E_IMAGE: ${{ steps.image-uris.outputs.agent }}
+          K8S_AGENT_E2E_SKIP_BUILD: 'true'
         run: |
           cd agents/k8s-agent
           make test-e2e

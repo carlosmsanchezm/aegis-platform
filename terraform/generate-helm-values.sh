@@ -321,6 +321,7 @@ else
   POD_ANNOTATIONS_BLOCK=""
 fi
 
+
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
   echo "   ⚠️  Skipping migration placeholder (handled externally)"
 else
@@ -334,7 +335,6 @@ if [ ! -f "${MIGRATIONS_DIR}/0001_init.sql" ]; then
   echo "❌ Migration file not found at ${MIGRATIONS_DIR}/0001_init.sql"
   exit 1
 fi
-
 MIGRATIONS_UP_FILE=$(mktemp)
 awk '/^--[[:space:]]+\+migrate[[:space:]]+Down/{exit} {print}' "${MIGRATIONS_DIR}/0001_init.sql" > "${MIGRATIONS_UP_FILE}"
 if [[ ! -s "${MIGRATIONS_UP_FILE}" ]]; then

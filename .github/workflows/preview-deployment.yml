@@ -244,7 +244,6 @@ jobs:
 
           # Deploy via Terraform helper (skips Route53 update but now includes migrations)
           ./terraform/generate-helm-values.sh --non-interactive --tls
-
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e
         env:
@@ -398,6 +397,7 @@ jobs:
 
       - name: Run k8s-agent E2E tests
         if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' }}
+
         env:
           USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}
           KIND_CLUSTER: aegis-e2e

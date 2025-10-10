@@ -24,7 +24,8 @@ PF_PLATFORM_GRPC_PORT ?= 10081
 PF_PROXY_HTTP_PORT ?= 10085
 
 .PHONY: all proto tidy build test verify run-api run-operator stop \
-	setup-local deploy-local port-forward dev-backstage clean-local
+	setup-local deploy-local deploy-local-tls port-forward \
+	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local
 
 all: proto tidy build
 
@@ -100,7 +101,7 @@ setup-local:
 	@kubectl config use-context docker-desktop
 
 deploy-local: setup-local
-	@echo "Deploying Aegis services locally..."
+	@echo "Deploying Aegis services locally (no TLS)..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
@@ -109,6 +110,27 @@ deploy-local: setup-local
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
 	  --namespace aegis-system --create-namespace
+
+deploy-local-tls: setup-local
+	@echo "Deploying Aegis services locally with TLS..."
+	@helm upgrade --install aegis-services charts/aegis-services \
+	  -f charts/aegis-services/values/common.yaml \
+	  -f charts/aegis-services/values/local.yaml \
+	  -f charts/aegis-services/values/local-tls.yaml \
+	  --namespace aegis-system --create-namespace
+	@helm upgrade --install aegis-spoke charts/aegis-spoke \
+	  -f charts/aegis-spoke/values.yaml \
+	  -f charts/aegis-spoke/values-local.yaml \
+	  -f charts/aegis-spoke/values-local-tls.yaml \
+	  --namespace aegis-system --create-namespace
+	@echo "✅ Deployed with TLS using self-signed certificates"
+	@echo "   Platform API gRPC: localhost:10081 (with TLS)"
+	@echo "   Proxy: localhost:10085 (with TLS)"
+	@echo ""
+	@echo "   For E2E tests with TLS:"
+	@echo "   export GRPC_TLS=1"
+	@echo "   export GRPC_TLS_SKIP_VERIFY=1  # Self-signed certs"
+	@echo "   ./scripts/e2e-platform-api.sh"
 
 port-forward:
 	@echo "Stopping any existing port-forwards..."
@@ -122,8 +144,19 @@ port-forward:
 	@echo "Port-forwarding started. Platform API on $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT), proxy on $(PF_PROXY_HTTP_PORT). Use 'pkill -f \"kubectl port-forward\"' to stop."
 
 dev-backstage:
-	@echo "Starting Backstage development server..."
+	@echo "Starting Backstage development server (local mode)..."
+	@echo "   Backend: http://localhost:8080 (port-forward required)"
 	@cd aegis-platform && yarn dev
+
+dev-backstage-cloud:
+	@echo "Starting Backstage development server (cloud mode)..."
+	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@cd aegis-platform && yarn dev:cloud
+
+dev-backstage-cloud-tls:
+	@echo "Starting Backstage development server (cloud TLS mode)..."
+	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@cd aegis-platform && yarn dev:cloud-tls
 
 clean-local:
 	@echo "Uninstalling Aegis services..."

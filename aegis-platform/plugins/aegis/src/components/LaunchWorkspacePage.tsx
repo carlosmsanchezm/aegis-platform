@@ -8,13 +8,7 @@ import {
   WarningPanel,
   InfoCard,
 } from '@backstage/core-components';
-import {
-  Box,
-  Button,
-  Grid,
-  TextField,
-  Typography,
-} from '@material-ui/core';
+import { Box, Button, Grid, TextField, Typography } from '@material-ui/core';
 import {
   alertApiRef,
   discoveryApiRef,
@@ -22,7 +16,11 @@ import {
   identityApiRef,
   useApi,
 } from '@backstage/core-plugin-api';
-import { SubmitWorkspaceRequest, submitWorkspace, WorkloadDTO } from '../api/aegisClient';
+import {
+  SubmitWorkspaceRequest,
+  submitWorkspace,
+  WorkloadDTO,
+} from '../api/aegisClient';
 
 const randomId = () => {
   if (typeof crypto?.randomUUID === 'function') {
@@ -83,9 +81,10 @@ export const LaunchWorkspacePage: FC = () => {
     [form],
   );
 
-  const handleChange = (field: keyof typeof form) => (event: ChangeEvent<HTMLInputElement>) => {
-    setForm(prev => ({ ...prev, [field]: event.target.value }));
-  };
+  const handleChange =
+    (field: keyof typeof form) => (event: ChangeEvent<HTMLInputElement>) => {
+      setForm(prev => ({ ...prev, [field]: event.target.value }));
+    };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -126,7 +125,10 @@ export const LaunchWorkspacePage: FC = () => {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       setError(msg);
-      alertApi.post({ message: `Failed to submit workspace: ${msg}`, severity: 'error' });
+      alertApi.post({
+        message: `Failed to submit workspace: ${msg}`,
+        severity: 'error',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -233,8 +235,9 @@ export const LaunchWorkspacePage: FC = () => {
           <Box marginTop={3}>
             <InfoCard title="Workspace submitted">
               <Typography variant="body2">
-                Workload <strong>{submitted.id ?? form.workloadId}</strong> is queued. Track status from the
-                workloads list or open the details page once it appears.
+                Workload <strong>{submitted.id ?? form.workloadId}</strong> is
+                queued. Track status from the workloads list or open the details
+                page once it appears.
               </Typography>
             </InfoCard>
           </Box>

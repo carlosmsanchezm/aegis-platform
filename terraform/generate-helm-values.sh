@@ -559,6 +559,7 @@ if [[ $TLS_MODE -eq 1 ]]; then
 fi
 
 HELM_ARGS+=(
+  --include-crds
   --namespace "${K8S_NAMESPACE}" --create-namespace
   --timeout 10m
 )
@@ -743,6 +744,7 @@ SPOKE_HELM_ARGS+=(
   --set k8sAgent.enabled=true
   --set k8sAgent.replicaCount=1
   --set proxy.enabled=false
+  --include-crds
   --namespace "${SPOKE_NAMESPACE}"
   --create-namespace
   --timeout 5m

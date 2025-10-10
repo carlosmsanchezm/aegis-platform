@@ -97,9 +97,15 @@ export const WorkloadDetailsPage: FC = () => {
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [pendingSession, setPendingSession] = useState(false);
 
-  const [helperInstalled, setHelperInstalled] = useState(() => getStoredFlag(HELPER_FLAG));
-  const [systemAcked, setSystemAcked] = useState(() => getStoredFlag(SYSTEM_ACK_FLAG));
-  const [rulesAcked, setRulesAcked] = useState(() => getStoredFlag(RULES_ACK_FLAG));
+  const [helperInstalled, setHelperInstalled] = useState(() =>
+    getStoredFlag(HELPER_FLAG),
+  );
+  const [systemAcked, setSystemAcked] = useState(() =>
+    getStoredFlag(SYSTEM_ACK_FLAG),
+  );
+  const [rulesAcked, setRulesAcked] = useState(() =>
+    getStoredFlag(RULES_ACK_FLAG),
+  );
 
   const load = useCallback(async () => {
     if (!id) {
@@ -114,7 +120,10 @@ export const WorkloadDetailsPage: FC = () => {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       setError(msg);
-      alertApi.post({ message: `Failed to load workload: ${msg}`, severity: 'error' });
+      alertApi.post({
+        message: `Failed to load workload: ${msg}`,
+        severity: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -148,7 +157,10 @@ export const WorkloadDetailsPage: FC = () => {
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         setSessionError(msg);
-        alertApi.post({ message: `Failed to create session: ${msg}`, severity: 'error' });
+        alertApi.post({
+          message: `Failed to create session: ${msg}`,
+          severity: 'error',
+        });
       } finally {
         setSessionLoading(false);
         setPendingSession(false);
@@ -168,7 +180,15 @@ export const WorkloadDetailsPage: FC = () => {
     ) {
       requestSession('cli');
     }
-  }, [pendingSession, systemAcked, rulesAcked, helperInstalled, session, sessionLoading, requestSession]);
+  }, [
+    pendingSession,
+    systemAcked,
+    rulesAcked,
+    helperInstalled,
+    session,
+    sessionLoading,
+    requestSession,
+  ]);
 
   const handleConnectClose = useCallback(() => {
     setConnectOpen(false);
@@ -193,7 +213,15 @@ export const WorkloadDetailsPage: FC = () => {
     }
 
     requestSession('cli');
-  }, [alertApi, helperInstalled, requestSession, rulesAcked, session, systemAcked, workload?.id]);
+  }, [
+    alertApi,
+    helperInstalled,
+    requestSession,
+    rulesAcked,
+    session,
+    systemAcked,
+    workload?.id,
+  ]);
 
   const handleRenew = useCallback(async () => {
     if (!session?.sessionId) {
@@ -212,7 +240,10 @@ export const WorkloadDetailsPage: FC = () => {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       setSessionError(msg);
-      alertApi.post({ message: `Failed to renew session: ${msg}`, severity: 'error' });
+      alertApi.post({
+        message: `Failed to renew session: ${msg}`,
+        severity: 'error',
+      });
     } finally {
       setSessionLoading(false);
     }
@@ -236,7 +267,10 @@ export const WorkloadDetailsPage: FC = () => {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       setSessionError(msg);
-      alertApi.post({ message: `Failed to revoke session: ${msg}`, severity: 'error' });
+      alertApi.post({
+        message: `Failed to revoke session: ${msg}`,
+        severity: 'error',
+      });
     } finally {
       setSessionLoading(false);
     }
@@ -327,7 +361,11 @@ export const WorkloadDetailsPage: FC = () => {
                       {sessionLoading ? 'Preparing session…' : 'Connect'}
                     </Button>
                     {!isRunning && (
-                      <Typography variant="caption" color="textSecondary" display="block">
+                      <Typography
+                        variant="caption"
+                        color="textSecondary"
+                        display="block"
+                      >
                         Workspace must be running before connecting.
                       </Typography>
                     )}
@@ -344,7 +382,10 @@ export const WorkloadDetailsPage: FC = () => {
               <InfoCard title="Debug commands">
                 <Box display="flex" alignItems="center" gridGap={8}>
                   <Typography variant="body2">{kubectlCmd}</Typography>
-                  <CopyTextButton text={kubectlCmd} tooltip="Copy kubectl describe" />
+                  <CopyTextButton
+                    text={kubectlCmd}
+                    tooltip="Copy kubectl describe"
+                  />
                 </Box>
               </InfoCard>
             )}
@@ -358,7 +399,8 @@ export const WorkloadDetailsPage: FC = () => {
                       workload.workspace?.image ??
                       workload.training?.image ??
                       '—',
-                    Command: workload.workspace?.command?.join(' ') ??
+                    Command:
+                      workload.workspace?.command?.join(' ') ??
                       workload.training?.command?.join(' ') ??
                       '—',
                   }}
@@ -369,7 +411,9 @@ export const WorkloadDetailsPage: FC = () => {
             {loc && (
               <Typography variant="body2">
                 View Kubernetes object{' '}
-                <RouterLink to={`/kubernetes/overview?namespace=${loc.namespace}`}>
+                <RouterLink
+                  to={`/kubernetes/overview?namespace=${loc.namespace}`}
+                >
                   {loc.kind} {loc.name}
                 </RouterLink>
               </Typography>

@@ -1,0 +1,120 @@
+# Local TLS overlay for aegis-services
+# Apply alongside local.yaml when testing TLS locally on Docker Desktop
+#
+# Usage:
+#   helm upgrade --install aegis-services charts/aegis-services \
+#     -f charts/aegis-services/values/common.yaml \
+#     -f charts/aegis-services/values/local.yaml \
+#     -f charts/aegis-services/values/local-tls.yaml \
+#     --namespace aegis-system --create-namespace
+
+platformApi:
+  tls:
+    enabled: true
+    # Self-signed cert for local testing
+    # Generate with:
+    #   openssl req -x509 -newkey rsa:2048 -nodes \
+    #     -keyout /tmp/local-tls-key.pem \
+    #     -out /tmp/local-tls-cert.pem \
+    #     -days 365 \
+    #     -subj "/CN=localhost" \
+    #     -addext "subjectAltName=DNS:localhost,DNS:*.aegis-system.svc.cluster.local,IP:127.0.0.1"
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIICyTCCAbGgAwIBAgIJAL6sxf08sRSRMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNV
+      BAMMCWxvY2FsaG9zdDAeFw0yNTEwMTAxOTQyMzBaFw0yNjEwMTAxOTQyMzBaMBQx
+      EjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC
+      ggEBAOfDHk5iZx3m8y8sRp1UPGQ0NCHxGb/U4BCps19bWPt2WmZxJ2GRJ7GfOksw
+      yl9SaqObUcG6ETE9uDtjBFs+CJrWLofFTWB1COpBlISryq49dTu2MAdXl1TtQ33I
+      o0sKbt/p/lAIYQWJuz0WBS+BpRhy1tGueEfxcsz8OYfStmb204x4W7gvpmkwppYi
+      nH098+vPIcRySZD+zM5Qof5uYEN2MzjJbp8bR3c5ielNTTr6389aKKh2RYUwjYBs
+      2u5HPk7FvE8O2HjaLSHKhbYLUfT93LzNWk9y6HswrZYv7cUaDN3WP7A3B3G5zDbq
+      fJtFxPyQhwZgxWx0R4eZx9u3wFsCAwEAAaMeMBwwGgYDVR0RBBMwEYIJbG9jYWxo
+      b3N0hwR/AAABMA0GCSqGSIb3DQEBCwUAA4IBAQBThbt6TT0YPtU6v9mdG315VMEv
+      6r96on59Ize8tBUk+h1lFZETfyK8ns83EvdmtxfR7amF9yL0+DIeF/CE8xBciB32
+      5wO+GgpF5zSCQQgmaU5HsnJPGDZUVvaqRmc2QsvuMkBXzl9fS2emNjCtpG3Z9O9b
+      x4ti5OQO5Ex14JWv0HyOnxaW0OfaQsUgdhtSc1BUNx0+hASgolVzmrOFNfhXlyxR
+      9bKLCtvsO84zAnqYV0PVXy5RYj1N7QZsmsVSWGjg0DsbLFDEWsQKMK36h7qQKeg4
+      HcyUC6PwCyPjqrWm36IUyDqGiIxyu6mLpI/m5L3iV4BH3jqoc0wN+0BeXvDn
+      -----END CERTIFICATE-----
+    key: |
+      -----BEGIN PRIVATE KEY-----
+      MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDnwx5OYmcd5vMv
+      LEadVDxkNDQh8Rm/1OAQqbNfW1j7dlpmcSdhkSexnzpLMMpfUmqjm1HBuhExPbg7
+      YwRbPgia1i6HxU1gdQjqQZSEq8quPXU7tjAHV5dU7UN9yKNLCm7f6f5QCGEFibs9
+      FgUvgaUYctbRrnhH8XLM/DmH0rZm9tOMeFu4L6ZpMKaWIpx9PfPrzyHEckmQ/szO
+      UKH+bmBDdjM4yW6fG0d3OYnpTU06+t/PWiiodkWFMI2AbNruRz5OxbxPDth42i0h
+      yoW2C1H0/dy8zVpPcuh7MK2WL+3FGgzd1j+wNwdxucw26nybRcT8kIcGYMVsdEeH
+      mcfbt8BbAgMBAAECggEBAOcUZONCug3WeCJQwxebJZvDcTdmbYYXelEi4vXw3ofb
+      Ocdqixl84Vb4q+bMfvsL8ceu1ZWTMBEouMh9sZpH/8xiQYKd9sh16K2pNawSncOd
+      A4bF4J1xeDH1X5XKtwXbITGg3TBvKk2bRlVh30m+uh3mYsouaz9QPmakFbiXH8cH
+      7aXgrIpIjljE4NZ4j2lTOjmFN1zVNTR6HVTIcyzbb88+GqhAAWEY/wsNikITZgCE
+      Rjz4cjfzoGDSrx03pQsooSlvrE2g7ufND9OKx+HT0AnP965o2iELHrIBd8VCtpF5
+      HLXIyO7T7CDjOjprAO11vqOWD0mzRD2z1ugc+o666gECgYEA9aoaFnlOMs18wJ5C
+      bS2YdDoF+051/WV3iC+b1WrSNQy7F3qhKocOTvN054mRSltbAhd350FeXeNRHxRz
+      pRrqEZtlM0jk4EQvZ7gNygh8Hzxo3ywE/AnwwjETa2T2DriVpUjys1axAvOwDtEg
+      QIHXwJo+3WvPAP02WZv8+5EmeU0CgYEA8YNIopnwpmB0PJ2DA4zw1KS/7qoWzgM5
+      uKbVHNqCu3g+VEIwoLxt4Q4f0XNtH6FG1C99RnqAndYThY1riU8sW8ScoFpb4Rqb
+      Qiav1pUhLlesTY5mC/3nMlYGBv4ZCpj+FKfMPCXCVsbxD8XtGugSU4RWeldczsYG
+      8BFFJ+OOjEcCgYASf6+dN5861hxpyMEJxaAwSFpA9USPQz/AAo3CgVu44O+JshNG
+      x4q9STnpYYOOTNjKjIfb4yE/AqoOJBUdPqyXjNMPDJMnjBrhvYtURlVKaNsgywjJ
+      DdqSVO24bY7VxvKF0rtr48BKj50XUIoUMXLUrwjC1aZt1aNtFgDz1JdIFQKBgGGu
+      ktNJZh81Be56WsI14DZxiDu0ydJ7VX5M5Adujc/bW4Ji3x4z+FE9kDr775gKeAZc
+      StQVui2cp3qt71+zCSL4y8zDn0PVqhRAZ4BoAuqmhUc9ICMbh8ZBKuDrJx+1L5cV
+      IzL0przIbDnP+Q2X7cmfzgZfjWcIi0fQBGOU01QDAoGAarSyweirtMvV7Ua2o94J
+      aKZWHkBnyH2S8JSzGzVpXqHgs5HoOFGI3RpdE55uqPPl6yltZbrUKGYzsQ3lDZVx
+      pHUW4um5xpyMdT64eC0rwZqFtQpJ1KcTD7mRh1vEM9gr0doCgR9DpNnVz4l8xAXG
+      e0H5y5km8cOBH9eCkXDdmxU=
+      -----END PRIVATE KEY-----
+
+proxy:
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+  tls:
+    enabled: true
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIIC5DCCAcygAwIBAgIJAJgdmEGvpB/wMA0GCSqGSIb3DQEBCwUAMB0xGzAZBgNV
+      BAMMEnByb3h5LmxvY2FsdGVzdC5tZTAeFw0yNTEwMTAxOTQyMzBaFw0yNjEwMTAx
+      OTQyMzBaMB0xGzAZBgNVBAMMEnByb3h5LmxvY2FsdGVzdC5tZTCCASIwDQYJKoZI
+      hvcNAQEBBQADggEPADCCAQoCggEBAKaEMplNECu5mSrWXZ7Gyi6/NeOiogrVIqNa
+      Con8j32jA5Zq+U2UOnpmSRb1Mmr+6UsCft+AO/pR0jAZFWgM47mNN9nOePkqjPHa
+      ZJ6ZvYlsZG8BZghhWIcSYm4RiXkKtWxJAlHkQ0qc7UQwHEmu85LyMHaxz57bGm6O
+      9PhnXyZIUr/Q61UOv2LZVrXWgaQMAXnpA+DTOl+kfbRcMel7U2vLfoC0c0OIEbDu
+      vUifXkHautdOQcisi9XDF9sQVo6Vmy6Cs9S4erRqI9rVT67a1nYAQD2SIyssSOu2
+      yXhdqsv0iEJPSR9IpF+ycRKqmJFcI4DbP6O//jKCyqBrr9XJCMUCAwEAAaMnMCUw
+      IwYDVR0RBBwwGoIScHJveHkubG9jYWx0ZXN0Lm1lhwR/AAABMA0GCSqGSIb3DQEB
+      CwUAA4IBAQCZB1PMwI6DhTZUpxgbOilfvUzrL5MG8eEEhVbp5Fthrxw41enF/lQK
+      ZGt4LAqhChC2xy+VgOk3sRcZOyDBnflKEJDI9oxmsm9BPWnRKd6nRT9RGEHtpUU8
+      Kl4sfNtNUkENvHW+BRa6fE7q9+AozlTo/jxfu044H7/+mzMhHCvYnuwSs7houJNT
+      +3q6JShMnhyhvlZtAZfS23udRXUwte24uk95zj7eIwrGVV/27vCNX0iOm4Fxkw1I
+      lPQshwUFPaS3R0OB8z9+HO05vlyCa9x2Ez79vphm1WuGpQgPNhQHAromqrcLMZl9
+      nM6a7WsJunpHVzNHbEdsB6vVYigyYIsL
+      -----END CERTIFICATE-----
+    key: |
+      -----BEGIN PRIVATE KEY-----
+      MIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQCmhDKZTRAruZkq
+      1l2exsouvzXjoqIK1SKjWgqJ/I99owOWavlNlDp6ZkkW9TJq/ulLAn7fgDv6UdIw
+      GRVoDOO5jTfZznj5Kozx2mSemb2JbGRvAWYIYViHEmJuEYl5CrVsSQJR5ENKnO1E
+      MBxJrvOS8jB2sc+e2xpujvT4Z18mSFK/0OtVDr9i2Va11oGkDAF56QPg0zpfpH20
+      XDHpe1Nry36AtHNDiBGw7r1In15B2rrXTkHIrIvVwxfbEFaOlZsugrPUuHq0aiPa
+      1U+u2tZ2AEA9kiMrLEjrtsl4XarL9IhCT0kfSKRfsnESqpiRXCOA2z+jv/4ygsqg
+      a6/VyQjFAgMBAAECggEALl33XPq5ewN2ZBhG/3RpTjUOQ3HA33VT7NqgvqWmKxze
+      Xd8xxml1EyoyRgNG48ZRngJ247NogB6SgbQqYsvcCYoKOEsnInK3xozCoes7fO3C
+      1ao1CDZbGVmEMRQPDLZvqFR4IeeG2VrzMp6W8emWh5+K4TJIFvr51DlYe2cFdroP
+      2f5Eqts3ZGVlrzLqqRCpeQh/BgVVQDoNKJls20caP7viPhrZKKQQHCEu+pgay906
+      hY5fU/83xGcCK5vEXPfehq5R9TVTcY9Trn1g44iP6n4bDs8WUa8rzZsiDrhoFiE6
+      T3EStQUDIOgjHsE3+LQqbR1tWNWtVuV2c2WYeLGYgQKBgQDRWEc2rwG9Tf5ha6/0
+      oFG8tOWH6bgig4ggSDosFPCew6ufi7suTGYs6Fm/YjlEQn/slhPLkuh83jlcLxqp
+      svjXSCYRGayaFtBbngILl5DkNBQQVDPzVe1IgIZSBokMv5gwMkOfkQZmOnd07iy3
+      QWNtRFXPr1YYFTO/ZdKpg06AJQKBgQDLoG85qXYW8mCE6mn44JxPmoXRsrpAwhH+
+      IktirD1ODpkv1FfJmEVVE4fGlw3qPvxyYyn69BB1i9U5gn5IKtqtukYDZ8VuzoUo
+      SoB6/5pdDZx8RKIU1PyZeBicAQ01r2tyNz+4AN9wt9XFdldgbDVTY9gge0QeXADf
+      wfDbXSc0IQKBgCwJX+GW6szBjVM87eSNnOQPQYFXns5T0NzJlMMVHJCpJH8JS7Sv
+      iYbE0aw6o0VCn9pKr5tRKeqqbHKBziAIb+QJX0iVmANJ7UZ4dIGvvmDiu527uLnl
+      R2bK8nZqvYWbAA6TZDo6rZfvkJVeTLW34YxopYxsm7WxMBOA/dF+t5KpAn9Gyn/g
+      jAmB8MGdc+FjpLKy+gWL4Zbe7JlUwJd0tmyZtnmLJ0ddzpJMAX4yjFFKHpulKNRv
+      ampOc06tr7A3Zq6ftyKgDHOXEjU4zK3eFP6VWyYMDdBLbcBjmlzz32m4QEQacRq1
+      3ZfQmBi5jWrTGstvMkbxA+mqpFGpeMNDgB8h
+      -----END PRIVATE KEY-----

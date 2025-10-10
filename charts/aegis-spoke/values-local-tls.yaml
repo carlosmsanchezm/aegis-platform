@@ -1,0 +1,15 @@
+# Local TLS overlay for aegis-spoke
+# Apply alongside values-local.yaml when platform-api is deployed with TLS locally
+#
+# Usage:
+#   helm upgrade --install aegis-spoke charts/aegis-spoke \
+#     -f charts/aegis-spoke/values-local.yaml \
+#     -f charts/aegis-spoke/values-local-tls.yaml \
+#     --namespace aegis-system
+
+k8sAgent:
+  env:
+    # Connect to platform-api with TLS
+    AEGIS_CP_GRPC_INSECURE: "false"
+    # For self-signed certs, you may need to skip verification
+    AEGIS_CP_GRPC_SKIP_VERIFY: "true"

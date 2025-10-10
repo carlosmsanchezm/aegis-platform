@@ -9,16 +9,16 @@ const suppressedWarnPatterns = [
   /React Router Future Flag Warning/, // v7 migration noise
 ];
 
+/* eslint-disable no-console */
 const originalError = console.error;
-// eslint-disable-next-line no-console
 console.error = (...args: unknown[]) => {
   const firstArg = args[0];
-  const message =
-    typeof firstArg === 'string'
-      ? firstArg
-      : firstArg instanceof Error
-      ? firstArg.message
-      : '';
+  let message = '';
+  if (typeof firstArg === 'string') {
+    message = firstArg;
+  } else if (firstArg instanceof Error) {
+    message = firstArg.message;
+  }
   if (suppressedErrorPatterns.some(pattern => pattern.test(message))) {
     return;
   }
@@ -26,7 +26,6 @@ console.error = (...args: unknown[]) => {
 };
 
 const originalWarn = console.warn;
-// eslint-disable-next-line no-console
 console.warn = (...args: unknown[]) => {
   const firstArg = args[0];
   const message = typeof firstArg === 'string' ? firstArg : '';
@@ -35,6 +34,7 @@ console.warn = (...args: unknown[]) => {
   }
   originalWarn(...args);
 };
+/* eslint-enable no-console */
 
 Object.defineProperty(window.HTMLCanvasElement.prototype, 'getContext', {
   value: () => null,

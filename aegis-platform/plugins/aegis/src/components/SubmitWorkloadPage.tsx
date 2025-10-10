@@ -43,7 +43,9 @@ export const SubmitWorkloadPage: FC = () => {
   const [flavor, setFlavor] = useState('a10-mig-1g');
   const [image, setImage] = useState('alpine:3.19');
   const [command, setCommand] = useState('echo Hello from Aegis; sleep 2');
-  const [maxDurationSeconds, setMaxDurationSeconds] = useState<number | ''>(600);
+  const [maxDurationSeconds, setMaxDurationSeconds] = useState<number | ''>(
+    600,
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<WorkloadResponse | null>(null);
@@ -96,7 +98,7 @@ export const SubmitWorkloadPage: FC = () => {
           severity: 'success',
         });
       }
-  } catch (err: any) {
+    } catch (err: any) {
       const msg = err?.message ?? String(err);
       setError(msg);
       alertApi.post({ message: `Submit failed: ${msg}`, severity: 'error' });

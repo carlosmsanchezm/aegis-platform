@@ -475,3 +475,5 @@ The operator has been updated to respect Kueue’s admission flow instead of fig
    - Once pods exit, the Job becomes `Completed 1/1` and the operator sends the `AckWorkload` bridge (`SUCCEEDED` or `FAILED`).
 
 If Jobs stay suspended forever, confirm Kueue has available quota or temporarily disable Kueue (set `AEGIS_DISABLE_KUEUE=1`) to revert to the legacy behavior.
+
+A pull request auto-triggers the preview deployment workflow.

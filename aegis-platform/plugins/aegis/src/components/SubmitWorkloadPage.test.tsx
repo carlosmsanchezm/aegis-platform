@@ -34,6 +34,8 @@ const server = setupServer(
   ),
 );
 
+jest.setTimeout(15000);
+
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());

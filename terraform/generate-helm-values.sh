@@ -79,18 +79,27 @@ PROXY_IMAGE_TAG=${PROXY_IMAGE_TAG:-"no-client-cert"}
 K8S_AGENT_IMAGE_TAG=${K8S_AGENT_IMAGE_TAG:-"v1.0.2-tls-20251005-amd64"}
 TLS_CERT_PATH=/tmp/proxy-cert.pem
 TLS_KEY_PATH=/tmp/proxy-key.pem
+TLS_CA_CERT_PATH=/tmp/proxy-ca.pem
+TLS_CA_KEY_PATH=/tmp/proxy-ca-key.pem
+TLS_CERT_CSR_PATH=/tmp/proxy-cert.csr
+TLS_CERT_EXT_PATH=/tmp/proxy-cert-ext.cnf
+TLS_CERT_CHAIN_PATH=/tmp/proxy-cert-chain.pem
+PLATFORM_API_SERVICE_ACCOUNT=${PLATFORM_API_SERVICE_ACCOUNT:-aegis-platform-api}
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
+MIGRATIONS_UP_FILE=""
 
 cleanup() {
-  rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}"
+  rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
+    "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl" \
+    "${MIGRATIONS_UP_FILE}"
 }
 trap cleanup EXIT
 
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "🔐 TLS mode enabled"
-  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}"
+  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 fi
 
 echo "🚀 Generating Helm values from Terraform outputs..."
@@ -226,6 +235,26 @@ echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
 
 echo "   ✅ Namespace and secrets created"
 
+# Ensure the platform API ServiceAccount exists with Helm ownership metadata so
+# pre-deploy jobs (like migrations) can run before Helm installs the chart.
+echo "   ℹ️  Ensuring ServiceAccount ${PLATFORM_API_SERVICE_ACCOUNT} exists"
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${PLATFORM_API_SERVICE_ACCOUNT}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: aegis-services
+    app.kubernetes.io/instance: ${HELM_RELEASE}
+    app.kubernetes.io/component: platform-api
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: ${HELM_RELEASE}
+    meta.helm.sh/release-namespace: ${K8S_NAMESPACE}
+EOF
+echo "   ✅ ServiceAccount ready"
+
 # Step 3: Run database migrations manually (to avoid public image pull issues)
 echo ""
 echo "3️⃣  Running database migrations..."
@@ -251,6 +280,48 @@ else
 fi
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
 
+if [[ -z "${AWS_REGION:-}" ]]; then
+  AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
+fi
+
+if [[ -z "${AWS_REGION}" ]]; then
+  echo "❌ Unable to determine AWS region for migrations"
+  exit 1
+fi
+
+RDS_CA_BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
+NODE_SECURITY_GROUP="$(terraform output -raw node_security_group_id 2>/dev/null || echo "")"
+CLUSTER_SECURITY_GROUP="$(terraform output -raw cluster_security_group_id 2>/dev/null || echo "")"
+EKS_CLUSTER_MANAGED_SECURITY_GROUP="$(terraform output -raw eks_cluster_security_group_id 2>/dev/null || echo "")"
+SECURITY_GROUPS_LIST=()
+if [[ -n "${NODE_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${NODE_SECURITY_GROUP}")
+fi
+if [[ -n "${CLUSTER_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${CLUSTER_SECURITY_GROUP}")
+fi
+if [[ -n "${EKS_CLUSTER_MANAGED_SECURITY_GROUP}" ]]; then
+  SECURITY_GROUPS_LIST+=("${EKS_CLUSTER_MANAGED_SECURITY_GROUP}")
+fi
+
+if (( ${#SECURITY_GROUPS_LIST[@]} > 0 )); then
+  SECURITY_GROUPS=$(IFS=','; echo "${SECURITY_GROUPS_LIST[*]}")
+  JOB_ANNOTATIONS_BLOCK=$(cat <<EOF
+  annotations:
+    vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
+EOF
+)
+  POD_ANNOTATIONS_BLOCK=$(cat <<EOF
+      annotations:
+        vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
+EOF
+)
+else
+  JOB_ANNOTATIONS_BLOCK=""
+  POD_ANNOTATIONS_BLOCK=""
+fi
+
+
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
   echo "   ⚠️  Skipping migration placeholder (handled externally)"
 else
@@ -264,9 +335,15 @@ if [ ! -f "${MIGRATIONS_DIR}/0001_init.sql" ]; then
   echo "❌ Migration file not found at ${MIGRATIONS_DIR}/0001_init.sql"
   exit 1
 fi
+MIGRATIONS_UP_FILE=$(mktemp)
+awk '/^--[[:space:]]+\+migrate[[:space:]]+Down/{exit} {print}' "${MIGRATIONS_DIR}/0001_init.sql" > "${MIGRATIONS_UP_FILE}"
+if [[ ! -s "${MIGRATIONS_UP_FILE}" ]]; then
+  echo "❌ Failed to extract migration up statements"
+  exit 1
+fi
 
 kubectl -n "${K8S_NAMESPACE}" create configmap "${MIGRATION_CONFIGMAP}" \
-  --from-file=0001_init.sql="${MIGRATIONS_DIR}/0001_init.sql" \
+  --from-file=0001_init.sql="${MIGRATIONS_UP_FILE}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
@@ -277,11 +354,25 @@ kind: Job
 metadata:
   name: ${MIGRATION_JOB}
   namespace: ${K8S_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: aegis-services
+    app.kubernetes.io/instance: ${HELM_RELEASE}
+    app.kubernetes.io/component: platform-api
+    app: aegis-platform-api
+${JOB_ANNOTATIONS_BLOCK}
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 1
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aegis-services
+        app.kubernetes.io/instance: ${HELM_RELEASE}
+        app.kubernetes.io/component: platform-api
+        app: aegis-platform-api
+${POD_ANNOTATIONS_BLOCK}
     spec:
+      serviceAccountName: "${PLATFORM_API_SERVICE_ACCOUNT}"
       restartPolicy: Never
       containers:
       - name: migrate
@@ -290,25 +381,32 @@ spec:
         - name: PGPASSWORD
           valueFrom:
             secretKeyRef:
-              name: ${HELM_RELEASE}-platform-api-secret
+              name: aegis-platform-secrets
               key: db-password
         - name: DB_HOST
           value: "${DB_HOST}"
+        - name: DB_PORT
+          value: "${DB_PORT}"
         - name: DB_NAME
           value: "${DB_NAME}"
         - name: DB_USER
           value: "${DB_USER}"
         - name: AWS_REGION
           value: "${AWS_REGION}"
+        - name: RDS_CA_BUNDLE_URL
+          value: "${RDS_CA_BUNDLE_URL}"
         command:
         - /bin/sh
         - -c
         - |
           set -euo pipefail
           apk add --no-cache ca-certificates curl >/dev/null 2>&1
-          BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-          curl -sSL "$BUNDLE_URL" -o /tmp/rds.pem
-          psql "host=${DB_HOST} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+          if [ -z "${RDS_CA_BUNDLE_URL:-}" ]; then
+            echo "Missing RDS_CA_BUNDLE_URL" >&2
+            exit 1
+          fi
+          curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /tmp/rds.pem
+          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
         volumeMounts:
         - name: migrations
           mountPath: /migrations
@@ -321,12 +419,14 @@ EOF
 if ! kubectl -n "${K8S_NAMESPACE}" wait --for=condition=complete "job/${MIGRATION_JOB}" --timeout=5m; then
   echo "❌ Migration job failed. Logs:"
   kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
-  kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  echo "ℹ️  Leaving ${MIGRATION_JOB} and configmap ${MIGRATION_CONFIGMAP} in place for troubleshooting"
   exit 1
 fi
 
+kubectl logs job/"${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" || true
 kubectl delete job "${MIGRATION_JOB}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-echo "   ✅ Migrations ready"
+kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+echo "   ✅ Migrations applied"
 fi
 
 # Step 4: Generate self-signed TLS certs using Route53 DNS names
@@ -344,26 +444,59 @@ echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
 echo "      Proxy:             ${DNS_PROXY}"
 
 if [[ $TLS_MODE -eq 1 ]]; then
-  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ]; then
+  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
     openssl req -x509 -newkey rsa:2048 \
-      -keyout "${TLS_KEY_PATH}" \
-      -out "${TLS_CERT_PATH}" \
+      -keyout "${TLS_CA_KEY_PATH}" \
+      -out "${TLS_CA_CERT_PATH}" \
       -days 365 -nodes \
+      -subj "/CN=Aegis Platform API CA" \
+      -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+      -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+
+    openssl req -new -newkey rsa:2048 \
+      -keyout "${TLS_KEY_PATH}" \
+      -out "${TLS_CERT_CSR_PATH}" \
+      -nodes \
       -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" 2>/dev/null
+      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
+
+    cat <<EOF > "${TLS_CERT_EXT_PATH}"
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}
+EOF
+
+    openssl x509 -req \
+      -in "${TLS_CERT_CSR_PATH}" \
+      -CA "${TLS_CA_CERT_PATH}" \
+      -CAkey "${TLS_CA_KEY_PATH}" \
+      -CAcreateserial \
+      -out "${TLS_CERT_PATH}" \
+      -days 365 \
+      -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
+
+    cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
+    mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
   fi
 
   mkdir -p "$(dirname "${CA_BUNDLE}")"
-  cat "${TLS_CERT_PATH}" > "${CA_BUNDLE}"
+  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
 if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   ✅ TLS certificates ready with proper DNS names"
+echo "   ✅ TLS certificates ready with proper DNS names"
 fi
 
-# Step 5: Deploy aegis-services using Helm (FULL deployment)
+# Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
-echo "5️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
+echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
+kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
+echo "   ✅ CRD synced"
+
+# Step 6: Deploy aegis-services using Helm (FULL deployment)
+echo ""
+echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 
 # Get JWT secret for proxy
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
@@ -415,6 +548,8 @@ fi
 cd "${OUTPUT_DIR}"
 if [[ $TLS_MODE -eq 1 ]]; then
   echo "   ℹ️  Including TLS overlay values (values-cloud-tls.yaml)"
+  kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 fi
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services
@@ -438,10 +573,17 @@ helm "${HELM_ARGS[@]}"
 
 
 echo "   ✅ aegis-services deployed"
+echo "   🔄 Restarting workloads to pick up latest configuration"
+kubectl rollout restart "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" >/dev/null
+kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" >/dev/null
 
-# Step 6: Wait for Load Balancers
+echo "   ⏳ Waiting for deployments to become ready"
+kubectl rollout status "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" --timeout=5m
+kubectl rollout status "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" --timeout=5m
+
+# Step 7: Wait for Load Balancers
 echo ""
-echo "6️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
+echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do

@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
@@ -58,8 +60,15 @@ func TestWorkloadLifecycle_Postgres(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := pool.Exec(ctx, schemaDDL); err != nil {
-		t.Fatalf("apply schema: %v", err)
+	var schemaErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if _, schemaErr = pool.Exec(ctx, schemaDDL); schemaErr == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if schemaErr != nil {
+		t.Fatalf("apply schema: %v", schemaErr)
 	}
 
 	store, err := New(dsn, zap.NewNop())
@@ -286,7 +295,9 @@ func startPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.C
 			"POSTGRES_USER":     username,
 			"POSTGRES_DB":       dbName,
 		},
-		WaitingFor: wait.ForListeningPort("5432/tcp").WithStartupTimeout(2 * time.Minute),
+		WaitingFor: wait.ForSQL("5432/tcp", "pgx", func(host string, port nat.Port) string {
+			return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", username, password, host, port.Port(), dbName)
+		}).WithStartupTimeout(2 * time.Minute),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

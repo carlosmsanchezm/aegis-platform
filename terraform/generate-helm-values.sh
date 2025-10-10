@@ -485,12 +485,18 @@ EOF
   echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 fi
 if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   ✅ TLS certificates ready with proper DNS names"
+echo "   ✅ TLS certificates ready with proper DNS names"
 fi
 
-# Step 5: Deploy aegis-services using Helm (FULL deployment)
+# Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
-echo "5️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
+echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
+kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
+echo "   ✅ CRD synced"
+
+# Step 6: Deploy aegis-services using Helm (FULL deployment)
+echo ""
+echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 
 # Get JWT secret for proxy
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
@@ -559,7 +565,6 @@ if [[ $TLS_MODE -eq 1 ]]; then
 fi
 
 HELM_ARGS+=(
-  --include-crds
   --namespace "${K8S_NAMESPACE}" --create-namespace
   --timeout 10m
 )
@@ -576,9 +581,9 @@ echo "   ⏳ Waiting for deployments to become ready"
 kubectl rollout status "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" --timeout=5m
 kubectl rollout status "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" --timeout=5m
 
-# Step 6: Wait for Load Balancers
+# Step 7: Wait for Load Balancers
 echo ""
-echo "6️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
+echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
@@ -744,7 +749,6 @@ SPOKE_HELM_ARGS+=(
   --set k8sAgent.enabled=true
   --set k8sAgent.replicaCount=1
   --set proxy.enabled=false
-  --include-crds
   --namespace "${SPOKE_NAMESPACE}"
   --create-namespace
   --timeout 5m

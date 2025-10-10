@@ -73,6 +73,9 @@ proxy:
   expectedAudience: "aegis-proxy"
   allowedSuffix: ".svc.cluster.local"
   publicHost: "proxy.localtest.me"
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
 
   # TLS enabled with self-signed cert for local development
   tls:

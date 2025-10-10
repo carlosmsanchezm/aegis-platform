@@ -101,7 +101,10 @@ export const WorkloadListPage: FC = () => {
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         setError(msg);
-        alertApi.post({ message: `Failed to load workloads: ${msg}`, severity: 'error' });
+        alertApi.post({
+          message: `Failed to load workloads: ${msg}`,
+          severity: 'error',
+        });
       } finally {
         if (!silent) {
           setLoading(false);
@@ -160,7 +163,10 @@ export const WorkloadListPage: FC = () => {
         render: row => (
           <Box display="flex" alignItems="center" gridGap={8}>
             {row.id ? (
-              <RouterLink to={`/aegis/workloads/${row.id}`} style={{ textDecoration: 'none' }}>
+              <RouterLink
+                to={`/aegis/workloads/${row.id}`}
+                style={{ textDecoration: 'none' }}
+              >
                 <Typography variant="body2" color="primary">
                   {row.id}
                 </Typography>
@@ -180,7 +186,9 @@ export const WorkloadListPage: FC = () => {
       {
         title: 'Flavor',
         field: 'flavor',
-        render: row => <Typography variant="body2">{getFlavor(row)}</Typography>,
+        render: row => (
+          <Typography variant="body2">{getFlavor(row)}</Typography>
+        ),
       },
       {
         title: 'Project',
@@ -191,14 +199,20 @@ export const WorkloadListPage: FC = () => {
         field: 'url',
         render: row => {
           if (!row.url) {
-            return <Typography variant="body2" color="textSecondary">N/A</Typography>;
+            return (
+              <Typography variant="body2" color="textSecondary">
+                N/A
+              </Typography>
+            );
           }
           const loc = parseKubernetesUrl(row.url);
           const cmd = buildKubectlDescribeCommand(loc);
           return (
             <Box display="flex" alignItems="center" gridGap={8}>
               <Typography variant="body2">{row.url}</Typography>
-              {cmd ? <CopyTextButton text={cmd} tooltip="Copy kubectl describe" /> : null}
+              {cmd ? (
+                <CopyTextButton text={cmd} tooltip="Copy kubectl describe" />
+              ) : null}
             </Box>
           );
         },
@@ -228,7 +242,10 @@ export const WorkloadListPage: FC = () => {
 
   return (
     <Page themeId="tool">
-      <Header title="Aegis — Workload Status" subtitle="Monitor submitted workloads" />
+      <Header
+        title="Aegis — Workload Status"
+        subtitle="Monitor submitted workloads"
+      />
       <Content>
         <ContentHeader title="Filters">
           <Button

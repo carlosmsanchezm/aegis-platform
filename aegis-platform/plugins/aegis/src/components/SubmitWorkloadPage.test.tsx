@@ -1,4 +1,3 @@
-import React from 'react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { rest } from 'msw';
@@ -14,23 +13,27 @@ import {
 import { SubmitWorkloadPage } from './SubmitWorkloadPage';
 
 const server = setupServer(
-  rest.post('http://example.test/aegis/aegis.v1.AegisPlatform/SubmitWorkload', (_req, res, ctx) =>
-    res(
-      ctx.json({
-        id: 'w-ui-123',
-        status: 'PLACED',
-        projectId: 'p-demo',
-      }),
-    ),
+  rest.post(
+    'http://example.test/aegis/aegis.v1.AegisPlatform/SubmitWorkload',
+    (_req, res, ctx) =>
+      res(
+        ctx.json({
+          id: 'w-ui-123',
+          status: 'PLACED',
+          projectId: 'p-demo',
+        }),
+      ),
   ),
-  rest.post('http://example.test/aegis/aegis.v1.AegisPlatform/GetWorkload', (_req, res, ctx) =>
-    res(
-      ctx.json({
-        id: 'w-ui-123',
-        status: 'SUCCEEDED',
-        projectId: 'p-demo',
-      }),
-    ),
+  rest.post(
+    'http://example.test/aegis/aegis.v1.AegisPlatform/GetWorkload',
+    (_req, res, ctx) =>
+      res(
+        ctx.json({
+          id: 'w-ui-123',
+          status: 'SUCCEEDED',
+          projectId: 'p-demo',
+        }),
+      ),
   ),
 );
 

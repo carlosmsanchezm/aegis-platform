@@ -53,6 +53,10 @@ spec:
               value: ":{{ .Values.proxy.service.port }}"
             - name: AEGIS_PROXY_ALLOWED_SUFFIX
               value: {{ .Values.proxy.allowedSuffix | quote }}
+            {{- if and .Values.proxy.clientCerts .Values.proxy.clientCerts.enabled (gt (len .Values.proxy.clientCerts.sanSuffixes) 0) }}
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
+            {{- end }}
             {{- if .Values.proxy.tls.enabled }}
             - name: AEGIS_PROXY_TLS_CERT
               value: "/etc/aegis-proxy/tls.crt"

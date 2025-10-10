@@ -1,0 +1,69 @@
+# Local TLS overlay for aegis-services
+# Apply alongside local.yaml when testing TLS locally on Docker Desktop
+#
+# Usage:
+#   helm upgrade --install aegis-services charts/aegis-services \
+#     -f charts/aegis-services/values/common.yaml \
+#     -f charts/aegis-services/values/local.yaml \
+#     -f charts/aegis-services/values/local-tls.yaml \
+#     --namespace aegis-system --create-namespace
+
+platformApi:
+  tls:
+    enabled: true
+    # Self-signed cert for local testing
+    # Generate with:
+    #   openssl req -x509 -newkey rsa:2048 -nodes \
+    #     -keyout /tmp/local-tls-key.pem \
+    #     -out /tmp/local-tls-cert.pem \
+    #     -days 365 \
+    #     -subj "/CN=localhost" \
+    #     -addext "subjectAltName=DNS:localhost,DNS:*.aegis-system.svc.cluster.local,IP:127.0.0.1"
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIICyTCCAbGgAwIBAgIJAL6sxf08sRSRMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNV
+      BAMMCWxvY2FsaG9zdDAeFw0yNTEwMTAxOTQyMzBaFw0yNjEwMTAxOTQyMzBaMBQx
+      EjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC
+      ggEBAOfDHk5iZx3m8y8sRp1UPGQ0NCHxGb/U4BCps19bWPt2WmZxJ2GRJ7GfOksw
+      yl9SaqObUcG6ETE9uDtjBFs+CJrWLofFTWB1COpBlISryq49dTu2MAdXl1TtQ33I
+      o0sKbt/p/lAIYQWJuz0WBS+BpRhy1tGueEfxcsz8OYfStmb204x4W7gvpmkwppYi
+      nH098+vPIcRySZD+zM5Qof5uYEN2MzjJbp8bR3c5ielNTTr6389aKKh2RYUwjYBs
+      2u5HPk7FvE8O2HjaLSHKhbYLUfT93LzNWk9y6HswrZYv7cUaDN3WP7A3B3G5zDbq
+      fJtFxPyQhwZgxWx0R4eZx9u3wFsCAwEAAaMeMBwwGgYDVR0RBBMwEYIJbG9jYWxo
+      b3N0hwR/AAABMA0GCSqGSIb3DQEBCwUAA4IBAQBThbt6TT0YPtU6v9mdG315VMEv
+      6r96on59Ize8tBUk+h1lFZETfyK8ns83EvdmtxfR7amF9yL0+DIeF/CE8xBciB32
+      5wO+GgpF5zSCQQgmaU5HsnJPGDZUVvaqRmc2QsvuMkBXzl9fS2emNjCtpG3Z9O9b
+      x4ti5OQO5Ex14JWv0HyOnxaW0OfaQsUgdhtSc1BUNx0+hASgolVzmrOFNfhXlyxR
+      9bKLCtvsO84zAnqYV0PVXy5RYj1N7QZsmsVSWGjg0DsbLFDEWsQKMK36h7qQKeg4
+      HcyUC6PwCyPjqrWm36IUyDqGiIxyu6mLpI/m5L3iV4BH3jqoc0wN+0BeXvDn
+      -----END CERTIFICATE-----
+    key: |
+      -----REDACTED-PRIVATE-KEY-----
+
+proxy:
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+  tls:
+    enabled: true
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIIC5DCCAcygAwIBAgIJAJgdmEGvpB/wMA0GCSqGSIb3DQEBCwUAMB0xGzAZBgNV
+      BAMMEnByb3h5LmxvY2FsdGVzdC5tZTAeFw0yNTEwMTAxOTQyMzBaFw0yNjEwMTAx
+      OTQyMzBaMB0xGzAZBgNVBAMMEnByb3h5LmxvY2FsdGVzdC5tZTCCASIwDQYJKoZI
+      hvcNAQEBBQADggEPADCCAQoCggEBAKaEMplNECu5mSrWXZ7Gyi6/NeOiogrVIqNa
+      Con8j32jA5Zq+U2UOnpmSRb1Mmr+6UsCft+AO/pR0jAZFWgM47mNN9nOePkqjPHa
+      ZJ6ZvYlsZG8BZghhWIcSYm4RiXkKtWxJAlHkQ0qc7UQwHEmu85LyMHaxz57bGm6O
+      9PhnXyZIUr/Q61UOv2LZVrXWgaQMAXnpA+DTOl+kfbRcMel7U2vLfoC0c0OIEbDu
+      vUifXkHautdOQcisi9XDF9sQVo6Vmy6Cs9S4erRqI9rVT67a1nYAQD2SIyssSOu2
+      yXhdqsv0iEJPSR9IpF+ycRKqmJFcI4DbP6O//jKCyqBrr9XJCMUCAwEAAaMnMCUw
+      IwYDVR0RBBwwGoIScHJveHkubG9jYWx0ZXN0Lm1lhwR/AAABMA0GCSqGSIb3DQEB
+      CwUAA4IBAQCZB1PMwI6DhTZUpxgbOilfvUzrL5MG8eEEhVbp5Fthrxw41enF/lQK
+      ZGt4LAqhChC2xy+VgOk3sRcZOyDBnflKEJDI9oxmsm9BPWnRKd6nRT9RGEHtpUU8
+      Kl4sfNtNUkENvHW+BRa6fE7q9+AozlTo/jxfu044H7/+mzMhHCvYnuwSs7houJNT
+      +3q6JShMnhyhvlZtAZfS23udRXUwte24uk95zj7eIwrGVV/27vCNX0iOm4Fxkw1I
+      lPQshwUFPaS3R0OB8z9+HO05vlyCa9x2Ez79vphm1WuGpQgPNhQHAromqrcLMZl9
+      nM6a7WsJunpHVzNHbEdsB6vVYigyYIsL
+      -----END CERTIFICATE-----
+    key: |
+      -----REDACTED-PRIVATE-KEY-----

@@ -1,10 +1,18 @@
-# Ignore node_modules folders from the Backstage UI
+# Ignore dependency folders
+node_modules/
 aegis-platform/node_modules
 aegis-platform/packages/app/node_modules
 aegis-platform/packages/backend/node_modules
 aegis-platform/plugins/aegis/node_modules
+venv/
 
-# Ignore local build artifacts
+# Ignore bulky local artifacts
 bin/
 dist/
+out/
+workspace-images/
+
+# Ignore Python caches and logs
+__pycache__/
+.pytest_cache/
 *.log

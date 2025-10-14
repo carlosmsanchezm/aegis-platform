@@ -5,7 +5,6 @@
 
 set -e
 
-TLS_MODE=0
 NON_INTERACTIVE=0
 K8S_NAMESPACE=${K8S_NAMESPACE:-aegis-system}
 HELM_RELEASE=${HELM_RELEASE:-aegis}
@@ -37,23 +36,20 @@ IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_imag
 
 usage() {
 cat <<'EOF'
-Usage: ./generate-helm-values.sh [--tls] [--non-interactive]
+Usage: ./generate-helm-values.sh [--non-interactive]
 
 Options:
-  --tls      Enable TLS for platform-api gRPC endpoint and configure Backstage
   --non-interactive  Run without interactive prompts for CI/CD
-  -h, --help Show this help message
+  -h, --help         Show this help message
 
-By default the script deploys using the HTTP gateway for Backstage but keeps the
-proxy (wss) secured. Use --tls when you want the platform gRPC endpoint itself
-to require TLS.
+All cloud deployments terminate TLS inside the platform-api and proxy pods; no additional flags are required.
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tls)
-      TLS_MODE=1
+      echo "⚠️  --tls is deprecated; TLS is always enforced for cloud deployments."
       shift
       ;;
     --non-interactive)
@@ -97,10 +93,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "🔐 TLS mode enabled"
-  rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
-fi
+echo "🔐 Enforcing TLS for platform-api and proxy"
+rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 
 echo "🚀 Generating Helm values from Terraform outputs..."
 echo "📖 See DEPLOYMENT.md for complete deployment guide"
@@ -195,7 +189,7 @@ if [[ $NON_INTERACTIVE -eq 0 ]]; then
         echo ""
         echo "✨ Done!"
         echo ""
-        echo "ℹ️  Tip: run ./generate-helm-values.sh --tls to deploy the TLS overlay"
+        echo "ℹ️  TLS is enforced automatically; rerun this script anytime you want to regenerate certificates"
         exit 0
     fi
 else
@@ -443,50 +437,46 @@ echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
 echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
 echo "      Proxy:             ${DNS_PROXY}"
 
-if [[ $TLS_MODE -eq 1 ]]; then
-  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
-    openssl req -x509 -newkey rsa:2048 \
-      -keyout "${TLS_CA_KEY_PATH}" \
-      -out "${TLS_CA_CERT_PATH}" \
-      -days 365 -nodes \
-      -subj "/CN=Aegis Platform API CA" \
-      -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
-      -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
+  openssl req -x509 -newkey rsa:2048 \
+    -keyout "${TLS_CA_KEY_PATH}" \
+    -out "${TLS_CA_CERT_PATH}" \
+    -days 365 -nodes \
+    -subj "/CN=Aegis Platform API CA" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 
-    openssl req -new -newkey rsa:2048 \
-      -keyout "${TLS_KEY_PATH}" \
-      -out "${TLS_CERT_CSR_PATH}" \
-      -nodes \
-      -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-      -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
+  openssl req -new -newkey rsa:2048 \
+    -keyout "${TLS_KEY_PATH}" \
+    -out "${TLS_CERT_CSR_PATH}" \
+    -nodes \
+    -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
+    -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
 
-    cat <<EOF > "${TLS_CERT_EXT_PATH}"
+  cat <<EOF > "${TLS_CERT_EXT_PATH}"
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
 subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}
 EOF
 
-    openssl x509 -req \
-      -in "${TLS_CERT_CSR_PATH}" \
-      -CA "${TLS_CA_CERT_PATH}" \
-      -CAkey "${TLS_CA_KEY_PATH}" \
-      -CAcreateserial \
-      -out "${TLS_CERT_PATH}" \
-      -days 365 \
-      -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "${TLS_CERT_CSR_PATH}" \
+    -CA "${TLS_CA_CERT_PATH}" \
+    -CAkey "${TLS_CA_KEY_PATH}" \
+    -CAcreateserial \
+    -out "${TLS_CERT_PATH}" \
+    -days 365 \
+    -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
 
-    cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
-    mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
-  fi
-
-  mkdir -p "$(dirname "${CA_BUNDLE}")"
-  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
-  echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
+  cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
+  mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
 fi
-if [[ $TLS_MODE -eq 1 ]]; then
+
+mkdir -p "$(dirname "${CA_BUNDLE}")"
+cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
+echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 echo "   ✅ TLS certificates ready with proper DNS names"
-fi
 
 # Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
@@ -527,30 +517,25 @@ OVERRIDE_FILE=$(mktemp)
   echo "  jwtSecret: \"${JWT_SECRET}\""
 } > "${OVERRIDE_FILE}"
 
-if [[ $TLS_MODE -eq 1 ]]; then
-  TLS_OVERRIDE_FILE=$(mktemp)
-  {
-    echo "platformApi:"
-    echo "  tls:"
-    echo "    cert: |"
-    sed 's/^/      /' "${TLS_CERT_PATH}"
-    echo "    key: |"
-    sed 's/^/      /' "${TLS_KEY_PATH}"
-    echo "proxy:"
-    echo "  tls:"
-    echo "    cert: |"
-    sed 's/^/      /' "${TLS_CERT_PATH}"
-    echo "    key: |"
-    sed 's/^/      /' "${TLS_KEY_PATH}"
-  } > "${TLS_OVERRIDE_FILE}"
-fi
+TLS_OVERRIDE_FILE=$(mktemp)
+{
+  echo "platformApi:"
+  echo "  tls:"
+  echo "    cert: |"
+  sed 's/^/      /' "${TLS_CERT_PATH}"
+  echo "    key: |"
+  sed 's/^/      /' "${TLS_KEY_PATH}"
+  echo "proxy:"
+  echo "  tls:"
+  echo "    cert: |"
+  sed 's/^/      /' "${TLS_CERT_PATH}"
+  echo "    key: |"
+  sed 's/^/      /' "${TLS_KEY_PATH}"
+} > "${TLS_OVERRIDE_FILE}"
 
 cd "${OUTPUT_DIR}"
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   ℹ️  Including TLS overlay values (values-cloud-tls.yaml)"
-  kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-fi
+kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services
   -f ./aegis-services/values/common.yaml
@@ -559,10 +544,7 @@ HELM_ARGS=(
   -f "${OVERRIDE_FILE}"
 )
 
-if [[ $TLS_MODE -eq 1 ]]; then
-  HELM_ARGS+=( -f ./aegis-services/values-cloud-tls.yaml )
-  HELM_ARGS+=( -f "${TLS_OVERRIDE_FILE}" )
-fi
+HELM_ARGS+=( -f "${TLS_OVERRIDE_FILE}" )
 
 HELM_ARGS+=(
   --namespace "${K8S_NAMESPACE}" --create-namespace
@@ -738,12 +720,9 @@ cd "${OUTPUT_DIR}"
 SPOKE_HELM_ARGS=(
   upgrade --install "${SPOKE_HELM_RELEASE}" ./aegis-spoke
   -f ./aegis-spoke/values-cloud-generated.yaml
+  -f ./aegis-spoke/values-cloud-tls.yaml
 )
-
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   ℹ️  Including TLS overlay for k8s-agent (values-cloud-tls.yaml)"
-  SPOKE_HELM_ARGS+=( -f ./aegis-spoke/values-cloud-tls.yaml )
-fi
+echo "   ℹ️  Configuring k8s-agent to require TLS when dialing the hub"
 
 SPOKE_HELM_ARGS+=(
   --set k8sAgent.enabled=true
@@ -772,13 +751,8 @@ echo ""
 echo "🎉 Deployment Complete!"
 echo ""
 echo "📊 Service URLs:"
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API_HTTP}:8080"
-  echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API_GRPC}:8081"
-else
-  echo "   Platform API (HTTP): http://${DNS_PLATFORM_API_HTTP}:8080"
-  echo "   Platform API (gRPC): ${DNS_PLATFORM_API_GRPC}:8081"
-fi
+echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API_HTTP}:8080"
+echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API_GRPC}:8081"
 echo "   Proxy (WSS):                 wss://${DNS_PROXY}:8080"
 echo ""
 echo "🌐 LoadBalancer Endpoints:"
@@ -792,31 +766,23 @@ echo ""
 echo "🔍 View logs:"
 echo "   kubectl logs -n ${K8S_NAMESPACE} -l app.kubernetes.io/component=platform-api -f"
 echo ""
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "🔐 Test gRPC with grpcurl (TLS mode):"
-  echo "   export GRPC_HOST=${DNS_PLATFORM_API_GRPC}"
-  echo "   export CA_BUNDLE=${CA_BUNDLE}"
-  echo ""
-  echo "   grpcurl -cacert \"\$CA_BUNDLE\" \\"
-  echo "     -d '{\"project\":{\"id\":\"p-demo\",\"displayName\":\"Demo\",\"ownerGroup\":\"eng\"}}' \\"
-  echo "     \${GRPC_HOST}:8081 aegis.v1.AegisPlatform/CreateProject"
-  echo ""
-  echo "📱 VSCode Extension Configuration:"
-  echo "   grpcEndpoint: \"${DNS_PLATFORM_API_GRPC}:8081\""
-  echo "   caPath: \"${CA_BUNDLE}\""
-  echo ""
-fi
+echo "🔐 Test gRPC with grpcurl:"
+echo "   export GRPC_HOST=${DNS_PLATFORM_API_GRPC}"
+echo "   export CA_BUNDLE=${CA_BUNDLE}"
+echo ""
+echo "   grpcurl -cacert \"\$CA_BUNDLE\" \\"
+echo "     -d '{\"project\":{\"id\":\"p-demo\",\"displayName\":\"Demo\",\"ownerGroup\":\"eng\"}}' \\"
+echo "     \${GRPC_HOST}:8081 aegis.v1.AegisPlatform/CreateProject"
+echo ""
+echo "📱 VSCode Extension Configuration:"
+echo "   grpcEndpoint: \"${DNS_PLATFORM_API_GRPC}:8081\""
+echo "   caPath: \"${CA_BUNDLE}\""
+echo ""
 echo "🚀 Next steps:"
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud-tls"
-else
-  echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud"
-fi
+echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud-tls"
 echo "   2. Access at: http://localhost:3000"
 echo "   3. Backstage proxy will use the configuration generated above"
-if [[ $TLS_MODE -eq 1 ]]; then
-  echo ""
-  echo "🔐 TLS mode: gRPC clients must trust ${CA_BUNDLE}"
-fi
+echo ""
+echo "🔐 TLS mode: gRPC clients must trust ${CA_BUNDLE}"
 echo ""
 echo "✨ Done!"

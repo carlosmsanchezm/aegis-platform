@@ -56,6 +56,9 @@ spec:
             {{- if and .Values.proxy.clientCerts .Values.proxy.clientCerts.enabled (gt (len .Values.proxy.clientCerts.sanSuffixes) 0) }}
             - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
               value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
+            {{- else if not (and .Values.proxy.clientCerts .Values.proxy.clientCerts.enabled) }}
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: ""
             {{- end }}
             {{- if .Values.proxy.tls.enabled }}
             - name: AEGIS_PROXY_TLS_CERT

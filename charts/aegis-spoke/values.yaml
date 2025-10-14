@@ -13,6 +13,7 @@ k8sAgent:
     AEGIS_CLUSTER_ID: "dev-1"
     AEGIS_CP_GRPC: "host.docker.internal:8081"
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
+    AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"
 
     # Geographic metadata for workload placement
     AEGIS_REGION: "us-east-1"  # AWS region where this cluster is deployed (us-east-1, us-west-2, eu-west-1, etc.)

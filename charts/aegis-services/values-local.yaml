@@ -16,19 +16,29 @@ platformApi:
     pullPolicy: IfNotPresent  # Use local images if available
 
   service:
-    type: ClusterIP  # Use port-forward for local access
+    type: ClusterIP
     grpcPort: 8081
     httpPort: 8080
 
   ingress:
-    enabled: false  # Not needed for local Docker Desktop
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
 
   # Local development environment variables
   env:
     LOG_LEVEL: "debug"
     AEGIS_PROXY_JWT_SECRET: "a-very-secret-key-for-local-dev-must-be-32-chars"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
-    AEGIS_PROXY_BASE_URL: "http://localhost:8085"
+    AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AUTH_STATIC_TOKEN: "supersecret"
     AUTH_STATIC_SUBJECT: "dev-user@example.com"
 
@@ -57,16 +67,25 @@ proxy:
   replicaCount: 1
 
   image:
-    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
+    repository: aegis-proxy-local
     tag: "latest"
     pullPolicy: IfNotPresent  # Use local images if available
 
   service:
-    type: ClusterIP  # Use port-forward for local access
+    type: ClusterIP
     port: 8085
 
   ingress:
-    enabled: false  # Not needed for local Docker Desktop
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: proxy.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
 
   # Local development JWT secret (32+ chars) - must match Platform API
   jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
@@ -77,31 +96,8 @@ proxy:
     enabled: false
     sanSuffixes: []
 
-  # TLS enabled with self-signed cert for local development
   tls:
-    enabled: true
-    cert: |
-      -----BEGIN CERTIFICATE-----
-      MIIDCTCCAfGgAwIBAgIUDtJoY9b/CFspF/RUIPaap52nSgQwDQYJKoZIhvcNAQEL
-      BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI1MTAwMjA0MzQ1NloXDTI2MTAw
-      MjA0MzQ1NlowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF
-      AAOCAQ8AMIIBCgKCAQEAnMguu1y/XJhzo8BH50kFTakWSlxddcXZWj0oFyN4us8y
-      Sg7Xp0EavoGOk1+7i0Y4ClrKWUudKWr47CNfd3NKY+SWoRnMQytEelJfXav5kB6f
-      ymI/UBdl++lOHgZuGy7mKD6DvNGyxqZUmYT7APExNm+51wrVeUn7cxGrika29ADP
-      NjFH3HWiimIjLGTMvIZy6B4eUhl145zWaU1oDzP/5E3uc020DhVXKnawDKMQYnT5
-      sp1SbWaO/SGymhXEdKIg6yIp4U4HCrqyY4KCt6LhlPekK0qC8vDLJ2n0fUV9FJxQ
-      JJklpFwrSpTOj+tbtWnJTUx2dqvRpxMsutlDxuXEowIDAQABo1MwUTAdBgNVHQ4E
-      FgQUj4v2XnPOapSI/zh/a2iZeqIo8ckwHwYDVR0jBBgwFoAUj4v2XnPOapSI/zh/
-      a2iZeqIo8ckwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAYVzG
-      FPSH1/Uql6Y4ILRH8ZgL4GlB1/LM2eJRPiADaYs7rmKQ64LO1HIMNwKX2BVQZ9Ro
-      ydpb7LFOcDUKq+fW6N26WzIkfcA+dWoURyQ93Oe28A4QJTCTnucZ/PyJlKMdADuE
-      Jku2iUfrchPXyK0fpITmjb/JsZjP2HqHqRa+5OU1YNLC+O+wcYlE0OpnaKlnfdGn
-      TzrLQHCMJOwM0a3OYzZSV0s/kNVe2AQclTnwVP94FRxvt1IbMszC3RB0stLo2nKP
-      mwg94bh/GCPV+5uHCUlnAq3R9JBufRFK7cF+BQxNrHDq29awpsCFgO/6ZDeVVzIi
-      OwpmHOiUIn1V94kARQ==
-      -----END CERTIFICATE-----
-    key: |
-      -----REDACTED-PRIVATE-KEY-----
+    enabled: false
 
   # Local development environment variables
   env:

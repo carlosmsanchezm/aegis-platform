@@ -9,7 +9,8 @@
 
 k8sAgent:
   env:
-    # Connect to platform-api with TLS
+    # Connect to platform-api with TLS (self-signed, skip verification)
     AEGIS_CP_GRPC_INSECURE: "false"
-    # For self-signed certs, you may need to skip verification
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
+    AEGIS_PROXY_INGRESS_HOST: "proxy.localtest.me"
+    AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"

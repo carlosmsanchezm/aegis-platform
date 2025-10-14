@@ -6,7 +6,7 @@
 platformApi:
   image:
     repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
-    tag: "latest"  # TODO: Use specific version tags
+    tag: "8afb9e0-vscode-dynamic"
 
   env:
     DB_HOST: "aegis-spoke-prod-db.cepmyey24yl0.us-east-1.rds.amazonaws.com"

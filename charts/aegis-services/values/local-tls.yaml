@@ -9,8 +9,27 @@
 #     --namespace aegis-system --create-namespace
 
 platformApi:
+  ingress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPCS"
+      nginx.ingress.kubernetes.io/proxy-ssl-secret: "aegis-system/aegis-services-platform-api-tls"
+      nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+      nginx.ingress.kubernetes.io/proxy-ssl-server-name: "platform-api-grpc.localtest.me"
+    tls:
+      - secretName: aegis-services-platform-api-tls
+        hosts:
+          - platform-api-grpc.localtest.me
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
   tls:
     enabled: true
+    serveGrpc: true
     # Self-signed cert for local testing
     # Generate with:
     #   openssl req -x509 -newkey rsa:2048 -nodes \
@@ -21,26 +40,35 @@ platformApi:
     #     -addext "subjectAltName=DNS:localhost,DNS:*.aegis-system.svc.cluster.local,IP:127.0.0.1"
     cert: |
       -----BEGIN CERTIFICATE-----
-      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
+      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
+      iK1RUL0578U0BmfF94aCTw==
       -----END CERTIFICATE-----
     key: |
       -----REDACTED-PRIVATE-KEY-----
+  env:
+    AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
 
 proxy:
+  ingress:
+    enabled: true
   clientCerts:
     enabled: false
     sanSuffixes: []
@@ -48,22 +76,26 @@ proxy:
     enabled: true
     cert: |
       -----BEGIN CERTIFICATE-----
-      MIIC5DCCAcygAwIBAgIJAJgdmEGvpB/wMA0GCSqGSIb3DQEBCwUAMB0xGzAZBgNV
-      BAMMEnByb3h5LmxvY2FsdGVzdC5tZTAeFw0yNTEwMTAxOTQyMzBaFw0yNjEwMTAx
-      OTQyMzBaMB0xGzAZBgNVBAMMEnByb3h5LmxvY2FsdGVzdC5tZTCCASIwDQYJKoZI
-      hvcNAQEBBQADggEPADCCAQoCggEBAKaEMplNECu5mSrWXZ7Gyi6/NeOiogrVIqNa
-      Con8j32jA5Zq+U2UOnpmSRb1Mmr+6UsCft+AO/pR0jAZFWgM47mNN9nOePkqjPHa
-      ZJ6ZvYlsZG8BZghhWIcSYm4RiXkKtWxJAlHkQ0qc7UQwHEmu85LyMHaxz57bGm6O
-      9PhnXyZIUr/Q61UOv2LZVrXWgaQMAXnpA+DTOl+kfbRcMel7U2vLfoC0c0OIEbDu
-      vUifXkHautdOQcisi9XDF9sQVo6Vmy6Cs9S4erRqI9rVT67a1nYAQD2SIyssSOu2
-      yXhdqsv0iEJPSR9IpF+ycRKqmJFcI4DbP6O//jKCyqBrr9XJCMUCAwEAAaMnMCUw
-      IwYDVR0RBBwwGoIScHJveHkubG9jYWx0ZXN0Lm1lhwR/AAABMA0GCSqGSIb3DQEB
-      CwUAA4IBAQCZB1PMwI6DhTZUpxgbOilfvUzrL5MG8eEEhVbp5Fthrxw41enF/lQK
-      ZGt4LAqhChC2xy+VgOk3sRcZOyDBnflKEJDI9oxmsm9BPWnRKd6nRT9RGEHtpUU8
-      Kl4sfNtNUkENvHW+BRa6fE7q9+AozlTo/jxfu044H7/+mzMhHCvYnuwSs7houJNT
-      +3q6JShMnhyhvlZtAZfS23udRXUwte24uk95zj7eIwrGVV/27vCNX0iOm4Fxkw1I
-      lPQshwUFPaS3R0OB8z9+HO05vlyCa9x2Ez79vphm1WuGpQgPNhQHAromqrcLMZl9
-      nM6a7WsJunpHVzNHbEdsB6vVYigyYIsL
+      MIIDnDCCAoSgAwIBAgIUd8yoPh0wZ2g5qZf64iCeKFPutTswDQYJKoZIhvcNAQEL
+      BQAwPTESMBAGA1UECgwJQWVnaXMgRGV2MScwJQYDVQQDDB5wbGF0Zm9ybS1hcGkt
+      Z3JwYy5sb2NhbHRlc3QubWUwHhcNMjUxMDEyMDkxODA4WhcNMjYxMDEyMDkxODA4
+      WjA9MRIwEAYDVQQKDAlBZWdpcyBEZXYxJzAlBgNVBAMMHnBsYXRmb3JtLWFwaS1n
+      cnBjLmxvY2FsdGVzdC5tZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB
+      AM+5CGBIwyYzdIy5TBwl+wxEoS790U0sQ8t+mZFZnhDikYdjSQPWqS4xnxS4b+vi
+      q+NSuJF91EnQkROb2KMXzeONa9PGvirQBdOyLWMSuD/iK3w/wei8hpNLLYhUyRFT
+      65uic69L75Rba9oESAVDSllJpmo6anVwe36rfxvnOJO5N1be1EQKj/FWWYvuZkJ8
+      +7C+zdqgzDDmMNuYa/9Y8DeMses7WzT1Mdx56x9lnP+prMoOvsewlXOA3vSMYDXC
+      lxadllgJ9pGtdo8WNl6QVYtEwBvidKTHK23XF3roKzKnVqzbWbalg3QzpevTzEix
+      smMX/Hkg1mhDAeV8qysk300CAwEAAaOBkzCBkDAdBgNVHQ4EFgQU1FHLl6pD+lm4
+      H02kVKcmqGN+L5YwHwYDVR0jBBgwFoAU1FHLl6pD+lm4H02kVKcmqGN+L5YwDwYD
+      VR0TAQH/BAUwAwEB/zA9BgNVHREENjA0gh5wbGF0Zm9ybS1hcGktZ3JwYy5sb2Nh
+      bHRlc3QubWWCEnByb3h5LmxvY2FsdGVzdC5tZTANBgkqhkiG9w0BAQsFAAOCAQEA
+      l/QgR76fkm0BJ844UVYOiYDWS7YAqT9JFrnmaw6fZLbC+Q+OcTGeEmEXmgcHkGok
+      KKKuww4B6PF8Q6cGZHDfU0LTHHiApzsbruZ2kpOsGLGUVC82vBWnL2uCHPsmYf84
+      SA2+v4Vii+sACGjLnPP5QqDqyvaxHiAbxzTnB3cWdYcjFKkuyTjzmpoV63RkBFLn
+      HTMz/zljfqFBu/5ovzbwPv3LprH4uhnDu1d7GAFojK4DdA2cBK520A9DMhHX6LI/
+      SPSf0O34yXfy/XiNcDfGgKNzZrzwqivx7SkHnyllfGNqtjVWD7JzmdTNSYo71/+s
+      iK1RUL0578U0BmfF94aCTw==
       -----END CERTIFICATE-----
     key: |
       -----REDACTED-PRIVATE-KEY-----

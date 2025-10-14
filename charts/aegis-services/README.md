@@ -14,16 +14,77 @@ This chart provides a streamlined, configurable deployment process for:
 
 For local development with minikube, kind, or Docker Desktop:
 
-```bash
-# Install with local configuration
-helm install aegis-services ./charts/aegis-services \
-  -f ./charts/aegis-services/values/common.yaml \
-  -f ./charts/aegis-services/values/local.yaml
+1. Fetch dependencies (installs the bundled ingress-nginx chart):
+   ```bash
+   helm dependency update charts/aegis-services
+   ```
+2. Deploy the chart with the local values file:
 
-# Access services (with ingress controller)
-curl http://platform-api.localtest.me:8080/healthz
-curl http://proxy.localtest.me/proxy/
+```bash
+helm upgrade --install aegis-services ./charts/aegis-services \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/local.yaml \
+  --namespace aegis-system --create-namespace
+
+# or simply:
+make deploy-local
 ```
+
+This configuration deploys the ingress controller and exposes the services via hostnames (leveraging `*.localtest.me`, which always resolves to `127.0.0.1`):
+
+| Service        | Hostname                          | Protocol | Notes                                  |
+| -------------- | --------------------------------- | -------- | -------------------------------------- |
+| Platform API   | `platform-api-grpc.localtest.me`  | gRPC     | Use port `80`; TLS optional via overlay |
+| Proxy          | `proxy.localtest.me`              | HTTP     | Upgrades to HTTPS when TLS overlay is applied |
+
+Example verification commands (requires [`grpcurl`](https://github.com/fullstorydev/grpcurl)):
+
+```bash
+grpcurl -plaintext \
+  -H "x-aegis-user: dev-user@example.com" \
+  -H "x-aegis-namespace: aegis-workloads-local" \
+  -d '{"project_id":"p-dev"}' \
+  platform-api-grpc.localtest.me:80 aegis.v1.AegisPlatform/ListWorkloads
+
+curl http://proxy.localtest.me/healthz || true
+```
+
+To connect from the VS Code extension, update the settings to:
+
+```json
+"aegisRemote.platform.grpcEndpoint": "platform-api-grpc.localtest.me:80",
+"aegisRemote.platform.namespace": "aegis-workloads-local",
+"aegisRemote.platform.projectId": "p-dev",
+"aegisRemote.security.rejectUnauthorized": false
+"aegisRemote.security.caPath": "~/aegis-platform-api-ca.crt"
+
+Make sure the certificate you point to matches the ingress certificate bundled in the chart. If you prefer not to verify the certificate, leave `rejectUnauthorized` set to `false` and omit `caPath`.
+```
+
+> **Tip:** The extension no longer requires `kubectl port-forward`; it connects directly to the ingress hostnames.
+
+#### Enabling TLS locally
+
+If you want to test HTTPS termination, the simplest path is:
+
+```bash
+make deploy-local-tls
+```
+
+This layers in the TLS overlay, refreshes `~/aegis-platform-api-ca.crt` from the ingress secret, and prints reminders to trust the cert and launch VS Code with `NODE_EXTRA_CA_CERTS` set. After each redeploy:
+
+```bash
+sudo security add-trust -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  ~/aegis-platform-api-ca.crt
+
+NODE_EXTRA_CA_CERTS=~/aegis-platform-api-ca.crt \
+  /Applications/Visual\ Studio\ Code.app/Contents/MacOS/Electron \
+  --enable-proposed-api aegis.aegis-remote \
+  ~/code/sovran
+```
+
+> Tip: wrap the launch command in a small script so the env var is always present.
 
 ### Cloud Deployment
 

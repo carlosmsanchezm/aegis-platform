@@ -24,7 +24,8 @@ PF_PLATFORM_GRPC_PORT ?= 10081
 PF_PROXY_HTTP_PORT ?= 10085
 
 .PHONY: all proto tidy build test verify run-api run-operator stop \
-	setup-local deploy-local port-forward dev-backstage clean-local
+	setup-local deploy-local deploy-local-tls port-forward \
+	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local
 
 all: proto tidy build
 
@@ -100,7 +101,9 @@ setup-local:
 	@kubectl config use-context docker-desktop
 
 deploy-local: setup-local
-	@echo "Deploying Aegis services locally..."
+	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
+	@helm dependency update charts/aegis-services >/dev/null
+	@echo "Deploying Aegis services locally (no TLS)..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
@@ -109,6 +112,40 @@ deploy-local: setup-local
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
 	  --namespace aegis-system --create-namespace
+	@echo "✅ Deployed local stack without TLS"
+	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"
+	@echo "   Proxy: http://proxy.localtest.me"
+
+deploy-local-tls: setup-local
+	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
+	@helm dependency update charts/aegis-services >/dev/null
+	@echo "Deploying Aegis services locally with TLS..."
+	@helm upgrade --install aegis-services charts/aegis-services \
+	  -f charts/aegis-services/values/common.yaml \
+	  -f charts/aegis-services/values/local.yaml \
+	  -f charts/aegis-services/values/local-tls.yaml \
+	  --namespace aegis-system --create-namespace
+	@helm upgrade --install aegis-spoke charts/aegis-spoke \
+	  -f charts/aegis-spoke/values.yaml \
+	  -f charts/aegis-spoke/values-local.yaml \
+	  -f charts/aegis-spoke/values-local-tls.yaml \
+	  --namespace aegis-system --create-namespace
+	@echo "Syncing platform API certificate to $(HOME)/aegis-platform-api-ca.crt ..."
+	@kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\\.crt}" | base64 --decode > "$(HOME)/aegis-platform-api-ca.crt"
+	@chmod 0644 "$(HOME)/aegis-platform-api-ca.crt"
+	@echo "   CA bundle refreshed."
+	@echo "   To trust it system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $(HOME)/aegis-platform-api-ca.crt"
+	@echo "   Launch VS Code with TLS trust:"
+	@echo "     NODE_EXTRA_CA_CERTS=$(HOME)/aegis-platform-api-ca.crt \\"
+	@echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $(PWD)"
+	@echo "✅ Deployed with TLS using self-signed certificates"
+	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"
+	@echo "   Proxy: https://proxy.localtest.me"
+	@echo ""
+	@echo "   For E2E tests with TLS:"
+	@echo "   export GRPC_TLS=1"
+	@echo "   export GRPC_TLS_SKIP_VERIFY=1  # Self-signed certs"
+	@echo "   ./scripts/e2e-platform-api.sh"
 
 port-forward:
 	@echo "Stopping any existing port-forwards..."
@@ -122,8 +159,19 @@ port-forward:
 	@echo "Port-forwarding started. Platform API on $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT), proxy on $(PF_PROXY_HTTP_PORT). Use 'pkill -f \"kubectl port-forward\"' to stop."
 
 dev-backstage:
-	@echo "Starting Backstage development server..."
+	@echo "Starting Backstage development server (local mode)..."
+	@echo "   Backend: http://localhost:8080 (port-forward required)"
 	@cd aegis-platform && yarn dev
+
+dev-backstage-cloud:
+	@echo "Starting Backstage development server (cloud mode)..."
+	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@cd aegis-platform && yarn dev:cloud
+
+dev-backstage-cloud-tls:
+	@echo "Starting Backstage development server (cloud TLS mode)..."
+	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@cd aegis-platform && yarn dev:cloud-tls
 
 clean-local:
 	@echo "Uninstalling Aegis services..."

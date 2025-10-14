@@ -33,7 +33,6 @@ func TestEnsureDefaultPorts(t *testing.T) {
 
 func TestMergeEnv(t *testing.T) {
 	defaults := map[string]string{
-		EnvVSCodeCommit:   "commit-a",
 		EnvVSCodeQuality:  "stable",
 		EnvPasswordAccess: DefaultPasswordAccess,
 		"FOO":             "bar",
@@ -47,9 +46,6 @@ func TestMergeEnv(t *testing.T) {
 	merged := MergeEnv(user, defaults)
 	if merged["FOO"] != "baz" {
 		t.Fatalf("expected user value to win, got %q", merged["FOO"])
-	}
-	if merged[EnvVSCodeCommit] != "commit-a" {
-		t.Fatalf("expected default commit, got %q", merged[EnvVSCodeCommit])
 	}
 	if _, ok := merged["EMPTY_OVERRIDE"]; ok {
 		t.Fatalf("expected empty override to be dropped, got %v", merged)

@@ -23,38 +23,33 @@ kubectl config use-context docker-desktop
 kubectl get nodes   # should show docker-desktop
 ```
 
-### Deploy the hub (platform-api + proxy)
+### Deploy with Make
 ```bash
-helm upgrade --install aegis-services charts/aegis-services \
-  -f charts/aegis-services/values/common.yaml \
-  -f charts/aegis-services/values/local.yaml \
-  --namespace aegis-system --create-namespace
+make deploy-local
 ```
 
-### Deploy the spoke (k8s-agent)
-```bash
-helm upgrade --install aegis-spoke charts/aegis-spoke \
-  -f charts/aegis-spoke/values.yaml \
-  -f charts/aegis-spoke/values-local.yaml \
-  --namespace aegis-system
-```
+### Access services via localtest.me (no port-forward needed)
 
-> **Re-deploying?** Run `helm uninstall aegis-services aegis-spoke -n aegis-system` first.
+Both make targets configure ingress-nginx with hostnames that resolve to `127.0.0.1`, so you can reach the services directly:
 
-### Port-forward for local access
+| Service        | Hostname                          | Protocol |
+|----------------|-----------------------------------|----------|
+| Platform API   | `platform-api-grpc.localtest.me`  | gRPC     |
+| Proxy          | `proxy.localtest.me`              | HTTPS/WS |
+
+If you still prefer a tunnel, you can port-forward manually:
+
 ```bash
 # Platform API on http://localhost:10080 (HTTP) and :10081 (gRPC)
-PF_PLATFORM_HTTP_PORT=10080 PF_PLATFORM_GRPC_PORT=10081 \ 
+PF_PLATFORM_HTTP_PORT=10080 PF_PLATFORM_GRPC_PORT=10081 \
 kubectl -n aegis-system port-forward svc/aegis-services-platform-api $PF_PLATFORM_HTTP_PORT:8080 $PF_PLATFORM_GRPC_PORT:8081
 
 # Proxy tunnel on http://localhost:10085/proxy/
-PF_PROXY_HTTP_PORT=10085 \ 
+PF_PROXY_HTTP_PORT=10085 \
 kubectl -n aegis-system port-forward svc/aegis-services-proxy $PF_PROXY_HTTP_PORT:8085
 
 # Stop existing forwards if needed
 pkill -f "kubectl port-forward"  # optional cleanup
-
-> Tip: override `PF_PLATFORM_HTTP_PORT`, `PF_PLATFORM_GRPC_PORT`, or `PF_PROXY_HTTP_PORT` if those defaults are busy on your workstation.
 ```
 
 ### Start Backstage against local services
@@ -62,6 +57,26 @@ pkill -f "kubectl port-forward"  # optional cleanup
 cd aegis-platform
 yarn dev          # copies app-config.local-dev.yaml
 ```
+
+### Enable TLS locally (auto-refreshes CA)
+```bash
+make deploy-local-tls
+```
+This command also saves the latest ingress certificate to `~/aegis-platform-api-ca.crt`. After it finishes:
+
+```bash
+# trust the new CA
+sudo security add-trust -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  ~/aegis-platform-api-ca.crt
+
+# launch VS Code with the CA
+NODE_EXTRA_CA_CERTS=~/aegis-platform-api-ca.crt \
+  /Applications/Visual\ Studio\ Code.app/Contents/MacOS/Electron \
+  --enable-proposed-api aegis.aegis-remote \
+  ~/code/sovran
+```
+> Tip: wrap the launch command in a script so the env var is always present.
 
 ---
 
@@ -155,24 +170,22 @@ Use the same Terraform apply.
 
 ### Generate TLS assets + values
 ```bash
-./generate-helm-values.sh --tls
+./generate-helm-values.sh
 ```
-The prompt behaves the same way as the non-TLS run (`y` to deploy now, `n` to just write the files). This adds:
-- `charts/aegis-services/values-cloud-tls.yaml`
+The prompt behaves the same way as before (`y` to deploy now, `n` to just write the files). TLS is now enforced by default, and the script emits:
 - `tls-overrides.yaml`
 
-### Deploy with TLS overlay (manual path)
+### Deploy with TLS-enabled services (manual path)
 ```bash
 helm upgrade --install aegis-services charts/aegis-services \
   -f charts/aegis-services/values/common.yaml \
   -f charts/aegis-services/values/cloud.yaml \
   -f charts/aegis-services/values-cloud-generated.yaml \
   -f overrides.yaml \
-  -f charts/aegis-services/values-cloud-tls.yaml \
   -f tls-overrides.yaml \
   --namespace aegis-system --create-namespace
 ```
-(Spoke deployment is unchanged unless you also apply `charts/aegis-spoke/values-cloud-tls.yaml` to enforce TLS when dialing the hub.)
+(Apply `charts/aegis-spoke/values-cloud-tls.yaml` alongside the spoke chart so the agent dials the hub over TLS.)
 
 ### Backstage against cloud TLS
 ```bash
@@ -189,8 +202,7 @@ yarn dev:cloud-tls   # copies app-config.cloud-tls.yaml
 | Docker Desktop → EKS | `aws eks update-kubeconfig --region us-east-1 --name aegis-spoke-prod --profile myclaude` |
 | EKS → Docker Desktop | `kubectl config use-context docker-desktop` |
 | Local Backstage | `yarn dev` |
-| Cloud Backstage (HTTP) | `yarn dev:cloud` |
-| Cloud Backstage (TLS) | `yarn dev:cloud-tls` |
+| Cloud Backstage | `yarn dev:cloud-tls` |
 | Remove local stack | `helm uninstall aegis-services aegis-spoke -n aegis-system` |
 
 ---

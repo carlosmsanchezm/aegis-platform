@@ -13,6 +13,7 @@ k8sAgent:
     AEGIS_CLUSTER_ID: "dev-1"
     AEGIS_CP_GRPC: "host.docker.internal:8081"
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
+    AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"
 
     # Geographic metadata for workload placement
     AEGIS_REGION: "us-east-1"  # AWS region where this cluster is deployed (us-east-1, us-west-2, eu-west-1, etc.)
@@ -54,6 +55,10 @@ proxy:
     terminateAtIngress: false
     cert: "" # Provide via --set-file proxy.tls.cert=/path/to/cert or external secret
     key: ""  # Provide via --set-file proxy.tls.key=/path/to/key or external secret
+
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
 
 # RBAC settings for the k8s-agent
 rbac:

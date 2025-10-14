@@ -1,6 +1,6 @@
 import {
-	createPlugin,
-	createRoutableExtension,
+  createPlugin,
+  createRoutableExtension,
 } from '@backstage/core-plugin-api';
 
 import {
@@ -21,9 +21,7 @@ export const AegisPage = aegisPlugin.provide(
   createRoutableExtension({
     name: 'AegisPage',
     component: () =>
-      import('./components/SubmitWorkloadPage').then(
-        m => m.SubmitWorkloadPage,
-      ),
+      import('./components/SubmitWorkloadPage').then(m => m.SubmitWorkloadPage),
     mountPoint: rootRouteRef,
   }),
 );
@@ -32,9 +30,7 @@ export const AegisWorkloadListPage = aegisPlugin.provide(
   createRoutableExtension({
     name: 'AegisWorkloadListPage',
     component: () =>
-      import('./components/WorkloadListPage').then(
-        m => m.WorkloadListPage,
-      ),
+      import('./components/WorkloadListPage').then(m => m.WorkloadListPage),
     mountPoint: workloadsRouteRef,
   }),
 );

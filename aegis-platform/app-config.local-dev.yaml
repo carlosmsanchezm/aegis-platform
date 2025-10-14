@@ -1,9 +1,10 @@
-# Local development configuration - points to local platform-api
+# Local development configuration - points to local platform-api via port-forward
+# Requires: make port-forward (forwards to localhost:10080)
 
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://localhost:8080'
+      target: 'http://localhost:10080'
       changeOrigin: true
       credentials: forward
       allowedHeaders:

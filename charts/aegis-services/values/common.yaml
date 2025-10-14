@@ -1,11 +1,26 @@
 # AEGIS Services Helm Chart Values
 # FedRAMP Moderate Compliance Configuration
 
+# Ingress Controller (ingress-nginx) settings
+ingressController:
+  enabled: false
+
+ingress-nginx:
+  controller:
+    ingressClassResource:
+      name: ingress-nginx
+      default: false
+    ingressClass: ingress-nginx
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Cluster
+    watchIngressWithoutClass: false
+
 # Platform API Configuration
 platformApi:
   image:
     repository: aegis-platform-api
-    tag: latest
+    tag: 8afb9e0-vscode-dynamic
     pullPolicy: IfNotPresent
   
   replicas: 2
@@ -61,6 +76,10 @@ platformApi:
       - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
       - TLS_RSA_WITH_AES_256_GCM_SHA384
       - TLS_RSA_WITH_AES_128_GCM_SHA256
+
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
   
   # AC-6: Least Privilege
   serviceAccount:

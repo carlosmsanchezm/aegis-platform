@@ -67,3 +67,40 @@ app.kubernetes.io/component: platform-api
 {{ include "aegis-services.selectorLabels" . }}
 app.kubernetes.io/component: proxy
 {{- end -}}
+
+{{- define "aegis-services.proxy.tlsIngress" -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "aegis-services.proxy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: "{{ .Release.Namespace }}/{{ include "aegis-services.proxy.tlsSecretName" . }}"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    nginx.ingress.kubernetes.io/proxy-ssl-server-name: "{{ .Values.proxy.publicHost }}"
+    {{- with .Values.proxy.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.proxy.ingress.className | default "ingress-nginx" }}
+  tls:
+    - secretName: {{ include "aegis-services.proxy.tlsSecretName" . }}
+      hosts:
+        - {{ .Values.proxy.publicHost }}
+  rules:
+    - host: {{ .Values.proxy.publicHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "aegis-services.proxy.fullname" . }}
+                port:
+                  number: {{ .Values.proxy.service.port }}
+{{- end -}}

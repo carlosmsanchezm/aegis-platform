@@ -15,6 +15,10 @@ on:
         description: "Preview identifier (defaults to PR number or workflow run id)"
         required: false
   pull_request:
+  push:
+    branches:
+      - "aegis-ci-*"
+      - "aegis-ci/**"
 
 env:
   AWS_REGION: us-east-1

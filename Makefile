@@ -101,6 +101,8 @@ setup-local:
 	@kubectl config use-context docker-desktop
 
 deploy-local: setup-local
+	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
+	@helm dependency update charts/aegis-services >/dev/null
 	@echo "Deploying Aegis services locally (no TLS)..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
@@ -110,8 +112,13 @@ deploy-local: setup-local
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
 	  --namespace aegis-system --create-namespace
+	@echo "✅ Deployed local stack without TLS"
+	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"
+	@echo "   Proxy: http://proxy.localtest.me"
 
 deploy-local-tls: setup-local
+	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
+	@helm dependency update charts/aegis-services >/dev/null
 	@echo "Deploying Aegis services locally with TLS..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
@@ -123,9 +130,17 @@ deploy-local-tls: setup-local
 	  -f charts/aegis-spoke/values-local.yaml \
 	  -f charts/aegis-spoke/values-local-tls.yaml \
 	  --namespace aegis-system --create-namespace
+	@echo "Syncing platform API certificate to $(HOME)/aegis-platform-api-ca.crt ..."
+	@kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\\.crt}" | base64 --decode > "$(HOME)/aegis-platform-api-ca.crt"
+	@chmod 0644 "$(HOME)/aegis-platform-api-ca.crt"
+	@echo "   CA bundle refreshed."
+	@echo "   To trust it system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $(HOME)/aegis-platform-api-ca.crt"
+	@echo "   Launch VS Code with TLS trust:"
+	@echo "     NODE_EXTRA_CA_CERTS=$(HOME)/aegis-platform-api-ca.crt \\"
+	@echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $(PWD)"
 	@echo "✅ Deployed with TLS using self-signed certificates"
-	@echo "   Platform API gRPC: localhost:10081 (with TLS)"
-	@echo "   Proxy: localhost:10085 (with TLS)"
+	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"
+	@echo "   Proxy: https://proxy.localtest.me"
 	@echo ""
 	@echo "   For E2E tests with TLS:"
 	@echo "   export GRPC_TLS=1"

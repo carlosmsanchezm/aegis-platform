@@ -33,7 +33,7 @@ cd terraform
 
 ```bash
 cd terraform
-./generate-helm-values.sh --tls
+./generate-helm-values.sh
 ```
 
 **Configuration**:
@@ -55,34 +55,10 @@ cd terraform
 **What happens**:
 1. Generates TLS certificates with SANs: `platform-api-grpc.aegist.dev`, `proxy.aegist.dev`
 2. Updates `/etc/hosts` with LoadBalancer IPs
-3. Deploys with `values-cloud.yaml` + `values-cloud-tls.yaml`
-4. Sets `AEGIS_PROXY_BASE_URL=wss://proxy.aegist.dev:8080`
-5. Uses proxy image tag `no-client-cert` (server-side TLS only, no mTLS)
-
----
-
-### 3. **Cloud without TLS** (for debugging)
-**Use case**: Cloud deployment but want to avoid TLS complexity
-
-```bash
-cd terraform
-./generate-helm-values.sh
-# Don't use --tls flag
-```
-
-**Configuration**:
-- Platform API: Insecure gRPC on port 8081
-- Proxy: HTTP WebSocket (no TLS)
-- LoadBalancer services
-- No certificates
-
-**VSCode Extension Settings**:
-```json
-{
-  "aegisRemote.platform.grpcEndpoint": "a2359cd286b834952ae64c73e797f6c9-eddab4c24f09b0fd.elb.us-east-1.amazonaws.com:8081",
-  "aegisRemote.security.rejectUnauthorized": false
-}
-```
+3. Deploys with `values-cloud.yaml`
+4. Applies generated TLS overrides for platform-api and proxy secrets
+5. Sets `AEGIS_PROXY_BASE_URL=wss://proxy.aegist.dev:8080`
+6. Uses proxy image tag `no-client-cert` (server-side TLS only, no mTLS)
 
 ---
 
@@ -91,9 +67,7 @@ cd terraform
 ### Always Applied
 - `values-cloud.yaml` - Base cloud configuration (LoadBalancer, resources, replicas)
 - `values-cloud-generated.yaml` - Auto-generated from Terraform (DB, ECR, secrets)
-
-### Conditional (--tls flag)
-- `values-cloud-tls.yaml` - TLS overlay (enables TLS for platform-api and proxy)
+- `tls-overrides.yaml` - Generated certificate material for platform-api and proxy
 
 ### Important Settings
 
@@ -104,8 +78,7 @@ cd terraform
 #### Platform API Environment
 - `AEGIS_PROXY_BASE_URL` - Must match deployment mode:
   - Local: `ws://aegis-proxy.aegis-system.svc.cluster.local:8080`
-  - Cloud no-TLS: `ws://${PROXY_LB}:8080`
-  - Cloud TLS: `wss://proxy.aegist.dev:8080`
+  - Cloud: `wss://proxy.aegist.dev:8080`
 
 ---
 
@@ -118,7 +91,7 @@ cd terraform
 terraform destroy
 
 # Deploy locally
-./generate-helm-values.sh  # without --tls
+./generate-helm-values.sh
 ```
 
 ### From Local to Cloud
@@ -128,14 +101,14 @@ cd terraform
 terraform apply
 
 # Deploy with TLS
-./generate-helm-values.sh --tls
+./generate-helm-values.sh
 ```
 
 ### Updating TLS Certificates
 If LoadBalancer IPs change, rerun:
 ```bash
 cd terraform
-./generate-helm-values.sh --tls
+./generate-helm-values.sh
 ```
 
 This will:
@@ -174,10 +147,10 @@ This will:
 ## Automation
 
 The `generate-helm-values.sh` script automatically:
-1. Detects deployment mode (local vs cloud, TLS vs no-TLS)
-2. Generates appropriate certificates (TLS mode only)
-3. Updates /etc/hosts with current LoadBalancer IPs (TLS mode only)
-4. Updates Route53 DNS records (TLS mode only)
+1. Detects deployment mode (local vs cloud)
+2. Generates certificates for cloud deployments
+3. Updates /etc/hosts with current LoadBalancer IPs
+4. Updates Route53 DNS records when available
 5. Deploys with correct Helm values
 6. Validates deployment and shows connection instructions
 

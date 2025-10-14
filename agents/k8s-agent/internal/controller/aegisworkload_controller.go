@@ -905,11 +905,10 @@ func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) 
 
 func workspaceDefaultCommand(image string) string {
 	return fmt.Sprintf(`echo "[AEGIS] start workload=$AEGIS_WORKLOAD_ID pod=$POD_NAME ns=$POD_NAMESPACE node=$NODE_NAME";
-	date;
-	echo "[AEGIS] image=%s";
-	echo "[AEGIS] running task...";
-	sleep 3;
-	echo "[AEGIS] done";`, image)
+date;
+echo "[AEGIS] image=%s";
+echo "[AEGIS] launching VS Code workspace...";
+exec /init`, image)
 }
 
 func deriveJobFailureMessage(job *batchv1.Job) string {

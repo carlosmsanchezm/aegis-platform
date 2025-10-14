@@ -24,6 +24,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- $serveGrpc := true }}
+      {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
+      {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}
+      {{- end }}
       {{- with .Values.platformApi.serviceAccountName }}
       serviceAccountName: {{ . }}
       {{- end }}
@@ -79,7 +83,7 @@ spec:
                   name: {{ include "aegis-services.proxy.secretName" . }}
                   key: jwt-secret
             {{- end }}
-            {{- if .Values.platformApi.tls.enabled }}
+            {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: AEGIS_GRPC_TLS_CERT
               value: "/etc/aegis-platform-api/tls/tls.crt"
             - name: AEGIS_GRPC_TLS_KEY
@@ -89,9 +93,9 @@ spec:
               value: "/etc/aegis-platform-api/tls/ca.crt"
             {{- end }}
             {{- end }}
-          {{- if or .Values.platformApi.volumeMounts .Values.platformApi.tls.enabled }}
+          {{- if or .Values.platformApi.volumeMounts (and .Values.platformApi.tls.enabled $serveGrpc) }}
           volumeMounts:
-            {{- if .Values.platformApi.tls.enabled }}
+            {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: platform-api-tls
               mountPath: /etc/aegis-platform-api/tls
               readOnly: true
@@ -116,9 +120,9 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.platformApi.volumes .Values.platformApi.tls.enabled }}
+      {{- if or .Values.platformApi.volumes (and .Values.platformApi.tls.enabled $serveGrpc) }}
       volumes:
-        {{- if .Values.platformApi.tls.enabled }}
+        {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
         - name: platform-api-tls
           secret:
             secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}

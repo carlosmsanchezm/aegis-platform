@@ -4,7 +4,7 @@ description: A unified Helm chart for deploying Aegis platform-api and proxy ser
 type: application
 version: 0.1.0
 appVersion: "latest"
-home: "https://github.com/yourorg/aegis"
+home: "https://github.com/carlosmsanchezm/aegis"
 maintainers:
   - name: Aegis Team
     email: team@yourorg.dev
@@ -15,4 +15,9 @@ keywords:
   - microservices
   - kubernetes
 sources:
-  - https://github.com/yourorg/aegis
+  - https://github.com/carlosmsanchezm/aegis
+dependencies:
+  - name: ingress-nginx
+    version: 4.11.1
+    repository: https://kubernetes.github.io/ingress-nginx
+    condition: ingressController.enabled

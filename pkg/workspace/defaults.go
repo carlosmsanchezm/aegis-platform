@@ -13,8 +13,8 @@ const (
 	EnvUserName       = "USER_NAME"
 	EnvUserPassword   = "USER_PASSWORD"
 
-	DefaultVSCodeCommit   = "385651c938df8a906869babee516bffd0ddb9829"
-	DefaultVSCodeQuality  = "stable"
+	// DefaultVSCodeQuality is provided for environments that explicitly pin VS Code builds.
+	DefaultVSCodeQuality = "stable"
 	DefaultPUID           = "1000"
 	DefaultPGID           = "1000"
 	DefaultPasswordAccess = "true"
@@ -27,7 +27,6 @@ const (
 // environment expected by remote workspaces.
 func DefaultEnv() map[string]string {
 	return map[string]string{
-		EnvVSCodeCommit:   DefaultVSCodeCommit,
 		EnvVSCodeQuality:  DefaultVSCodeQuality,
 		EnvPUID:           DefaultPUID,
 		EnvPGID:           DefaultPGID,

@@ -48,6 +48,10 @@ spec:
               value: ":8080"
             - name: AEGIS_PROXY_ALLOWED_SUFFIX
               value: ".svc.cluster.local"
+{{- if and .Values.proxy.clientCerts .Values.proxy.clientCerts.enabled (gt (len .Values.proxy.clientCerts.sanSuffixes) 0) }}
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
+{{- end }}
 {{- if not .Values.proxy.tls.terminateAtIngress }}
             - name: AEGIS_PROXY_TLS_CERT
               value: "/etc/aegis-proxy/tls.crt"

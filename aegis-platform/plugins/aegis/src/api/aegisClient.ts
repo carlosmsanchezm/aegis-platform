@@ -9,7 +9,10 @@ const base64UrlDecode = (input: string): string => {
   if (typeof window !== 'undefined' && typeof window.atob === 'function') {
     return window.atob(normalized);
   }
-  if (typeof globalThis !== 'undefined' && typeof (globalThis as any).atob === 'function') {
+  if (
+    typeof globalThis !== 'undefined' &&
+    typeof (globalThis as any).atob === 'function'
+  ) {
     return (globalThis as any).atob(normalized);
   }
   if (typeof Buffer !== 'undefined') {
@@ -86,7 +89,9 @@ const postJson = async <TReq extends object, TRes>(
 ): Promise<TRes> => {
   const url = await buildProxyUrl(discoveryApi, method);
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
 
   let identityToken: string | undefined;
   let userEntityRef: string | undefined;
@@ -308,7 +313,9 @@ export type KubernetesLocation = {
   name: string;
 };
 
-export const parseKubernetesUrl = (url?: string): KubernetesLocation | undefined => {
+export const parseKubernetesUrl = (
+  url?: string,
+): KubernetesLocation | undefined => {
   if (!url || !url.startsWith('k8s://')) {
     return undefined;
   }
@@ -321,7 +328,9 @@ export const parseKubernetesUrl = (url?: string): KubernetesLocation | undefined
   return { namespace, kind, name: rest.join('/') };
 };
 
-export const buildKubectlDescribeCommand = (loc?: KubernetesLocation): string => {
+export const buildKubectlDescribeCommand = (
+  loc?: KubernetesLocation,
+): string => {
   if (!loc) {
     return '';
   }

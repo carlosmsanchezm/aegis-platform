@@ -27,7 +27,7 @@ if [[ "$TLS" == "1" ]]; then
     GRPC_ARGS+=(-authority "$GRPC_TLS_SERVER_NAME")
   fi
   if [[ "${GRPC_TLS_SKIP_VERIFY:-0}" == "1" ]]; then
-    GRPC_ARGS+=(-skip-verify)
+    GRPC_ARGS+=(-insecure)
   fi
 else
   GRPC_ARGS+=(-plaintext)

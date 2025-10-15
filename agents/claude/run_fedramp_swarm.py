@@ -807,7 +807,7 @@ async def run_implementer(plan: Plan, summary: str, targets: List[str], edits: L
 
     sanitized: Dict[str, str] = {}
     for path, content in proposed.items():
-        sanitized[path] = content.replace("`", "\\u0060")
+        sanitized[path] = content
     proposed = sanitized
     changed, diffs = compute_diffs(originals, proposed)
     if not changed:
@@ -818,7 +818,7 @@ async def run_implementer(plan: Plan, summary: str, targets: List[str], edits: L
             raise RuntimeError("Implementer retry returned no recognized targets")
         sanitized_retry: Dict[str, str] = {}
         for path, content in proposed.items():
-            sanitized_retry[path] = content.replace("`", "\\u0060")
+            sanitized_retry[path] = content
         proposed = sanitized_retry
         changed, diffs = compute_diffs(originals, proposed)
         if not changed:
@@ -869,7 +869,7 @@ async def run_implementer_chunked(
         files_map = await ask_json(prompt, implementer_options(plan.__dict__))
         if not isinstance(files_map, dict) or path not in files_map:
             raise RuntimeError(f"Implementer (per-file) did not return content for {path}")
-        new_content = str(files_map[path]).replace("`", "\\u0060")
+        new_content = str(files_map[path])
         proposed[path] = new_content
         changed, file_diff = compute_diffs(originals, {path: new_content})
         if not changed:
@@ -879,7 +879,7 @@ async def run_implementer_chunked(
                   "Introduce the minimal safe policy enhancement to create a concrete delta."
             )
             files_map = await ask_json(retry_prompt, implementer_options(plan.__dict__))
-            new_content = str(files_map[path]).replace("`", "\\u0060")
+            new_content = str(files_map[path])
             proposed[path] = new_content
             changed, file_diff = compute_diffs(originals, {path: new_content})
             if not changed:

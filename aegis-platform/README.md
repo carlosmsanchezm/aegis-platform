@@ -5,6 +5,7 @@ Backstage-based frontend for the Aegis platform.
 ## Quick Start
 
 ### Local Development
+
 ```bash
 # From repository root
 make deploy-local && make port-forward && make dev-backstage
@@ -12,6 +13,7 @@ make deploy-local && make port-forward && make dev-backstage
 ```
 
 ### Cloud Development
+
 ```bash
 make dev-backstage-cloud
 # Access at http://localhost:3000
@@ -19,11 +21,11 @@ make dev-backstage-cloud
 
 ## Configuration Modes
 
-| Command | Backend | Port-Forward? |
-|---------|---------|---------------|
-| `make dev-backstage` | localhost:10080 | Yes ✅ |
-| `make dev-backstage-cloud` | platform-api.aegist.dev:8080 | No ❌ |
-| `make dev-backstage-cloud-tls` | platform-api.aegist.dev:8080 (TLS) | No ❌ |
+| Command                        | Backend                            | Port-Forward? |
+| ------------------------------ | ---------------------------------- | ------------- |
+| `make dev-backstage`           | localhost:10080                    | Yes ✅        |
+| `make dev-backstage-cloud`     | platform-api.aegist.dev:8080       | No ❌         |
+| `make dev-backstage-cloud-tls` | platform-api.aegist.dev:8080 (TLS) | No ❌         |
 
 ## Config Files
 
@@ -35,6 +37,7 @@ make dev-backstage-cloud
 ## Workflow
 
 **Local:**
+
 ```bash
 # Terminal 1
 make deploy-local
@@ -45,6 +48,7 @@ make dev-backstage
 ```
 
 **Cloud:**
+
 ```bash
 make dev-backstage-cloud
 ```

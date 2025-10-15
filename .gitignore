@@ -52,13 +52,10 @@ coverage/
 
 # Misc frontend artifacts
 *.tsbuildinfo
-agents/strands
-agents/k8s-agent/
 docs
 out
 .aegis
 policy
-scripts
 third_party
 .terraform/
 .terraform.lock.hcl
@@ -67,8 +64,6 @@ terraform.tfstate.backup
 plans/
 backups/
 CREDENTIALS-CHEATSHEET.md
-agents/swarm
-agents/tools
 agents/__init__.py
 agents/__pycache__
 

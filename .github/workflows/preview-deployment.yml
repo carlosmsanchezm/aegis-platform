@@ -227,10 +227,10 @@ jobs:
         run: |
           set -euo pipefail
           cd terraform
-          terraform init -backend-config=backend.hcl
-          TF_WS="$TF_WORKSPACE"
+          TF_WS="${TF_WORKSPACE}"
           unset TF_WORKSPACE
-          terraform workspace select "$TF_WS" || terraform workspace new "$TF_WS"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
           terraform apply -auto-approve
 
       - name: Deploy control plane via Helm
@@ -443,11 +443,11 @@ jobs:
         run: |
           set -euo pipefail
           cd terraform
-          terraform init -backend-config=backend.hcl
-          TF_WS="$TF_WORKSPACE"
+          TF_WS="${TF_WORKSPACE}"
           unset TF_WORKSPACE
-          if terraform workspace list | grep -q "$TF_WS"; then
-            terraform workspace select "$TF_WS"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          if terraform state pull >/dev/null 2>&1; then
             KUBECTL_CMD=$(terraform output -raw kubectl_config_command || true)
             if [ -n "$KUBECTL_CMD" ]; then
               eval "$KUBECTL_CMD"
@@ -456,8 +456,6 @@ jobs:
               kubectl delete namespace "$PREVIEW_NAMESPACE" --ignore-not-found || true
             fi
             terraform destroy -auto-approve || echo "Terraform destroy failed; manual cleanup may be required"
-            terraform workspace select default
-            terraform workspace delete "$TF_WS" || true
           else
-            echo "Workspace $TF_WS not found; skipping destroy"
+            echo "Terraform state for ${TF_WS} not found; skipping destroy"
           fi

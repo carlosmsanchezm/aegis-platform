@@ -56,7 +56,6 @@ agents/strands
 agents/k8s-agent/
 docs
 out
-servers
 .aegis
 policy
 scripts
@@ -76,4 +75,3 @@ agents/__pycache__
 # Helm auto-generated values files
 charts/aegis-services/values-cloud-generated.yaml
 charts/aegis-spoke/values-cloud-generated.yaml
-

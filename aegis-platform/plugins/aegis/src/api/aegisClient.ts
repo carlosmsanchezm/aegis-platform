@@ -27,6 +27,8 @@ export type WorkspaceSpec = {
   command?: string[];
   interactive?: boolean;
   ports?: number[];
+  env?: Record<string, string>;
+  maxDurationSeconds?: number;
 };
 
 export type TrainingSpec = {
@@ -61,14 +63,98 @@ export type ConnectionSession = {
 };
 
 export type SubmitWorkspaceRequest = {
-  id: string;
+  id?: string;
   projectId: string;
   queue?: string;
-  workspace: WorkspaceSpec;
+  workspace: {
+    flavor?: string;
+    image?: string;
+    command?: string | string[];
+    interactive?: boolean;
+    ports?: number[];
+    env?: Record<string, string>;
+    maxDurationSeconds?: number;
+  };
 };
 
 export type ListWorkloadsResponse = {
   items: WorkloadDTO[];
+};
+
+export const DEFAULT_SSH_PORT = 22;
+export const DEFAULT_VSCODE_PORT = 11111;
+
+export const WORKSPACE_DEFAULT_ENV: Record<string, string> = {
+  VSCODE_QUALITY: 'stable',
+  PUID: '1000',
+  PGID: '1000',
+  PASSWORD_ACCESS: 'true',
+  USER_NAME: 'aegis',
+  USER_PASSWORD: 'aegis123',
+};
+
+const DEFAULT_COMMAND: string[] = ['sh', '-c', 'echo hello'];
+
+const normalizeCommand = (command: string | string[] | undefined): string[] => {
+  if (Array.isArray(command)) {
+    const sanitized = command
+      .map(part => (typeof part === 'string' ? part.trim() : ''))
+      .filter(part => part.length > 0);
+    if (sanitized.length > 0) {
+      return sanitized;
+    }
+  }
+
+  const text = typeof command === 'string' ? command.trim() : '';
+  if (!text) {
+    return [...DEFAULT_COMMAND];
+  }
+  return ['sh', '-c', text];
+};
+
+export const ensureWorkspacePorts = (ports?: number[]): number[] => {
+  const portSet = new Set<number>();
+  (ports ?? []).forEach(port => {
+    if (Number.isFinite(port) && port > 0) {
+      portSet.add(Math.trunc(port));
+    }
+  });
+
+  if (portSet.size === 0) {
+    portSet.add(DEFAULT_SSH_PORT);
+  }
+  portSet.add(DEFAULT_VSCODE_PORT);
+
+  return Array.from(portSet).sort((a, b) => a - b);
+};
+
+export const mergeWorkspaceEnv = (
+  user?: Record<string, string>,
+): Record<string, string> | undefined => {
+  const merged: Record<string, string> = {};
+
+  Object.entries(WORKSPACE_DEFAULT_ENV).forEach(([key, value]) => {
+    if (value) {
+      merged[key] = value;
+    }
+  });
+
+  if (user) {
+    Object.entries(user).forEach(([key, value]) => {
+      const trimmedKey = key?.trim();
+      if (!trimmedKey) {
+        return;
+      }
+      const normalizedValue =
+        typeof value === 'string' ? value.trim() : String(value ?? '');
+      if (!normalizedValue) {
+        return;
+      }
+      merged[trimmedKey] = normalizedValue;
+    });
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
 };
 
 const buildProxyUrl = async (
@@ -256,14 +342,30 @@ export const submitWorkspace = async (
   identityApi: IdentityApi,
   req: SubmitWorkspaceRequest,
 ): Promise<WorkloadDTO> => {
+  const workspaceInput = req.workspace ?? {};
+  const command = normalizeCommand(workspaceInput.command);
+  const ports = ensureWorkspacePorts(workspaceInput.ports);
+  const env = mergeWorkspaceEnv(workspaceInput.env);
+  const maxDuration =
+    typeof workspaceInput.maxDurationSeconds === 'number' &&
+    Number.isFinite(workspaceInput.maxDurationSeconds)
+      ? Math.floor(workspaceInput.maxDurationSeconds)
+      : undefined;
+
   const body = {
     workload: {
-      id: req.id,
+      ...(req.id ? { id: req.id } : {}),
       projectId: req.projectId,
-      queue: req.queue,
+      ...(req.queue ? { queue: req.queue } : {}),
       kind: {
         workspace: {
-          ...req.workspace,
+          flavor: workspaceInput.flavor,
+          image: workspaceInput.image,
+          interactive: true,
+          command,
+          ports,
+          ...(env ? { env } : {}),
+          ...(maxDuration ? { maxDurationSeconds: maxDuration } : {}),
         },
       },
     },

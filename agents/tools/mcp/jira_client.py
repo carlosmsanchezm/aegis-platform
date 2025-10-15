@@ -37,6 +37,11 @@ class Plan:
     requires_migration: bool = False
     labels: List[str] = field(default_factory=list)
     max_loc_delta: int = 800
+    remote_tests_required: bool = True
+    remote_ci_workflow: str = ""
+    remote_ci_inputs: Dict[str, Any] = field(default_factory=dict)
+    remote_ci_branch_prefix: str = "aegis-ci"
+    remote_ci_delete_branch_on_success: bool = True
 
 
 def _jira_client() -> MCPClient:
@@ -454,6 +459,14 @@ def load_plan_from_jira(issue_key: str) -> Plan:
         breaking_change=_detect_breaking(summary, labels),
         requires_migration=_detect_migration(summary, labels),
         labels=labels,
+        remote_tests_required=str(os.environ.get("AEGIS_REMOTE_TESTS_REQUIRED", "true")).lower() == "true",
+        remote_ci_workflow=os.environ.get("AEGIS_REMOTE_CI_WORKFLOW", ""),
+        remote_ci_inputs={},
+        remote_ci_branch_prefix=os.environ.get("AEGIS_REMOTE_CI_BRANCH_PREFIX", "aegis-ci"),
+        remote_ci_delete_branch_on_success=str(
+            os.environ.get("AEGIS_REMOTE_CI_DELETE_BRANCH_ON_SUCCESS", "true")
+        ).lower()
+        != "false",
     )
     return plan
 

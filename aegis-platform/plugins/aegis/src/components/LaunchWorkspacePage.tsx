@@ -21,36 +21,13 @@ import {
   submitWorkspace,
   WorkloadDTO,
 } from '../api/aegisClient';
+import { parseEnvInput, parsePortsInput } from './workspaceFormUtils';
 
 const randomId = () => {
   if (typeof crypto?.randomUUID === 'function') {
     return crypto.randomUUID();
   }
   return `workspace-${Math.random().toString(16).slice(2, 10)}`;
-};
-
-const parsePorts = (value: string): number[] =>
-  value
-    .split(/[,\s]+/)
-    .map(v => v.trim())
-    .filter(Boolean)
-    .map(v => Number.parseInt(v, 10))
-    .filter(v => Number.isFinite(v) && v > 0);
-
-const parseEnv = (value: string): Record<string, string> => {
-  const result: Record<string, string> = {};
-  value
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .forEach(line => {
-      const [key, ...rest] = line.split('=');
-      if (!key) {
-        return;
-      }
-      result[key.trim()] = rest.join('=').trim();
-    });
-  return result;
 };
 
 export const LaunchWorkspacePage: FC = () => {
@@ -92,8 +69,8 @@ export const LaunchWorkspacePage: FC = () => {
       return;
     }
 
-    const ports = parsePorts(form.ports);
-    const env = parseEnv(form.env);
+    const ports = parsePortsInput(form.ports);
+    const env = parseEnvInput(form.env);
 
     const payload: SubmitWorkspaceRequest = {
       id: form.workloadId.trim(),

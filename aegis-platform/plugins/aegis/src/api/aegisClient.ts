@@ -357,16 +357,14 @@ export const submitWorkspace = async (
       ...(req.id ? { id: req.id } : {}),
       projectId: req.projectId,
       ...(req.queue ? { queue: req.queue } : {}),
-      kind: {
-        workspace: {
-          flavor: workspaceInput.flavor,
-          image: workspaceInput.image,
-          interactive: true,
-          command,
-          ports,
-          ...(env ? { env } : {}),
-          ...(maxDuration ? { maxDurationSeconds: maxDuration } : {}),
-        },
+      workspace: {
+        flavor: workspaceInput.flavor,
+        image: workspaceInput.image,
+        interactive: true,
+        command,
+        ports,
+        ...(env ? { env } : {}),
+        ...(maxDuration ? { maxDurationSeconds: maxDuration } : {}),
       },
     },
   };

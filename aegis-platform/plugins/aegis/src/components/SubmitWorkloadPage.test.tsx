@@ -144,18 +144,18 @@ describe('SubmitWorkloadPage', () => {
 
     expect(body.workload.projectId).toBe('p-ui-e2e');
     expect(body.workload.queue).toBe('interactive');
-    expect(body.workload.kind.workspace.interactive).toBe(true);
-    expect(body.workload.kind.workspace.command).toEqual([
+    expect(body.workload.workspace.interactive).toBe(true);
+    expect(body.workload.workspace.command).toEqual([
       'sh',
       '-c',
       'echo from test',
     ]);
-    expect(body.workload.kind.workspace.ports).toEqual(
+    expect(body.workload.workspace.ports).toEqual(
       expect.arrayContaining([22, 11111, 10022]),
     );
-    expect(body.workload.kind.workspace.env.AEGIS_SSH_USER).toBe('dev');
-    expect(body.workload.kind.workspace.env.USER_NAME).toBe('aegis');
-    expect(body.workload.kind.workspace.maxDurationSeconds).toBe(120);
+    expect(body.workload.workspace.env.AEGIS_SSH_USER).toBe('dev');
+    expect(body.workload.workspace.env.USER_NAME).toBe('aegis');
+    expect(body.workload.workspace.maxDurationSeconds).toBe(120);
 
     await screen.findByText(/Workspace created/i);
     await screen.findByRole('button', { name: /view details/i });

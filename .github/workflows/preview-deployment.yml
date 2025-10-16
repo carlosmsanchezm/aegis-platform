@@ -220,6 +220,7 @@ jobs:
       - name: Terraform init & apply
         env:
           TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
           cd terraform
@@ -249,6 +250,7 @@ jobs:
         env:
           HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
 
@@ -436,6 +438,7 @@ jobs:
           PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
           cd terraform

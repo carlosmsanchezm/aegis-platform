@@ -1,6 +1,7 @@
 import {
   createPlugin,
   createRoutableExtension,
+  createSubRouteRef,
 } from '@backstage/core-plugin-api';
 
 import {
@@ -9,6 +10,12 @@ import {
   workloadDetailsRouteRef,
   launchWorkspaceRouteRef,
 } from './routes';
+
+export const createWorkspaceRouteRef = createSubRouteRef({
+  id: 'aegis-create-workspace',
+  parent: rootRouteRef,
+  path: '/workspaces/create',
+});
 
 export const aegisPlugin = createPlugin({
   id: 'aegis',
@@ -54,5 +61,16 @@ export const AegisLaunchWorkspacePage = aegisPlugin.provide(
         m => m.LaunchWorkspacePage,
       ),
     mountPoint: launchWorkspaceRouteRef,
+  }),
+);
+
+export const AegisCreateWorkspacePage = aegisPlugin.provide(
+  createRoutableExtension({
+    name: 'AegisCreateWorkspacePage',
+    component: () =>
+      import('./components/LaunchWorkspacePage').then(
+        m => m.LaunchWorkspacePage,
+      ),
+    mountPoint: createWorkspaceRouteRef,
   }),
 );

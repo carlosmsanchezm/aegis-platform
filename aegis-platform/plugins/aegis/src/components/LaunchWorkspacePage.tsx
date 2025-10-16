@@ -94,7 +94,7 @@ const templateCatalog: TemplateOption[] = [
     workspaceTypes: ['vscode'],
     defaults: {
       flavor: 'cpu-medium',
-      image: 'ghcr.io/aegis/workspace-vscode-python:latest',
+      image: 'carlosmsanchez/aegis-workspace-vscode:latest',
       ports: [22, 11111],
     },
   },

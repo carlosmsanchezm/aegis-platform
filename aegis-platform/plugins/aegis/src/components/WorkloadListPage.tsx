@@ -43,7 +43,7 @@ import {
   parseKubernetesUrl,
   buildKubectlDescribeCommand,
 } from '../api/aegisClient';
-import { createWorkspaceRouteRef } from '../plugin';
+import { createWorkspaceRouteRef } from '../routes';
 
 const statusChip = (status: string) => {
   const mapped = mapDisplayStatus(status);

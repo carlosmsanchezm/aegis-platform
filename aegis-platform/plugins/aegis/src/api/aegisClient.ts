@@ -93,8 +93,6 @@ export const WORKSPACE_DEFAULT_ENV: Record<string, string> = {
   USER_PASSWORD: 'aegis123',
 };
 
-const DEFAULT_COMMAND: string[] = ['sh', '-c', 'echo hello'];
-
 const normalizeCommand = (command: string | string[] | undefined): string[] => {
   if (Array.isArray(command)) {
     const sanitized = command
@@ -107,7 +105,7 @@ const normalizeCommand = (command: string | string[] | undefined): string[] => {
 
   const text = typeof command === 'string' ? command.trim() : '';
   if (!text) {
-    return [...DEFAULT_COMMAND];
+    return [];
   }
   return ['sh', '-c', text];
 };

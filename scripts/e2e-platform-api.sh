@@ -179,15 +179,40 @@ cat "$TMP_LIST" | jq '.'
 grep -q "\"id\": \"$WID\"" "$TMP_LIST" || { echo "workload $WID not returned by ListWorkloads" >&2; exit 1; }
 
 say "StartWorkload"
-grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/StartWorkload <<JSON >/dev/null
+start_attempt=0
+while true; do
+  if grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/StartWorkload <<JSON >/dev/null
 { "id": "$WID", "clusterId": "$CLUSTER_ID" }
 JSON
+  then
+    break
+  fi
+  status=$?
+  if (( start_attempt >= 5 )); then
+    exit "$status"
+  fi
+  start_attempt=$((start_attempt + 1))
+  echo "StartWorkload failed; retrying in 3s (attempt ${start_attempt})" >&2
+  sleep 3
+done
 
 say "GetWorkload"
-GET_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/GetWorkload <<JSON
+get_attempt=0
+while true; do
+  if GET_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/GetWorkload <<JSON
 { "id": "$WID" }
 JSON
-)"
+  )"; then
+    break
+  fi
+  status=$?
+  if (( get_attempt >= 5 )); then
+    exit "$status"
+  fi
+  get_attempt=$((get_attempt + 1))
+  echo "GetWorkload failed; retrying in 3s (attempt ${get_attempt})" >&2
+  sleep 3
+done
 echo "$GET_JSON" | jq '.'
 STATUS="$(echo "$GET_JSON" | jq -r '.status // empty')"
 case "$STATUS" in
@@ -196,15 +221,40 @@ case "$STATUS" in
 esac
 
 say "AckWorkload"
-grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/AckWorkload <<JSON >/dev/null
+ack_attempt=0
+while true; do
+  if grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/AckWorkload <<JSON >/dev/null
 { "id": "$WID", "status": "SUCCEEDED", "url": "k8s://default/job/$WID", "backend": "workspace" }
 JSON
+  then
+    break
+  fi
+  status=$?
+  if (( ack_attempt >= 5 )); then
+    exit "$status"
+  fi
+  ack_attempt=$((ack_attempt + 1))
+  echo "AckWorkload failed; retrying in 3s (attempt ${ack_attempt})" >&2
+  sleep 3
+done
 
 say "Verify terminal state"
-FINAL_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/GetWorkload <<JSON
+final_attempt=0
+while true; do
+  if FINAL_JSON="$(grpcurl "${GRPC_ARGS[@]}" -d @ "$ADDR" aegis.v1.AegisPlatform/GetWorkload <<JSON
 { "id": "$WID" }
 JSON
-)"
+  )"; then
+    break
+  fi
+  status=$?
+  if (( final_attempt >= 5 )); then
+    exit "$status"
+  fi
+  final_attempt=$((final_attempt + 1))
+  echo "GetWorkload (final) failed; retrying in 3s (attempt ${final_attempt})" >&2
+  sleep 3
+done
 echo "$FINAL_JSON" | jq '.'
 [[ "$(echo "$FINAL_JSON" | jq -r '.status')" == "SUCCEEDED" ]] || { echo "final status is not SUCCEEDED" >&2; exit 1; }
 

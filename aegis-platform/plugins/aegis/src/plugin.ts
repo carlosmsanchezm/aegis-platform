@@ -1,7 +1,6 @@
 import {
   createPlugin,
   createRoutableExtension,
-  createSubRouteRef,
 } from '@backstage/core-plugin-api';
 
 import {
@@ -9,13 +8,8 @@ import {
   workloadsRouteRef,
   workloadDetailsRouteRef,
   launchWorkspaceRouteRef,
+  createWorkspaceRouteRef,
 } from './routes';
-
-export const createWorkspaceRouteRef = createSubRouteRef({
-  id: 'aegis-create-workspace',
-  parent: rootRouteRef,
-  path: '/workspaces/create',
-});
 
 export const aegisPlugin = createPlugin({
   id: 'aegis',

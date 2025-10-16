@@ -13,6 +13,34 @@ log() {
   printf '\n[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$1"
 }
 
+wait_for_helm_release() {
+  local release="$1"
+  local namespace="$2"
+  local max_wait=${3:-120}
+  local sleep_interval=${4:-5}
+
+  if ! command -v helm >/dev/null 2>&1; then
+    log "helm not found; skipping wait for release ${release}"
+    return 0
+  fi
+
+  for ((i = 0; i < max_wait; i++)); do
+    if ! status_output=$(helm status "$release" -n "$namespace" 2>&1); then
+      # Release does not exist yet; nothing is currently in progress.
+      return 0
+    fi
+
+    if ! grep -qi "pending" <<<"$status_output"; then
+      return 0
+    fi
+
+    sleep "${sleep_interval}"
+  done
+
+  printf 'Timed out waiting for Helm release %s in %s to finish current operation\n' "$release" "$namespace" >&2
+  return 1
+}
+
 run_test_all_local() {
   local phase="$1"
   shift
@@ -37,6 +65,8 @@ TLS_SKIP_VERIFY="${TLS_SKIP_VERIFY:-1}"
 TLS_CA_FILE="${TLS_CA:-$HOME/aegis-platform-api-ca.crt}"
 
 log "Deploying local stack without TLS"
+wait_for_helm_release "aegis-services" "aegis-system" || exit 1
+wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
 make deploy-local
 
 if (( ${#HTTP_ARGS[@]} )); then
@@ -54,6 +84,8 @@ else
 fi
 
 log "Deploying local stack with TLS"
+wait_for_helm_release "aegis-services" "aegis-system" || exit 1
+wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
 make deploy-local-tls
 
 if [[ ! -s "$TLS_CA_FILE" ]]; then

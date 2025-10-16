@@ -81,6 +81,7 @@ def run_tests(cmd: str = "") -> Dict[str, Any]:
         text=True,
         shell=True,
         capture_output=True,
+        timeout=600,
     )
     return {
         "ok": result.returncode == 0,

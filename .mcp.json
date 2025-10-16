@@ -1,0 +1,49 @@
+{
+  "mcpServers": {
+    "atlassian": {
+      "type": "command",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]
+    },
+    "figma-remote": {
+      "type": "command",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.figma.com/mcp"]
+    },
+    "aws-api": {
+      "type": "command",
+      "command": "uvx",
+      "args": ["awslabs.aws-api-mcp-server@latest"]
+    },
+    "aws-docs": {
+      "type": "command",
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"]
+    },
+    "nist": {
+      "type": "command",
+      "command": "uv",
+      "args": ["run", "--env-file", ".env", "--python", "3.11", "--with", "mcp", "servers/nist_oscal/nist_oscal_server.py"]
+    },
+    "jira-local": {
+      "type": "command",
+      "command": "uv",
+      "args": ["run", "--env-file", ".env", "--python", "3.11", "--with", "mcp", "--with", "httpx", "servers/jira/jira_mcp_server.py"]
+    },
+    "gpt5": {
+      "type": "command",
+      "command": "uv",
+      "args": ["run", "--env-file", ".env", "--python", "3.11", "--with", "mcp", "--with", "openai", "servers/gpt5_pro/gpt5_pro_mcp_server.py"]
+    },
+    "aegis": {
+      "type": "command",
+      "command": "uv",
+      "args": ["run", "--env-file", ".env", "--python", "3.11", "--with", "mcp", "servers/aegis/aegis_mcp_server.py"]
+    },
+    "repo-files": {
+      "type": "command",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/carlossanchez/code/aegis-final-ui", "/Users/carlossanchez/code/aegis-final-ui/third_party/oscal-content", "/Users/carlossanchez/code/aegis-final-ui/third_party/fedramp-automation"]
+    }
+  }
+}

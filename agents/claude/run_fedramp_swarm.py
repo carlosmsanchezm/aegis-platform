@@ -111,7 +111,9 @@ def _base_mcp_servers() -> Dict[str, Any]:
         args=["run", "servers/gpt5_pro/gpt5_pro_mcp_server.py"],
         env={
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
-            "AEGIS_OPENAI_MODEL": os.environ.get("AEGIS_OPENAI_MODEL", "gpt-5-pro"),
+            "AEGIS_OPENAI_MODEL": os.environ.get(
+                "AEGIS_OPENAI_MODEL", "gpt-5-pro-2025-10-06"
+            ),
         },
     )
     return {"nist": nist, "fs": fs, "gpt5": gpt5}

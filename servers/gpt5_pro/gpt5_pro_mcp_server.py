@@ -17,7 +17,7 @@ except Exception as exc:  # pragma: no cover - import guard
 mcp = FastMCP("gpt5")  # tool namespace will be mcp__gpt5__advise
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-MODEL = os.environ.get("AEGIS_OPENAI_MODEL", "gpt-5-pro")
+MODEL = os.environ.get("AEGIS_OPENAI_MODEL", "gpt-5-pro-2025-10-06")
 if not OPENAI_API_KEY:
     raise SystemExit("OPENAI_API_KEY is required for gpt5_pro_mcp_server.py")
 

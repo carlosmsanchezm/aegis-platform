@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "aegis": {
-      "command": "uv",
+      "command": "/usr/bin/env",
       "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
         "run",
         "--env-file",
         ".env",
@@ -14,8 +16,10 @@
       ]
     },
     "jira-local": {
-      "command": "uv",
+      "command": "/usr/bin/env",
       "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
         "run",
         "--env-file",
         ".env",
@@ -29,8 +33,10 @@
       ]
     },
     "github": {
-      "command": "uv",
+      "command": "/usr/bin/env",
       "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
         "run",
         "--env-file",
         ".env",

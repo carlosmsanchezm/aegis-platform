@@ -94,7 +94,7 @@ module "ecr" {
 locals {
   ecr_repositories = var.manage_ecr_repositories ? {
     for repo_name, repo in module.ecr : repo_name => repo.repository_url
-  } : {
+    } : {
     for repo_name in local.ecr_repository_names :
     repo_name => "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${repo_name}"
   }

@@ -52,7 +52,6 @@ coverage/
 
 # Misc frontend artifacts
 *.tsbuildinfo
-docs
 out
 .aegis
 policy

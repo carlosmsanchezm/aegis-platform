@@ -157,9 +157,10 @@ def dispatch_workflow(
 
 
 if __name__ == "__main__":
-    import sys, json, time
-    sys.stdout.write(json.dumps({"type": "mcp/handshake", "version": "1.0"}) + "\n")
-    sys.stdout.flush()
-    time.sleep(1.0)          # give Claude’s probe time to see the line
-    from mcp.server.fastmcp import FastMCP
-    mcp.run()
+    import traceback
+
+    try:
+        mcp.run()
+    except Exception:  # surface stack traces so Codex can display the failure reason
+        traceback.print_exc()
+        raise

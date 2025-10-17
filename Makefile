@@ -96,6 +96,13 @@ stop:
 	@pkill -f services/platform-api || true
 	@pkill -f "k8s-agent/cmd" || true
 
+test-workspace:
+	@echo "Running workspace connectivity smoke test..."
+	@GRPC_ADDR=$${GRPC_ADDR:-localhost:10081} \
+	 WORKSPACE_IMAGE=$${WORKSPACE_IMAGE:-aegis-workspace:latest} \
+	 CLEANUP=1 \
+	 scripts/test-workspace-connection.sh
+
 setup-local:
 	@echo "Switching to docker-desktop context..."
 	@kubectl config use-context docker-desktop

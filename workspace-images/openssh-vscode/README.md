@@ -1,14 +1,25 @@
 # Aegis Workspace Image
 
-This image extends `lscr.io/linuxserver/openssh-server` with the extra Alpine
-packages Visual Studio Code Remote SSH expects (`libstdc++` and `libgcc`). Build
-it locally before submitting interactive workspaces so that new pods have the
-runtime VS Code needs without any manual `apk add` patching.
+This image extends `debian:12-slim` with OpenSSH, sudo, and the VS Code Remote
+runtime dependencies. Build it locally before submitting interactive workspaces
+so that new pods have the runtime VS Code needs without any manual package
+patching. We also ship `/usr/local/bin/start-reh.sh`, the same helper bundled
+with the production ECR image. The script honours `VSCODE_COMMIT`, detects the
+container architecture, caches the server under `/reh/bin/current`, provisions
+`/home/project`, and launches `code-server` with the connection token file the
+control plane expects. This mirrors the cloud image behaviour while preventing
+the \"fallback to latest stable\" downgrade that causes version mismatches with
+newer clients.
 
 ```sh
 # from the repo root
-# Build locally
+# Build locally (host architecture)
 docker build -t aegis-workspace:latest workspace-images/openssh-vscode
+
+# Or produce a multi-architecture image (requires Docker Buildx)
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t aegis-workspace:latest \
+  workspace-images/openssh-vscode
 
 # Push to Docker Hub (requires prior `docker login`)
 docker tag aegis-workspace:latest carlossanchez/aegis-workspace-vscode:latest

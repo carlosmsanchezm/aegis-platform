@@ -18,7 +18,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 # Apply MCP JSON-RPC compatibility shim for legacy Codex clients.
-import servers.mcp_compat  # noqa: F401
+# import servers.mcp_compat  # noqa: F401
 
 mcp = FastMCP("Jira")
 

@@ -41,6 +41,7 @@ import {
   AegisPage,
   AegisWorkloadListPage,
   AegisWorkloadDetailsPage,
+  AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
 
 const app = createApp({
@@ -105,6 +106,10 @@ const routes = (
     <Route path="/aegis" element={<AegisPage />} />
     <Route path="/aegis/workloads" element={<AegisWorkloadListPage />} />
     <Route path="/aegis/workloads/:id" element={<AegisWorkloadDetailsPage />} />
+    <Route
+      path="/aegis/workspaces/create"
+      element={<AegisCreateWorkspacePage />}
+    />
   </FlatRoutes>
 );
 

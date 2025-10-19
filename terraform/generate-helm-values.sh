@@ -30,10 +30,6 @@ PROXY_RELEASE_NAME="${RELEASE_BASENAME}-proxy"
 SPOKE_HELM_RELEASE=${SPOKE_HELM_RELEASE:-${HELM_RELEASE}-spoke}
 SPOKE_NAMESPACE=${SPOKE_NAMESPACE:-${K8S_NAMESPACE}}
 
-IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG:-}")"
-IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG:-}")"
-IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${K8S_AGENT_IMAGE_TAG:-}")"
-
 usage() {
 cat <<'EOF'
 Usage: ./generate-helm-values.sh [--non-interactive]
@@ -85,6 +81,10 @@ CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
 MIGRATIONS_UP_FILE=""
+
+IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG}")"
+IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG}")"
+IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${K8S_AGENT_IMAGE_TAG}")"
 
 cleanup() {
   rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \

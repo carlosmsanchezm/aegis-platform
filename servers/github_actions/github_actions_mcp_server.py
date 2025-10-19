@@ -15,10 +15,19 @@ Environment variables loaded (either via `.env` or shell):
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Add repo root to Python path so we can import servers.mcp_compat
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+# Apply MCP JSON-RPC compatibility shim for legacy Codex clients.
+import servers.mcp_compat  # noqa: F401
 
 
 mcp = FastMCP("GitHubActions")
@@ -157,10 +166,9 @@ def dispatch_workflow(
 
 
 if __name__ == "__main__":
-    import traceback
-
-    try:
-        mcp.run()
-    except Exception:  # surface stack traces so Codex can display the failure reason
-        traceback.print_exc()
-        raise
+    import sys, json, time
+    sys.stdout.write(json.dumps({"type": "mcp/handshake", "version": "1.0"}) + "\n")
+    sys.stdout.flush()
+    time.sleep(1.0)          # give Claude’s probe time to see the line
+    from mcp.server.fastmcp import FastMCP
+    mcp.run()

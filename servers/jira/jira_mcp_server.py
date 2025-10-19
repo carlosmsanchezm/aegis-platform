@@ -5,11 +5,20 @@ import hashlib
 import json
 import os
 import random
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Add repo root to Python path so we can import servers.mcp_compat
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+# Apply MCP JSON-RPC compatibility shim for legacy Codex clients.
+import servers.mcp_compat  # noqa: F401
 
 mcp = FastMCP("Jira")
 

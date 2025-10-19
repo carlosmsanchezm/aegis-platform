@@ -4,9 +4,17 @@ import json
 import os
 import sys
 import textwrap
+from pathlib import Path
 from typing import Any, Dict
 
+# Add repo root to Python path so we can import servers.mcp_compat
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
 from mcp.server.fastmcp import FastMCP
+
+# Apply MCP JSON-RPC compatibility shim for legacy Codex clients.
+import servers.mcp_compat  # noqa: F401
 
 try:
     from openai import OpenAI

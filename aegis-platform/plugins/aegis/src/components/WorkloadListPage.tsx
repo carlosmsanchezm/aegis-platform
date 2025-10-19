@@ -21,6 +21,7 @@ import {
   fetchApiRef,
   identityApiRef,
   useApi,
+  useRouteRef,
 } from '@backstage/core-plugin-api';
 import {
   Box,
@@ -42,6 +43,7 @@ import {
   parseKubernetesUrl,
   buildKubectlDescribeCommand,
 } from '../api/aegisClient';
+import { createWorkspaceRouteRef } from '../routes';
 
 const statusChip = (status: string) => {
   const mapped = mapDisplayStatus(status);
@@ -68,6 +70,8 @@ export const WorkloadListPage: FC = () => {
   const identityApi = useApi(identityApiRef);
   const alertApi = useApi(alertApiRef);
   const navigate = useNavigate();
+  const createWorkspaceLink = useRouteRef(createWorkspaceRouteRef);
+  const createWorkspacePath = createWorkspaceLink();
 
   const [projectId, setProjectId] = useState('p-demo');
   const [rows, setRows] = useState<WorkloadRow[]>([]);
@@ -248,14 +252,24 @@ export const WorkloadListPage: FC = () => {
       />
       <Content>
         <ContentHeader title="Filters">
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<RefreshIcon />}
-            onClick={() => load()}
-          >
-            Refresh
-          </Button>
+          <Box display="flex" gridGap={8}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<RefreshIcon />}
+              onClick={() => load()}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              component={RouterLink}
+              to={createWorkspacePath}
+            >
+              Create New Workspace
+            </Button>
+          </Box>
         </ContentHeader>
 
         <Grid container spacing={2} alignItems="flex-end">

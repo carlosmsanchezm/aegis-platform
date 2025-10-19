@@ -28,6 +28,7 @@
 **/.cache/
 **/.parcel-cache/
 **/.storybook/
+**/__pycache__/
 
 # Package manager lockfiles (optional – keep if you want reproducibility)
 # yarn.lock
@@ -51,24 +52,17 @@ coverage/
 
 # Misc frontend artifacts
 *.tsbuildinfo
-agents/strands
-docs
 out
-servers
 .aegis
 policy
-scripts
 third_party
 .terraform/
 .terraform.lock.hcl
 terraform.tfstate
 terraform.tfstate.backup
-agents/claude/
 plans/
 backups/
 CREDENTIALS-CHEATSHEET.md
-agents/swarm
-agents/tools
 agents/__init__.py
 agents/__pycache__
 

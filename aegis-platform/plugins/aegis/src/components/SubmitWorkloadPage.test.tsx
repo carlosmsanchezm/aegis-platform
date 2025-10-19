@@ -7,26 +7,32 @@ import {
   alertApiRef,
   discoveryApiRef,
   fetchApiRef,
+  identityApiRef,
   FetchApi,
   AlertApi,
+  IdentityApi,
 } from '@backstage/core-plugin-api';
 import { SubmitWorkloadPage } from './SubmitWorkloadPage';
+
+const submittedBodies: any[] = [];
 
 const server = setupServer(
   rest.post(
     'http://example.test/aegis/aegis.v1.AegisPlatform/SubmitWorkload',
-    (_req, res, ctx) =>
-      res(
+    async (req, res, ctx) => {
+      submittedBodies.push(await req.json());
+      return res(
         ctx.json({
           id: 'w-ui-123',
           status: 'PLACED',
           projectId: 'p-demo',
         }),
-      ),
+      );
+    },
   ),
   rest.post(
     'http://example.test/aegis/aegis.v1.AegisPlatform/GetWorkload',
-    (_req, res, ctx) =>
+    async (_req, res, ctx) =>
       res(
         ctx.json({
           id: 'w-ui-123',
@@ -40,11 +46,14 @@ const server = setupServer(
 jest.setTimeout(15000);
 
 beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  submittedBodies.length = 0;
+});
 afterAll(() => server.close());
 
 describe('SubmitWorkloadPage', () => {
-  it('submits a workload and shows success feedback', async () => {
+  it('submits an interactive workspace and surfaces feedback', async () => {
     const user = userEvent.setup();
 
     const discoveryApi = {
@@ -62,12 +71,25 @@ describe('SubmitWorkloadPage', () => {
       fetch: (...args) => fetch(...args),
     };
 
+    const identityApi: IdentityApi = {
+      async getBackstageIdentity() {
+        return { token: 'test-token', userEntityRef: 'user:default/tester' };
+      },
+      async getCredentials() {
+        return { token: 'test-token', userEntityRef: 'user:default/tester' };
+      },
+      async signOut() {
+        /* not needed */
+      },
+    } as IdentityApi;
+
     await renderInTestApp(
       <TestApiProvider
         apis={[
           [discoveryApiRef, discoveryApi],
           [fetchApiRef, fetchApi],
           [alertApiRef, alertApi],
+          [identityApiRef, identityApi],
         ]}
       >
         <SubmitWorkloadPage />
@@ -80,7 +102,7 @@ describe('SubmitWorkloadPage', () => {
 
     const queueField = await screen.findByDisplayValue('default');
     await user.clear(queueField);
-    await user.type(queueField, 'default');
+    await user.type(queueField, 'interactive');
 
     const flavorField = await screen.findByDisplayValue('a10-mig-1g');
     await user.clear(flavorField);
@@ -100,16 +122,48 @@ describe('SubmitWorkloadPage', () => {
     await user.clear(durationField);
     await user.type(durationField, '120');
 
-    const submitButton = await screen.findByRole('button', { name: /submit/i });
+    const advancedButton = await screen.findByRole('button', {
+      name: /show advanced options/i,
+    });
+    await user.click(advancedButton);
+
+    const portsField = await screen.findByDisplayValue('22, 11111');
+    await user.clear(portsField);
+    await user.type(portsField, '22, 11111, 10022');
+
+    const envField = await screen.findByDisplayValue(/USER_NAME=aegis/);
+    await user.type(envField, '\nAEGIS_SSH_USER=dev');
+
+    const submitButton = await screen.findByRole('button', {
+      name: /launch workspace/i,
+    });
     await user.click(submitButton);
 
-    await screen.findByText(/Workload Created/i);
-    expect(await screen.findByText('w-ui-123')).toBeInTheDocument();
+    await waitFor(() => expect(submittedBodies).toHaveLength(1));
+    const body = submittedBodies[0];
+
+    expect(body.workload.projectId).toBe('p-ui-e2e');
+    expect(body.workload.queue).toBe('interactive');
+    expect(body.workload.workspace.interactive).toBe(true);
+    expect(body.workload.workspace.command).toEqual([
+      'sh',
+      '-c',
+      'echo from test',
+    ]);
+    expect(body.workload.workspace.ports).toEqual(
+      expect.arrayContaining([22, 11111, 10022]),
+    );
+    expect(body.workload.workspace.env.AEGIS_SSH_USER).toBe('dev');
+    expect(body.workload.workspace.env.USER_NAME).toBe('aegis');
+    expect(body.workload.workspace.maxDurationSeconds).toBe(120);
+
+    await screen.findByText(/Workspace created/i);
+    await screen.findByRole('button', { name: /view details/i });
 
     await waitFor(() => {
       expect(alertSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: 'Workload submitted: w-ui-123',
+          message: 'Interactive workspace submitted: w-ui-123',
           severity: 'success',
         }),
       );

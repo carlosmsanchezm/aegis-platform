@@ -1,4 +1,11 @@
-import { FC, FormEvent, useEffect, useState } from 'react';
+import {
+  ChangeEvent,
+  FC,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   Page,
   Content,
@@ -6,98 +13,196 @@ import {
   ContentHeader,
   Progress,
   WarningPanel,
+  InfoCard,
 } from '@backstage/core-components';
 import {
   useApi,
   fetchApiRef,
   alertApiRef,
   discoveryApiRef,
+  identityApiRef,
 } from '@backstage/core-plugin-api';
 import {
+  Box,
   Button,
+  Collapse,
   Grid,
   TextField,
-  Card,
-  CardContent,
   Typography,
 } from '@material-ui/core';
+import { Link as RouterLink } from 'react-router-dom';
+import {
+  DEFAULT_SSH_PORT,
+  DEFAULT_VSCODE_PORT,
+  SubmitWorkspaceRequest,
+  WorkloadDTO,
+  getWorkload,
+  submitWorkspace,
+} from '../api/aegisClient';
+import {
+  formatDefaultEnv,
+  parseEnvInput,
+  parsePortsInput,
+  validateEnvInput,
+  validatePortsInput,
+} from './workspaceFormUtils';
 
-type WorkloadResponse = {
-  id?: string;
-  projectId?: string;
-  queue?: string;
-  clusterId?: string;
-  status?: string;
-  url?: string;
-  message?: string;
+const DEFAULT_ENV_TEXT = formatDefaultEnv();
+const DEFAULT_PORTS_TEXT = `${DEFAULT_SSH_PORT}, ${DEFAULT_VSCODE_PORT}`;
+
+type FormState = {
+  projectId: string;
+  queue: string;
+  flavor: string;
+  image: string;
+  command: string;
+  maxDurationSeconds: string;
+  ports: string;
+  env: string;
 };
 
 export const SubmitWorkloadPage: FC = () => {
   const fetchApi = useApi(fetchApiRef);
-  const alertApi = useApi(alertApiRef);
   const discoveryApi = useApi(discoveryApiRef);
+  const identityApi = useApi(identityApiRef);
+  const alertApi = useApi(alertApiRef);
 
-  // Defaults aimed at the local dev environment
-  const [projectId, setProjectId] = useState('p-demo');
-  const [queue, setQueue] = useState('default');
-  const [flavor, setFlavor] = useState('a10-mig-1g');
-  const [image, setImage] = useState('alpine:3.19');
-  const [command, setCommand] = useState('echo Hello from Aegis; sleep 2');
-  const [maxDurationSeconds, setMaxDurationSeconds] = useState<number | ''>(
-    600,
+  const [form, setForm] = useState<FormState>({
+    projectId: 'p-demo',
+    queue: 'default',
+    flavor: 'a10-mig-1g',
+    image: 'alpine:3.19',
+    command: 'echo Hello from Aegis; sleep 2',
+    maxDurationSeconds: '600',
+    ports: DEFAULT_PORTS_TEXT,
+    env: DEFAULT_ENV_TEXT,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<WorkloadDTO | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [portsError, setPortsError] = useState<string | null>(null);
+  const [envError, setEnvError] = useState<string | null>(null);
+  const [durationError, setDurationError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const isSubmitDisabled = useMemo(
+    () =>
+      submitting ||
+      !form.projectId.trim() ||
+      !form.flavor.trim() ||
+      !form.image.trim() ||
+      Boolean(portsError) ||
+      Boolean(envError) ||
+      Boolean(durationError),
+    [
+      submitting,
+      form.projectId,
+      form.flavor,
+      form.image,
+      portsError,
+      envError,
+      durationError,
+    ],
   );
 
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<WorkloadResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const handleFieldChange =
+    (field: keyof FormState) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setForm(prev => ({ ...prev, [field]: value }));
+    };
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    setResult(null);
+  const handlePortsChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const value = event.target.value;
+    setForm(prev => ({ ...prev, ports: value }));
+    setPortsError(validatePortsInput(value));
+  };
 
-    const trimmed = command.trim();
-    const cmd = trimmed.length ? ['sh', '-c', trimmed] : ['sh', '-c', 'echo'];
-    const payload = {
-      workload: {
-        projectId,
-        queue,
-        workspace: {
-          flavor,
-          image,
-          command: cmd,
-          ...(maxDurationSeconds
-            ? { maxDurationSeconds: Number(maxDurationSeconds) }
-            : {}),
-        },
+  const handleEnvChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const value = event.target.value;
+    setForm(prev => ({ ...prev, env: value }));
+    setEnvError(validateEnvInput(value));
+  };
+
+  const handleDurationChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const value = event.target.value;
+    setForm(prev => ({ ...prev, maxDurationSeconds: value }));
+    if (!value.trim()) {
+      setDurationError(null);
+      return;
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      setDurationError('Duration must be a positive number');
+    } else {
+      setDurationError(null);
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const currentPortsError = validatePortsInput(form.ports);
+    const currentEnvError = validateEnvInput(form.env);
+
+    const trimmedDuration = form.maxDurationSeconds.trim();
+    let parsedDuration: number | undefined;
+    let currentDurationError: string | null = null;
+    if (trimmedDuration) {
+      const parsed = Number.parseInt(trimmedDuration, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        currentDurationError = 'Duration must be a positive number';
+      } else {
+        parsedDuration = parsed;
+      }
+    }
+
+    setPortsError(currentPortsError);
+    setEnvError(currentEnvError);
+    setDurationError(currentDurationError);
+
+    if (currentPortsError || currentEnvError || currentDurationError) {
+      return;
+    }
+
+    const envOverrides = parseEnvInput(form.env);
+    const ports = parsePortsInput(form.ports);
+    const commandText = form.command.trim();
+
+    const payload: SubmitWorkspaceRequest = {
+      projectId: form.projectId.trim(),
+      queue: form.queue.trim() || undefined,
+      workspace: {
+        flavor: form.flavor.trim(),
+        image: form.image.trim(),
+        command: commandText,
+        ports,
+        env: Object.keys(envOverrides).length > 0 ? envOverrides : undefined,
+        maxDurationSeconds: parsedDuration,
       },
     };
 
     try {
-      const proxyBase = await discoveryApi.getBaseUrl('proxy');
-      const res = await fetchApi.fetch(
-        `${proxyBase}/aegis/aegis.v1.AegisPlatform/SubmitWorkload`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
+      setSubmitting(true);
+      setError(null);
+      setResult(null);
+      const created = await submitWorkspace(
+        fetchApi,
+        discoveryApi,
+        identityApi,
+        payload,
       );
-
-      if (!res.ok) {
-        const txt = await res.text();
-        const msg = txt || `HTTP ${res.status}`;
-        setError(msg);
-        alertApi.post({ message: `Submit failed: ${msg}`, severity: 'error' });
-      } else {
-        const json = (await res.json()) as WorkloadResponse;
-        setResult(json);
-        alertApi.post({
-          message: `Workload submitted: ${json.id ?? '(no id)'}`,
-          severity: 'success',
-        });
-      }
+      setResult(created);
+      alertApi.post({
+        message: `Interactive workspace submitted: ${created.id ?? '(no id)'}`,
+        severity: 'success',
+      });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       setError(msg);
@@ -108,87 +213,72 @@ export const SubmitWorkloadPage: FC = () => {
   };
 
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    let cancelled = false;
-
-    const shouldPoll =
-      Boolean(result?.id) &&
-      result?.status !== 'SUCCEEDED' &&
-      result?.status !== 'FAILED';
-    const targetId = result?.id;
-
-    if (shouldPoll) {
-      const startPolling = async () => {
-        try {
-          const proxyBase = await discoveryApi.getBaseUrl('proxy');
-          if (cancelled) {
-            return;
-          }
-          timer = setInterval(async () => {
-            try {
-              const res = await fetchApi.fetch(
-                `${proxyBase}/aegis/aegis.v1.AegisPlatform/GetWorkload`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ id: targetId }),
-                },
-              );
-              if (!res.ok) {
-                return;
-              }
-              const json = (await res.json()) as WorkloadResponse;
-              setResult(prev => {
-                if (!prev) {
-                  return json;
-                }
-                if (
-                  prev.status === json.status &&
-                  prev.clusterId === json.clusterId &&
-                  prev.url === json.url &&
-                  prev.message === json.message
-                ) {
-                  return prev;
-                }
-                return json;
-              });
-            } catch {
-              /* ignore polling errors */
-            }
-          }, 2000);
-        } catch (err) {
-          if (cancelled) {
-            return;
-          }
-          const msg = (err as Error)?.message ?? String(err);
-          setError(prev => prev ?? msg);
-        }
-      };
-      startPolling();
+    const terminalStatuses = new Set(['SUCCEEDED', 'FAILED']);
+    if (!result?.id || terminalStatuses.has(result.status ?? '')) {
+      return undefined;
     }
+
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await getWorkload(
+          fetchApi,
+          discoveryApi,
+          identityApi,
+          result.id!,
+        );
+        if (cancelled) {
+          return;
+        }
+        setResult(prev => {
+          if (!prev) {
+            return fresh;
+          }
+          if (
+            prev.status === fresh.status &&
+            prev.clusterId === fresh.clusterId &&
+            prev.url === fresh.url &&
+            prev.message === fresh.message
+          ) {
+            return prev;
+          }
+          return fresh;
+        });
+      } catch {
+        /* ignore polling errors */
+      }
+    }, 2000);
 
     return () => {
       cancelled = true;
-      if (timer) {
-        clearInterval(timer);
-      }
+      clearInterval(timer);
     };
-  }, [result?.id, result?.status, discoveryApi, fetchApi]);
+  }, [result?.id, result?.status, fetchApi, discoveryApi, identityApi]);
 
   return (
     <Page themeId="tool">
-      <Header title="Aegis — Submit Workload" subtitle="Workspace (MVP)" />
+      <Header
+        title="Aegis — Launch Workspace"
+        subtitle="Create an interactive workspace that supports connection sessions"
+      />
       <Content>
         <ContentHeader title="Workspace Form" />
 
-        <form onSubmit={onSubmit}>
+        <Box marginBottom={2}>
+          <Typography variant="body2" color="textSecondary">
+            Defaults target the local demo environment. Update project, queue,
+            and flavor to match real resources before launch.
+          </Typography>
+        </Box>
+
+        <form onSubmit={handleSubmit} noValidate>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
                 label="Project ID"
-                value={projectId}
-                onChange={e => setProjectId(e.target.value)}
+                value={form.projectId}
+                onChange={handleFieldChange('projectId')}
                 required
               />
             </Grid>
@@ -196,9 +286,9 @@ export const SubmitWorkloadPage: FC = () => {
               <TextField
                 fullWidth
                 label="Queue"
-                value={queue}
-                onChange={e => setQueue(e.target.value)}
-                required
+                value={form.queue}
+                onChange={handleFieldChange('queue')}
+                helperText="Optional scheduling queue"
               />
             </Grid>
 
@@ -206,18 +296,20 @@ export const SubmitWorkloadPage: FC = () => {
               <TextField
                 fullWidth
                 label="Flavor"
-                value={flavor}
-                onChange={e => setFlavor(e.target.value)}
+                value={form.flavor}
+                onChange={handleFieldChange('flavor')}
                 required
+                helperText="GPU flavor or node profile"
               />
             </Grid>
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
                 label="Image"
-                value={image}
-                onChange={e => setImage(e.target.value)}
+                value={form.image}
+                onChange={handleFieldChange('image')}
                 required
+                helperText="Container image that boots the workspace"
               />
             </Grid>
 
@@ -225,9 +317,9 @@ export const SubmitWorkloadPage: FC = () => {
               <TextField
                 fullWidth
                 label='Command (wrapped as ["sh","-c", ...])'
-                value={command}
-                onChange={e => setCommand(e.target.value)}
-                helperText="Example: echo Hello; sleep 2"
+                value={form.command}
+                onChange={handleFieldChange('command')}
+                helperText='Defaults to sh -c "echo hello" when left blank'
               />
             </Grid>
 
@@ -236,68 +328,123 @@ export const SubmitWorkloadPage: FC = () => {
                 fullWidth
                 label="Max Duration Seconds"
                 type="number"
-                value={maxDurationSeconds}
-                onChange={e =>
-                  setMaxDurationSeconds(
-                    e.target.value === '' ? '' : Number(e.target.value),
-                  )
+                value={form.maxDurationSeconds}
+                onChange={handleDurationChange}
+                error={Boolean(durationError)}
+                helperText={
+                  durationError ??
+                  'Optional runtime budget; queue or server defaults apply when empty'
                 }
-                helperText="Optional; defaults to queue/server if omitted"
               />
             </Grid>
-
-            <Grid item xs={12}>
-              <Button
-                type="submit"
-                color="primary"
-                variant="contained"
-                disabled={submitting}
-              >
-                Submit
-              </Button>
-            </Grid>
           </Grid>
+
+          <Box marginTop={2}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setAdvancedOpen(prev => !prev)}
+            >
+              {advancedOpen ? 'Hide advanced options' : 'Show advanced options'}
+            </Button>
+            <Collapse in={advancedOpen}>
+              <Box marginTop={2}>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <TextField
+                      fullWidth
+                      label="Exposed ports"
+                      value={form.ports}
+                      onChange={handlePortsChange}
+                      error={Boolean(portsError)}
+                      helperText={
+                        portsError ??
+                        `Comma or space separated list. Defaults include SSH (${DEFAULT_SSH_PORT}) and VS Code (${DEFAULT_VSCODE_PORT}).`
+                      }
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Environment variables"
+                      value={form.env}
+                      onChange={handleEnvChange}
+                      error={Boolean(envError)}
+                      helperText={
+                        envError ??
+                        'Optional KEY=VALUE pairs, one per line. Keys such as AEGIS_SSH_USER, USER_NAME, and PASSWORD_ACCESS affect connection helpers.'
+                      }
+                      multiline
+                      minRows={4}
+                    />
+                  </Grid>
+                </Grid>
+              </Box>
+            </Collapse>
+          </Box>
+
+          <Box marginTop={3} display="flex" alignItems="center" gridGap={16}>
+            <Button
+              type="submit"
+              color="primary"
+              variant="contained"
+              disabled={isSubmitDisabled}
+            >
+              Launch Workspace
+            </Button>
+            {submitting && <Progress />}
+          </Box>
         </form>
 
-        {submitting && <Progress />}
-
         {error && (
-          <WarningPanel title="Submission Error" severity="error">
-            <Typography
-              variant="body2"
-              component="pre"
-              style={{ whiteSpace: 'pre-wrap' }}
-            >
-              {error}
-            </Typography>
-          </WarningPanel>
+          <Box marginTop={3}>
+            <WarningPanel title="Submission Error" severity="error">
+              <Typography
+                variant="body2"
+                component="pre"
+                style={{ whiteSpace: 'pre-wrap' }}
+              >
+                {error}
+              </Typography>
+            </WarningPanel>
+          </Box>
         )}
 
         {result && (
-          <Card style={{ marginTop: 24 }}>
-            <CardContent>
-              <Typography variant="h6">Workload Created</Typography>
-              <Typography variant="body2">
-                <b>ID:</b> {result.id}
-              </Typography>
-              <Typography variant="body2">
-                <b>Status:</b> {result.status}
-              </Typography>
-              <Typography variant="body2">
-                <b>Cluster:</b> {result.clusterId}
-              </Typography>
-              {result.message && (
+          <Box marginTop={3}>
+            <InfoCard title="Workspace created">
+              <Box display="flex" flexDirection="column" gridGap={12}>
                 <Typography variant="body2">
-                  <b>Message:</b> {result.message}
+                  <strong>ID:</strong> {result.id ?? '—'}
                 </Typography>
-              )}
-              {result.url && (
                 <Typography variant="body2">
-                  <b>URL:</b> {result.url}
+                  <strong>Status:</strong> {result.status ?? '—'}
                 </Typography>
-              )}
-            </CardContent>
-          </Card>
+                {result.clusterId && (
+                  <Typography variant="body2">
+                    <strong>Cluster:</strong> {result.clusterId}
+                  </Typography>
+                )}
+                <Typography variant="body2" color="textSecondary">
+                  The workspace must reach RUNNING before a connection session
+                  can mint successfully.
+                </Typography>
+                {result.id && (
+                  <Box>
+                    <Button
+                      component={RouterLink}
+                      to={`/aegis/workloads/${result.id}`}
+                      color="primary"
+                      variant="outlined"
+                      size="small"
+                    >
+                      View Details
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+            </InfoCard>
+          </Box>
         )}
       </Content>
     </Page>

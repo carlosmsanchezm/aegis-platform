@@ -197,7 +197,7 @@ resource "aws_security_group" "node" {
   vpc_id      = module.vpc.vpc_id
 
   tags = merge(local.common_tags, {
-    Name                                        = "${local.cluster_name}-node-sg"
+    Name                                          = "${local.cluster_name}-node-sg"
     "kubernetes.io/cluster/${local.cluster_name}" = "owned"
   })
 }
@@ -298,7 +298,7 @@ resource "aws_eks_node_group" "gpu_workers" {
 
   instance_types = [var.gpu_instance_type]
   capacity_type  = "ON_DEMAND"
-  ami_type       = "AL2023_x86_64_NVIDIA"  # AL2023 for K8s 1.32+
+  ami_type       = "AL2023_x86_64_NVIDIA" # AL2023 for K8s 1.32+
   disk_size      = 100
 
   labels = {
@@ -344,7 +344,7 @@ resource "aws_eks_node_group" "gpu_mig_workers" {
 
   instance_types = [var.gpu_mig_instance_type]
   capacity_type  = "ON_DEMAND"
-  ami_type       = "AL2023_x86_64_NVIDIA"  # AL2023 for K8s 1.32+
+  ami_type       = "AL2023_x86_64_NVIDIA" # AL2023 for K8s 1.32+
   disk_size      = 100
 
   labels = {
@@ -377,9 +377,9 @@ resource "aws_eks_node_group" "gpu_mig_workers" {
 ################################################################################
 
 resource "aws_eks_addon" "coredns" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "coredns"
-  addon_version            = data.aws_eks_addon_version.coredns.version
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "coredns"
+  addon_version               = data.aws_eks_addon_version.coredns.version
   resolve_conflicts_on_update = "OVERWRITE"
 
   # CoreDNS needs nodes to run on
@@ -391,18 +391,18 @@ resource "aws_eks_addon" "coredns" {
 }
 
 resource "aws_eks_addon" "kube_proxy" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "kube-proxy"
-  addon_version            = data.aws_eks_addon_version.kube_proxy.version
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "kube-proxy"
+  addon_version               = data.aws_eks_addon_version.kube_proxy.version
   resolve_conflicts_on_update = "OVERWRITE"
 
   tags = local.common_tags
 }
 
 resource "aws_eks_addon" "vpc_cni" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "vpc-cni"
-  addon_version            = data.aws_eks_addon_version.vpc_cni.version
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "vpc-cni"
+  addon_version               = data.aws_eks_addon_version.vpc_cni.version
   resolve_conflicts_on_update = "OVERWRITE"
 
   configuration_values = jsonencode({

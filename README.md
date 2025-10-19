@@ -68,6 +68,9 @@ The Backstage plugin now lets you submit interactive workspaces and connect to
 them from VS Code without hand-editing SSH configs. The same flow works for
 local Docker Desktop clusters and remote GPU clusters.
 
+See [`docs/workspace-images.md`](docs/workspace-images.md) for a full matrix of
+workspace images, publishing instructions, and smoke tests.
+
 1. **Build and publish the VS Code-ready image** (one time):
 
    ```bash
@@ -79,7 +82,29 @@ local Docker Desktop clusters and remote GPU clusters.
 2. **Run the platform API and operator** as described in the quickstart above
    (Terminals A and B). Wait for the operator to register before continuing.
 
-3. **Start the Backstage UI** in a new terminal:
+3. **(Optional) Run the connectivity smoke test**
+
+   ```bash
+   export GRPC_ADDR=localhost:10081          # port-forward the platform API first
+   scripts/test-workspace-connection.sh carlosmsanchez/aegis-workspace-vscode:latest
+   ```
+
+   The script ensures the demo project/queue exist, submits a workspace, waits for the
+   Remote Extension Host to announce readiness, probes port 11111 from inside the pod,
+   and prints the `vscode://` deep link.
+   The workspace remains running so you can finish the test manually in the UI/extension.
+
+   For TLS previews, set `GRPC_TLS=1`, provide the CA bundle (`GRPC_CA`) and server name (`GRPC_TLS_SERVER_NAME`):
+
+   ```bash
+   GRPC_ADDR=platform-api-grpc.localtest.me:443 \
+   GRPC_TLS=1 \
+   GRPC_CA="$HOME/aegis-platform-api-ca.crt" \
+   GRPC_TLS_SERVER_NAME=platform-api-grpc.localtest.me \
+   scripts/test-workspace-connection.sh carlosmsanchez/aegis-workspace-vscode:latest
+   ```
+
+4. **Start the Backstage UI** in a new terminal:
 
    ```bash
    cd aegis-platform
@@ -88,7 +113,7 @@ local Docker Desktop clusters and remote GPU clusters.
 
    This serves the app at <http://localhost:3000>.
 
-4. **Launch a workspace from the UI**:
+5. **Launch a workspace from the UI**:
 
    - Open <http://localhost:3000/aegis/workspaces/launch>.
    - Fill in the form (example values):
@@ -101,13 +126,13 @@ local Docker Desktop clusters and remote GPU clusters.
      - Environment variables: leave empty unless you need overrides.
    - Submit the form. The page shows the created workload summary.
 
-5. **Track the workspace**:
+6. **Track the workspace**:
 
    - Navigate to <http://localhost:3000/aegis/workloads> to see the list.
    - Click the workload ID to open the details view. The live status, pod ID, and
      VS Code connection helpers appear once the pod is running.
 
-6. **Connect from VS Code**:
+7. **Connect from VS Code**:
 
    - In the workload details panel, click *Connect*.
    - The modal shows ready-to-run snippets:

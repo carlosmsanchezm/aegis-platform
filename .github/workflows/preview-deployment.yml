@@ -33,7 +33,7 @@ concurrency:
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,7 +88,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Images
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -97,6 +97,7 @@ jobs:
       platform_api_image: ${{ steps.image-data.outputs.platform_api_image }}
       proxy_image: ${{ steps.image-data.outputs.proxy_image }}
       k8s_agent_image: ${{ steps.image-data.outputs.k8s_agent_image }}
+      workspace_image: ${{ steps.image-data.outputs.workspace_image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -130,6 +131,7 @@ jobs:
           echo "platform_api_image=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "proxy_image=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "k8s_agent_image=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "workspace_image=${ECR_REGISTRY}/aegis/workspace-vscode:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Check if images already exist
         if: ${{ env.RUN_SUBSET == 'all' }}
@@ -138,11 +140,12 @@ jobs:
           PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
           PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
           K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ steps.image-data.outputs.workspace_image }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -euo pipefail
           needs_build=0
-          for image in "$PLATFORM_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE"; do
+          for image in "$PLATFORM_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE" "$WORKSPACE_IMAGE"; do
             repo="${image%:*}"
             tag="${image##*:}"
             repo_name="${repo#${ECR_REGISTRY}/}"
@@ -161,19 +164,22 @@ jobs:
           PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
           PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
           K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ steps.image-data.outputs.workspace_image }}
         run: |
           set -euo pipefail
           docker build -t "${PLATFORM_IMAGE}" -f services/platform-api/Dockerfile .
           docker build -t "${PROXY_IMAGE}" -f services/proxy/Dockerfile .
           docker build -t "${K8S_AGENT_IMAGE}" -f agents/k8s-agent/Dockerfile .
+          docker build -t "${WORKSPACE_IMAGE}" workspace-images/openssh-vscode
 
           docker push "${PLATFORM_IMAGE}"
           docker push "${PROXY_IMAGE}"
           docker push "${K8S_AGENT_IMAGE}"
+          docker push "${WORKSPACE_IMAGE}"
 
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -199,10 +205,12 @@ jobs:
             echo "platform=${{ needs.build-and-push.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
             echo "proxy=${{ needs.build-and-push.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
             echo "agent=${{ needs.build-and-push.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
+            echo "workspace=${{ needs.build-and-push.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
           else
             echo "platform=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api:v1.0.6-tls2" >> "$GITHUB_OUTPUT"
             echo "proxy=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy:no-client-cert" >> "$GITHUB_OUTPUT"
             echo "agent=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:v1.0.2-tls-20251005-amd64" >> "$GITHUB_OUTPUT"
+            echo "workspace=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Configure AWS credentials
@@ -220,13 +228,14 @@ jobs:
       - name: Terraform init & apply
         env:
           TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
           cd terraform
-          terraform init -backend-config=backend.hcl
-          TF_WS="$TF_WORKSPACE"
+          TF_WS="${TF_WORKSPACE}"
           unset TF_WORKSPACE
-          terraform workspace select "$TF_WS" || terraform workspace new "$TF_WS"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
           terraform apply -auto-approve
 
       - name: Deploy control plane via Helm
@@ -249,6 +258,7 @@ jobs:
         env:
           HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
 
@@ -395,6 +405,26 @@ jobs:
           SCRIPT_ROOT="${{ github.workspace }}"
           bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
+      - name: Workspace connectivity smoke test
+        if: ${{ env.RUN_SUBSET == 'all' }}
+        env:
+          WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
+          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
+          AEGIS_GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
+          AEGIS_GRPC_HOST: ${{ steps.configure-e2e.outputs.grpc_host }}
+        run: |
+          set -euo pipefail
+          echo "🧪 Workspace connectivity smoke test using image ${WORKSPACE_IMAGE}"
+          export GRPC_ADDR=${AEGIS_GRPC_ADDR}
+          export GRPC_TLS=1
+          export GRPC_CA=${AEGIS_GRPC_CA}
+          export GRPC_TLS_SERVER_NAME=${AEGIS_GRPC_HOST}
+          export WORKSPACE_NAMESPACE=aegis-workloads
+          export CLEANUP=1
+          scripts/test-workspace-connection.sh "${WORKSPACE_IMAGE}"
+          cat .aegis/workspace-session.json || true
+          rm -f .aegis/workspace-session.json || true
+
       - name: Run k8s-agent E2E tests
         if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' }}
 
@@ -409,7 +439,7 @@ jobs:
 
   teardown-preview:
     name: Teardown Preview Environment
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy') }}
+    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy')) || github.event_name == 'pull_request') }}
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:
@@ -436,14 +466,15 @@ jobs:
           PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
           cd terraform
-          terraform init -backend-config=backend.hcl
-          TF_WS="$TF_WORKSPACE"
+          TF_WS="${TF_WORKSPACE}"
           unset TF_WORKSPACE
-          if terraform workspace list | grep -q "$TF_WS"; then
-            terraform workspace select "$TF_WS"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          if terraform state pull >/dev/null 2>&1; then
             KUBECTL_CMD=$(terraform output -raw kubectl_config_command || true)
             if [ -n "$KUBECTL_CMD" ]; then
               eval "$KUBECTL_CMD"
@@ -452,8 +483,6 @@ jobs:
               kubectl delete namespace "$PREVIEW_NAMESPACE" --ignore-not-found || true
             fi
             terraform destroy -auto-approve || echo "Terraform destroy failed; manual cleanup may be required"
-            terraform workspace select default
-            terraform workspace delete "$TF_WS" || true
           else
-            echo "Workspace $TF_WS not found; skipping destroy"
+            echo "Terraform state for ${TF_WS} not found; skipping destroy"
           fi

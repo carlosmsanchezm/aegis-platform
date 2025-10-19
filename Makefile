@@ -96,6 +96,13 @@ stop:
 	@pkill -f services/platform-api || true
 	@pkill -f "k8s-agent/cmd" || true
 
+test-workspace:
+	@echo "Running workspace connectivity smoke test..."
+	@GRPC_ADDR=$${GRPC_ADDR:-localhost:10081} \
+	 WORKSPACE_IMAGE=$${WORKSPACE_IMAGE:-aegis-workspace:latest} \
+	 CLEANUP=1 \
+	 scripts/test-workspace-connection.sh
+
 setup-local:
 	@echo "Switching to docker-desktop context..."
 	@kubectl config use-context docker-desktop
@@ -107,7 +114,8 @@ deploy-local: setup-local
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
-	  --namespace aegis-system --create-namespace
+	  --namespace aegis-system --create-namespace \
+	  --wait --timeout 5m
 	@helm upgrade --install aegis-spoke charts/aegis-spoke \
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
@@ -124,7 +132,8 @@ deploy-local-tls: setup-local
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
 	  -f charts/aegis-services/values/local-tls.yaml \
-	  --namespace aegis-system --create-namespace
+	  --namespace aegis-system --create-namespace \
+	  --wait --timeout 5m
 	@helm upgrade --install aegis-spoke charts/aegis-spoke \
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
@@ -174,5 +183,11 @@ dev-backstage-cloud-tls:
 	@cd aegis-platform && yarn dev:cloud-tls
 
 clean-local:
-	@echo "Uninstalling Aegis services..."
-	@helm uninstall aegis-services aegis-spoke -n aegis-system || true
+	@for release in aegis-services aegis-spoke; do \
+		if helm status $$release -n aegis-system >/dev/null 2>&1; then \
+			echo "Uninstalling $$release..."; \
+			helm uninstall $$release -n aegis-system >/dev/null; \
+		else \
+			echo "Skipping $$release (not installed)"; \
+		fi; \
+	done

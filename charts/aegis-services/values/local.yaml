@@ -15,7 +15,7 @@ ingress-nginx:
       default: false
     ingressClass: ingress-nginx
     publishService:
-      enabled: true
+      enabled: false  # Avoid conflict with publish-status-address for local clusters
     service:
       type: LoadBalancer
     metrics:
@@ -59,6 +59,7 @@ platformApi:
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AUTH_STATIC_TOKEN: "supersecret"
     AUTH_STATIC_SUBJECT: "dev-user@example.com"
+    # AEGIS_PROXY_MTLS_ENABLED: "false"  # set to "true" when proxy mTLS is required
     AEGIS_STORE_BACKEND: "memory"
 
   tls:

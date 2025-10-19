@@ -1,0 +1,53 @@
+{
+  "mcpServers": {
+    "aegis": {
+      "command": "/usr/bin/env",
+      "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
+        "run",
+        "--env-file",
+        ".env",
+        "--python",
+        "3.11",
+        "--with",
+        "mcp",
+        "servers/aegis/aegis_mcp_server.py"
+      ]
+    },
+    "jira-local": {
+      "command": "/usr/bin/env",
+      "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
+        "run",
+        "--env-file",
+        ".env",
+        "--python",
+        "3.11",
+        "--with",
+        "mcp",
+        "--with",
+        "httpx",
+        "servers/jira/jira_mcp_server.py"
+      ]
+    },
+    "github": {
+      "command": "/usr/bin/env",
+      "args": [
+        "UV_CACHE_DIR=/Users/carlossanchez/code/aegis-final-ui/.uv_cache",
+        "uv",
+        "run",
+        "--env-file",
+        ".env",
+        "--python",
+        "3.11",
+        "--with",
+        "mcp",
+        "--with",
+        "httpx",
+        "servers/github_actions/github_actions_mcp_server.py"
+      ]
+    }
+  }
+}

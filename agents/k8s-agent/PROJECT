@@ -20,4 +20,67 @@ resources:
   kind: AegisWorkload
   path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: yourorg.dev
+  group: aegis
+  kind: Workspace
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: yourorg.dev
+  group: aegis
+  kind: WorkspaceCluster
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: yourorg.dev
+  group: aegis
+  kind: WorkspaceNetwork
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: yourorg.dev
+  group: aegis
+  kind: WorkspaceStorage
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: yourorg.dev
+  group: aegis
+  kind: WorkspaceGPUProfile
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: false
+  domain: yourorg.dev
+  group: aegis
+  kind: WorkspaceClass
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: yourorg.dev
+  group: aegis
+  kind: AegisWorkloadSlice
+  path: github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2
+  version: v1alpha2
 version: "3"

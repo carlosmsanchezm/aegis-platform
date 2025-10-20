@@ -65,9 +65,10 @@ const (
 	labelWorkloadID = "aegis.workload/id"
 	labelSSHManaged = "aegis.yourorg.dev/ssh-managed"
 
-	annotationStartAcked         = "aegis.yourorg.dev/start-acked"
-	annotationFinalAcked         = "aegis.yourorg.dev/final-acked"
-	annotationMaxDurationSeconds = "aegis.yourorg.dev/maxDurationSeconds"
+	annotationStartAcked              = "aegis.yourorg.dev/start-acked"
+	annotationFinalAcked              = "aegis.yourorg.dev/final-acked"
+	annotationMaxDurationSeconds      = "aegis.yourorg.dev/maxDurationSeconds"
+	annotationTTLSecondsAfterFinished = "aegis.yourorg.dev/ttlSecondsAfterFinished"
 
 	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
 	annotationSSHTrustedCA      = "aegis.yourorg.dev/ssh-trusted-user-ca"
@@ -187,6 +188,11 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 		log.Error(mdErr, "invalid max duration annotation", "annotation", aw.GetAnnotations()[annotationMaxDurationSeconds])
 	}
 	ttlAfterFinished := ptr.To(workspaceJobTTLSeconds)
+	if ttl, err := ttlSecondsAfterFinishedFromAnnotation(aw); err != nil {
+		log.Error(err, "invalid ttl annotation", "annotation", aw.GetAnnotations()[annotationTTLSecondsAfterFinished])
+	} else if ttl != nil {
+		ttlAfterFinished = ttl
+	}
 
 	var job batchv1.Job
 	err := r.Get(ctx, jobKey, &job)
@@ -300,8 +306,9 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			updated = true
 		}
 	}
-	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != workspaceJobTTLSeconds {
-		job.Spec.TTLSecondsAfterFinished = ptr.To(workspaceJobTTLSeconds)
+	desiredTTL := ptr.Deref(ttlAfterFinished, workspaceJobTTLSeconds)
+	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != desiredTTL {
+		job.Spec.TTLSecondsAfterFinished = ptr.To(desiredTTL)
 		updated = true
 	}
 	if updated {
@@ -901,6 +908,24 @@ func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) 
 		return nil, nil
 	}
 	return ptr.To(secs), nil
+}
+
+func ttlSecondsAfterFinishedFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int32, error) {
+	if aw == nil {
+		return nil, nil
+	}
+	val := aw.GetAnnotations()[annotationTTLSecondsAfterFinished]
+	if val == "" {
+		return nil, nil
+	}
+	secs, err := strconv.ParseInt(val, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", annotationTTLSecondsAfterFinished, err)
+	}
+	if secs < 0 {
+		return nil, nil
+	}
+	return ptr.To(int32(secs)), nil
 }
 
 func workspaceDefaultCommand(image string) string {

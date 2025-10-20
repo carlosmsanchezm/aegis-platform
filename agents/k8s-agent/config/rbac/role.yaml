@@ -35,6 +35,7 @@ rules:
   - aegis.yourorg.dev
   resources:
   - aegisworkloads
+  - workspaces
   verbs:
   - create
   - delete
@@ -47,16 +48,29 @@ rules:
   - aegis.yourorg.dev
   resources:
   - aegisworkloads/finalizers
+  - workspaces/finalizers
   verbs:
   - update
 - apiGroups:
   - aegis.yourorg.dev
   resources:
   - aegisworkloads/status
+  - workspaces/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - aegis.yourorg.dev
+  resources:
+  - aegisworkloadslices
+  - workspaceclusters
+  - workspacegpuprofiles
+  - workspacenetworks
+  - workspacestorage
+  verbs:
+  - list
+  - watch
 - apiGroups:
   - batch
   resources:

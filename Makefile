@@ -110,6 +110,7 @@ setup-local:
 deploy-local: setup-local
 	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
 	@helm dependency update charts/aegis-services >/dev/null
+	@./scripts/update-local-hosts.sh
 	@echo "Deploying Aegis services locally (no TLS)..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
@@ -127,6 +128,7 @@ deploy-local: setup-local
 deploy-local-tls: setup-local
 	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
 	@helm dependency update charts/aegis-services >/dev/null
+	@./scripts/update-local-hosts.sh
 	@echo "Deploying Aegis services locally with TLS..."
 	@helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
@@ -169,7 +171,7 @@ port-forward:
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
-	@echo "   Backend: http://localhost:8080 (port-forward required)"
+	@echo "   Backend: http://platform-api.localtest.me (ingress, no port-forward required)"
 	@cd aegis-platform && yarn dev
 
 dev-backstage-cloud:

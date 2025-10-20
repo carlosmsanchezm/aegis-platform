@@ -46,7 +46,10 @@ integrations:
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://localhost:8080'
+      target: 'http://platform-api.localtest.me'
+      secure: false
+      headers:
+        Host: platform-api.localtest.me
       changeOrigin: true
       credentials: forward
       allowedHeaders:

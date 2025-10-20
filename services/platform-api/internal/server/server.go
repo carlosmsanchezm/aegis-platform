@@ -53,6 +53,7 @@ type Server struct {
 	proxySecret          []byte
 	proxyTokenTTL        time.Duration
 	workspaceEnvDefaults map[string]string
+	autoBootstrap        bool
 }
 
 type proxyClaims struct {
@@ -178,6 +179,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		proxySecret:          []byte(secret),
 		proxyTokenTTL:        time.Duration(ttlSeconds) * time.Second,
 		workspaceEnvDefaults: defaults,
+		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
 	}
 }
 
@@ -186,6 +188,17 @@ func getEnvInt(key string, def int64) int64 {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
+	}
+	return def
+}
+
+func getEnvBool(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	if parsed, err := strconv.ParseBool(v); err == nil {
+		return parsed
 	}
 	return def
 }
@@ -280,6 +293,63 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
 }
 
+func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
+	_ = ctx // reserved for future use (tracing, cancellation)
+	if !s.autoBootstrap || w == nil {
+		return
+	}
+	projectID := strings.TrimSpace(w.GetProjectId())
+	if projectID == "" {
+		return
+	}
+	reqFlavor, err := requiredFlavor(w)
+	if err != nil {
+		s.log.Debug("autobootstrap skipped; workload missing flavor",
+			zap.String("workload_id", w.GetId()),
+			zap.Error(err),
+		)
+		return
+	}
+	reqFlavor = strings.TrimSpace(reqFlavor)
+	if reqFlavor == "" {
+		return
+	}
+	if s.store.GetProject(projectID) == nil {
+		s.store.PutProject(&aegis.Project{Id: projectID})
+		s.log.Info("autobootstrap: project created",
+			zap.String("project_id", projectID),
+			zap.String("workload_id", w.GetId()),
+		)
+	}
+	queueName := strings.TrimSpace(w.GetQueue())
+	if queueName != "" && s.store.GetQueue(queueName) == nil {
+		s.store.PutQueue(&aegis.Queue{
+			Name:                      queueName,
+			ProjectId:                 projectID,
+			DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
+		})
+		s.log.Info("autobootstrap: queue created",
+			zap.String("queue", queueName),
+			zap.String("project_id", projectID),
+			zap.String("workload_id", w.GetId()),
+		)
+	}
+	if s.store.GetFlavor(reqFlavor) == nil {
+		flavor := workspacecfg.GuessFlavor(reqFlavor)
+		if flavor == nil {
+			flavor = &aegis.Flavor{Name: reqFlavor}
+		} else {
+			flavor.Name = reqFlavor
+		}
+		s.store.PutFlavor(flavor)
+		s.log.Info("autobootstrap: flavor created",
+			zap.String("flavor", reqFlavor),
+			zap.String("resource_name", flavor.GetResourceName()),
+			zap.Int32("gpu_count", flavor.GetGpuCount()),
+		)
+	}
+}
+
 func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRequest) (*aegis.Workload, error) {
 	if req == nil || req.Workload == nil {
 		err := status.Error(codes.InvalidArgument, "workload payload required")
@@ -293,6 +363,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if w.Id == "" {
 		w.Id = "w-" + RandID()
 	}
+	s.maybeBootstrapWorkspaceDeps(ctx, w)
 	p := s.store.GetProject(w.ProjectId)
 	if p == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "unknown project %q", w.ProjectId)

@@ -78,12 +78,11 @@ scripts/test-workspace-connection.sh [image]
 
 What the script does:
 
-1. Idempotently ensures the `p-demo` project, `cpu-small` flavor, and `default` queue exist.
-2. Submits a workspace pointing at `WORKSPACE_IMAGE` (positional argument or default) with the detected VS Code commit.
-3. Waits for the pod to reach `Running`, and asserts the REH emitted “Extension host agent listening”.
-4. Calls `CreateConnectionSession` and prints the returned `vscodeUri` / `sshConfig`.
-5. Executes an in-cluster `curl http://127.0.0.1:11111` to confirm the VS Code server responds.
-6. Writes a JSON bundle to `.aegis/workspace-session.json` so you can reuse the credentials.
+1. Submits a workspace pointing at `WORKSPACE_IMAGE` (positional argument or default) with the detected VS Code commit, relying on the API's bootstrap flag to create the demo project/queue/flavor on first run.
+2. Waits for the pod to reach `Running`, and asserts the REH emitted “Extension host agent listening”.
+3. Calls `CreateConnectionSession` and prints the returned `vscodeUri` / `sshConfig`.
+4. Executes an in-cluster `curl http://127.0.0.1:11111` to confirm the VS Code server responds.
+5. Writes a JSON bundle to `.aegis/workspace-session.json` so you can reuse the credentials.
 
 By default the workspace is left running so you can finish the test manually from Backstage or the VS Code
 extension. When you are done:

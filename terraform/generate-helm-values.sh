@@ -187,6 +187,8 @@ if [[ $NON_INTERACTIVE -eq 0 ]]; then
         echo "     jwtSecret: \$(terraform output -raw jwt_secret_value)"
         echo "   EOF"
         echo ""
+        echo "   # Set platformApi.env.AEGIS_AUTO_BOOTSTRAP_WORKSPACES=false in overrides when production environments require manual catalog management."
+        echo ""
         echo "✨ Done!"
         echo ""
         echo "ℹ️  TLS is enforced automatically; rerun this script anytime you want to regenerate certificates"

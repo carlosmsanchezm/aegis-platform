@@ -4,7 +4,10 @@
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://localhost:10080'
+      target: 'http://platform-api.localtest.me'
+      secure: false
+      headers:
+        Host: platform-api.localtest.me
       changeOrigin: true
       credentials: forward
       allowedHeaders:
@@ -12,3 +15,7 @@ proxy:
         - Authorization
         - x-aegis-user
         - X-Aegis-User
+        - grpc-metadata-authorization
+        - Grpc-Metadata-Authorization
+        - grpc-metadata-x-aegis-user
+        - Grpc-Metadata-X-Aegis-User

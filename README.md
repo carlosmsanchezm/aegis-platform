@@ -82,6 +82,14 @@ workspace images, publishing instructions, and smoke tests.
 2. **Run the platform API and operator** as described in the quickstart above
    (Terminals A and B). Wait for the operator to register before continuing.
 
+   ⚠️ `make deploy-local` / `make deploy-local-tls` now updates `/etc/hosts`
+   automatically (using `sudo`). You will be prompted for your password the first
+   time so the following entries are always present:
+
+   ```
+   127.0.0.1 platform-api.localtest.me platform-api-grpc.localtest.me proxy.localtest.me
+   ```
+
 3. **(Optional) Run the connectivity smoke test**
 
    ```bash
@@ -89,8 +97,8 @@ workspace images, publishing instructions, and smoke tests.
    scripts/test-workspace-connection.sh carlosmsanchez/aegis-workspace-vscode:latest
    ```
 
-   The script ensures the demo project/queue exist, submits a workspace, waits for the
-   Remote Extension Host to announce readiness, probes port 11111 from inside the pod,
+   The script reuses the server-side bootstrap, so the first submission creates the demo project/queue/flavor automatically when the flag is enabled.
+   It waits for the Remote Extension Host to announce readiness, probes port 11111 from inside the pod,
    and prints the `vscode://` deep link.
    The workspace remains running so you can finish the test manually in the UI/extension.
 
@@ -275,11 +283,7 @@ The following scenarios validate the full functionality of the refactored system
 
 1.  **Seed the API (Terminal C)**
 
-    ```bash
-    grpcurl -plaintext -d '{"project":{"id":"p-demo"}}' localhost:8081 aegis.v1.AegisPlatform/CreateProject
-    grpcurl -plaintext -d '{"flavor":{"name":"cpu-small","gpuCount":0}}' localhost:8081 aegis.v1.AegisPlatform/UpsertFlavor
-    grpcurl -plaintext -d '{"queue":{"name":"default","projectId":"p-demo","allowedFlavors":["cpu-small"]}}' localhost:8081 aegis.v1.AegisPlatform/UpsertQueue
-    ```
+    With `AEGIS_AUTO_BOOTSTRAP_WORKSPACES=true` (enabled by default in the local and preview Helm values) the first workspace submission automatically creates the `p-demo` project, `default` queue, and `cpu-small` flavor. If you turn the flag off for production hardening, create those catalog entries manually via the usual `CreateProject`, `UpsertFlavor`, and `UpsertQueue` RPCs before submitting workloads.
 
 2.  **Submit Workloads (Terminal C)**
 

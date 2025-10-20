@@ -39,6 +39,7 @@ platformApi:
     AEGIS_PROXY_JWT_SECRET: "a-very-secret-key-for-local-dev-must-be-32-chars"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AUTH_STATIC_TOKEN: "supersecret"
     AUTH_STATIC_SUBJECT: "dev-user@example.com"
 

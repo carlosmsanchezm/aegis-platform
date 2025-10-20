@@ -1,6 +1,11 @@
 package workspace
 
-import "sort"
+import (
+	"sort"
+	"strings"
+
+	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+)
 
 const (
 	DefaultVSCodePort int32 = 11111
@@ -14,7 +19,7 @@ const (
 	EnvUserPassword   = "USER_PASSWORD"
 
 	// DefaultVSCodeQuality is provided for environments that explicitly pin VS Code builds.
-	DefaultVSCodeQuality = "stable"
+	DefaultVSCodeQuality  = "stable"
 	DefaultPUID           = "1000"
 	DefaultPGID           = "1000"
 	DefaultPasswordAccess = "true"
@@ -100,4 +105,82 @@ func CopyEnv(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// KnownFlavors returns the reference catalog of flavors surfaced in the UI.
+func KnownFlavors() map[string]*aegis.Flavor {
+	return map[string]*aegis.Flavor{
+		"cpu-small": {
+			Name:            "cpu-small",
+			CpuCoresRequest: "2",
+			MemoryRequest:   "4Gi",
+		},
+		"cpu-medium": {
+			Name:            "cpu-medium",
+			CpuCoresRequest: "4",
+			MemoryRequest:   "16Gi",
+		},
+		"cpu-large": {
+			Name:            "cpu-large",
+			CpuCoresRequest: "8",
+			MemoryRequest:   "32Gi",
+		},
+		"gpu-standard": {
+			Name:            "gpu-standard",
+			ResourceName:    "nvidia.com/gpu",
+			GpuCount:        1,
+			CpuCoresRequest: "4",
+			MemoryRequest:   "32Gi",
+		},
+		"gpu-large": {
+			Name:            "gpu-large",
+			ResourceName:    "nvidia.com/gpu",
+			GpuCount:        1,
+			CpuCoresRequest: "8",
+			MemoryRequest:   "64Gi",
+		},
+		"a10-mig-1g": {
+			Name:            "a10-mig-1g",
+			ResourceName:    "nvidia.com/mig-1g.10gb",
+			GpuCount:        1,
+			CpuCoresRequest: "1",
+			MemoryRequest:   "4Gi",
+			MigProfile:      "1g.10gb",
+		},
+	}
+}
+
+// GuessFlavor returns a sensible default definition for the provided name.
+// The lookup is case-insensitive and falls back to heuristics for GPU/MIG
+// keywords. Unknown names surface a conservative CPU flavor.
+func GuessFlavor(name string) *aegis.Flavor {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil
+	}
+	lower := strings.ToLower(trimmed)
+	if f, ok := KnownFlavors()[lower]; ok {
+		clone := *f
+		clone.Name = trimmed
+		return &clone
+	}
+
+	flavor := &aegis.Flavor{Name: trimmed}
+	switch {
+	case strings.Contains(lower, "mig-1g"):
+		flavor.ResourceName = "nvidia.com/mig-1g.10gb"
+		flavor.GpuCount = 1
+		flavor.CpuCoresRequest = "1"
+		flavor.MemoryRequest = "4Gi"
+		flavor.MigProfile = "1g.10gb"
+	case strings.Contains(lower, "gpu"):
+		flavor.ResourceName = "nvidia.com/gpu"
+		flavor.GpuCount = 1
+		flavor.CpuCoresRequest = "4"
+		flavor.MemoryRequest = "32Gi"
+	default:
+		flavor.CpuCoresRequest = "2"
+		flavor.MemoryRequest = "4Gi"
+	}
+	return flavor
 }

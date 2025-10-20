@@ -51,12 +51,24 @@ platformApi:
           - path: /
             pathType: Prefix
             service: grpc
+  httpIngress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: platform-api.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
 
   # Local development environment variables
   env:
     LOG_LEVEL: "debug"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AUTH_STATIC_TOKEN: "supersecret"
     AUTH_STATIC_SUBJECT: "dev-user@example.com"
     # AEGIS_PROXY_MTLS_ENABLED: "false"  # set to "true" when proxy mTLS is required

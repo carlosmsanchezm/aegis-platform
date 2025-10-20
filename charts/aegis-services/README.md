@@ -34,8 +34,12 @@ This configuration deploys the ingress controller and exposes the services via h
 
 | Service        | Hostname                          | Protocol | Notes                                  |
 | -------------- | --------------------------------- | -------- | -------------------------------------- |
-| Platform API   | `platform-api-grpc.localtest.me`  | gRPC     | Use port `80`; TLS optional via overlay |
+| Platform API (gRPC) | `platform-api-grpc.localtest.me`  | gRPC     | Use port `80`; TLS optional via overlay |
+| Platform API (REST) | `platform-api.localtest.me`       | HTTP     | Serves JSON/REST for Backstage and grpc-gateway |
 | Proxy          | `proxy.localtest.me`              | HTTP     | Upgrades to HTTPS when TLS overlay is applied |
+
+> Remember to add the hostnames above to `/etc/hosts` if they are missing:
+> `127.0.0.1 platform-api.localtest.me platform-api-grpc.localtest.me proxy.localtest.me`
 
 Example verification commands (requires [`grpcurl`](https://github.com/fullstorydev/grpcurl)):
 

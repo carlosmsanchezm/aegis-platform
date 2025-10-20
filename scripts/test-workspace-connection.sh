@@ -84,21 +84,9 @@ for dep in grpcurl jq kubectl awk sed curl; do
   fi
 done
 
-ensure_project_queue() {
-  grpcurl "${GRPCURL_OPTS[@]}" -d '{"project":{"id":"p-demo"}}' "${GRPC_ADDR}" aegis.v1.AegisPlatform/CreateProject >/dev/null || true
-  grpcurl "${GRPCURL_OPTS[@]}" -d '{"flavor":{"name":"cpu-small","gpuCount":0}}' "${GRPC_ADDR}" aegis.v1.AegisPlatform/UpsertFlavor >/dev/null || true
-  grpcurl "${GRPCURL_OPTS[@]}" -d '{
-    "queue":{
-      "name":"default",
-      "projectId":"p-demo",
-      "allowedFlavors":["cpu-small"]
-    }
-  }' "${GRPC_ADDR}" aegis.v1.AegisPlatform/UpsertQueue >/dev/null || true
-}
-
-ensure_project_queue
-
 echo "→ Submitting workspace with image ${WORKSPACE_IMAGE}"
+# When AEGIS_AUTO_BOOTSTRAP_WORKSPACES=true (default for local/preview),
+# the first SubmitWorkload call below will create the demo project/queue/flavor automatically.
 SUBMIT_JSON=$(
   grpcurl "${GRPCURL_OPTS[@]}" \
     -H "x-aegis-user: ${AEGIS_USER_HEADER}" \

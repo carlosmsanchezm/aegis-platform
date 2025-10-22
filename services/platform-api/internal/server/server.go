@@ -933,12 +933,8 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	}
 
 	port := selectWorkspacePort(wk.Workspace)
-	// The service name in Kubernetes is "aegis-{workloadID}", not "aegis-w-{workloadID}"
-	// The k8s-agent planner creates the AegisWorkload with name "aegis-{workspaceID}"
-	// and the aegisworkload controller creates a service with the same name.
-	serviceName := fmt.Sprintf("aegis-%s", w.GetId())
-	alias := serviceName
-	internalHost := fmt.Sprintf("%s.%s%s", serviceName, s.targetNamespace, svcClusterDomainSuffix)
+	alias := buildHostAlias(w.GetId())
+	internalHost := fmt.Sprintf("%s.%s%s", alias, s.targetNamespace, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
 	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
 

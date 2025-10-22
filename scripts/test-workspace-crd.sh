@@ -70,13 +70,17 @@ fi
 
 echo "→ Workspace references workload ${WORKLOAD_ID}"
 
-LABEL_SELECTOR="aegis.yourorg.dev/workspace=${WORKSPACE_NAME}"
+PRIMARY_SELECTOR="aegis.workload/id=${WORKLOAD_ID}"
+FALLBACK_SELECTOR="aegis.yourorg.dev/workspace=${WORKSPACE_NAME}"
 POD_NAME=""
 
 echo "→ Waiting for workspace pod to become Ready..."
 DEADLINE=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < DEADLINE )); do
-  POD_NAME=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "${LABEL_SELECTOR}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  POD_NAME=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "${PRIMARY_SELECTOR}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [[ -z "${POD_NAME}" ]]; then
+    POD_NAME=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "${FALLBACK_SELECTOR}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  fi
   if [[ -n "${POD_NAME}" ]]; then
     PHASE=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.status.phase}')
     READY=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")

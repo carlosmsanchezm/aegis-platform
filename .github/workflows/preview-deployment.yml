@@ -437,6 +437,42 @@ jobs:
           cd agents/k8s-agent
           make test-e2e
 
+      - name: Promote images to latest
+        if: ${{ env.RUN_SUBSET == 'all' && success() }}
+        env:
+          PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}
+          PROXY_IMAGE: ${{ needs.build-and-push.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ needs.build-and-push.outputs.workspace_image }}
+        run: |
+          set -euo pipefail
+          promote() {
+            local image="$1"
+            local repo="${image%:*}"
+            local tag="${image##*:}"
+            local registry="${repo%%/*}"
+            local repo_name="${repo#${registry}/}"
+            echo "Promoting ${repo_name}:${tag} -> latest"
+            local manifest
+            manifest=$(aws ecr batch-get-image \
+              --repository-name "$repo_name" \
+              --image-ids imageTag="$tag" \
+              --query 'images[0].imageManifest' \
+              --output text)
+            if [ -z "$manifest" ]; then
+              echo "Failed to retrieve manifest for ${repo_name}:${tag}" >&2
+              exit 1
+            fi
+            aws ecr put-image \
+              --repository-name "$repo_name" \
+              --image-tag latest \
+              --image-manifest "$manifest" >/dev/null
+          }
+          promote "$PLATFORM_IMAGE"
+          promote "$PROXY_IMAGE"
+          promote "$K8S_AGENT_IMAGE"
+          promote "$WORKSPACE_IMAGE"
+
   teardown-preview:
     name: Teardown Preview Environment
     if: ${{ always() && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy')) || github.event_name == 'pull_request') }}

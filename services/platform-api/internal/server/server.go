@@ -39,6 +39,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	unstructuredapi "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -443,35 +444,67 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
 	}
 
-	cr := buildAegisWorkloadCR(w, s.targetNamespace)
-	// Surface computed max runtime so the operator can apply an active deadline without a CRD change.
-	if maxSecs > 0 {
-		if cr.Annotations == nil {
-			cr.Annotations = map[string]string{}
+	var workspacePayload *unstructuredapi.Unstructured
+	var workloadPayload *aegisv1alpha1.AegisWorkload
+
+	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
+		workspacePayload = buildWorkspaceCR(w, wk.Workspace, s.targetNamespace, reqFlavor, maxSecs)
+	} else {
+		workloadPayload = buildAegisWorkloadCR(w, s.targetNamespace)
+		if maxSecs > 0 {
+			if workloadPayload.Annotations == nil {
+				workloadPayload.Annotations = map[string]string{}
+			}
+			workloadPayload.Annotations["aegis.yourorg.dev/maxDurationSeconds"] = fmt.Sprintf("%d", maxSecs)
 		}
-		cr.Annotations["aegis.yourorg.dev/maxDurationSeconds"] = strconv.FormatInt(maxSecs, 10)
 	}
-	if err := kubeClient.Create(ctx, cr); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			s.log.Error("failed to create aegis workload CR",
+
+	if workspacePayload != nil {
+		if err := kubeClient.Create(ctx, workspacePayload); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				s.log.Error("failed to create workspace CR",
+					zap.String("workload_id", w.GetId()),
+					zap.String("cluster_id", chosen),
+					zap.String("namespace", s.targetNamespace),
+					zap.Error(err),
+				)
+				return nil, status.Error(codes.Internal, "failed to create Workspace in target cluster")
+			}
+			s.log.Info("workspace CR already exists",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
 				zap.String("namespace", s.targetNamespace),
-				zap.Error(err),
 			)
-			return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
+		} else {
+			s.log.Info("workspace CR created",
+				zap.String("workload_id", w.GetId()),
+				zap.String("cluster_id", chosen),
+				zap.String("namespace", s.targetNamespace),
+			)
 		}
-		s.log.Info("aegis workload CR already exists",
-			zap.String("workload_id", w.GetId()),
-			zap.String("cluster_id", chosen),
-			zap.String("namespace", s.targetNamespace),
-		)
-	} else {
-		s.log.Info("aegis workload CR created",
-			zap.String("workload_id", w.GetId()),
-			zap.String("cluster_id", chosen),
-			zap.String("namespace", s.targetNamespace),
-		)
+	} else if workloadPayload != nil {
+		if err := kubeClient.Create(ctx, workloadPayload); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				s.log.Error("failed to create aegis workload CR",
+					zap.String("workload_id", w.GetId()),
+					zap.String("cluster_id", chosen),
+					zap.String("namespace", s.targetNamespace),
+					zap.Error(err),
+				)
+				return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
+			}
+			s.log.Info("aegis workload CR already exists",
+				zap.String("workload_id", w.GetId()),
+				zap.String("cluster_id", chosen),
+				zap.String("namespace", s.targetNamespace),
+			)
+		} else {
+			s.log.Info("aegis workload CR created",
+				zap.String("workload_id", w.GetId()),
+				zap.String("cluster_id", chosen),
+				zap.String("namespace", s.targetNamespace),
+			)
+		}
 	}
 
 	s.store.PutWorkload(w)
@@ -900,8 +933,12 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	}
 
 	port := selectWorkspacePort(wk.Workspace)
-	alias := buildHostAlias(w.GetId())
-	internalHost := fmt.Sprintf("%s.%s%s", alias, s.targetNamespace, svcClusterDomainSuffix)
+	// The service name in Kubernetes is "aegis-{workloadID}", not "aegis-w-{workloadID}"
+	// The k8s-agent planner creates the AegisWorkload with name "aegis-{workspaceID}"
+	// and the aegisworkload controller creates a service with the same name.
+	serviceName := fmt.Sprintf("aegis-%s", w.GetId())
+	alias := serviceName
+	internalHost := fmt.Sprintf("%s.%s%s", serviceName, s.targetNamespace, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
 	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
 
@@ -1054,7 +1091,7 @@ func buildSSHUser(subject string) string {
 }
 
 func buildHostAlias(workloadID string) string {
-	const prefix = "aegis-w-"
+	const prefix = "aegis-"
 	cleaned := strings.TrimSpace(strings.ToLower(workloadID))
 	if cleaned == "" {
 		return prefix + randomHex(4)
@@ -1577,6 +1614,113 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 			Namespace: namespace,
 		},
 		Spec: spec,
+	}
+}
+
+func buildWorkspaceCR(w *aegis.Workload, ws *aegis.WorkspaceSpec, namespace, flavor string, maxRuntime int64) *unstructuredapi.Unstructured {
+	if ws == nil {
+		return nil
+	}
+
+	metadata := map[string]interface{}{
+		"name":      w.GetId(),
+		"namespace": namespace,
+		"labels": map[string]interface{}{
+			labelWorkloadID:                w.GetId(),
+			"aegis.aegis-remote/workspace": "true",
+			"aegisRemote":                  "true",
+		},
+	}
+
+	execution := map[string]interface{}{}
+	if img := strings.TrimSpace(ws.GetImage()); img != "" {
+		execution["image"] = img
+	}
+	if env := ws.GetEnv(); len(env) > 0 {
+		envMap := make(map[string]interface{}, len(env))
+		for k, v := range env {
+			if strings.TrimSpace(k) == "" {
+				continue
+			}
+			envMap[k] = v
+		}
+		if len(envMap) > 0 {
+			execution["env"] = envMap
+		}
+	}
+	if cmd := ws.GetCommand(); len(cmd) > 0 {
+		execution["command"] = cmd
+	}
+	if ports := ws.GetPorts(); len(ports) > 0 {
+		portsOut := make([]interface{}, 0, len(ports))
+		for _, port := range ports {
+			portsOut = append(portsOut, port)
+		}
+		execution["ports"] = portsOut
+	}
+	if ws.GetInteractive() {
+		execution["interactive"] = true
+	}
+
+	spec := map[string]interface{}{
+		"projectRef": strings.TrimSpace(w.GetProjectId()),
+		"profileRef": "custom",
+	}
+	if queue := strings.TrimSpace(w.GetQueue()); queue != "" {
+		spec["queue"] = queue
+	}
+	if len(execution) > 0 {
+		spec["execution"] = execution
+	}
+
+	gpuFlavor := strings.TrimSpace(ws.GetFlavor())
+	if gpuFlavor == "" {
+		gpuFlavor = strings.TrimSpace(flavor)
+	}
+	hints := w.GetHints()
+	if gpuFlavor != "" || hints != nil {
+		gpuProfile := map[string]interface{}{}
+		if gpuFlavor != "" {
+			gpuProfile["flavor"] = gpuFlavor
+		}
+		if hints != nil {
+			hintsMap := map[string]interface{}{}
+			if resourceName := strings.TrimSpace(hints.GetResourceName()); resourceName != "" {
+				hintsMap["resourceName"] = resourceName
+			}
+			if gpuCount := hints.GetGpuCount(); gpuCount > 0 {
+				hintsMap["gpuCount"] = gpuCount
+			}
+			if cpu := strings.TrimSpace(hints.GetCpuCoresRequest()); cpu != "" {
+				hintsMap["cpuCoresRequest"] = cpu
+			}
+			if memory := strings.TrimSpace(hints.GetMemoryRequest()); memory != "" {
+				hintsMap["memoryRequest"] = memory
+			}
+			if len(hintsMap) > 0 {
+				gpuProfile["hints"] = hintsMap
+			}
+		}
+		if len(gpuProfile) > 0 {
+			spec["gpuProfile"] = gpuProfile
+		}
+	}
+
+	maxDuration := ws.GetMaxDurationSeconds()
+	if maxDuration <= 0 {
+		maxDuration = maxRuntime
+	}
+	if maxDuration > 0 {
+		spec["maxDurationSeconds"] = maxDuration
+	}
+
+	return &unstructuredapi.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "aegis.yourorg.dev/v1alpha2",
+			"kind":       "Workspace",
+			"metadata":   metadata,
+			"spec":       spec,
+		},
 	}
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 IMAGE="${1:-${WORKSPACE_IMAGE:-aegis-workspace:latest}}"
-QUALITY="${VSCODE_QUALITY:-insider}"
+QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-}"
 TIMEOUT_SECONDS="${SMOKE_TIMEOUT:-120}"
 
@@ -13,7 +13,7 @@ Usage: $(basename "$0") [image]
 Environment variables:
   WORKSPACE_IMAGE   Override the image name (default: aegis-workspace:latest)
   VSCODE_COMMIT     Required VS Code commit hash (40 hex characters)
-  VSCODE_QUALITY    Channel to fetch (default: insider)
+  VSCODE_QUALITY    Channel to fetch (default: stable)
   SMOKE_TIMEOUT     Seconds to wait for the server to start (default: 120)
 EOF
 }

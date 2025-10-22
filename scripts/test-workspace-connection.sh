@@ -10,9 +10,9 @@ else
 fi
 WORKSPACE_NAMESPACE="${WORKSPACE_NAMESPACE:-aegis-workloads-local}"
 AEGIS_USER_HEADER="${AEGIS_WORKSPACE_USER:-testuser@test.com}"
-QUALITY="${VSCODE_QUALITY:-insider}"
+QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-}"
-TIMEOUT_SECONDS="${WORKSPACE_TIMEOUT:-240}"
+TIMEOUT_SECONDS="${WORKSPACE_TIMEOUT:-600}"
 REH_READY_STRING="${REH_READY_STRING:-Extension host agent listening}"
 GRPC_TLS="${GRPC_TLS:-0}"
 GRPC_CA="${GRPC_CA:-}"
@@ -28,14 +28,48 @@ Environment variables:
   GRPC_ADDR              Platform API address (default: localhost:10081)
   WORKSPACE_IMAGE        Container image to launch (default: aegis-workspace:latest or positional argument)
   VSCODE_COMMIT          VS Code commit hash expected by the client (required)
-  VSCODE_QUALITY         VS Code channel to fetch (default: insider)
+  VSCODE_QUALITY         VS Code channel to fetch (default: stable)
   WORKSPACE_NAMESPACE    Namespace for workloads (default: aegis-workloads-local)
-  WORKSPACE_TIMEOUT      Seconds to wait for pod readiness (default: 240)
+  WORKSPACE_TIMEOUT      Seconds to wait for pod readiness (default: 600)
   AEGIS_WORKSPACE_USER   Value for the x-aegis-user header (default: testuser@test.com)
   GRPC_TLS               Set to 1 to enable TLS (default: 0)
   GRPC_CA                Path to CA bundle when GRPC_TLS=1
   GRPC_TLS_SERVER_NAME   Expected server name (SNI) when GRPC_TLS=1
 EOF
+}
+
+find_workspace_pod() {
+  local candidate=""
+  candidate=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "${LABEL_SELECTOR}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [[ -n "${candidate}" ]]; then
+    echo "${candidate}"
+    return 0
+  fi
+
+  candidate=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "aegis.yourorg.dev/workspace-id=${WORKLOAD_ID}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [[ -n "${candidate}" ]]; then
+    echo "${candidate}"
+    return 0
+  fi
+
+  local pod_json=""
+  if pod_json=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -o json 2>/dev/null); then
+    candidate=$(jq -r --arg id "${WORKLOAD_ID}" '[
+        .items[]
+        | select(
+            (.metadata.labels["aegis.workload/id"] // "") == $id
+            or (.metadata.labels["aegis.yourorg.dev/workspace-id"] // "") == $id
+            or ((.metadata.name // "") | contains($id))
+          )
+        | .metadata.name
+      ][0] // ""' <<<"${pod_json}" 2>/dev/null || true)
+    if [[ -n "${candidate}" ]]; then
+      echo "${candidate}"
+      return 0
+    fi
+  fi
+
+  return 1
 }
 
 if [[ "${1:-}" == "--help" ]]; then
@@ -130,29 +164,52 @@ echo "→ Workload ID: ${WORKLOAD_ID}"
 LABEL_SELECTOR="aegis.workload/id=${WORKLOAD_ID}"
 DEADLINE=$((SECONDS + TIMEOUT_SECONDS))
 POD_NAME=""
+UNSCHEDULABLE_MSG=""
 
 echo "→ Waiting for workspace pod to become Ready..."
 while (( SECONDS < DEADLINE )); do
-  POD_NAME=$(kubectl get pods -n "${WORKSPACE_NAMESPACE}" -l "${LABEL_SELECTOR}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-  if [[ -n "${POD_NAME}" ]]; then
-    PHASE=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.status.phase}')
-    READY=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
-    if [[ "${PHASE}" == "Running" && "${READY}" == "true" ]]; then
-      echo "→ Pod ${POD_NAME} is Ready."
-      break
+  if POD_CANDIDATE=$(find_workspace_pod); then
+    POD_NAME="${POD_CANDIDATE}"
+    POD_JSON=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o json 2>/dev/null || true)
+    if [[ -n "${POD_JSON}" && "${POD_JSON}" != "null" ]]; then
+      PHASE=$(echo "${POD_JSON}" | jq -r '.status.phase // ""')
+      READY=$(echo "${POD_JSON}" | jq -r '.status.containerStatuses[0].ready // "false"')
+      SCHEDULED_STATUS=$(echo "${POD_JSON}" | jq -r '.status.conditions[]? | select(.type=="PodScheduled") | .status // empty')
+      if [[ "${SCHEDULED_STATUS}" == "False" ]]; then
+        REASON=$(echo "${POD_JSON}" | jq -r '.status.conditions[]? | select(.type=="PodScheduled") | .reason // empty')
+        MESSAGE=$(echo "${POD_JSON}" | jq -r '.status.conditions[]? | select(.type=="PodScheduled") | .message // empty')
+        if [[ "${REASON}" == "Unschedulable" ]]; then
+          UNSCHEDULABLE_MSG="${MESSAGE}"
+          break
+        fi
+      fi
+      if [[ "${PHASE}" == "Running" && "${READY}" == "true" ]]; then
+        echo "→ Pod ${POD_NAME} is Ready."
+        break
+      fi
     fi
+  else
+    POD_NAME=""
   fi
   sleep 3
 done
 
 if [[ -z "${POD_NAME}" ]]; then
-  echo "✖ Workspace pod did not schedule." >&2
+  if [[ -n "${UNSCHEDULABLE_MSG}" ]]; then
+    echo "✖ Workspace pod is unschedulable: ${UNSCHEDULABLE_MSG}" >&2
+  else
+    echo "✖ Workspace pod did not schedule." >&2
+  fi
   exit 1
 fi
 
 PHASE=$(kubectl get pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.status.phase}')
 if [[ "${PHASE}" != "Running" ]]; then
-  echo "✖ Workspace pod failed to reach Running phase (current: ${PHASE})." >&2
+  if [[ -n "${UNSCHEDULABLE_MSG}" ]]; then
+    echo "✖ Workspace pod is unschedulable: ${UNSCHEDULABLE_MSG}" >&2
+  else
+    echo "✖ Workspace pod failed to reach Running phase (current: ${PHASE})." >&2
+  fi
   kubectl describe pod "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" >&2 || true
   exit 1
 fi

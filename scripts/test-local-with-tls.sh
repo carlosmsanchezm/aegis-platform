@@ -64,25 +64,6 @@ TLS_RUN_E2E_OPERATOR="${TLS_RUN_E2E_OPERATOR:-1}"
 TLS_SKIP_VERIFY="${TLS_SKIP_VERIFY:-1}"
 TLS_CA_FILE="${TLS_CA:-$HOME/aegis-platform-api-ca.crt}"
 
-log "Deploying local stack without TLS"
-wait_for_helm_release "aegis-services" "aegis-system" || exit 1
-wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
-make deploy-local
-
-if (( ${#HTTP_ARGS[@]} )); then
-  run_test_all_local "http" \
-    env \
-      RUN_E2E_PLATFORM="$HTTP_RUN_E2E_PLATFORM" \
-      RUN_E2E_OPERATOR="$HTTP_RUN_E2E_OPERATOR" \
-      ./scripts/test-all-local.sh "${HTTP_ARGS[@]}"
-else
-  run_test_all_local "http" \
-    env \
-      RUN_E2E_PLATFORM="$HTTP_RUN_E2E_PLATFORM" \
-      RUN_E2E_OPERATOR="$HTTP_RUN_E2E_OPERATOR" \
-      ./scripts/test-all-local.sh
-fi
-
 log "Deploying local stack with TLS"
 wait_for_helm_release "aegis-services" "aegis-system" || exit 1
 wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1

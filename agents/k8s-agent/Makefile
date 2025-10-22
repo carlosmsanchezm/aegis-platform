@@ -50,7 +50,7 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= unknown
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= carlosmsanchez/aegis-k8s-agent:dev
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -194,12 +194,22 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	cd ../.. && $(CONTAINER_TOOL) build -t ${IMG} -f agents/k8s-agent/Dockerfile .
+
+.PHONY: docker-build-multi
+docker-build-multi: ## Build and push multi-arch (amd64+arm64) image for the manager.
+	@set -euo pipefail; \
+	cd ../..; \
+	IMAGE="$${IMG:-controller:latest}"; \
+	echo ">> Building $$IMAGE for linux/amd64,linux/arm64"; \
+	$(CONTAINER_TOOL) buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-t $$IMAGE \
+		-f agents/k8s-agent/Dockerfile \
+		--push \
+		.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,9 +35,13 @@ import (
 
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	aegisv1alpha2 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha2"
+	"github.com/yourorg/aegis/agents/k8s-agent/internal/cpclient"
 	"github.com/yourorg/aegis/agents/k8s-agent/internal/providers"
 	"github.com/yourorg/aegis/agents/k8s-agent/internal/workspace/metrics"
 	"github.com/yourorg/aegis/agents/k8s-agent/internal/workspace/plan"
+	aegisproto "github.com/yourorg/aegis/proto/aegis/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -51,6 +57,8 @@ type WorkspaceReconciler struct {
 	recorder         recordEventRecorder
 	metricsCollector *metrics.Collector
 	providers        *providers.Registry
+	cpClient         *cpclient.Client
+	clusterID        string
 }
 
 type recordEventRecorder interface {
@@ -193,6 +201,10 @@ func (r *WorkspaceReconciler) ensureWorkload(ctx context.Context, ws *aegisv1alp
 		return nil, err
 	}
 
+	if err := r.ensureControlPlaneRegistration(ctx, ws, child); err != nil {
+		return nil, err
+	}
+
 	return child, nil
 }
 
@@ -242,6 +254,151 @@ func (r *WorkspaceReconciler) patchStatus(ctx context.Context, ws *aegisv1alpha2
 	original := ws.DeepCopy()
 	mutate(&ws.Status)
 	return r.Status().Patch(ctx, ws, client.MergeFrom(original))
+}
+
+func (r *WorkspaceReconciler) ensureControlPlaneRegistration(ctx context.Context, ws *aegisv1alpha2.Workspace, aw *aegisv1alpha1.AegisWorkload) error {
+	if r.cpClient == nil || ws == nil || aw == nil {
+		return nil
+	}
+
+	workloadID := strings.TrimSpace(ws.GetLabels()["aegis.workload/id"])
+	for strings.HasPrefix(workloadID, "aegis-") {
+		workloadID = strings.TrimPrefix(workloadID, "aegis-")
+	}
+	if workloadID == "" {
+		workloadID = strings.TrimSpace(ws.GetName())
+		for strings.HasPrefix(workloadID, "aegis-") {
+			workloadID = strings.TrimPrefix(workloadID, "aegis-")
+		}
+	}
+	if workloadID == "" {
+		workloadID = strings.TrimSpace(aw.GetLabels()["aegis.workload/id"])
+		for strings.HasPrefix(workloadID, "aegis-") {
+			workloadID = strings.TrimPrefix(workloadID, "aegis-")
+		}
+	}
+	if workloadID == "" {
+		workloadID = strings.TrimSpace(aw.GetName())
+		for strings.HasPrefix(workloadID, "aegis-") {
+			workloadID = strings.TrimPrefix(workloadID, "aegis-")
+		}
+	}
+	if workloadID == "" {
+		ctrl.LoggerFrom(ctx).V(1).Info("workspace missing workload identifier; skipping control-plane registration",
+			"workspace", ws.GetName(),
+			"namespace", ws.GetNamespace())
+		return nil
+	}
+
+	if _, err := r.cpClient.GetWorkload(ctx, workloadID); err == nil {
+		return nil
+	} else if status.Code(err) != codes.NotFound {
+		return err
+	}
+
+	protoWorkload, err := buildControlPlaneWorkload(workloadID, &aw.Spec)
+	if err != nil {
+		return err
+	}
+	if r.clusterID != "" {
+		protoWorkload.ClusterId = r.clusterID
+	}
+
+	ctrl.LoggerFrom(ctx).Info("registering workspace with control plane", "workloadID", workloadID)
+
+	if _, err := r.cpClient.SubmitWorkload(ctx, protoWorkload); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildControlPlaneWorkload(id string, spec *aegisv1alpha1.AegisWorkloadSpec) (*aegisproto.Workload, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("workload %s has no specification", id)
+	}
+	if spec.ProjectID == "" {
+		return nil, fmt.Errorf("workload %s missing projectId", id)
+	}
+
+	workload := &aegisproto.Workload{
+		Id:        id,
+		ProjectId: spec.ProjectID,
+		Queue:     spec.Queue,
+	}
+
+	switch {
+	case spec.Workspace != nil:
+		wsSpec := spec.Workspace
+		workload.Kind = &aegisproto.Workload_Workspace{
+			Workspace: &aegisproto.WorkspaceSpec{
+				Flavor:      wsSpec.Flavor,
+				Image:       wsSpec.Image,
+				Env:         copyStringMap(wsSpec.Env),
+				Command:     copyStringSlice(wsSpec.Command),
+				Interactive: wsSpec.Interactive,
+				Ports:       copyInt32Slice(wsSpec.Ports),
+			},
+		}
+	case spec.Training != nil:
+		trSpec := spec.Training
+		workload.Kind = &aegisproto.Workload_Training{
+			Training: &aegisproto.TrainingSpec{
+				Flavor:        trSpec.Flavor,
+				Workers:       trSpec.Workers,
+				GpusPerWorker: trSpec.GpusPerWorker,
+				Image:         trSpec.Image,
+				Command:       copyStringSlice(trSpec.Command),
+				Gang:          trSpec.Gang,
+			},
+		}
+	default:
+		return nil, fmt.Errorf("workload %s missing workspace or training specification", id)
+	}
+
+	if spec.Hints != nil {
+		hints := &aegisproto.ResourceHints{
+			ResourceName: spec.Hints.ResourceName,
+			GpuCount:     spec.Hints.GpuCount,
+		}
+		if spec.Hints.CpuCoresRequest != nil {
+			hints.CpuCoresRequest = *spec.Hints.CpuCoresRequest
+		}
+		if spec.Hints.MemoryRequest != nil {
+			hints.MemoryRequest = *spec.Hints.MemoryRequest
+		}
+		workload.Hints = hints
+	}
+
+	return workload, nil
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func copyStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func copyInt32Slice(in []int32) []int32 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]int32, len(in))
+	copy(out, in)
+	return out
 }
 
 func mergeConditionsForWorkspace(ws *aegisv1alpha2.Workspace, child *aegisv1alpha1.AegisWorkload, extra []metav1.Condition) []metav1.Condition {
@@ -324,6 +481,19 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.providers == nil {
 		r.providers = providers.NewRegistry()
+	}
+	if r.clusterID == "" {
+		r.clusterID = os.Getenv("AEGIS_CLUSTER_ID")
+	}
+	if r.cpClient == nil {
+		if endpoint := os.Getenv("AEGIS_CP_GRPC"); endpoint != "" {
+			client, err := cpclient.New(endpoint)
+			if err != nil {
+				ctrl.Log.WithName("workspace-controller").Error(err, "failed to create control-plane client", "endpoint", endpoint)
+			} else {
+				r.cpClient = client
+			}
+		}
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

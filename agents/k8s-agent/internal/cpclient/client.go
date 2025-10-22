@@ -3,6 +3,7 @@ package cpclient
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -96,4 +97,18 @@ func (c *Client) Ack(ctx context.Context, id, status, backend, url string) error
 func (c *Client) Start(ctx context.Context, id, clusterID string) error {
 	_, err := c.api.StartWorkload(ctx, &aegis.StartWorkloadRequest{Id: id, ClusterId: clusterID})
 	return err
+}
+
+func (c *Client) SubmitWorkload(ctx context.Context, workload *aegis.Workload) (*aegis.Workload, error) {
+	if workload == nil {
+		return nil, fmt.Errorf("workload payload required")
+	}
+	return c.api.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{Workload: workload})
+}
+
+func (c *Client) GetWorkload(ctx context.Context, id string) (*aegis.Workload, error) {
+	if id == "" {
+		return nil, fmt.Errorf("workload id required")
+	}
+	return c.api.GetWorkload(ctx, &aegis.GetWorkloadRequest{Id: id})
 }

@@ -32,7 +32,7 @@ platformApi:
   image:
     repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
     tag: "8afb9e0-vscode-dynamic"
-    pullPolicy: IfNotPresent  # Use local images if available
+    pullPolicy: Always  # Always pull to get latest :dev tag
 
   service:
     type: ClusterIP
@@ -109,9 +109,9 @@ proxy:
   replicaCount: 1
 
   image:
-    repository: aegis-proxy-local
+    repository: carlosmsanchez/aegis-proxy
     tag: "latest"
-    pullPolicy: IfNotPresent  # Use local images if available
+    pullPolicy: Always  # Always pull to get latest :dev tag
 
   service:
     type: ClusterIP

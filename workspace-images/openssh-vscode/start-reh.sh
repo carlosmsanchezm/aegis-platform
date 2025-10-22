@@ -7,7 +7,7 @@ log() {
 
 trap 'log "received termination signal"; exit 0' TERM INT
 
-QUALITY="${VSCODE_QUALITY:-insider}"
+QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-${VSCODE_SERVER_COMMIT:-}}"
 
 if [[ $# -gt 0 && "${1:-}" =~ ^[0-9a-f]{40}$ ]]; then

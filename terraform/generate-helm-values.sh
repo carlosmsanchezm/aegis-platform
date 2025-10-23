@@ -1,1 +1,0 @@
-generate-cloud-deployment.sh

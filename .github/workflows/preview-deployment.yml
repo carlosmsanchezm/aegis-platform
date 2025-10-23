@@ -33,7 +33,7 @@ concurrency:
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

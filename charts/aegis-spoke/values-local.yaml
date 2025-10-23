@@ -1,9 +1,9 @@
 # Overrides for local development.
 k8sAgent:
   image:
-    repository: aegis-k8s-agent-local
-    tag: "latest"
-    pullPolicy: IfNotPresent
+    repository: carlosmsanchez/aegis-k8s-agent
+    tag: "dev"
+    pullPolicy: Always
   env:
     AEGIS_CLUSTER_ID: "dev-local"
     AEGIS_CP_GRPC: "aegis-services-platform-api.aegis-system.svc.cluster.local:8081"

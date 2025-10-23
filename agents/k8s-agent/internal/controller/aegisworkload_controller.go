@@ -65,9 +65,10 @@ const (
 	labelWorkloadID = "aegis.workload/id"
 	labelSSHManaged = "aegis.yourorg.dev/ssh-managed"
 
-	annotationStartAcked         = "aegis.yourorg.dev/start-acked"
-	annotationFinalAcked         = "aegis.yourorg.dev/final-acked"
-	annotationMaxDurationSeconds = "aegis.yourorg.dev/maxDurationSeconds"
+	annotationStartAcked              = "aegis.yourorg.dev/start-acked"
+	annotationFinalAcked              = "aegis.yourorg.dev/final-acked"
+	annotationMaxDurationSeconds      = "aegis.yourorg.dev/maxDurationSeconds"
+	annotationTTLSecondsAfterFinished = "aegis.yourorg.dev/ttlSecondsAfterFinished"
 
 	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
 	annotationSSHTrustedCA      = "aegis.yourorg.dev/ssh-trusted-user-ca"
@@ -179,7 +180,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 		}
 	}
 
-	jobName := builders.SanitizeName("aegis-" + aw.Name)
+	jobName := builders.SanitizeName(aw.Name)
 	jobKey := types.NamespacedName{Name: jobName, Namespace: aw.Namespace}
 
 	maxDeadline, mdErr := maxDurationFromAnnotation(aw)
@@ -187,6 +188,11 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 		log.Error(mdErr, "invalid max duration annotation", "annotation", aw.GetAnnotations()[annotationMaxDurationSeconds])
 	}
 	ttlAfterFinished := ptr.To(workspaceJobTTLSeconds)
+	if ttl, err := ttlSecondsAfterFinishedFromAnnotation(aw); err != nil {
+		log.Error(err, "invalid ttl annotation", "annotation", aw.GetAnnotations()[annotationTTLSecondsAfterFinished])
+	} else if ttl != nil {
+		ttlAfterFinished = ttl
+	}
 
 	var job batchv1.Job
 	err := r.Get(ctx, jobKey, &job)
@@ -300,8 +306,9 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			updated = true
 		}
 	}
-	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != workspaceJobTTLSeconds {
-		job.Spec.TTLSecondsAfterFinished = ptr.To(workspaceJobTTLSeconds)
+	desiredTTL := ptr.Deref(ttlAfterFinished, workspaceJobTTLSeconds)
+	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != desiredTTL {
+		job.Spec.TTLSecondsAfterFinished = ptr.To(desiredTTL)
 		updated = true
 	}
 	if updated {
@@ -514,7 +521,7 @@ func (r *AegisWorkloadReconciler) reconcileTraining(ctx context.Context, aw *aeg
 		workers = 1
 	}
 
-	name := builders.SanitizeName("aegis-" + aw.Name)
+	name := builders.SanitizeName(aw.Name)
 
 	// Use simple Kubernetes Jobs instead of PyTorchJob
 	var existingJob batchv1.Job
@@ -589,6 +596,22 @@ func (r *AegisWorkloadReconciler) patchStatus(ctx context.Context, aw *aegisv1al
 	return r.Status().Patch(ctx, aw, client.MergeFrom(original))
 }
 
+func controlPlaneWorkloadID(name string) string {
+	id := strings.TrimSpace(name)
+	for strings.HasPrefix(id, "aegis-") {
+		id = strings.TrimPrefix(id, "aegis-")
+	}
+	return id
+}
+
+func workspaceAliasName(name string) string {
+	cpID := controlPlaneWorkloadID(name)
+	if cpID == "" {
+		cpID = strings.TrimSpace(name)
+	}
+	return fmt.Sprintf("aegis-w-%s", cpID)
+}
+
 func (r *AegisWorkloadReconciler) startWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) {
 	if r.cpClient == nil || aw == nil {
 		return
@@ -600,15 +623,16 @@ func (r *AegisWorkloadReconciler) startWorkloadBridge(ctx context.Context, aw *a
 	if aw.GetAnnotations()[annotationStartAcked] == "true" {
 		return
 	}
-	if err := r.cpClient.Start(ctx, aw.Name, r.clusterID); err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "StartWorkload bridge failed", "workload", aw.Name, "clusterID", r.clusterID)
+	cpID := controlPlaneWorkloadID(aw.Name)
+	if err := r.cpClient.Start(ctx, cpID, r.clusterID); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "StartWorkload bridge failed", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
 	if err := r.markAnnotation(ctx, aw, annotationStartAcked); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "failed to persist start acknowledgement", "workload", aw.Name)
 		return
 	}
-	ctrl.LoggerFrom(ctx).Info("StartWorkload bridge sent", "workload", aw.Name, "clusterID", r.clusterID)
+	ctrl.LoggerFrom(ctx).Info("StartWorkload bridge sent", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 }
 
 func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, status string) {
@@ -623,8 +647,9 @@ func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aeg
 	if url == "" {
 		url = fmt.Sprintf("k8s://%s/%s", aw.Namespace, aw.Name)
 	}
-	if err := r.cpClient.Ack(ctx, aw.Name, status, backend, url); err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", status, "clusterID", r.clusterID)
+	cpID := controlPlaneWorkloadID(aw.Name)
+	if err := r.cpClient.Ack(ctx, cpID, status, backend, url); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", status, "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
 	if err := r.markAnnotation(ctx, aw, annotationFinalAcked); err != nil {
@@ -677,7 +702,7 @@ func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Contex
 		changed = true
 	}
 
-	svcName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	svcName := workspaceAliasName(aw.Name)
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: aw.Namespace}, svc); err == nil {
 		if metav1.IsControlledBy(svc, aw) {
@@ -690,7 +715,7 @@ func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Contex
 		return false, err
 	}
 
-	ingName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	ingName := workspaceAliasName(aw.Name)
 	ing := &networkingv1.Ingress{}
 	if err := r.Get(ctx, types.NamespacedName{Name: ingName, Namespace: aw.Namespace}, ing); err == nil {
 		if metav1.IsControlledBy(ing, aw) {
@@ -707,7 +732,7 @@ func (r *AegisWorkloadReconciler) cleanupInteractiveResources(ctx context.Contex
 }
 
 func workspaceSSHSecretName(workloadName string) string {
-	return fmt.Sprintf("aegis-w-%s-ssh", workloadName)
+	return fmt.Sprintf("%s-ssh", workloadName)
 }
 
 func (r *AegisWorkloadReconciler) ensureWorkspaceSSHSecret(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (string, bool, bool, error) {
@@ -774,7 +799,7 @@ func (r *AegisWorkloadReconciler) cleanupWorkspaceSSHSecret(ctx context.Context,
 }
 
 func (r *AegisWorkloadReconciler) ensureWorkspaceService(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, ports []int32) (bool, error) {
-	svcName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	svcName := workspaceAliasName(aw.Name)
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: aw.Namespace}}
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
 		if err := controllerutil.SetControllerReference(aw, svc, r.Scheme); err != nil {
@@ -808,7 +833,7 @@ func (r *AegisWorkloadReconciler) ensureWorkspaceService(ctx context.Context, aw
 }
 
 func (r *AegisWorkloadReconciler) ensureWorkspaceIngress(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
-	ingName := fmt.Sprintf("aegis-w-%s", aw.Name)
+	ingName := workspaceAliasName(aw.Name)
 	ing := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: ingName, Namespace: aw.Namespace}}
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, ing, func() error {
 		if err := controllerutil.SetControllerReference(aw, ing, r.Scheme); err != nil {
@@ -877,6 +902,7 @@ func convertSpecHints(h *aegisv1alpha1.ResourceHints) *builders.GPUHints {
 	if h == nil {
 		return nil
 	}
+
 	return &builders.GPUHints{
 		ResourceName:    h.ResourceName,
 		GPUCount:        h.GpuCount,
@@ -884,7 +910,6 @@ func convertSpecHints(h *aegisv1alpha1.ResourceHints) *builders.GPUHints {
 		MemoryRequest:   h.MemoryRequest,
 	}
 }
-
 func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) {
 	if aw == nil {
 		return nil, nil
@@ -901,6 +926,24 @@ func maxDurationFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int64, error) 
 		return nil, nil
 	}
 	return ptr.To(secs), nil
+}
+
+func ttlSecondsAfterFinishedFromAnnotation(aw *aegisv1alpha1.AegisWorkload) (*int32, error) {
+	if aw == nil {
+		return nil, nil
+	}
+	val := aw.GetAnnotations()[annotationTTLSecondsAfterFinished]
+	if val == "" {
+		return nil, nil
+	}
+	secs, err := strconv.ParseInt(val, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", annotationTTLSecondsAfterFinished, err)
+	}
+	if secs < 0 {
+		return nil, nil
+	}
+	return ptr.To(int32(secs)), nil
 }
 
 func workspaceDefaultCommand(image string) string {

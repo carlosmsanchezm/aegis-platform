@@ -11,29 +11,31 @@ on:
           - all
           - deploy
           - deploy-no-teardown
+          - e2e-only
       preview_number:
         description: "Preview identifier (defaults to PR number or workflow run id)"
         required: false
-  pull_request:
-
+      image_tag:
+        description: "Override image tag for e2e-only runs (expects image already pushed)"
+        required: false
 env:
   AWS_REGION: us-east-1
-  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
-  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
-  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_id) || github.event.number }}
+  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
+  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
+  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || 'all' }}
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
 
 concurrency:
-  group: preview-${{ github.workflow }}-${{ github.event.number || github.run_id }}
+  group: preview-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   cancel-in-progress: true
 
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,7 +90,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Images
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -102,9 +104,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Skip build for deploy-only run
+      - name: Skip build for non-full run
         if: ${{ env.RUN_SUBSET != 'all' }}
-        run: echo "Deploy-only run detected; skipping image build."
+        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping image build."
 
       - name: Set up Docker Buildx
         if: ${{ env.RUN_SUBSET == 'all' }}
@@ -179,7 +181,7 @@ jobs:
 
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -472,6 +474,235 @@ jobs:
           promote "$PROXY_IMAGE"
           promote "$K8S_AGENT_IMAGE"
           promote "$WORKSPACE_IMAGE"
+
+  deploy-preview-and-test-e2e-only:
+    name: Deploy Preview & Run E2E Tests (e2e-only)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset == 'e2e-only' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      USE_EXISTING_CLUSTER: 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Determine image URIs for deployment
+        id: image-uris
+        env:
+          INPUT_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INPUT_IMAGE_TAG}" ]]; then
+            echo "image_tag input is required for e2e-only runs." >&2
+            exit 1
+          fi
+          ECR_REGISTRY='${{ steps.login-ecr.outputs.registry }}'
+          echo "platform=${ECR_REGISTRY}/aegis/platform-api:${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "proxy=${ECR_REGISTRY}/aegis/proxy:${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "agent=${ECR_REGISTRY}/aegis/k8s-agent:${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "workspace=${ECR_REGISTRY}/aegis/workspace-vscode:${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init & apply
+        env:
+          TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
+        run: |
+          set -euo pipefail
+          cd terraform
+          TF_WS="${TF_WORKSPACE}"
+          unset TF_WORKSPACE
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          terraform apply -auto-approve
+
+      - name: Deploy control plane via Helm
+        id: deploy
+        env:
+          PLATFORM_API_IMAGE_TAG: ${{ steps.image-uris.outputs.platform }}
+          PROXY_IMAGE_TAG: ${{ steps.image-uris.outputs.proxy }}
+          K8S_AGENT_IMAGE_TAG: ${{ steps.image-uris.outputs.agent }}
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
+          SKIP_ROUTE53_UPDATE: '1'
+        run: |
+          set -euo pipefail
+
+          # Deploy via Terraform helper (skips Route53 update but now includes migrations)
+          ./terraform/generate-cloud-deployment.sh --non-interactive --tls
+      - name: Update Route53 and configure E2E endpoints
+        id: configure-e2e
+        env:
+          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
+        run: |
+          set -euo pipefail
+
+          # Extract actual LoadBalancer hostnames from Kubernetes services
+          echo "⏳ Waiting for LoadBalancers to be provisioned..."
+
+          # Wait for platform-api LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PLATFORM_LB}" ]; then
+              echo "✅ Platform API LoadBalancer ready: ${PLATFORM_LB}"
+              break
+            fi
+            echo "  Waiting for platform-api LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Wait for proxy LoadBalancer (max 5 minutes)
+          for i in {1..60}; do
+            PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "${PROXY_LB}" ]; then
+              echo "✅ Proxy LoadBalancer ready: ${PROXY_LB}"
+              break
+            fi
+            echo "  Waiting for proxy LoadBalancer... (${i}/60)"
+            sleep 5
+          done
+
+          # Verify LoadBalancers were obtained
+          if [ -z "${PLATFORM_LB}" ] || [ -z "${PROXY_LB}" ]; then
+            echo "❌ Failed to get LoadBalancer hostnames after 5 minutes"
+            exit 1
+          fi
+
+          # Update Route53 DNS records with actual LoadBalancer hostnames
+          echo ""
+          echo "🌐 Updating Route53 DNS records..."
+          cd terraform
+          terraform apply -auto-approve \
+            -var="platform_api_lb_hostname=${PLATFORM_LB}" \
+            -var="proxy_lb_hostname=${PROXY_LB}" \
+            -target=aws_route53_record.platform_api_grpc \
+            -target=aws_route53_record.platform_api_http \
+            -target=aws_route53_record.proxy
+
+          # Get the DNS names from Terraform outputs (now updated)
+          PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
+          PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
+
+          # Remove trailing dots from DNS names if present
+          PLATFORM_DNS=${PLATFORM_DNS%.}
+          PROXY_DNS=${PROXY_DNS%.}
+
+          echo "✅ Route53 records updated:"
+          echo "   ${PLATFORM_DNS} → ${PLATFORM_LB}"
+          echo "   ${PROXY_DNS} → ${PROXY_LB}"
+
+          echo ""
+          echo "🔍 Resolving LoadBalancer IPs for local overrides..."
+          PLATFORM_IP=$(dig +short "${PLATFORM_LB}" | head -1)
+          PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
+
+          if [ -n "${PLATFORM_IP}" ]; then
+            echo "   Platform API LB IP: ${PLATFORM_IP}"
+            sudo sed -i.bak "/${PLATFORM_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PLATFORM_IP} ${PLATFORM_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          if [ -n "${PROXY_IP}" ]; then
+            echo "   Proxy LB IP: ${PROXY_IP}"
+            sudo sed -i.bak "/${PROXY_DNS}/d" /etc/hosts 2>/dev/null || true
+            echo "${PROXY_IP} ${PROXY_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          sudo resolvectl flush-caches || true
+          echo "🔄 Local resolver cache flushed (hosts file overrides in place)"
+
+          # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
+          echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"
+          echo "grpc_host=${PLATFORM_DNS}" >> "$GITHUB_OUTPUT"
+          echo "proxy_hostname=${PROXY_DNS}" >> "$GITHUB_OUTPUT"
+          echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "📋 E2E Test Endpoints (via DNS):"
+          echo "   Platform API gRPC: ${PLATFORM_DNS}:8081"
+          echo "   Proxy:             ${PROXY_DNS}:8080"
+          echo "   CA Bundle:         ${HOME}/aegis-platform-api-ca.crt"
+
+      - name: Install test tooling
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}"
+          sudo apt-get update
+          sudo apt-get install -y jq
+          GRPCURL_VERSION=1.9.3
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64|amd64)
+              GRPCURL_PACKAGE_ARCH=linux_x86_64
+              ;;
+            arm64|aarch64)
+              GRPCURL_PACKAGE_ARCH=linux_arm64
+              ;;
+            *)
+              echo "Unsupported architecture: $ARCH" >&2
+              exit 1
+              ;;
+          esac
+          TMPDIR=$(mktemp -d)
+          ASSET="grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz"
+          CURL_URL="https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/${ASSET}"
+          if ! curl -fsSL "$CURL_URL" -o "$TMPDIR/$ASSET"; then
+            echo "Failed to download grpcurl from $CURL_URL" >&2
+            exit 1
+          fi
+          tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR" grpcurl
+          sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
+          rm -rf "$TMPDIR"
+
+      - name: Run platform API E2E tests
+        env:
+          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
+          AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
+          GRPC_TLS: '1'
+          GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
+          GRPC_TLS_SERVER_NAME: ${{ steps.configure-e2e.outputs.grpc_host }}
+          AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
+          AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
+          AEGIS_PLATFORM_DEPLOYMENT: ${{ env.PREVIEW_RELEASE }}-platform-api
+        run: |
+          set -euo pipefail
+          echo "🧪 Running E2E tests against preview environment (via DNS):"
+          echo "   gRPC Address: ${AEGIS_GRPC_ADDR}"
+          echo "   Proxy:        ${AEGIS_PROXY_HOSTNAME}"
+          echo "   Namespace:    ${AEGIS_PLATFORM_NAMESPACE}"
+          echo "   CA Bundle:    ${GRPC_CA}"
+          echo "   TLS:          Enabled"
+          echo ""
+
+          SCRIPT_ROOT="${{ github.workspace }}"
+          bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
   teardown-preview:
     name: Teardown Preview Environment

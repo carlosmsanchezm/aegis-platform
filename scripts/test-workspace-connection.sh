@@ -239,6 +239,27 @@ if ! kubectl exec "${POD_NAME}" -n "${WORKSPACE_NAMESPACE}" -- curl -sf --max-ti
 fi
 echo "✔ VS Code server responded to in-cluster curl"
 
+ASSIGNED_CLUSTER_ID=$(echo "${SUBMIT_JSON}" | jq -r '.clusterId // empty')
+if [[ -z "${ASSIGNED_CLUSTER_ID}" ]]; then
+  WORKLOAD_STATE=$(
+    grpcurl "${GRPCURL_OPTS[@]}" \
+      -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
+      -d "{\"id\":\"${WORKLOAD_ID}\"}" \
+      "${GRPC_ADDR}" aegis.v1.AegisPlatform/GetWorkload || true
+  )
+  if [[ -n "${WORKLOAD_STATE}" && "${WORKLOAD_STATE}" != "null" ]]; then
+    ASSIGNED_CLUSTER_ID=$(echo "${WORKLOAD_STATE}" | jq -r '.clusterId // empty')
+  fi
+fi
+
+if [[ -n "${ASSIGNED_CLUSTER_ID}" ]]; then
+  echo "→ Marking workload ${WORKLOAD_ID} as RUNNING via StartWorkload (${ASSIGNED_CLUSTER_ID})"
+  grpcurl "${GRPCURL_OPTS[@]}" \
+    -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
+    -d "{\"id\":\"${WORKLOAD_ID}\",\"clusterId\":\"${ASSIGNED_CLUSTER_ID}\"}" \
+    "${GRPC_ADDR}" aegis.v1.AegisPlatform/StartWorkload >/dev/null || true
+fi
+
 echo "→ Requesting connection session..."
 SESSION_JSON=$(
   grpcurl "${GRPCURL_OPTS[@]}" \

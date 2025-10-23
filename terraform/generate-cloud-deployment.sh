@@ -433,13 +433,20 @@ kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore
 echo "   ✅ Migrations applied"
 fi
 
-# Step 4: Clear out previous namespace before redeploying chart
+# Optional namespace reset (cleans out previous preview if requested)
+RESET_NAMESPACE="${RESET_NAMESPACE:-0}"
+REUSE_EXISTING_DEPLOYMENT="${REUSE_EXISTING_DEPLOYMENT:-0}"
 if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
-  echo ""
-  echo "4️⃣  Cleaning previous ${K8S_NAMESPACE} namespace"
-  helm uninstall "${HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
-  helm uninstall "${SPOKE_HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
-  kubectl delete namespace "${K8S_NAMESPACE}" --ignore-not-found --wait >/dev/null 2>&1 || true
+  if [[ "${RESET_NAMESPACE}" == "1" || "${REUSE_EXISTING_DEPLOYMENT}" != "1" ]]; then
+    echo ""
+    echo "4️⃣  Cleaning previous ${K8S_NAMESPACE} namespace"
+    helm uninstall "${HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
+    helm uninstall "${SPOKE_HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
+    kubectl delete namespace "${K8S_NAMESPACE}" --ignore-not-found --wait >/dev/null 2>&1 || true
+  else
+    echo ""
+    echo "4️⃣  Reusing existing namespace ${K8S_NAMESPACE} (skipping reset)"
+  fi
 fi
 
 # Step 4: Generate self-signed TLS certs using Route53 DNS names

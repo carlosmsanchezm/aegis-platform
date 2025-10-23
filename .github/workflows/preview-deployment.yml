@@ -260,6 +260,7 @@ jobs:
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
           SKIP_ROUTE53_UPDATE: '1'
           REUSE_EXISTING_DEPLOYMENT: ${{ env.RUN_SUBSET == 'e2e-only' && '1' || '0' }}
+          AEGIS_PLATFORM_API_CERT: ${{ steps.image-uris.outputs.platform_api_cert }}
         run: |
           set -euo pipefail
 

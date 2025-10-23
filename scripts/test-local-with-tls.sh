@@ -63,25 +63,7 @@ TLS_RUN_E2E_PLATFORM="${TLS_RUN_E2E_PLATFORM:-1}"
 TLS_RUN_E2E_OPERATOR="${TLS_RUN_E2E_OPERATOR:-1}"
 TLS_SKIP_VERIFY="${TLS_SKIP_VERIFY:-1}"
 TLS_CA_FILE="${TLS_CA:-$HOME/aegis-platform-api-ca.crt}"
-
-log "Deploying local stack without TLS"
-wait_for_helm_release "aegis-services" "aegis-system" || exit 1
-wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
-make deploy-local
-
-if (( ${#HTTP_ARGS[@]} )); then
-  run_test_all_local "http" \
-    env \
-      RUN_E2E_PLATFORM="$HTTP_RUN_E2E_PLATFORM" \
-      RUN_E2E_OPERATOR="$HTTP_RUN_E2E_OPERATOR" \
-      ./scripts/test-all-local.sh "${HTTP_ARGS[@]}"
-else
-  run_test_all_local "http" \
-    env \
-      RUN_E2E_PLATFORM="$HTTP_RUN_E2E_PLATFORM" \
-      RUN_E2E_OPERATOR="$HTTP_RUN_E2E_OPERATOR" \
-      ./scripts/test-all-local.sh
-fi
+TLS_AGENT_IMAGE="${K8S_AGENT_IMAGE:-carlosmsanchez/aegis-k8s-agent:dev}"
 
 log "Deploying local stack with TLS"
 wait_for_helm_release "aegis-services" "aegis-system" || exit 1
@@ -101,6 +83,8 @@ if (( ${#TLS_ARGS[@]} )); then
       GRPC_CA="$TLS_CA_FILE" \
       AEGIS_GRPC_ADDR="platform-api-grpc.localtest.me:443" \
       AEGIS_PROXY_HOSTNAME="proxy.localtest.me" \
+      K8S_AGENT_E2E_IMAGE="$TLS_AGENT_IMAGE" \
+      K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \
       RUN_E2E_OPERATOR="$TLS_RUN_E2E_OPERATOR" \
       ./scripts/test-all-local.sh "${TLS_ARGS[@]}"
@@ -112,6 +96,8 @@ else
       GRPC_CA="$TLS_CA_FILE" \
       AEGIS_GRPC_ADDR="platform-api-grpc.localtest.me:443" \
       AEGIS_PROXY_HOSTNAME="proxy.localtest.me" \
+      K8S_AGENT_E2E_IMAGE="$TLS_AGENT_IMAGE" \
+      K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \
       RUN_E2E_OPERATOR="$TLS_RUN_E2E_OPERATOR" \
       ./scripts/test-all-local.sh

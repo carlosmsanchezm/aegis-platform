@@ -96,6 +96,40 @@ stop:
 	@pkill -f services/platform-api || true
 	@pkill -f "k8s-agent/cmd" || true
 
+.PHONY: platform-api-docker-build
+platform-api-docker-build:
+	@echo "Building multi-arch platform-api image $(PLATFORM_API_IMAGE)"
+	@docker buildx build --platform linux/amd64,linux/arm64 \
+		-f services/platform-api/Dockerfile \
+		-t $(PLATFORM_API_IMAGE) \
+		--push \
+		.
+
+.PHONY: platform-api-docker-push
+platform-api-docker-push:
+	@echo "platform-api-docker-build already pushes the manifest (no-op)"
+
+.PHONY: build-platform
+build-platform:
+	@echo "Building platform-api image $(PLATFORM_API_IMAGE)"
+	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE)
+
+.PHONY: build-agent
+build-agent:
+	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
+	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
+
+.PHONY: build-workspace
+build-workspace:
+	@echo "Building workspace image $(WORKSPACE_IMAGE)"
+	@docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(WORKSPACE_IMAGE) \
+		--push \
+		workspace-images/openssh-vscode
+
+.PHONY: build-images
+build-images: build-platform build-agent build-workspace
+
 test-workspace:
 	@echo "Running workspace connectivity smoke test..."
 	@GRPC_ADDR=$${GRPC_ADDR:-localhost:10081} \
@@ -107,54 +141,132 @@ setup-local:
 	@echo "Switching to docker-desktop context..."
 	@kubectl config use-context docker-desktop
 
+K8S_AGENT_IMAGE ?= carlosmsanchez/aegis-k8s-agent:dev
+PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev
+WORKSPACE_IMAGE ?= carlosmsanchez/aegis-workspace-vscode:latest
+
+AWS_ECR_REGISTRY ?= 567751785679.dkr.ecr.us-east-1.amazonaws.com
+CLOUD_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
+CLOUD_K8S_AGENT_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/k8s-agent:$(CLOUD_IMAGE_TAG)
+CLOUD_WORKSPACE_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:$(CLOUD_IMAGE_TAG)
+
+.PHONY: push-cloud-images
+push-cloud-images:
+	@echo "Building and pushing cloud images with tag $(CLOUD_IMAGE_TAG) to $(AWS_ECR_REGISTRY)"
+	@$(MAKE) PLATFORM_API_IMAGE=$(CLOUD_PLATFORM_API_IMAGE) build-platform
+	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) build-agent
+	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) build-workspace
+ifeq ($(PUSH_LATEST),1)
+	@echo "Promoting images to :latest"
+	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/platform-api:latest $(CLOUD_PLATFORM_API_IMAGE)
+	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/k8s-agent:latest $(CLOUD_K8S_AGENT_IMAGE)
+	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
+endif
+
+.PHONY: deploy-local
+.PHONY: deploy-local
 deploy-local: setup-local
-	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
-	@helm dependency update charts/aegis-services >/dev/null
-	@echo "Deploying Aegis services locally (no TLS)..."
-	@helm upgrade --install aegis-services charts/aegis-services \
+	@ \
+	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
+	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
+	  PLATFORM_API_REPO="$${PLATFORM_API_IMAGE%:*}"; \
+	  PLATFORM_API_TAG="$${PLATFORM_API_IMAGE##*:}"; \
+	else \
+	  PLATFORM_API_REPO="$$PLATFORM_API_IMAGE"; \
+	  PLATFORM_API_TAG="latest"; \
+	fi; \
+	K8S_AGENT_IMAGE="$(K8S_AGENT_IMAGE)"; \
+	if [[ "$$K8S_AGENT_IMAGE" == *":"* ]]; then \
+	  K8S_AGENT_REPO="$${K8S_AGENT_IMAGE%:*}"; \
+	  K8S_AGENT_TAG="$${K8S_AGENT_IMAGE##*:}"; \
+	else \
+	  K8S_AGENT_REPO="$$K8S_AGENT_IMAGE"; \
+	  K8S_AGENT_TAG="latest"; \
+	fi; \
+	echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
+	echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
+	echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
+	helm dependency update charts/aegis-services >/dev/null; \
+	echo "Deploying Aegis services locally (no TLS)..."; \
+	helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
+	  --set platformApi.image.repository=$$PLATFORM_API_REPO \
+	  --set platformApi.image.tag=$$PLATFORM_API_TAG \
 	  --namespace aegis-system --create-namespace \
-	  --wait --timeout 5m
-	@helm upgrade --install aegis-spoke charts/aegis-spoke \
+	  --wait --timeout 5m; \
+	echo "Deploying Aegis spoke locally (no TLS)..."; \
+	helm upgrade --install aegis-spoke charts/aegis-spoke \
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
-	  --namespace aegis-system --create-namespace
-	@echo "✅ Deployed local stack without TLS"
-	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"
-	@echo "   Proxy: http://proxy.localtest.me"
+	  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
+	  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+	  --set k8sAgent.image.pullPolicy=Always \
+	  --namespace aegis-system --create-namespace; \
+	echo "✅ Deployed local stack without TLS"; \
+	echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"; \
+	echo "   Proxy: http://proxy.localtest.me"
 
+.PHONY: deploy-local-tls
+.PHONY: deploy-local-tls
 deploy-local-tls: setup-local
-	@echo "Ensuring chart dependencies (ingress-nginx) are up to date..."
-	@helm dependency update charts/aegis-services >/dev/null
-	@echo "Deploying Aegis services locally with TLS..."
-	@helm upgrade --install aegis-services charts/aegis-services \
+	@ \
+	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
+	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
+	  PLATFORM_API_REPO="$${PLATFORM_API_IMAGE%:*}"; \
+	  PLATFORM_API_TAG="$${PLATFORM_API_IMAGE##*:}"; \
+	else \
+	  PLATFORM_API_REPO="$$PLATFORM_API_IMAGE"; \
+	  PLATFORM_API_TAG="latest"; \
+	fi; \
+	K8S_AGENT_IMAGE="$(K8S_AGENT_IMAGE)"; \
+	if [[ "$$K8S_AGENT_IMAGE" == *":"* ]]; then \
+	  K8S_AGENT_REPO="$${K8S_AGENT_IMAGE%:*}"; \
+	  K8S_AGENT_TAG="$${K8S_AGENT_IMAGE##*:}"; \
+	else \
+	  K8S_AGENT_REPO="$$K8S_AGENT_IMAGE"; \
+	  K8S_AGENT_TAG="latest"; \
+	fi; \
+	echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
+	echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
+	echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
+	helm dependency update charts/aegis-services >/dev/null; \
+	echo "Deploying Aegis services locally with TLS..."; \
+	helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
 	  -f charts/aegis-services/values/local.yaml \
 	  -f charts/aegis-services/values/local-tls.yaml \
+	  --set platformApi.image.repository=$$PLATFORM_API_REPO \
+	  --set platformApi.image.tag=$$PLATFORM_API_TAG \
 	  --namespace aegis-system --create-namespace \
-	  --wait --timeout 5m
-	@helm upgrade --install aegis-spoke charts/aegis-spoke \
+	  --wait --timeout 5m; \
+	echo "Deploying Aegis spoke locally with TLS..."; \
+	helm upgrade --install aegis-spoke charts/aegis-spoke \
 	  -f charts/aegis-spoke/values.yaml \
 	  -f charts/aegis-spoke/values-local.yaml \
 	  -f charts/aegis-spoke/values-local-tls.yaml \
-	  --namespace aegis-system --create-namespace
-	@echo "Syncing platform API certificate to $(HOME)/aegis-platform-api-ca.crt ..."
-	@kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\\.crt}" | base64 --decode > "$(HOME)/aegis-platform-api-ca.crt"
-	@chmod 0644 "$(HOME)/aegis-platform-api-ca.crt"
-	@echo "   CA bundle refreshed."
-	@echo "   To trust it system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $(HOME)/aegis-platform-api-ca.crt"
-	@echo "   Launch VS Code with TLS trust:"
-	@echo "     NODE_EXTRA_CA_CERTS=$(HOME)/aegis-platform-api-ca.crt \\"
-	@echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $(PWD)"
-	@echo "✅ Deployed with TLS using self-signed certificates"
-	@echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"
-	@echo "   Proxy: https://proxy.localtest.me"
-	@echo ""
-	@echo "   For E2E tests with TLS:"
-	@echo "   export GRPC_TLS=1"
-	@echo "   export GRPC_TLS_SKIP_VERIFY=1  # Self-signed certs"
-	@echo "   ./scripts/e2e-platform-api.sh"
+	  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
+	  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+	  --set k8sAgent.image.pullPolicy=Always \
+	  --namespace aegis-system --create-namespace; \
+	echo "Syncing platform API certificate to $$HOME/aegis-platform-api-ca.crt ..."; \
+	kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; \
+	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; \
+	echo "   CA bundle refreshed."; \
+	echo "   To trust it system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
+	echo "   Launch VS Code with TLS trust:"; \
+	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-platform-api-ca.crt \"; \
+	echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
+	echo "✅ Deployed with TLS using self-signed certificates"; \
+	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
+	echo "   Proxy: https://proxy.localtest.me"; \
+	echo ""; \
+	echo "   For E2E tests with TLS:"; \
+	echo "   export GRPC_TLS=1"; \
+	echo "   export GRPC_TLS_SKIP_VERIFY=1  # Self-signed certs"; \
+	echo "   ./scripts/e2e-platform-api.sh"
+
 
 port-forward:
 	@echo "Stopping any existing port-forwards..."

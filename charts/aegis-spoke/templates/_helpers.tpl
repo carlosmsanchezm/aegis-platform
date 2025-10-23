@@ -3,7 +3,11 @@
 {{- end -}}
 
 {{- define "aegis-spoke.fullname" -}}
+{{- if eq .Release.Name (include "aegis-spoke.name" .) -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
 {{- printf "%s-%s" .Release.Name (include "aegis-spoke.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "aegis-spoke.labels" -}}

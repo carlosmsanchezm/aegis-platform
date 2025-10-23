@@ -191,8 +191,8 @@ output "helm_values_aegis_spoke" {
       tag: "latest"  # TODO: Use specific version tags
 
     env:
-      AEGIS_CP_GRPC: "aegis-platform-api.aegis-system.svc.cluster.local:8081"
-      AEGIS_PROXY_INGRESS_HOST: "proxy.yourdomain.com"  # TODO: Update domain
+      AEGIS_CP_GRPC: "${var.environment}-platform-api.${var.environment}.svc.cluster.local:8081"
+      AEGIS_PROXY_INGRESS_HOST: "${chomp(aws_route53_record.proxy.fqdn)}"
       AEGIS_CLUSTER_ID: "aws-${var.aws_region}-${var.environment}"
 
   proxy:

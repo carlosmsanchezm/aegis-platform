@@ -38,7 +38,7 @@ concurrency:
 jobs:
   lint-and-unit-test:
     name: Lint & Unit Test
-    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') != 'e2e-only' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -93,7 +93,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Images
-    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') != 'e2e-only' }}
     runs-on: ubuntu-latest
     needs: lint-and-unit-test
     permissions:
@@ -184,7 +184,7 @@ jobs:
 
   deploy-preview-and-test:
     name: Deploy Preview & Run E2E Tests
-    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && env.RUN_SUBSET != 'e2e-only' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') != 'e2e-only' }}
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
@@ -480,7 +480,7 @@ jobs:
 
   deploy-preview-and-test-e2e-only:
     name: Deploy Preview & Run E2E Tests (e2e-only)
-    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset == 'e2e-only') || github.event_name == 'pull_request' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') == 'e2e-only') || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

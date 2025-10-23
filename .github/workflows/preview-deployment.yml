@@ -252,7 +252,7 @@ jobs:
           set -euo pipefail
 
           # Deploy via Terraform helper (skips Route53 update but now includes migrations)
-          ./terraform/generate-helm-values.sh --non-interactive --tls
+          ./terraform/generate-cloud-deployment.sh --non-interactive --tls
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e
         env:
@@ -475,7 +475,7 @@ jobs:
 
   teardown-preview:
     name: Teardown Preview Environment
-    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy')) || github.event_name == 'pull_request') }}
+    if: ${{ false }}  # Temporarily disabled for testing
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:

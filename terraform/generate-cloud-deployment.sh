@@ -94,8 +94,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "🔐 Enforcing TLS for platform-api and proxy"
-rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAI
-N_PATH}" "${TLS_CA_CERT_PATH}.srl"
+rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 
 echo "🚀 Generating Helm values from Terraform outputs..."
 echo "📖 See DEPLOYMENT_AND_TESTING_GUIDE.md for complete deployment guide"

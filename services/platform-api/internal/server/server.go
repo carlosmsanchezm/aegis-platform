@@ -1087,7 +1087,7 @@ func buildSSHUser(subject string) string {
 }
 
 func buildHostAlias(workloadID string) string {
-	const prefix = "aegis-"
+    const prefix = "aegis-w-"
 	cleaned := strings.TrimSpace(strings.ToLower(workloadID))
 	if cleaned == "" {
 		return prefix + randomHex(4)

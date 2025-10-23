@@ -18,12 +18,15 @@ on:
       image_tag:
         description: "Override image tag for e2e-only runs (expects image already pushed)"
         required: false
+  pull_request:
+
 env:
   AWS_REGION: us-east-1
   PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || 'all' }}
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || (github.event_name == 'pull_request' && 'e2e-only') || 'all' }}
+  DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
@@ -477,7 +480,7 @@ jobs:
 
   deploy-preview-and-test-e2e-only:
     name: Deploy Preview & Run E2E Tests (e2e-only)
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset == 'e2e-only' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset == 'e2e-only') || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -506,7 +509,7 @@ jobs:
       - name: Determine image URIs for deployment
         id: image-uris
         env:
-          INPUT_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          INPUT_IMAGE_TAG: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag) || env.DEFAULT_E2E_IMAGE_TAG }}
         run: |
           set -euo pipefail
           if [[ -z "${INPUT_IMAGE_TAG}" ]]; then

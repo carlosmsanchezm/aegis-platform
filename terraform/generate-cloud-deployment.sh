@@ -449,60 +449,59 @@ if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
   fi
 fi
 
-# Step 4: Generate self-signed TLS certs using Route53 DNS names
-echo ""
-echo "4️⃣  Generating TLS certificates using Route53 DNS names..."
 
-# Get DNS hostnames from Terraform outputs
-DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
-DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
-DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
+RUN_HELM_UPGRADE=1
+if [[ "${REUSE_EXISTING_DEPLOYMENT}" == "1" && $(helm status "${HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1; echo $?) -eq 0 ]]; then
+  echo "   ♻️  Reusing existing installation for ${HELM_RELEASE}; skipping Helm upgrade"
+  RUN_HELM_UPGRADE=0
+fi
 
-echo "   📋 DNS hostnames:"
-echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
-echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
-echo "      Proxy:             ${DNS_PROXY}"
+if [[ "${RUN_HELM_UPGRADE}" == "1" ]]; then
+  echo ""
+  echo "4️⃣  Generating TLS certificates using Route53 DNS names..."
 
-if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
-  openssl req -x509 -newkey rsa:2048 \
-    -keyout "${TLS_CA_KEY_PATH}" \
-    -out "${TLS_CA_CERT_PATH}" \
-    -days 365 -nodes \
-    -subj "/CN=Aegis Platform API CA" \
-    -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
-    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+  DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
+  DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
+  DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
 
-  openssl req -new -newkey rsa:2048 \
-    -keyout "${TLS_KEY_PATH}" \
-    -out "${TLS_CERT_CSR_PATH}" \
-    -nodes \
-    -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-    -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
+  echo "   📋 DNS hostnames:"
+  echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
+  echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
+  echo "      Proxy:             ${DNS_PROXY}"
 
-  cat <<EOF > "${TLS_CERT_EXT_PATH}"
+  if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
+    openssl req -x509 -newkey rsa:2048       -keyout "${TLS_CA_KEY_PATH}"       -out "${TLS_CA_CERT_PATH}"       -days 365 -nodes       -subj "/CN=Aegis Platform API CA"       -addext "basicConstraints=critical,CA:TRUE,pathlen:1"       -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+
+    openssl req -new -newkey rsa:2048       -keyout "${TLS_KEY_PATH}"       -out "${TLS_CERT_CSR_PATH}"       -nodes       -subj "/CN=${DNS_PLATFORM_API_GRPC}"       -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
+
+    cat <<EOF > "${TLS_CERT_EXT_PATH}"
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
 subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}
 EOF
 
-  openssl x509 -req \
-    -in "${TLS_CERT_CSR_PATH}" \
-    -CA "${TLS_CA_CERT_PATH}" \
-    -CAkey "${TLS_CA_KEY_PATH}" \
-    -CAcreateserial \
-    -out "${TLS_CERT_PATH}" \
-    -days 365 \
-    -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
+    openssl x509 -req       -in "${TLS_CERT_CSR_PATH}"       -CA "${TLS_CA_CERT_PATH}"       -CAkey "${TLS_CA_KEY_PATH}"       -CAcreateserial       -out "${TLS_CERT_PATH}"       -days 365       -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
 
-  cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
-  mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
+    cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
+    mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
+  fi
+
+  mkdir -p "$(dirname "${CA_BUNDLE}")"
+  cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
+  echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
+  echo "   ✅ TLS certificates ready with proper DNS names"
+else
+  echo ""
+  echo "4️⃣  Skipping TLS certificate regeneration (reuse existing certs)"
+  DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
+  DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
+  DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
+  echo "   📋 Reusing DNS hostnames:"
+  echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
+  echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
+  echo "      Proxy:             ${DNS_PROXY}"
 fi
-
-mkdir -p "$(dirname "${CA_BUNDLE}")"
-cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
-echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
-echo "   ✅ TLS certificates ready with proper DNS names"
 
 # Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
@@ -514,7 +513,85 @@ if [ -d "${CRD_BASE_DIR}" ]; then
 fi
 echo "   ✅ CRDs synced"
 
-# Step 6: Deploy aegis-services using Helm (FULL deployment)
+
+if [[ "${RUN_HELM_UPGRADE}" == "1" ]]; then
+  echo ""
+  echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
+
+  JWT_SECRET=$(terraform output -raw jwt_secret_value)
+
+  OVERRIDE_FILE=$(mktemp)
+  {
+    echo "platformApi:"
+    echo "  image:"
+    if [[ -n "${PLATFORM_API_IMAGE_REPO}" ]]; then
+      echo "    repository: ${PLATFORM_API_IMAGE_REPO}"
+    fi
+    if [[ -n "${PLATFORM_API_IMAGE_TAG_VALUE}" ]]; then
+      echo "    tag: "${PLATFORM_API_IMAGE_TAG_VALUE}""
+    fi
+    echo "  env:"
+    echo "    DATABASE_URL: "${DB_URL}""
+    if [[ -n "${DNS_PROXY}" ]]; then
+      echo "    AEGIS_PROXY_BASE_URL: "wss://${DNS_PROXY}:8080""
+    fi
+    echo "  secrets:"
+    echo "    db-password: "${DB_PASSWORD}""
+    echo "    proxy-jwt-secret: "${JWT_SECRET}""
+    echo "proxy:"
+    if [[ -n "${DNS_PROXY}" ]]; then
+      echo "  publicHost: "${DNS_PROXY}""
+    fi
+    echo "  image:"
+    if [[ -n "${PROXY_IMAGE_REPO}" ]]; then
+      echo "    repository: ${PROXY_IMAGE_REPO}"
+    fi
+    if [[ -n "${PROXY_IMAGE_TAG_VALUE}" ]]; then
+      echo "    tag: "${PROXY_IMAGE_TAG_VALUE}""
+    fi
+    echo "  jwtSecret: "${JWT_SECRET}""
+  } > "${OVERRIDE_FILE}"
+
+  TLS_OVERRIDE_FILE=$(mktemp)
+  {
+    echo "platformApi:"
+    echo "  tls:"
+    echo "    enabled: true"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+    echo "proxy:"
+    echo "  tls:"
+    echo "    enabled: true"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+  } > "${TLS_OVERRIDE_FILE}"
+
+  cd "${OUTPUT_DIR}"
+  HELM_ARGS=(
+    upgrade --install "${HELM_RELEASE}" ./aegis-services
+    -f ./aegis-services/values/common.yaml
+    -f ./aegis-services/values/cloud.yaml
+    -f ./aegis-services/values-cloud-generated.yaml
+    -f "${OVERRIDE_FILE}"
+    -f "${TLS_OVERRIDE_FILE}"
+    --namespace "${K8S_NAMESPACE}" --create-namespace
+    --timeout 10m
+  )
+
+  helm "${HELM_ARGS[@]}"
+
+  echo "   ✅ aegis-services deployed"
+  echo "   🔄 Restarting workloads to pick up latest configuration"
+  kubectl rollout restart "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" >/dev/null
+  kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" >/dev/null
+else
+  echo ""
+  echo "6️⃣  Skipping aegis-services Helm upgrade (reuse existing release)"
+fi
 echo ""
 echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
 
@@ -553,27 +630,9 @@ OVERRIDE_FILE=$(mktemp)
   echo "  jwtSecret: \"${JWT_SECRET}\""
 } > "${OVERRIDE_FILE}"
 
-TLS_OVERRIDE_FILE=$(mktemp)
-{
-  echo "platformApi:"
-  echo "  tls:"
-  echo "    enabled: true"
-  echo "    cert: |"
-  sed 's/^/      /' "${TLS_CERT_PATH}"
-  echo "    key: |"
-  sed 's/^/      /' "${TLS_KEY_PATH}"
-  echo "proxy:"
-  echo "  tls:"
-  echo "    enabled: true"
-  echo "    cert: |"
-  sed 's/^/      /' "${TLS_CERT_PATH}"
-  echo "    key: |"
-  sed 's/^/      /' "${TLS_KEY_PATH}"
-} > "${TLS_OVERRIDE_FILE}"
+
 
 cd "${OUTPUT_DIR}"
-kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services
   -f ./aegis-services/values/common.yaml

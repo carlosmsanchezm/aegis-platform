@@ -520,6 +520,86 @@ if [[ "${RUN_HELM_UPGRADE}" == "1" ]]; then
 
   JWT_SECRET=$(terraform output -raw jwt_secret_value)
 
+    OVERRIDE_FILE=$(mktemp)
+  {
+    echo "platformApi:"
+    echo "  image:"
+    if [[ -n "${PLATFORM_API_IMAGE_REPO}" ]]; then
+      echo "    repository: ${PLATFORM_API_IMAGE_REPO}"
+    fi
+    if [[ -n "${PLATFORM_API_IMAGE_TAG_VALUE}" ]]; then
+      echo "    tag: "${PLATFORM_API_IMAGE_TAG_VALUE}""
+    fi
+    echo "  env:"
+    echo "    DATABASE_URL: "${DB_URL}""
+    if [[ -n "${DNS_PROXY}" ]]; then
+      echo "    AEGIS_PROXY_BASE_URL: "wss://${DNS_PROXY}:8080""
+    fi
+    echo "  secrets:"
+    echo "    db-password: "${DB_PASSWORD}""
+    echo "    proxy-jwt-secret: "${JWT_SECRET}""
+    echo "proxy:"
+    if [[ -n "${DNS_PROXY}" ]]; then
+      echo "  publicHost: "${DNS_PROXY}""
+    fi
+    echo "  image:"
+    if [[ -n "${PROXY_IMAGE_REPO}" ]]; then
+      echo "    repository: ${PROXY_IMAGE_REPO}"
+    fi
+    if [[ -n "${PROXY_IMAGE_TAG_VALUE}" ]]; then
+      echo "    tag: "${PROXY_IMAGE_TAG_VALUE}""
+    fi
+    echo "  jwtSecret: "${JWT_SECRET}""
+  } > "${OVERRIDE_FILE}""
+  } > "${OVERRIDE_FILE}"
+
+  TLS_OVERRIDE_FILE=$(mktemp)
+  {
+    echo "platformApi:"
+    echo "  tls:"
+    echo "    enabled: true"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+    echo "proxy:"
+    echo "  tls:"
+    echo "    enabled: true"
+    echo "    cert: |"
+    sed 's/^/      /' "${TLS_CERT_PATH}"
+    echo "    key: |"
+    sed 's/^/      /' "${TLS_KEY_PATH}"
+  } > "${TLS_OVERRIDE_FILE}"
+
+  cd "${OUTPUT_DIR}"
+  HELM_ARGS=(
+    upgrade --install "${HELM_RELEASE}" ./aegis-services
+    -f ./aegis-services/values/common.yaml
+    -f ./aegis-services/values/cloud.yaml
+    -f ./aegis-services/values-cloud-generated.yaml
+    -f "${OVERRIDE_FILE}"
+    -f "${TLS_OVERRIDE_FILE}"
+    --namespace "${K8S_NAMESPACE}" --create-namespace
+    --timeout 10m
+  )
+
+  helm "${HELM_ARGS[@]}"
+
+  echo "   ✅ aegis-services deployed"
+  echo "   🔄 Restarting workloads to pick up latest configuration"
+  kubectl rollout restart "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" >/dev/null
+  kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" >/dev/null
+else
+  echo ""
+  echo "6️⃣  Skipping aegis-services Helm upgrade (reuse existing release)"
+fi
+
+if [[ "${RUN_HELM_UPGRADE}" == "1" ]]; then
+  echo ""
+  echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
+
+  JWT_SECRET=$(terraform output -raw jwt_secret_value)
+
   OVERRIDE_FILE=$(mktemp)
   {
     echo "platformApi:"

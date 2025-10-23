@@ -192,7 +192,7 @@ output "helm_values_aegis_spoke" {
 
     env:
       AEGIS_CP_GRPC: "${var.environment}-platform-api.${var.environment}.svc.cluster.local:8081"
-      AEGIS_PROXY_INGRESS_HOST: "${regexreplace(aws_route53_record.proxy.fqdn, "\\.$", "")}"
+      AEGIS_PROXY_INGRESS_HOST: "${chomp(aws_route53_record.proxy.fqdn)}"
       AEGIS_CLUSTER_ID: "aws-${var.aws_region}-${var.environment}"
 
   proxy:

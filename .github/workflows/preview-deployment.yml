@@ -417,7 +417,7 @@ jobs:
           bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Workspace connectivity smoke test
-        if: ${{ env.RUN_SUBSET == 'all' }}
+        if: ${{ env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'e2e-only' }}
         env:
           WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
           AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
@@ -437,7 +437,7 @@ jobs:
           rm -f .aegis/workspace-session.json || true
 
       - name: Run k8s-agent E2E tests
-        if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' }}
+        if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' || env.RUN_SUBSET == 'e2e-only' }}
 
         env:
           USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}

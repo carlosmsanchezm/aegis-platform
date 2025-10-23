@@ -25,7 +25,7 @@ env:
   PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') || (github.event_name == 'pull_request' && 'e2e-only') || 'all' }}
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') || (github.event_name == 'pull_request' && 'all') || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
 # Requires repository secrets:

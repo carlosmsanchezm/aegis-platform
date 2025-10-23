@@ -425,6 +425,7 @@ jobs:
           AEGIS_GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
           AEGIS_GRPC_HOST: ${{ steps.configure-e2e.outputs.grpc_host }}
           VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
+          AEGIS_CLUSTER_ID: aws-${{ env.AWS_REGION }}-${{ env.PREVIEW_RELEASE }}
         run: |
           set -euo pipefail
           echo "🧪 Workspace connectivity smoke test using image ${WORKSPACE_IMAGE}"

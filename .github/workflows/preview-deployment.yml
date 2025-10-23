@@ -259,7 +259,6 @@ jobs:
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
           SKIP_ROUTE53_UPDATE: '1'
-          SKIP_MIGRATION_PLACEHOLDER: ${{ env.RUN_SUBSET == 'e2e-only' && '1' || '0' }}
         run: |
           set -euo pipefail
 

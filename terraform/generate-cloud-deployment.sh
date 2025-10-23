@@ -410,8 +410,7 @@ ${POD_ANNOTATIONS_BLOCK}
             exit 1
           fi
           curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /tmp/rds.pem
-          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME
-}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+          psql "host=${DB_HOST} port=${DB_PORT} sslmode=verify-full sslrootcert=/tmp/rds.pem user=${DB_USER} dbname=${DB_NAME}" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
         volumeMounts:
         - name: migrations
           mountPath: /migrations

@@ -501,7 +501,11 @@ echo "   ✅ TLS certificates ready with proper DNS names"
 echo ""
 echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
 kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
-echo "   ✅ CRD synced"
+CRD_BASE_DIR="${SCRIPT_DIR}/../agents/k8s-agent/config/crd/bases"
+if [ -d "${CRD_BASE_DIR}" ]; then
+  kubectl apply -f "${CRD_BASE_DIR}" >/dev/null
+fi
+echo "   ✅ CRDs synced"
 
 # Step 6: Deploy aegis-services using Helm (FULL deployment)
 echo ""

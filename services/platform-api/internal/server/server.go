@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -48,12 +49,14 @@ type Server struct {
 	log                  *zap.Logger
 	store                store.Store
 	kubeClients          *kubeclients.Manager
+	policyOverlay        *placement.PolicyOverlay
 	targetNamespace      string
 	proxyBaseURL         string
 	proxyAudience        string
 	proxySecret          []byte
 	proxyTokenTTL        time.Duration
 	workspaceEnvDefaults map[string]string
+	autoBootstrap        bool
 }
 
 type proxyClaims struct {
@@ -133,7 +136,7 @@ var (
 	)
 )
 
-func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string) *Server {
+func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay) *Server {
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -169,16 +172,21 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	if val := strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE_USER_PASSWORD")); val != "" {
 		defaults[workspacecfg.EnvUserPassword] = val
 	}
+	if overlay == nil {
+		overlay = placement.NewPolicyOverlay()
+	}
 	return &Server{
 		log:                  log,
 		store:                st,
 		kubeClients:          clients,
+		policyOverlay:        overlay,
 		targetNamespace:      namespace,
 		proxyBaseURL:         baseURL,
 		proxyAudience:        audience,
 		proxySecret:          []byte(secret),
 		proxyTokenTTL:        time.Duration(ttlSeconds) * time.Second,
 		workspaceEnvDefaults: defaults,
+		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
 	}
 }
 
@@ -187,6 +195,17 @@ func getEnvInt(key string, def int64) int64 {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
+	}
+	return def
+}
+
+func getEnvBool(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	if parsed, err := strconv.ParseBool(v); err == nil {
+		return parsed
 	}
 	return def
 }
@@ -281,6 +300,58 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
 }
 
+func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
+	_ = ctx // reserved for future use (tracing, cancellation)
+	if !s.autoBootstrap || w == nil {
+		return
+	}
+	projectID := strings.TrimSpace(w.GetProjectId())
+	if projectID == "" {
+		return
+	}
+	reqFlavor, err := requiredFlavor(w)
+	if err != nil {
+		s.log.Debug("autobootstrap skipped; workload missing flavor",
+			zap.String("workload_id", w.GetId()),
+			zap.Error(err),
+		)
+		return
+	}
+	reqFlavor = strings.TrimSpace(reqFlavor)
+	if reqFlavor == "" {
+		return
+	}
+	if s.store.GetProject(projectID) == nil {
+		s.store.PutProject(&aegis.Project{Id: projectID})
+		s.log.Info("autobootstrap: project created",
+			zap.String("project_id", projectID),
+			zap.String("workload_id", w.GetId()),
+		)
+	}
+	queueName := strings.TrimSpace(w.GetQueue())
+	if queueName != "" && s.store.GetQueue(queueName) == nil {
+		s.store.PutQueue(&aegis.Queue{
+			Name:                      queueName,
+			ProjectId:                 projectID,
+			DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
+		})
+		s.log.Info("autobootstrap: queue created",
+			zap.String("queue", queueName),
+			zap.String("project_id", projectID),
+			zap.String("workload_id", w.GetId()),
+		)
+	}
+	if s.store.GetFlavor(reqFlavor) == nil {
+		flavor := defaultFlavorForName(reqFlavor)
+		s.store.PutFlavor(flavor)
+		s.log.Info("autobootstrap: flavor created",
+			zap.String("flavor", reqFlavor),
+			zap.String("resource_name", flavor.GetResourceName()),
+			zap.Int32("gpu_count", flavor.GetGpuCount()),
+		)
+	}
+}
+
 func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRequest) (*aegis.Workload, error) {
 	if req == nil || req.Workload == nil {
 		err := status.Error(codes.InvalidArgument, "workload payload required")
@@ -294,10 +365,23 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if w.Id == "" {
 		w.Id = "w-" + RandID()
 	}
+	s.maybeBootstrapWorkspaceDeps(ctx, w)
 	p := s.store.GetProject(w.ProjectId)
 	if p == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "unknown project %q", w.ProjectId)
 	}
+
+	var (
+		projectPolicy placement.ProjectPolicy
+		hasPolicy     bool
+	)
+	if s.policyOverlay != nil {
+		projectPolicy, hasPolicy = s.policyOverlay.Effective(w.ProjectId)
+	}
+	if hasPolicy {
+		s.applyDefaultFlavor(projectPolicy, w)
+	}
+
 	reqFlavor, err := requiredFlavor(w)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -377,6 +461,33 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		s.store.SetEstimateUSD(w.GetId(), estimateUSD)
 	}
 
+	var (
+		activeByFlavor map[string]int
+		clusterLoads   map[string]int
+	)
+	if hasPolicy {
+		requiresStats := len(projectPolicy.Quotas) > 0 || strings.EqualFold(strings.TrimSpace(projectPolicy.Strategy), "spread")
+		if requiresStats {
+			activeByFlavor, clusterLoads = s.activeWorkloadStats(w.GetProjectId())
+		}
+		if len(projectPolicy.Quotas) > 0 {
+			flavorKey := strings.ToLower(strings.TrimSpace(reqFlavor))
+			if limit, ok := projectPolicy.Quotas[flavorKey]; ok && limit > 0 {
+				if activeByFlavor == nil {
+					activeByFlavor, clusterLoads = s.activeWorkloadStats(w.GetProjectId())
+				}
+				if activeByFlavor[strings.ToLower(flavorKey)] >= limit {
+					err := status.Error(codes.ResourceExhausted, fmt.Sprintf("quota reached for project %s flavor %s", w.GetProjectId(), reqFlavor))
+					s.log.Warn("placement quota reached",
+						zap.String("project_id", w.GetProjectId()),
+						zap.String("flavor", reqFlavor),
+						zap.Int("limit", limit))
+					return nil, err
+				}
+			}
+		}
+	}
+
 	// Build candidates from current cluster snapshots
 	infos := s.store.ListClusterInfos()
 	cands := make([]placement.Candidate, 0, len(infos))
@@ -391,6 +502,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		}
 		cands = append(cands, placement.Candidate{
 			ClusterID:   ci.ID,
+			Provider:    strings.ToLower(strings.TrimSpace(ci.Provider)),
 			Region:      ci.Region,
 			Labels:      ci.Labels,
 			TTFGSeconds: ci.TTFGSecondsP50,
@@ -398,16 +510,20 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		})
 	}
 
-	var regions []string
-	if p.GetPolicy() != nil {
-		regions = p.GetPolicy().GetRegions()
+	regions := normalizeStrings(projectPolicy.AllowedRegions)
+	if len(regions) == 0 && p.GetPolicy() != nil {
+		regions = normalizeStrings(p.GetPolicy().GetRegions())
 	}
-	pd := placement.PolicyDomain{Regions: regions}
+	pd := placement.PolicyDomain{
+		Regions:   regions,
+		Providers: projectPolicy.AllowedProviders,
+		Strategy:  projectPolicy.Strategy,
+	}
 	placementFlavor := reqFlavor
 	if flavorObj.GetGpuCount() == 0 && flavorObj.GetResourceName() == "" {
 		placementFlavor = ""
 	}
-	chosen, perr := placement.ChooseCluster(cands, pd, placementFlavor)
+	chosen, perr := placement.ChooseCluster(cands, pd, placementFlavor, clusterLoads)
 	if perr != nil {
 		s.log.Warn("placement failed",
 			zap.String("workload_id", w.GetId()),
@@ -1087,7 +1203,7 @@ func buildSSHUser(subject string) string {
 }
 
 func buildHostAlias(workloadID string) string {
-    const prefix = "aegis-w-"
+	const prefix = "aegis-w-"
 	cleaned := strings.TrimSpace(strings.ToLower(workloadID))
 	if cleaned == "" {
 		return prefix + randomHex(4)
@@ -1749,6 +1865,94 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+func normalizeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, v := range in {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Server) applyDefaultFlavor(policy placement.ProjectPolicy, w *aegis.Workload) {
+	defaultFlavor := strings.TrimSpace(policy.DefaultFlavor)
+	if defaultFlavor == "" || w == nil {
+		return
+	}
+	switch wk := w.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		if wk.Workspace != nil && strings.TrimSpace(wk.Workspace.Flavor) == "" {
+			wk.Workspace.Flavor = defaultFlavor
+		}
+	case *aegis.Workload_Training:
+		if wk.Training != nil && strings.TrimSpace(wk.Training.Flavor) == "" {
+			wk.Training.Flavor = defaultFlavor
+		}
+	}
+}
+
+func (s *Server) activeWorkloadStats(projectID string) (map[string]int, map[string]int) {
+	flavorCounts := map[string]int{}
+	clusterLoads := map[string]int{}
+	if strings.TrimSpace(projectID) == "" {
+		return flavorCounts, clusterLoads
+	}
+	for _, existing := range s.store.ListWorkloads(projectID) {
+		if existing == nil || !isWorkloadActive(existing.GetStatus()) {
+			continue
+		}
+		if flavor, err := requiredFlavor(existing); err == nil {
+			key := strings.ToLower(strings.TrimSpace(flavor))
+			if key != "" {
+				flavorCounts[key]++
+			}
+		}
+		if cid := strings.TrimSpace(existing.GetClusterId()); cid != "" {
+			clusterLoads[cid]++
+		}
+	}
+	return flavorCounts, clusterLoads
+}
+
+func isWorkloadActive(status string) bool {
+	switch {
+	case strings.EqualFold(status, statusPlaced):
+		return true
+	case strings.EqualFold(status, statusRunning):
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultFlavorForName(name string) *aegis.Flavor {
+	flavor := &aegis.Flavor{
+		Name:               name,
+		CpuCoresRequest:    "2",
+		MemoryRequest:      "4Gi",
+		ResourceName:       name,
+		GpuCount:           0,
+		PriceUsdPerGpuHour: 0,
+	}
+	return flavor
+}
+
 func stringPtr(in string) *string {
 	if strings.TrimSpace(in) == "" {
 		return nil
@@ -1819,7 +2023,6 @@ func subjectFromContext(ctx context.Context) string {
 		return "unknown"
 	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		fmt.Printf("[subjectFromContext] metadata: %#v\n", md)
 		lower := md.Copy()
 		for key, values := range lower {
 			if len(values) == 0 {

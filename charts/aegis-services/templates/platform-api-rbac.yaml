@@ -25,10 +25,26 @@ rules:
     resources: ["aegisworkloads/status"]
     verbs: ["get", "update", "patch"]
 
+  # Management-plane CRDs for infrastructure and placement
+  - apiGroups: ["infra.aegis.yourorg.dev"]
+    resources: ["projectinfras", "projectinfras/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["infra.aegis.yourorg.dev"]
+    resources: ["projectplacements", "projectplacements/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["infra.aegis.yourorg.dev"]
+    resources: ["aegisclusters", "aegisclusters/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
   # Namespace permissions to create workload namespaces dynamically
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "create"]
+
+  # Secret management for kubeconfig synchronization
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Pod and Job inspection for workload status
   - apiGroups: [""]

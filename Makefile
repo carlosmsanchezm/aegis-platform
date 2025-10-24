@@ -281,7 +281,7 @@ port-forward:
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
-	@echo "   Backend: http://localhost:8080 (port-forward required)"
+	@echo "   Backend: http://platform-api.localtest.me (ingress, no port-forward required)"
 	@cd aegis-platform && yarn dev
 
 dev-backstage-cloud:

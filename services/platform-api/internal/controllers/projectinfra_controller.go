@@ -362,8 +362,10 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 			},
 			Spec: spec,
 		}
-		if err := controllerutil.SetControllerReference(infra, current, r.Scheme); err != nil {
-			return err
+		if key.Namespace == infra.Namespace {
+			if err := controllerutil.SetControllerReference(infra, current, r.Scheme); err != nil {
+				return err
+			}
 		}
 		return r.Create(ctx, current)
 	} else if err != nil {
@@ -376,8 +378,10 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 
 	patched := current.DeepCopy()
 	patched.Spec = spec
-	if err := controllerutil.SetControllerReference(infra, patched, r.Scheme); err != nil {
-		return err
+	if key.Namespace == infra.Namespace {
+		if err := controllerutil.SetControllerReference(infra, patched, r.Scheme); err != nil {
+			return err
+		}
 	}
 	return r.Patch(ctx, patched, client.MergeFrom(current))
 }

@@ -25,7 +25,13 @@ env:
   PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
   PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
+<<<<<<< HEAD
   RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset || 'all' }}
+=======
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') || (github.event_name == 'pull_request' && 'all') || 'all' }}
+  DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
+  MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+>>>>>>> origin/main
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
@@ -221,10 +227,15 @@ jobs:
             echo "agent=${{ needs.build-and-push.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
             echo "workspace=${{ needs.build-and-push.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
           else
-            echo "platform=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api:v1.0.6-tls2" >> "$GITHUB_OUTPUT"
-            echo "proxy=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy:no-client-cert" >> "$GITHUB_OUTPUT"
-            echo "agent=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:v1.0.2-tls-20251005-amd64" >> "$GITHUB_OUTPUT"
-            echo "workspace=567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest" >> "$GITHUB_OUTPUT"
+            IMAGE_TAG="${MANUAL_IMAGE_TAG}"
+            if [[ -z "${IMAGE_TAG}" ]]; then
+              IMAGE_TAG="${DEFAULT_E2E_IMAGE_TAG}"
+            fi
+            ECR_REGISTRY="567751785679.dkr.ecr.us-east-1.amazonaws.com"
+            echo "platform=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "proxy=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "agent=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "workspace=${ECR_REGISTRY}/aegis/workspace-vscode:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Configure AWS credentials
@@ -262,11 +273,13 @@ jobs:
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
           SKIP_ROUTE53_UPDATE: '1'
+          REUSE_EXISTING_DEPLOYMENT: ${{ env.RUN_SUBSET == 'e2e-only' && '1' || '0' }}
+          AEGIS_PLATFORM_API_CERT: ${{ steps.image-uris.outputs.platform_api_cert }}
         run: |
           set -euo pipefail
 
           # Deploy via Terraform helper (skips Route53 update but now includes migrations)
-          ./terraform/generate-helm-values.sh --non-interactive --tls
+          ./terraform/generate-cloud-deployment.sh --non-interactive --tls
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e
         env:
@@ -420,12 +433,13 @@ jobs:
           bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
 
       - name: Workspace connectivity smoke test
-        if: ${{ env.RUN_SUBSET == 'all' }}
+        if: ${{ env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'e2e-only' }}
         env:
           WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
           AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
           AEGIS_GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
           AEGIS_GRPC_HOST: ${{ steps.configure-e2e.outputs.grpc_host }}
+          VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
         run: |
           set -euo pipefail
           echo "🧪 Workspace connectivity smoke test using image ${WORKSPACE_IMAGE}"
@@ -440,7 +454,7 @@ jobs:
           rm -f .aegis/workspace-session.json || true
 
       - name: Run k8s-agent E2E tests
-        if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' }}
+        if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' || env.RUN_SUBSET == 'e2e-only' }}
 
         env:
           USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}
@@ -451,9 +465,45 @@ jobs:
           cd agents/k8s-agent
           make test-e2e
 
+      - name: Promote images to latest
+        if: ${{ env.RUN_SUBSET == 'all' && success() }}
+        env:
+          PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}
+          PROXY_IMAGE: ${{ needs.build-and-push.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ needs.build-and-push.outputs.workspace_image }}
+        run: |
+          set -euo pipefail
+          promote() {
+            local image="$1"
+            local repo="${image%:*}"
+            local tag="${image##*:}"
+            local registry="${repo%%/*}"
+            local repo_name="${repo#${registry}/}"
+            echo "Promoting ${repo_name}:${tag} -> latest"
+            local manifest
+            manifest=$(aws ecr batch-get-image \
+              --repository-name "$repo_name" \
+              --image-ids imageTag="$tag" \
+              --query 'images[0].imageManifest' \
+              --output text)
+            if [ -z "$manifest" ]; then
+              echo "Failed to retrieve manifest for ${repo_name}:${tag}" >&2
+              exit 1
+            fi
+            aws ecr put-image \
+              --repository-name "$repo_name" \
+              --image-tag latest \
+              --image-manifest "$manifest" >/dev/null
+          }
+          promote "$PLATFORM_IMAGE"
+          promote "$PROXY_IMAGE"
+          promote "$K8S_AGENT_IMAGE"
+          promote "$WORKSPACE_IMAGE"
+
   teardown-preview:
     name: Teardown Preview Environment
-    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset == '' || github.event.inputs.run_subset == 'all' || github.event.inputs.run_subset == 'deploy')) || github.event_name == 'pull_request') }}
+    if: ${{ false }}  # Temporarily disabled for testing
     runs-on: ubuntu-latest
     needs: deploy-preview-and-test
     permissions:

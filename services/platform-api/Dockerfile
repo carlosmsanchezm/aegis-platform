@@ -1,6 +1,9 @@
 # Build stage
 FROM golang:1.24-alpine AS builder
 
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
 WORKDIR /app
 
 # Copy the entire project structure since we have local dependencies
@@ -8,7 +11,7 @@ COPY . .
 
 # Build the platform-api service binary
 WORKDIR /app/services/platform-api
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o platform-api .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -o platform-api .
 
 # Final stage
 FROM alpine:latest

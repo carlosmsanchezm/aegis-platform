@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate Helm values and optionally deploy to Kubernetes
 #
-# For complete deployment documentation, see: DEPLOYMENT.md
+# For complete deployment documentation, see: DEPLOYMENT_AND_TESTING_GUIDE.md
 
 set -e
 
@@ -97,7 +97,7 @@ echo "🔐 Enforcing TLS for platform-api and proxy"
 rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
 
 echo "🚀 Generating Helm values from Terraform outputs..."
-echo "📖 See DEPLOYMENT.md for complete deployment guide"
+echo "📖 See DEPLOYMENT_AND_TESTING_GUIDE.md for complete deployment guide"
 echo ""
 
 # Check if terraform is initialized
@@ -210,6 +210,16 @@ KUBECTL_CMD=$(terraform output -raw kubectl_config_command)
 echo "   Running: ${KUBECTL_CMD}"
 eval "${KUBECTL_CMD}"
 echo "   ✅ kubectl configured"
+
+# Surface the fully qualified context so operators can switch back easily
+AWS_REGION=${AWS_REGION:-$(terraform output -raw aws_region 2>/dev/null || echo "")}
+AWS_ACCOUNT_ID=$(terraform output -raw aws_account_id 2>/dev/null || echo "")
+CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "")
+if [[ -n "${AWS_REGION}" && -n "${AWS_ACCOUNT_ID}" && -n "${CLUSTER_NAME}" ]]; then
+  KUBE_CONTEXT="arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
+  echo "   ℹ️  Switch kubectl context with:"
+  echo "      kubectl config use-context ${KUBE_CONTEXT}"
+fi
 
 # Step 2: Create namespace and secrets
 echo ""
@@ -425,6 +435,22 @@ kubectl delete configmap "${MIGRATION_CONFIGMAP}" -n "${K8S_NAMESPACE}" --ignore
 echo "   ✅ Migrations applied"
 fi
 
+# Optional namespace reset (cleans out previous preview if requested)
+RESET_NAMESPACE="${RESET_NAMESPACE:-0}"
+REUSE_EXISTING_DEPLOYMENT="${REUSE_EXISTING_DEPLOYMENT:-0}"
+if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+  if [[ "${RESET_NAMESPACE}" == "1" || "${REUSE_EXISTING_DEPLOYMENT}" != "1" ]]; then
+    echo ""
+    echo "4️⃣  Cleaning previous ${K8S_NAMESPACE} namespace"
+    helm uninstall "${HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
+    helm uninstall "${SPOKE_HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
+    kubectl delete namespace "${K8S_NAMESPACE}" --ignore-not-found --wait >/dev/null 2>&1 || true
+  else
+    echo ""
+    echo "4️⃣  Reusing existing namespace ${K8S_NAMESPACE} (skipping reset)"
+  fi
+fi
+
 # Step 4: Generate self-signed TLS certs using Route53 DNS names
 echo ""
 echo "4️⃣  Generating TLS certificates using Route53 DNS names..."
@@ -484,7 +510,11 @@ echo "   ✅ TLS certificates ready with proper DNS names"
 echo ""
 echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
 kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
-echo "   ✅ CRD synced"
+CRD_BASE_DIR="${SCRIPT_DIR}/../agents/k8s-agent/config/crd/bases"
+if [ -d "${CRD_BASE_DIR}" ]; then
+  kubectl apply -f "${CRD_BASE_DIR}" >/dev/null
+fi
+echo "   ✅ CRDs synced"
 
 # Step 6: Deploy aegis-services using Helm (FULL deployment)
 echo ""
@@ -505,10 +535,16 @@ OVERRIDE_FILE=$(mktemp)
   fi
   echo "  env:"
   echo "    DATABASE_URL: \"${DB_URL}\""
+  if [[ -n "${DNS_PROXY}" ]]; then
+    echo "    AEGIS_PROXY_BASE_URL: \"wss://${DNS_PROXY}:8080\""
+  fi
   echo "  secrets:"
   echo "    db-password: \"${DB_PASSWORD}\""
   echo "    proxy-jwt-secret: \"${JWT_SECRET}\""
   echo "proxy:"
+  if [[ -n "${DNS_PROXY}" ]]; then
+    echo "  publicHost: \"${DNS_PROXY}\""
+  fi
   echo "  image:"
   if [[ -n "${PROXY_IMAGE_REPO}" ]]; then
     echo "    repository: ${PROXY_IMAGE_REPO}"
@@ -573,7 +609,8 @@ echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.i
+ngress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PLATFORM_API_LB}" ]; then
     echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
     break
@@ -597,7 +634,8 @@ fi
 echo ""
 echo "   Waiting for proxy Load Balancer..."
 for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].host
+name}' 2>/dev/null || echo "")
   if [ -n "${PROXY_LB}" ]; then
     echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
     break

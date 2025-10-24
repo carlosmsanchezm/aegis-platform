@@ -11,6 +11,12 @@ bin/
 dist/
 out/
 workspace-images/
+terraform/
+.terraform/
+
+.bufcache/
+.gocache/
+.gomodcache/
 
 # Ignore Python caches and logs
 __pycache__/

@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PASSWORD_ACCESS=true \
     SSH_PORT=2222 \
     WORKSPACE_ROOT=/home/project \
-    VSCODE_QUALITY=insider
+    VSCODE_QUALITY=stable
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

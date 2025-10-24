@@ -15,8 +15,10 @@ if [[ $# -gt 0 && "${1:-}" =~ ^[0-9a-f]{40}$ ]]; then
   shift
 fi
 
-if [[ -z "$COMMIT" && -n "${VSCODE_SERVER_URL:-}" && "${VSCODE_SERVER_URL}" =~ commit:?([0-9a-f]{40}) ]]; then
-  COMMIT="${BASH_REMATCH[1]}"
+if [[ -z "$COMMIT" && -n "${VSCODE_SERVER_URL:-}" ]]; then
+  if [[ "${VSCODE_SERVER_URL}" =~ commit:?([0-9a-f]{40}) ]]; then
+    COMMIT="${BASH_REMATCH[1]}"
+  fi
 fi
 
 if [[ -z "$COMMIT" ]]; then

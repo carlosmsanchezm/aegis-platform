@@ -1,0 +1,214 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: projectinfras.infra.aegis.yourorg.dev
+spec:
+  group: infra.aegis.yourorg.dev
+  names:
+    kind: ProjectInfra
+    listKind: ProjectInfraList
+    plural: projectinfras
+    singular: projectinfra
+    shortNames:
+      - pinfra
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ProjectInfra represents a declarative infrastructure request for an Aegis project.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - projectId
+                - provider
+                - region
+              properties:
+                projectId:
+                  type: string
+                provider:
+                  type: string
+                region:
+                  type: string
+                strategy:
+                  type: string
+                importKubeconfigSecretRef:
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                aws:
+                  type: object
+                  required:
+                    - accountId
+                    - clusterName
+                  properties:
+                    accountId:
+                      type: string
+                    roleArn:
+                      type: string
+                    vpcId:
+                      type: string
+                    clusterName:
+                      type: string
+                    version:
+                      type: string
+                    nodePools:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - name
+                          - instanceType
+                          - minSize
+                          - maxSize
+                        properties:
+                          name:
+                            type: string
+                          instanceType:
+                            type: string
+                          minSize:
+                            type: integer
+                            format: int32
+                          maxSize:
+                            type: integer
+                            format: int32
+                          labels:
+                            type: object
+                            additionalProperties:
+                              type: string
+                          taints:
+                            type: array
+                            items:
+                              type: string
+                    additionalClusters:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - clusterName
+                        properties:
+                          clusterName:
+                            type: string
+                          version:
+                            type: string
+                          nodePools:
+                            type: array
+                            items:
+                              type: object
+                              required:
+                                - name
+                                - instanceType
+                                - minSize
+                                - maxSize
+                              properties:
+                                name:
+                                  type: string
+                                instanceType:
+                                  type: string
+                                minSize:
+                                  type: integer
+                                  format: int32
+                                maxSize:
+                                  type: integer
+                                  format: int32
+                                labels:
+                                  type: object
+                                  additionalProperties:
+                                    type: string
+                                taints:
+                                  type: array
+                                  items:
+                                    type: string
+                addons:
+                  type: object
+                  additionalProperties:
+                    type: boolean
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                outputs:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - clusterId
+                      - name
+                      - region
+                      - kubeconfigSecretKey
+                    properties:
+                      clusterId:
+                        type: string
+                      name:
+                        type: string
+                      region:
+                        type: string
+                      kubeconfigSecretKey:
+                        type: string
+                      observability:
+                        type: object
+                        properties:
+                          otelEndpoint:
+                            type: string
+                          metricsUrl:
+                            type: string
+                costHintUsdPerHour:
+                  type: number
+                  format: double
+                lastSyncTime:
+                  type: string
+                  format: date-time
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Project
+          type: string
+          jsonPath: .spec.projectId
+        - name: Provider
+          type: string
+          jsonPath: .spec.provider
+        - name: Region
+          type: string
+          jsonPath: .spec.region
+        - name: Phase
+          type: string
+          jsonPath: .status.phase

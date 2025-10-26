@@ -239,10 +239,23 @@ jobs:
         if: env.RUN_SUBSET == 'e2e-only'
         env:
           WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
+          PLATFORM_IMAGE: ${{ steps.image-uris.outputs.platform }}
+          PROXY_IMAGE: ${{ steps.image-uris.outputs.proxy }}
+          K8S_AGENT_IMAGE: ${{ steps.image-uris.outputs.agent }}
         run: |
           set -euo pipefail
+          if [[ -z "${MANUAL_IMAGE_TAG:-}" ]]; then
+            echo "MANUAL_IMAGE_TAG must be provided for e2e-only runs" >&2
+            exit 1
+          fi
           docker build -t "${WORKSPACE_IMAGE}" workspace-images/openssh-vscode
           docker push "${WORKSPACE_IMAGE}"
+          for image in "${PLATFORM_IMAGE}" "${PROXY_IMAGE}" "${K8S_AGENT_IMAGE}"; do
+            src="${image%:${MANUAL_IMAGE_TAG}}:${DEFAULT_E2E_IMAGE_TAG}"
+            docker pull "${src}"
+            docker tag "${src}" "${image}"
+            docker push "${image}"
+          done
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2

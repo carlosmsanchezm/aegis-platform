@@ -32,15 +32,39 @@ type ProjectInfraSpec struct {
 	Labels                    map[string]string       `json:"labels,omitempty"`
 }
 
+// AWSProvisionMode declares how the automation runner should reconcile AWS resources.
+type AWSProvisionMode string
+
+const (
+	AWSProvisionModeProvision AWSProvisionMode = "Provision"
+	AWSProvisionModeImport    AWSProvisionMode = "Import"
+)
+
+// SecretKeyReference describes a namespaced secret key selector.
+type SecretKeyReference struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Key       string `json:"key"`
+}
+
+// AWSImportSpec describes existing infrastructure to import into the management plane.
+type AWSImportSpec struct {
+	ClusterID           string             `json:"clusterId"`
+	KubeconfigSecretRef SecretKeyReference `json:"kubeconfigSecretRef"`
+}
+
 // AWSInfraSpec captures AWS-specific provisioning parameters.
 type AWSInfraSpec struct {
-	AccountID          string           `json:"accountId"`
+	AccountID          string           `json:"accountId,omitempty"`
+	Mode               AWSProvisionMode `json:"mode,omitempty"`
 	RoleARN            string           `json:"roleArn,omitempty"`
+	ExternalID         string           `json:"externalId,omitempty"`
 	VpcID              string           `json:"vpcId,omitempty"`
-	ClusterName        string           `json:"clusterName"`
+	ClusterName        string           `json:"clusterName,omitempty"`
 	Version            string           `json:"version,omitempty"`
 	NodePools          []NodePool       `json:"nodePools,omitempty"`
 	AdditionalClusters []AWSClusterSpec `json:"additionalClusters,omitempty"`
+	Imports            []AWSImportSpec  `json:"imports,omitempty"`
 }
 
 // AWSClusterSpec describes a secondary cluster to provision in AWS.
@@ -57,7 +81,7 @@ type NodePool struct {
 	MinSize      int32             `json:"minSize"`
 	MaxSize      int32             `json:"maxSize"`
 	Labels       map[string]string `json:"labels,omitempty"`
-	Taints       []string          `json:"taints,omitempty"`
+	Taints       []corev1.Taint    `json:"taints,omitempty"`
 }
 
 // ProjectInfraStatus reports provisioning progress and outputs.
@@ -170,6 +194,12 @@ func (in *AWSInfraSpec) DeepCopyInto(out *AWSInfraSpec) {
 			in.AdditionalClusters[i].DeepCopyInto(&out.AdditionalClusters[i])
 		}
 	}
+	if in.Imports != nil {
+		out.Imports = make([]AWSImportSpec, len(in.Imports))
+		for i := range in.Imports {
+			in.Imports[i].DeepCopyInto(&out.Imports[i])
+		}
+	}
 }
 
 func (in *AWSInfraSpec) DeepCopy() *AWSInfraSpec {
@@ -200,6 +230,32 @@ func (in *AWSClusterSpec) DeepCopy() *AWSClusterSpec {
 	return out
 }
 
+func (in *AWSImportSpec) DeepCopyInto(out *AWSImportSpec) {
+	*out = *in
+}
+
+func (in *AWSImportSpec) DeepCopy() *AWSImportSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(AWSImportSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SecretKeyReference) DeepCopyInto(out *SecretKeyReference) {
+	*out = *in
+}
+
+func (in *SecretKeyReference) DeepCopy() *SecretKeyReference {
+	if in == nil {
+		return nil
+	}
+	out := new(SecretKeyReference)
+	in.DeepCopyInto(out)
+	return out
+}
+
 func (in *NodePool) DeepCopyInto(out *NodePool) {
 	*out = *in
 	if in.Labels != nil {
@@ -209,8 +265,10 @@ func (in *NodePool) DeepCopyInto(out *NodePool) {
 		}
 	}
 	if in.Taints != nil {
-		out.Taints = make([]string, len(in.Taints))
-		copy(out.Taints, in.Taints)
+		out.Taints = make([]corev1.Taint, len(in.Taints))
+		for i := range in.Taints {
+			in.Taints[i].DeepCopyInto(&out.Taints[i])
+		}
 	}
 }
 

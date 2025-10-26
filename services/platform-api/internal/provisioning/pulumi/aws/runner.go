@@ -2,7 +2,9 @@ package aws
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -339,8 +341,10 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 
 		for idx, clusterDef := range input.Clusters {
 			clusterName := fmt.Sprintf("%s-%d", sanitize(clusterDef.Name), idx)
+			resourceName := pulumiResourceName(clusterName, 40)
 			if clusterDef.ClusterID != "" {
 				clusterName = sanitize(clusterDef.ClusterID)
+				resourceName = pulumiResourceName(clusterName, 40)
 			}
 			skipDefault := true
 			clusterIDLabel := clusterDef.ClusterID
@@ -359,7 +363,7 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				clusterArgs.VpcId = pulumi.StringPtr(input.VpcID)
 			}
 
-			cluster, err := eks.NewCluster(ctx, clusterName, clusterArgs, providerOpt)
+			cluster, err := eks.NewCluster(ctx, resourceName, clusterArgs, providerOpt)
 			if err != nil {
 				return fmt.Errorf("create eks cluster %q: %w", clusterDef.ClusterID, err)
 			}
@@ -406,6 +410,7 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 		if name == "" {
 			name = fmt.Sprintf("%s-nodepool", sanitize(clusterDef.ClusterID))
 		}
+		name = pulumiResourceName(sanitize(name), 40)
 		instanceType := strings.TrimSpace(pool.InstanceType)
 		if instanceType == "" {
 			instanceType = "m6i.large"
@@ -471,7 +476,7 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, cl
 		helmCfg.Namespace = defaultHelmNamespace
 	}
 	if helmCfg.ReleaseName == "" {
-		helmCfg.ReleaseName = fmt.Sprintf("%s-%s", defaultSpokeReleaseName, sanitize(clusterID))
+		helmCfg.ReleaseName = pulumiResourceName(fmt.Sprintf("%s-%s", defaultSpokeReleaseName, sanitize(clusterID)), 53)
 	}
 	if helmCfg.Timeout == 0 {
 		helmCfg.Timeout = defaultSpokeReleaseTimeout
@@ -762,6 +767,30 @@ func sanitize(in string) string {
 		trimmed = strings.ReplaceAll(trimmed, "--", "-")
 	}
 	return strings.Trim(trimmed, "-")
+}
+
+func pulumiResourceName(base string, max int) string {
+	name := sanitize(base)
+	if max <= 0 {
+		return name
+	}
+	if len(name) <= max {
+		return name
+	}
+	hash := sha1.Sum([]byte(name))
+	suffix := hex.EncodeToString(hash[:])[:8]
+	trim := max - len(suffix) - 1
+	if trim <= 0 {
+		return suffix
+	}
+	if trim > len(name) {
+		trim = len(name)
+	}
+	trimmed := strings.TrimRight(name[:trim], "-")
+	if trimmed == "" {
+		return suffix
+	}
+	return fmt.Sprintf("%s-%s", trimmed, suffix)
 }
 
 func estimateCost(spec *infraapi.AWSInfraSpec) float64 {

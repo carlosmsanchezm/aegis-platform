@@ -365,11 +365,6 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if w.Id == "" {
 		w.Id = "w-" + RandID()
 	}
-	s.maybeBootstrapWorkspaceDeps(ctx, w)
-	p := s.store.GetProject(w.ProjectId)
-	if p == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "unknown project %q", w.ProjectId)
-	}
 
 	var (
 		projectPolicy placement.ProjectPolicy
@@ -380,6 +375,12 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	}
 	if hasPolicy {
 		s.applyDefaultFlavor(projectPolicy, w)
+	}
+
+	s.maybeBootstrapWorkspaceDeps(ctx, w)
+	p := s.store.GetProject(w.ProjectId)
+	if p == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown project %q", w.ProjectId)
 	}
 
 	reqFlavor, err := requiredFlavor(w)

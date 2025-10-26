@@ -18,14 +18,13 @@ on:
       image_tag:
         description: "Override image tag for e2e-only runs (expects image already pushed)"
         required: false
-  pull_request:
 
 env:
   AWS_REGION: us-east-1
-  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') || (github.event_name == 'pull_request' && 'all') || 'all' }}
+  PREVIEW_ID: ${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  PREVIEW_NAMESPACE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  PREVIEW_RELEASE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
 # Requires repository secrets:
@@ -292,6 +291,8 @@ jobs:
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
         run: |
           set -euo pipefail
+          STATE_DIR="$(mktemp -d)"
+          export PULUMI_BACKEND_URL="file://${STATE_DIR}"
           KUBE_PATH="${KUBECONFIG:-${HOME}/.kube/config}"
           if [[ ! -f "${KUBE_PATH}" ]]; then
             echo "Kubeconfig not found at ${KUBE_PATH}" >&2

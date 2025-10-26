@@ -66,17 +66,115 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	if infra.Spec.Aws != nil {
+		if strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeImport)) {
+			return r.handleAWSImport(ctx, log, infra)
+		}
+	}
 	if infra.Spec.ImportKubeconfigSecretRef != nil {
 		return r.handleImport(ctx, log, infra)
 	}
 	if infra.Spec.Aws != nil {
-		return r.handleAWS(ctx, log, infra)
+		return r.handleAWSProvision(ctx, log, infra)
 	}
 	reason := "InvalidSpec"
 	err := fmt.Errorf("spec.aws or spec.importKubeconfigSecretRef required")
 	cond := newCondition(metav1.ConditionFalse, reason, err.Error())
 	_ = r.setStatus(ctx, infra, "Error", &cond, nil, infra.Status.CostHintUSDPerHour)
 	return ctrl.Result{}, err
+}
+
+func (r *ProjectInfraReconciler) handleAWSImport(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	aws := infra.Spec.Aws
+	if aws == nil {
+		err := fmt.Errorf("aws spec required for import mode")
+		cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+	if len(aws.Imports) == 0 {
+		err := fmt.Errorf("spec.aws.imports must include at least one entry")
+		cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	kubeconfigData := map[string][]byte{}
+	outputs := make([]infraapi.ClusterOutput, 0, len(aws.Imports))
+
+	for _, imp := range aws.Imports {
+		clusterID := strings.TrimSpace(imp.ClusterID)
+		if clusterID == "" {
+			err := fmt.Errorf("spec.aws.imports requires clusterId")
+			cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+
+		ref := imp.KubeconfigSecretRef
+		secretName := strings.TrimSpace(ref.Name)
+		secretKey := strings.TrimSpace(ref.Key)
+		if secretName == "" || secretKey == "" {
+			err := fmt.Errorf("import %s missing kubeconfig secret reference", clusterID)
+			cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		secretNamespace := strings.TrimSpace(ref.Namespace)
+		if secretNamespace == "" {
+			secretNamespace = infra.Namespace
+		}
+
+		secret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNamespace}, secret); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		if secret.Data == nil {
+			err := fmt.Errorf("secret %s/%s missing data", secretNamespace, secretName)
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		payload, ok := secret.Data[secretKey]
+		if !ok {
+			err := fmt.Errorf("secret %s/%s missing key %s", secretNamespace, secretName, secretKey)
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+
+		aggregatedKey := fmt.Sprintf("%s.kubeconfig", clusterID)
+		kubeconfigData[aggregatedKey] = payload
+		outputs = append(outputs, infraapi.ClusterOutput{
+			ClusterID:           clusterID,
+			Name:                clusterID,
+			Region:              infra.Spec.Region,
+			KubeconfigSecretKey: aggregatedKey,
+		})
+	}
+
+	if err := r.writeKubeconfigs(ctx, kubeconfigData); err != nil {
+		cond := newCondition(metav1.ConditionFalse, "SecretSyncFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	for _, output := range outputs {
+		if err := r.ensureAegisCluster(ctx, infra, output); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ClusterSpecSyncFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+	}
+
+	condReady := newCondition(metav1.ConditionTrue, "Imported", "aws kubeconfig imports synchronized")
+	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, infra.Status.CostHintUSDPerHour); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("project infrastructure imports synchronized", zap.Int("clusters", len(outputs)))
+	return ctrl.Result{}, nil
 }
 
 func (r *ProjectInfraReconciler) handleImport(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
@@ -109,7 +207,7 @@ func (r *ProjectInfraReconciler) handleImport(ctx context.Context, log *zap.Logg
 	return ctrl.Result{}, nil
 }
 
-func (r *ProjectInfraReconciler) handleAWS(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	if r.Provisioner == nil {
 		err := fmt.Errorf("aws provisioner not configured")
 		cond := newCondition(metav1.ConditionFalse, "ProvisionerUnavailable", err.Error())
@@ -423,6 +521,13 @@ func collectClusterIDs(infra *infraapi.ProjectInfra) []string {
 		for _, extra := range infra.Spec.Aws.AdditionalClusters {
 			if name := strings.TrimSpace(extra.ClusterName); name != "" {
 				ids[name] = struct{}{}
+			}
+		}
+	}
+	if infra.Spec.Aws != nil {
+		for _, imp := range infra.Spec.Aws.Imports {
+			if id := strings.TrimSpace(imp.ClusterID); id != "" {
+				ids[id] = struct{}{}
 			}
 		}
 	}

@@ -127,8 +127,17 @@ build-workspace:
 		--push \
 		workspace-images/openssh-vscode
 
+.PHONY: build-proxy
+build-proxy:
+	@echo "Building proxy image $(PROXY_IMAGE)"
+	@docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(PROXY_IMAGE) \
+		--push \
+		-f services/proxy/Dockerfile \
+		.
+
 .PHONY: build-images
-build-images: build-platform build-agent build-workspace
+build-images: build-platform build-agent build-proxy build-workspace
 
 test-workspace:
 	@echo "Running workspace connectivity smoke test..."
@@ -143,11 +152,13 @@ setup-local:
 
 K8S_AGENT_IMAGE ?= carlosmsanchez/aegis-k8s-agent:dev
 PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev
+PROXY_IMAGE ?= carlosmsanchez/aegis-proxy:dev
 WORKSPACE_IMAGE ?= carlosmsanchez/aegis-workspace-vscode:latest
 
 AWS_ECR_REGISTRY ?= 567751785679.dkr.ecr.us-east-1.amazonaws.com
 CLOUD_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
+CLOUD_PROXY_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/proxy:$(CLOUD_IMAGE_TAG)
 CLOUD_K8S_AGENT_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/k8s-agent:$(CLOUD_IMAGE_TAG)
 CLOUD_WORKSPACE_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:$(CLOUD_IMAGE_TAG)
 
@@ -155,11 +166,13 @@ CLOUD_WORKSPACE_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:$(CLOUD_IMAG
 push-cloud-images:
 	@echo "Building and pushing cloud images with tag $(CLOUD_IMAGE_TAG) to $(AWS_ECR_REGISTRY)"
 	@$(MAKE) PLATFORM_API_IMAGE=$(CLOUD_PLATFORM_API_IMAGE) build-platform
+	@$(MAKE) PROXY_IMAGE=$(CLOUD_PROXY_IMAGE) build-proxy
 	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) build-agent
 	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) build-workspace
 ifeq ($(PUSH_LATEST),1)
 	@echo "Promoting images to :latest"
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/platform-api:latest $(CLOUD_PLATFORM_API_IMAGE)
+	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/proxy:latest $(CLOUD_PROXY_IMAGE)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/k8s-agent:latest $(CLOUD_K8S_AGENT_IMAGE)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
 endif

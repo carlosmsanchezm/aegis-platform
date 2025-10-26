@@ -277,12 +277,10 @@ jobs:
         id: pulumi-preview-manifest
         run: |
           set -euo pipefail
-          kubectl apply -f ops/previews/projectinfra-sample.yaml
-          NAME="$(kubectl get -f ops/previews/projectinfra-sample.yaml -o jsonpath='{.metadata.name}')"
-          NAMESPACE="$(kubectl get -f ops/previews/projectinfra-sample.yaml -o jsonpath='{.metadata.namespace}')"
-          if [[ -z "${NAMESPACE}" ]]; then
-            NAMESPACE="default"
-          fi
+          kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f ops/previews/projectinfra-sample.yaml -n "${K8S_NAMESPACE}"
+          NAME="pulumi-preview-sample"
+          NAMESPACE="${K8S_NAMESPACE}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
 

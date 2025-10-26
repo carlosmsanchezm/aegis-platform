@@ -13,6 +13,7 @@ KEEP_RESOURCE=false
 MANIFEST_PATH=""
 TARGET_NAME=""
 TARGET_NAMESPACE=""
+PULUMI_PREVIEW_NAMESPACE="${PULUMI_PREVIEW_NAMESPACE:-}"
 
 usage() {
 	cat <<'EOF'
@@ -119,18 +120,28 @@ run_preview_from_file() {
 
 run_preview_from_cluster() {
 	local manifest="${MANIFEST_PATH:-$DEFAULT_MANIFEST}"
+	local namespace="$TARGET_NAMESPACE"
+	if [[ -z "$namespace" ]]; then
+		if [[ -n "$PULUMI_PREVIEW_NAMESPACE" ]]; then
+			namespace="$PULUMI_PREVIEW_NAMESPACE"
+		else
+			namespace="$PLATFORM_NAMESPACE"
+		fi
+	fi
+	if [[ -z "$namespace" ]]; then
+		namespace="aegis-system"
+	fi
 	if [[ ! -f "$manifest" ]]; then
 		echo "Sample manifest not found at $manifest" >&2
 		exit 1
 	fi
-	echo "[pulumi-preview] Applying ProjectInfra manifest ${manifest}"
-	kubectl apply -f "$manifest"
+	echo "[pulumi-preview] Ensuring namespace ${namespace}"
+	kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
+	echo "[pulumi-preview] Applying ProjectInfra manifest ${manifest} to namespace ${namespace}"
+	kubectl apply -f "$manifest" -n "$namespace"
 
-	TARGET_NAME="$(kubectl get -f "$manifest" -o jsonpath='{.metadata.name}')"
-	TARGET_NAMESPACE="$(kubectl get -f "$manifest" -o jsonpath='{.metadata.namespace}')"
-	if [[ -z "$TARGET_NAMESPACE" ]]; then
-		TARGET_NAMESPACE="default"
-	fi
+	TARGET_NAME="$(kubectl get -f "$manifest" -n "$namespace" -o jsonpath='{.metadata.name}')"
+	TARGET_NAMESPACE="$namespace"
 	echo "[pulumi-preview] Running preview for ${TARGET_NAMESPACE}/${TARGET_NAME}"
 	make -C "$SERVICE_DIR" pulumi-preview PULUMI_PREVIEW_ARGS="--namespace ${TARGET_NAMESPACE} --name ${TARGET_NAME} ${PULUMI_PREVIEW_ARGS:-}"
 }

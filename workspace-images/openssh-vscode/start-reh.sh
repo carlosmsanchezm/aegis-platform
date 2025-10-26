@@ -11,7 +11,7 @@ QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-${VSCODE_SERVER_COMMIT:-}}"
 
 if [[ $# -gt 0 && "${1:-}" =~ ^[0-9a-f]{40}$ ]]; then
-  [[ -zMMIT" ]] && COMMIT="$1"
+  [[ -z "${COMMIT}" ]] && COMMIT="$1"
   shift
 fi
 

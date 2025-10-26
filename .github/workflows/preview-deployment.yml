@@ -293,6 +293,7 @@ jobs:
           set -euo pipefail
           STATE_DIR="$(mktemp -d)"
           export PULUMI_BACKEND_URL="file://${STATE_DIR}"
+          export PULUMI_CONFIG_PASSPHRASE="preview"
           KUBE_PATH="${KUBECONFIG:-${HOME}/.kube/config}"
           if [[ ! -f "${KUBE_PATH}" ]]; then
             echo "Kubeconfig not found at ${KUBE_PATH}" >&2

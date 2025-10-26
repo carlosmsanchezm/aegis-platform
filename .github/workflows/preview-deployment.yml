@@ -292,7 +292,12 @@ jobs:
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
         run: |
           set -euo pipefail
-          ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}"
+          KUBE_PATH="${KUBECONFIG:-${HOME}/.kube/config}"
+          if [[ ! -f "${KUBE_PATH}" ]]; then
+            echo "Kubeconfig not found at ${KUBE_PATH}" >&2
+            exit 1
+          fi
+          ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}" --kubeconfig "${KUBE_PATH}"
 
       - name: Cleanup pulumi preview ProjectInfra
         if: always()

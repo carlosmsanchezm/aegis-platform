@@ -13,6 +13,7 @@ help:
 	@echo "Targets:"
 	@echo "  build           Build the platform-api Go binary"
 	@echo "  run             Run the service locally (go run ./...)"
+	@echo "  pulumi-preview  Run the pulumi preview CLI (set PULUMI_PREVIEW_ARGS=...)"
 	@echo "  docker-build    Build & push multi-arch image (set IMG=…)"
 	@echo "  docker-buildx   Alias of docker-build"
 	@echo "  docker-load     Build multi-arch image and load into local Docker"
@@ -24,6 +25,10 @@ build:
 .PHONY: run
 run:
 	GO111MODULE=on go run $(GO_FLAGS) ./...
+
+.PHONY: pulumi-preview
+pulumi-preview:
+	GO111MODULE=on go run $(GO_FLAGS) ./cmd/pulumi-preview -- $(PULUMI_PREVIEW_ARGS)
 
 .PHONY: docker-build docker-buildx
 # Multi-arch build that pushes to the registry defined by IMG.

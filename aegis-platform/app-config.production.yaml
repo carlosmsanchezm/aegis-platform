@@ -12,6 +12,10 @@ backend:
   # The listener can also be expressed as a single <host>:<port> string. In this case we bind to
   # all interfaces, the most permissive setting. The right value depends on your specific deployment.
   listen: ':7007'
+  auth:
+    keys:
+      - secret: ${BACKEND_SECRET}
+    # Session cookie flags (Secure/HttpOnly/SameSite=Lax) are enforced by the deployment ingress.
 
   # config options: https://node-postgres.com/apis/client
   database:
@@ -29,8 +33,19 @@ backend:
       #     $file: <file-path>/ca/server.crt
 
 auth:
+  environment: production
   providers:
-    guest: {}
+    keycloak:
+      production:
+        metadataUrl: ${KEYCLOAK_METADATA_URL}
+        authUrl: ${KEYCLOAK_AUTH_URL}
+        tokenUrl: ${KEYCLOAK_TOKEN_URL}
+        userInfoUrl: ${KEYCLOAK_USERINFO_URL}
+        logoutUrl: ${KEYCLOAK_LOGOUT_URL}
+        clientId: ${KEYCLOAK_CLIENT_ID}
+        clientSecret: ${KEYCLOAK_CLIENT_SECRET}
+        callbackUrl: '${BACKEND_BASE_URL}/api/auth/keycloak/handler/frame'
+        prompt: 'login'
 
 catalog:
   # Overrides the default list locations from app-config.yaml as these contain example data.

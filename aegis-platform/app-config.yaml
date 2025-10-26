@@ -9,9 +9,6 @@ backend:
   # Used for enabling authentication, secret is shared by all backend plugins
   # See https://backstage.io/docs/auth/service-to-service-auth for
   # information on the format
-  # auth:
-  #   keys:
-  #     - secret: ${BACKEND_SECRET}
   baseUrl: http://localhost:7008
   listen:
     port: 7008
@@ -25,6 +22,10 @@ backend:
     origin: http://localhost:3000
     methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
     credentials: true
+  auth:
+    keys:
+      - secret: ${BACKEND_SECRET}
+    # Secure/HttpOnly/SameSite cookie flags are enforced at the ingress layer.
   # This is for local development only, it is not recommended to use this in production
   # The production database configuration is stored in app-config.production.yaml
   database:
@@ -71,10 +72,19 @@ techdocs:
     type: 'local' # Alternatives - 'googleGcs' or 'awsS3'. Read documentation for using alternatives.
 
 auth:
-  # see https://backstage.io/docs/auth/ to learn about auth providers
+  environment: development
   providers:
-    # See https://backstage.io/docs/auth/guest/provider
-    guest: {}
+    keycloak:
+      development:
+        metadataUrl: ${KEYCLOAK_METADATA_URL}
+        authUrl: ${KEYCLOAK_AUTH_URL}
+        tokenUrl: ${KEYCLOAK_TOKEN_URL}
+        userInfoUrl: ${KEYCLOAK_USERINFO_URL}
+        logoutUrl: ${KEYCLOAK_LOGOUT_URL}
+        clientId: ${KEYCLOAK_CLIENT_ID}
+        clientSecret: ${KEYCLOAK_CLIENT_SECRET}
+        callbackUrl: 'http://localhost:7008/api/auth/keycloak/handler/frame'
+        prompt: 'login'
 
 scaffolder:
   # see https://backstage.io/docs/features/software-templates/configuration for software template options

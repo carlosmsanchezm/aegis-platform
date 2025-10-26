@@ -23,7 +23,7 @@ Use `scripts/pulumi-preview.sh` to orchestrate a deterministic preview against a
 Key behaviour:
 
 - The script optionally rebuilds/pushes the platform-api image and rolls the deployment so the Pulumi runner matches the latest code.
-- A sample manifest lives at `ops/previews/projectinfra-sample.yaml`; it is applied automatically when no explicit `--file`/`--name` is provided.
+- A sample manifest lives at `ops/previews/projectinfra-sample.yaml`; it is applied automatically when no explicit `--file`/`--name` is provided. Set `PULUMI_PREVIEW_NAMESPACE` (defaults to `PLATFORM_NAMESPACE` or `aegis-system`) to control where the manifest is applied.
 - Output from the CLI streams directly to the terminal so you can inspect the Pulumi diff.
 - Unless `--keep` is supplied, any ProjectInfra created by the script is deleted before exit.
 

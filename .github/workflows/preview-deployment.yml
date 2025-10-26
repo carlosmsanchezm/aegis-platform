@@ -27,6 +27,7 @@ env:
   RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+  PUSH_LATEST: '0'
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
@@ -522,7 +523,7 @@ jobs:
           make test-e2e
 
       - name: Promote images to latest
-        if: env.RUN_SUBSET == 'all' && github.event_name != 'workflow_dispatch'
+        if: env.PUSH_LATEST == '1'
         if: ${{ env.RUN_SUBSET == 'all' && success() }}
         env:
           PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}

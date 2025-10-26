@@ -522,6 +522,7 @@ jobs:
           make test-e2e
 
       - name: Promote images to latest
+        if: env.RUN_SUBSET == 'all' && github.event_name != 'workflow_dispatch'
         if: ${{ env.RUN_SUBSET == 'all' && success() }}
         env:
           PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}

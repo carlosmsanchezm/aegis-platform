@@ -275,6 +275,8 @@ jobs:
 
       - name: Apply pulumi preview ProjectInfra manifest
         id: pulumi-preview-manifest
+        env:
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
         run: |
           set -euo pipefail
           kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -

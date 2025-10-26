@@ -12,6 +12,7 @@ const backend = createBackend();
 
 backend.add(import('@backstage/plugin-app-backend'));
 backend.add(import('@backstage/plugin-proxy-backend'));
+backend.add(import('./plugins/auth-logging')); // AU controls: capture SSO lifecycle events
 
 // scaffolder plugin
 backend.add(import('@backstage/plugin-scaffolder-backend'));
@@ -25,9 +26,7 @@ backend.add(import('@backstage/plugin-techdocs-backend'));
 
 // auth plugin
 backend.add(import('@backstage/plugin-auth-backend'));
-// See https://backstage.io/docs/backend-system/building-backends/migrating#the-auth-plugin
-backend.add(import('@backstage/plugin-auth-backend-module-guest-provider'));
-// See https://backstage.io/docs/auth/guest/provider
+backend.add(import('./plugins/auth-keycloak-provider')); // Keycloak SSO via hardened OIDC module
 
 // catalog plugin
 backend.add(import('@backstage/plugin-catalog-backend'));

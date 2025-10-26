@@ -15,13 +15,13 @@ import {
 import { OAuth2, OAuthRequestManager } from '@backstage/core-app-api';
 import VpnKeyIcon from '@material-ui/icons/VpnKey';
 
-const ensureOidcScopes = (scopes: string[]): string[] => {
+export const ensureOidcScopes = (scopes: string[]): string[] => {
   const required = ['openid', 'profile', 'email'];
   const merged = new Set([...scopes, ...required]);
   return Array.from(merged);
 };
 
-const buildKeycloakProviderInfo = (): AuthProviderInfo => ({
+export const buildKeycloakProviderInfo = (): AuthProviderInfo => ({
   id: 'keycloak',
   title: 'Keycloak SSO',
   icon: VpnKeyIcon,

@@ -266,6 +266,44 @@ jobs:
 
           # Deploy via Terraform helper (skips Route53 update but now includes migrations)
           ./terraform/generate-cloud-deployment.sh --non-interactive --tls
+
+      - name: Build pulumi preview CLI
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          go build -o bin/pulumi-preview ./services/platform-api/cmd/pulumi-preview
+
+      - name: Apply pulumi preview ProjectInfra manifest
+        id: pulumi-preview-manifest
+        run: |
+          set -euo pipefail
+          kubectl apply -f ops/previews/projectinfra-sample.yaml
+          NAME="$(kubectl get -f ops/previews/projectinfra-sample.yaml -o jsonpath='{.metadata.name}')"
+          NAMESPACE="$(kubectl get -f ops/previews/projectinfra-sample.yaml -o jsonpath='{.metadata.namespace}')"
+          if [[ -z "${NAMESPACE}" ]]; then
+            NAMESPACE="default"
+          fi
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
+
+      - name: Run pulumi preview CLI
+        env:
+          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}"
+
+      - name: Cleanup pulumi preview ProjectInfra
+        if: always()
+        env:
+          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PROJECT_INFRA_NAME}" ]]; then
+            kubectl delete projectinfra "${PROJECT_INFRA_NAME}" -n "${PROJECT_INFRA_NAMESPACE}" --ignore-not-found
+          fi
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e
         env:

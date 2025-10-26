@@ -27,7 +27,6 @@ env:
   RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
-  PUSH_LATEST: '0'
 # Requires repository secrets:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
@@ -230,32 +229,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Log in to Amazon ECR (preview rebuild)
-        if: env.RUN_SUBSET == 'e2e-only'
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Rebuild workspace image for preview
-        if: env.RUN_SUBSET == 'e2e-only'
-        env:
-          WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
-          PLATFORM_IMAGE: ${{ steps.image-uris.outputs.platform }}
-          PROXY_IMAGE: ${{ steps.image-uris.outputs.proxy }}
-          K8S_AGENT_IMAGE: ${{ steps.image-uris.outputs.agent }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${MANUAL_IMAGE_TAG:-}" ]]; then
-            echo "MANUAL_IMAGE_TAG must be provided for e2e-only runs" >&2
-            exit 1
-          fi
-          docker build -t "${WORKSPACE_IMAGE}" workspace-images/openssh-vscode
-          docker push "${WORKSPACE_IMAGE}"
-          for image in "${PLATFORM_IMAGE}" "${PROXY_IMAGE}" "${K8S_AGENT_IMAGE}"; do
-            src="${image%:${MANUAL_IMAGE_TAG}}:${DEFAULT_E2E_IMAGE_TAG}"
-            docker pull "${src}"
-            docker tag "${src}" "${image}"
-            docker push "${image}"
-          done
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
@@ -536,7 +509,6 @@ jobs:
           make test-e2e
 
       - name: Promote images to latest
-        if: env.PUSH_LATEST == '1'
         if: ${{ env.RUN_SUBSET == 'all' && success() }}
         env:
           PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}

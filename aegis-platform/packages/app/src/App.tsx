@@ -44,6 +44,15 @@ import {
   AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
 
+export const keycloakSignInProviders = [
+  {
+    id: 'keycloak',
+    title: 'Keycloak',
+    message: 'Use Keycloak SSO with MFA enforcement.',
+    apiRef: keycloakAuthApiRef,
+  },
+];
+
 const app = createApp({
   apis,
   bindRoutes({ bind }) {
@@ -65,19 +74,7 @@ const app = createApp({
   },
   components: {
     // Force explicit Keycloak SSO; disables automatic guest sessions for compliance.
-    SignInPage: props => (
-      <SignInPage
-        {...props}
-        providers={[
-          {
-            id: 'keycloak',
-            title: 'Keycloak',
-            message: 'Use Keycloak SSO with MFA enforcement.',
-            apiRef: keycloakAuthApiRef,
-          },
-        ]}
-      />
-    ),
+    SignInPage: props => <SignInPage {...props} providers={keycloakSignInProviders} />,
   },
 });
 

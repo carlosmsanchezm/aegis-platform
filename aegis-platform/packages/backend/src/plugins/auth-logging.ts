@@ -6,7 +6,7 @@ import {
 
 const AUTH_BASE_PATH = '/api/auth';
 
-const resolveClientIp = (req: express.Request): string => {
+export const resolveClientIp = (req: express.Request): string => {
   const forwarded = req.headers['x-forwarded-for'];
   if (Array.isArray(forwarded) && forwarded.length > 0) {
     return forwarded[0];
@@ -17,7 +17,7 @@ const resolveClientIp = (req: express.Request): string => {
   return req.ip;
 };
 
-const inferEventType = (path: string): string => {
+export const inferEventType = (path: string): string => {
   const lowerPath = path.toLowerCase();
   if (lowerPath.includes('/logout')) {
     return 'sign-out';

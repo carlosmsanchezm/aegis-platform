@@ -248,6 +248,14 @@ jobs:
           terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
           terraform apply -auto-approve
 
+      - name: Capture preview infrastructure outputs
+        id: preview-outputs
+        run: |
+          set -euo pipefail
+          cd terraform
+          VPC_ID=$(terraform output -raw vpc_id)
+          echo "vpc_id=${VPC_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy control plane via Helm
         id: deploy
         env:
@@ -276,12 +284,16 @@ jobs:
         id: pulumi-preview-manifest
         env:
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          PREVIEW_VPC_ID: ${{ steps.preview-outputs.outputs.vpc_id }}
         run: |
           set -euo pipefail
           kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f ops/previews/projectinfra-sample.yaml -n "${K8S_NAMESPACE}"
           NAME="pulumi-preview-sample"
           NAMESPACE="${K8S_NAMESPACE}"
+          if [[ -n "${PREVIEW_VPC_ID}" ]]; then
+            kubectl patch projectinfra "${NAME}" -n "${NAMESPACE}" --type merge -p "{\"spec\":{\"aws\":{\"vpcId\":\"${PREVIEW_VPC_ID}\"}}}"
+          fi
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
 

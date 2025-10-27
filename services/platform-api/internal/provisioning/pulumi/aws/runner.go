@@ -353,11 +353,13 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			}
 			clusterArgs := &eks.ClusterArgs{
 				SkipDefaultNodeGroup: &skipDefault,
-				Version:              pulumi.StringPtr(strings.TrimSpace(clusterDef.Version)),
 				Tags: pulumi.StringMap{
 					"Project": pulumi.String(input.ProjectID),
 					"Cluster": pulumi.String(clusterIDLabel),
 				},
+			}
+			if version := strings.TrimSpace(clusterDef.Version); version != "" {
+				clusterArgs.Version = pulumi.StringPtr(version)
 			}
 			if input.VpcID != "" {
 				clusterArgs.VpcId = pulumi.StringPtr(input.VpcID)

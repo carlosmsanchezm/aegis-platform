@@ -14,6 +14,7 @@ module "ecr" {
 
   # Repository configuration
   repository_type = "private"
+  repository_image_tag_mutability = "MUTABLE"
 
   # Image scanning
   repository_image_scan_on_push = true

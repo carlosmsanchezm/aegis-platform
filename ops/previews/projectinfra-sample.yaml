@@ -1,0 +1,17 @@
+apiVersion: infra.aegis.yourorg.dev/v1alpha1
+kind: ProjectInfra
+metadata:
+  name: pulumi-preview-sample
+spec:
+  projectId: pulumi-preview-sample
+  provider: aws
+  region: us-east-1
+  aws:
+    mode: Provision
+    clusterName: pulumi-preview-sample
+    version: "1.29"
+    nodePools:
+      - name: default
+        instanceType: m6i.large
+        minSize: 1
+        maxSize: 2

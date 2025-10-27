@@ -1,0 +1,104 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: projectplacements.infra.aegis.yourorg.dev
+spec:
+  group: infra.aegis.yourorg.dev
+  names:
+    kind: ProjectPlacement
+    listKind: ProjectPlacementList
+    plural: projectplacements
+    singular: projectplacement
+    shortNames:
+      - pplace
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ProjectPlacement defines placement policy and quotas for a project.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - projectId
+              properties:
+                projectId:
+                  type: string
+                allowedRegions:
+                  type: array
+                  items:
+                    type: string
+                allowedProviders:
+                  type: array
+                  items:
+                    type: string
+                defaultFlavor:
+                  type: string
+                quotas:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                strategy:
+                  type: string
+            status:
+              type: object
+              properties:
+                effective:
+                  type: object
+                  properties:
+                    projectId:
+                      type: string
+                    allowedRegions:
+                      type: array
+                      items:
+                        type: string
+                    allowedProviders:
+                      type: array
+                      items:
+                        type: string
+                    defaultFlavor:
+                      type: string
+                    quotas:
+                      type: object
+                      additionalProperties:
+                        type: integer
+                    strategy:
+                      type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Project
+          type: string
+          jsonPath: .spec.projectId
+        - name: Strategy
+          type: string
+          jsonPath: .spec.strategy

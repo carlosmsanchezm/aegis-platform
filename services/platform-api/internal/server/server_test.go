@@ -14,6 +14,7 @@ import (
 
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
 
@@ -27,7 +28,7 @@ func newTestServer(t *testing.T) *Server {
 	logger := zap.NewNop()
 	st := store.NewMemStore()
 
-	srv := New(logger, st, nil, "default")
+	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay())
 	return srv
 }
 
@@ -282,4 +283,71 @@ func TestGetWorkspaceConnectionDetails(t *testing.T) {
 
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+func TestMaybeBootstrapWorkspaceDeps_CreatesCatalogWhenEnabled(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+
+	workload := &aegis.Workload{
+		Id:        "w-boot",
+		ProjectId: "p-demo",
+		Queue:     "default",
+		Kind: &aegis.Workload_Workspace{
+			Workspace: &aegis.WorkspaceSpec{
+				Flavor: "cpu-small",
+				Image:  "alpine:3.19",
+			},
+		},
+	}
+
+	srv.maybeBootstrapWorkspaceDeps(context.Background(), workload)
+
+	if srv.store.GetProject("p-demo") == nil {
+		t.Fatalf("expected project p-demo to be bootstrapped")
+	}
+	queue := srv.store.GetQueue("default")
+	if queue == nil {
+		t.Fatalf("expected queue default to be bootstrapped")
+	}
+	if queue.GetProjectId() != "p-demo" {
+		t.Fatalf("queue project mismatch: got %s", queue.GetProjectId())
+	}
+	if queue.GetDefaultMaxDurationSeconds() != srv.defaultMaxRuntimeSeconds(nil) {
+		t.Fatalf("queue default max duration not populated, got %d", queue.GetDefaultMaxDurationSeconds())
+	}
+	flavor := srv.store.GetFlavor("cpu-small")
+	if flavor == nil {
+		t.Fatalf("expected flavor cpu-small to be bootstrapped")
+	}
+	if flavor.GetCpuCoresRequest() != "2" || flavor.GetMemoryRequest() != "4Gi" {
+		t.Fatalf("unexpected flavor defaults: cpu=%s mem=%s", flavor.GetCpuCoresRequest(), flavor.GetMemoryRequest())
+	}
+	// Ensure idempotency
+	srv.maybeBootstrapWorkspaceDeps(context.Background(), workload)
+}
+
+func TestSubmitWorkload_BootstrapDisabledRequiresProject(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = false
+
+	req := &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "p-missing",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{
+					Flavor: "cpu-small",
+					Image:  "alpine:3.19",
+				},
+			},
+		},
+	}
+
+	_, err := srv.SubmitWorkload(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when project is missing")
+	}
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "unknown project") {
+		t.Fatalf("expected unknown project error, got %v", err)
+	}
 }

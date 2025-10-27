@@ -28,10 +28,17 @@
 **/.cache/
 **/.parcel-cache/
 **/.storybook/
+
+# Python
 **/__pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 
 # Package manager lockfiles (optional – keep if you want reproducibility)
-# yarn.lock
+# yarn.lock (keep project-specific ones like aegis-platform/yarn.lock)
+/yarn.lock
 # package-lock.json
 # pnpm-lock.yaml
 

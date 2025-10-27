@@ -53,13 +53,14 @@ spec:
                       type: string
                 aws:
                   type: object
-                  required:
-                    - accountId
-                    - clusterName
                   properties:
                     accountId:
                       type: string
+                    mode:
+                      type: string
                     roleArn:
+                      type: string
+                    externalId:
                       type: string
                     vpcId:
                       type: string
@@ -94,7 +95,17 @@ spec:
                           taints:
                             type: array
                             items:
-                              type: string
+                              type: object
+                              required:
+                                - key
+                                - effect
+                              properties:
+                                key:
+                                  type: string
+                                value:
+                                  type: string
+                                effect:
+                                  type: string
                     additionalClusters:
                       type: array
                       items:
@@ -133,7 +144,39 @@ spec:
                                 taints:
                                   type: array
                                   items:
-                                    type: string
+                                    type: object
+                                    required:
+                                      - key
+                                      - effect
+                                    properties:
+                                      key:
+                                        type: string
+                                      value:
+                                        type: string
+                                      effect:
+                                        type: string
+                    imports:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - clusterId
+                          - kubeconfigSecretRef
+                        properties:
+                          clusterId:
+                            type: string
+                          kubeconfigSecretRef:
+                            type: object
+                            required:
+                              - name
+                              - key
+                            properties:
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                              key:
+                                type: string
                 addons:
                   type: object
                   additionalProperties:

@@ -18,14 +18,13 @@ on:
       image_tag:
         description: "Override image tag for e2e-only runs (expects image already pushed)"
         required: false
-  pull_request:
 
 env:
   AWS_REGION: us-east-1
-  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  PREVIEW_NAMESPACE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  PREVIEW_RELEASE: preview-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_subset || 'all') || (github.event_name == 'pull_request' && 'all') || 'all' }}
+  PREVIEW_ID: ${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  PREVIEW_NAMESPACE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  PREVIEW_RELEASE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
+  RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
 # Requires repository secrets:
@@ -249,6 +248,14 @@ jobs:
           terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
           terraform apply -auto-approve
 
+      - name: Capture preview infrastructure outputs
+        id: preview-outputs
+        run: |
+          set -euo pipefail
+          cd terraform
+          VPC_ID=$(terraform output -raw vpc_id)
+          echo "vpc_id=${VPC_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy control plane via Helm
         id: deploy
         env:
@@ -266,6 +273,56 @@ jobs:
 
           # Deploy via Terraform helper (skips Route53 update but now includes migrations)
           ./terraform/generate-cloud-deployment.sh --non-interactive --tls
+
+      - name: Build pulumi preview CLI
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          go build -o bin/pulumi-preview ./services/platform-api/cmd/pulumi-preview
+
+      - name: Apply pulumi preview ProjectInfra manifest
+        id: pulumi-preview-manifest
+        env:
+          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
+          PREVIEW_VPC_ID: ${{ steps.preview-outputs.outputs.vpc_id }}
+        run: |
+          set -euo pipefail
+          kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f ops/previews/projectinfra-sample.yaml -n "${K8S_NAMESPACE}"
+          NAME="pulumi-preview-sample"
+          NAMESPACE="${K8S_NAMESPACE}"
+          if [[ -n "${PREVIEW_VPC_ID}" ]]; then
+            kubectl patch projectinfra "${NAME}" -n "${NAMESPACE}" --type merge -p "{\"spec\":{\"aws\":{\"vpcId\":\"${PREVIEW_VPC_ID}\"}}}"
+          fi
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
+
+      - name: Run pulumi preview CLI
+        env:
+          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          STATE_DIR="$(mktemp -d)"
+          export PULUMI_BACKEND_URL="file://${STATE_DIR}"
+          export PULUMI_CONFIG_PASSPHRASE="preview"
+          KUBE_PATH="${KUBECONFIG:-${HOME}/.kube/config}"
+          if [[ ! -f "${KUBE_PATH}" ]]; then
+            echo "Kubeconfig not found at ${KUBE_PATH}" >&2
+            exit 1
+          fi
+          ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}" --kubeconfig "${KUBE_PATH}"
+
+      - name: Cleanup pulumi preview ProjectInfra
+        if: always()
+        env:
+          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PROJECT_INFRA_NAME}" ]]; then
+            kubectl delete projectinfra "${PROJECT_INFRA_NAME}" -n "${PROJECT_INFRA_NAMESPACE}" --ignore-not-found
+          fi
       - name: Update Route53 and configure E2E endpoints
         id: configure-e2e
         env:

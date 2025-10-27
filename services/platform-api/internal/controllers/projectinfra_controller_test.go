@@ -103,6 +103,74 @@ func TestProjectInfraReconcile_ImportSecret(t *testing.T) {
 	}
 }
 
+func TestProjectInfraReconcile_AWSImportMode(t *testing.T) {
+	t.Parallel()
+
+	scheme, err := newTestScheme()
+	if err != nil {
+		t.Fatalf("scheme: %v", err)
+	}
+
+	ns := fmt.Sprintf("infra-aws-import-%d", time.Now().UnixNano())
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+
+	importKey := "proj-aws-import-us-west-1.kubeconfig"
+	importSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "import", Namespace: ns},
+		Data:       map[string][]byte{importKey: []byte("kubeconfig")},
+	}
+
+	infra := &infraapi.ProjectInfra{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj-aws-import", Namespace: ns},
+		Spec: infraapi.ProjectInfraSpec{
+			ProjectID: "proj-aws-import",
+			Provider:  "aws",
+			Region:    "us-west-1",
+			Aws: &infraapi.AWSInfraSpec{
+				Mode: infraapi.AWSProvisionModeImport,
+				Imports: []infraapi.AWSImportSpec{
+					{
+						ClusterID: "proj-aws-import-us-west-1",
+						KubeconfigSecretRef: infraapi.SecretKeyReference{
+							Name:      importSecret.Name,
+							Namespace: ns,
+							Key:       importKey,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&infraapi.ProjectInfra{}).
+		WithObjects(namespace, importSecret, infra).
+		Build()
+
+	reconciler := &ProjectInfraReconciler{
+		Client:                    client,
+		Scheme:                    scheme,
+		Log:                       zaptest.NewLogger(t).Named("projectinfra"),
+		Store:                     store.NewMemStore(),
+		KubeconfigSecretName:      "bundle",
+		KubeconfigSecretNamespace: ns,
+	}
+
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: infra.Name, Namespace: infra.Namespace}}
+	if _, err := reconciler.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	aggregated := &corev1.Secret{}
+	if err := client.Get(context.Background(), types.NamespacedName{Name: "bundle", Namespace: ns}, aggregated); err != nil {
+		t.Fatalf("fetch aggregated secret: %v", err)
+	}
+	if _, ok := aggregated.Data["proj-aws-import-us-west-1.kubeconfig"]; !ok {
+		t.Fatalf("expected kubeconfig key in aggregated secret")
+	}
+}
+
 func TestProjectInfraReconcile_AWSProvisioner(t *testing.T) {
 	t.Parallel()
 

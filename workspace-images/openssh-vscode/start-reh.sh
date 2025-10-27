@@ -11,12 +11,16 @@ QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-${VSCODE_SERVER_COMMIT:-}}"
 
 if [[ $# -gt 0 && "${1:-}" =~ ^[0-9a-f]{40}$ ]]; then
-  [[ -z "$COMMIT" ]] && COMMIT="$1"
+  if [[ -z "$COMMIT" ]]; then
+    COMMIT="$1"
+  fi
   shift
 fi
 
-if [[ -z "$COMMIT" && -n "${VSCODE_SERVER_URL:-}" && "${VSCODE_SERVER_URL}" =~ commit:?([0-9a-f]{40}) ]]; then
-  COMMIT="${BASH_REMATCH[1]}"
+if [[ -z "$COMMIT" && -n "${VSCODE_SERVER_URL:-}" ]]; then
+  if [[ "${VSCODE_SERVER_URL}" =~ commit:?([0-9a-f]{40}) ]]; then
+    COMMIT="${BASH_REMATCH[1]}"
+  fi
 fi
 
 if [[ -z "$COMMIT" ]]; then

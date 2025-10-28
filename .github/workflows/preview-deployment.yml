@@ -47,6 +47,7 @@ env:
   AWS_REGION: us-east-1
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
   CACHE_SCOPE_PREFIX: aegis-preview
+  VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
 
 permissions:
   contents: read

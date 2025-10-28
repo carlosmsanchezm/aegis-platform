@@ -137,7 +137,7 @@ spec:
                     type: boolean
                   ports:
                     description: Ports exposes additional container ports for interactive
-                      scenarios (default 22 when empty).
+                      scenarios (defaults to 11111 when empty).
                     items:
                       format: int32
                       type: integer

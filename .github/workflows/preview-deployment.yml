@@ -67,6 +67,7 @@ jobs:
       keep_on_failure: ${{ steps.compute.outputs.keep_on_failure }}
       manual_image_tag: ${{ steps.compute.outputs.manual_image_tag }}
       e2e_suites: ${{ steps.compute.outputs.e2e_suites }}
+      e2e_suite_matrix: ${{ steps.compute.outputs.e2e_suite_matrix }}
     steps:
       - name: Compute workflow settings
         id: compute
@@ -113,6 +114,28 @@ jobs:
           preview_namespace = f"preview-{preview_id}"
           preview_release = preview_namespace
 
+          allowed_suites = ["platform-api", "workspace", "k8s-agent"]
+          normalized = (
+              e2e_suites.lower()
+              .replace(",", " ")
+              .replace(";", " ")
+              .split()
+          )
+          matrix_entries = []
+          if not normalized or "all" in normalized:
+              matrix_entries = allowed_suites
+          else:
+              seen = set()
+              for token in normalized:
+                  token = token.strip()
+                  if token in allowed_suites and token not in seen:
+                      matrix_entries.append(token)
+                      seen.add(token)
+          if not matrix_entries:
+              matrix_entries = allowed_suites
+
+          matrix_json = json.dumps(matrix_entries)
+
           output_path = os.environ["GITHUB_OUTPUT"]
           with open(output_path, "a", encoding="utf-8") as fh:
               fh.write(f"preview_id={preview_id}\n")
@@ -123,6 +146,7 @@ jobs:
               fh.write(f"keep_on_failure={keep_on_failure}\n")
               fh.write(f"manual_image_tag={manual_image_tag}\n")
               fh.write(f"e2e_suites={e2e_suites}\n")
+              fh.write(f"e2e_suite_matrix={matrix_json}\n")
           PY
 
   lint-and-unit-test:
@@ -719,81 +743,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [platform-api, workspace, k8s-agent]
-        include:
-          - suite: platform-api
-            run: |
-              echo "🧪 Platform API E2E via DNS"
-              export AEGIS_GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
-              export AEGIS_PROXY_HOSTNAME="${{ needs.e2e-endpoints.outputs.proxy_hostname }}"
-              export GRPC_TLS=1
-              export GRPC_CA="${GRPC_CA_PATH}"
-              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
-              export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
-              export AEGIS_PLATFORM_NAMESPACE="${{ needs.resolve-settings.outputs.preview_namespace }}"
-              export AEGIS_PLATFORM_SERVICE="${{ needs.resolve-settings.outputs.preview_release }}-platform-api"
-              export AEGIS_PLATFORM_DEPLOYMENT="${{ needs.resolve-settings.outputs.preview_release }}-platform-api"
-              bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
-          - suite: workspace
-            run: |
-              echo "🧪 Workspace connectivity smoke"
-              export GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
-              export GRPC_TLS=1
-              export GRPC_CA="${GRPC_CA_PATH}"
-              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
-              export WORKSPACE_NAMESPACE=aegis-workloads
-              export CLEANUP=1
-              IMAGE="${{ (contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) && needs.build-and-push.outputs.workspace_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:{0}', needs.resolve-settings.outputs.manual_image_tag != '' && needs.resolve-settings.outputs.manual_image_tag || '4439705b81f1478e1b7e38529a171a9232feb691') }}"
-              scripts/test-workspace-connection.sh "${IMAGE}"
-              cat .aegis/workspace-session.json || true
-              rm -f .aegis/workspace-session.json || true
-          - suite: k8s-agent
-            run: |
-              echo "🧪 k8s-agent E2E (kind)"
-              cd agents/k8s-agent
-              export USE_EXISTING_CLUSTER=true
-              export KIND_CLUSTER=aegis-e2e
-              export K8S_AGENT_E2E_IMAGE="${{ (contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) && needs.build-and-push.outputs.k8s_agent_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:{0}', needs.resolve-settings.outputs.manual_image_tag != '' && needs.resolve-settings.outputs.manual_image_tag || '4439705b81f1478e1b7e38529a171a9232feb691') }}"
-              export K8S_AGENT_E2E_SKIP_BUILD=true
-              make test-e2e
+        suite: ${{ fromJson(needs.resolve-settings.outputs.e2e_suite_matrix) }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Decide if suite should run
-        id: suite-filter
-        run: |
-          set -euo pipefail
-          raw_input="${E2E_SUITES:-all}"
-          suite="${{ matrix.suite }}"
-          lower_input=$(echo "$raw_input" | tr '[:upper:]' '[:lower:]')
-          lower_input=$(echo "$lower_input" | tr ',;' '  ')
-          target=$(echo "$suite" | tr '[:upper:]' '[:lower:]')
-          should_run=false
-          for token in $lower_input; do
-            if [ "$token" = "all" ] || [ "$token" = "$target" ]; then
-              should_run=true
-              break
-            fi
-          done
-          echo "enabled=$should_run" >> "$GITHUB_OUTPUT"
-          if [ "$should_run" != "true" ]; then
-            echo "Skipping suite '${suite}' based on E2E_SUITES='${raw_input}'"
-          fi
-
       - uses: aws-actions/configure-aws-credentials@v4
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v2
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         with:
           terraform_wrapper: false
 
       - name: Configure kubectl for suite
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         run: |
           set -euo pipefail
           pushd terraform >/dev/null
@@ -807,7 +771,6 @@ jobs:
           fi
 
       - name: Write CA bundle for suite
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         env:
           GRPC_CA_B64: ${{ needs.e2e-endpoints.outputs.grpc_ca_b64 }}
         run: |
@@ -822,7 +785,6 @@ jobs:
           echo "GRPC_CA_PATH=${CA_PATH}" >> "$GITHUB_ENV"
 
       - name: Install test tooling (grpcurl + jq)
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -843,8 +805,68 @@ jobs:
           rm -rf "$TMPDIR"
 
       - name: Run suite
-        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
-        run: ${{ matrix.run }}
+        env:
+          WORKSPACE_IMAGE_OUTPUT: ${{ needs.build-and-push.outputs.workspace_image }}
+          K8S_AGENT_IMAGE_OUTPUT: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+        run: |
+          set -euo pipefail
+          SUITE="${{ matrix.suite }}"
+          case "${SUITE}" in
+            platform-api)
+              echo "🧪 Platform API E2E via DNS"
+              export AEGIS_GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
+              export AEGIS_PROXY_HOSTNAME="${{ needs.e2e-endpoints.outputs.proxy_hostname }}"
+              export GRPC_TLS=1
+              export GRPC_CA="${GRPC_CA_PATH}"
+              export GRPC_TLS_SERVER_NAME="${PLATFORM_TLS_HOST}"
+              export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
+              export AEGIS_PLATFORM_NAMESPACE="${PREVIEW_NAMESPACE}"
+              export AEGIS_PLATFORM_SERVICE="${PREVIEW_RELEASE}-platform-api"
+              export AEGIS_PLATFORM_DEPLOYMENT="${PREVIEW_RELEASE}-platform-api"
+              bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
+              ;;
+            workspace)
+              echo "🧪 Workspace connectivity smoke"
+              export GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
+              export GRPC_TLS=1
+              export GRPC_CA="${GRPC_CA_PATH}"
+              export GRPC_TLS_SERVER_NAME="${PLATFORM_TLS_HOST}"
+              export WORKSPACE_NAMESPACE=aegis-workloads
+              export CLEANUP=1
+              IMAGE="${WORKSPACE_IMAGE_OUTPUT}"
+              if [[ -z "${IMAGE}" ]]; then
+                if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${MANUAL_IMAGE_TAG}"
+                else
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${DEFAULT_E2E_IMAGE_TAG}"
+                fi
+              fi
+              scripts/test-workspace-connection.sh "${IMAGE}"
+              cat .aegis/workspace-session.json || true
+              rm -f .aegis/workspace-session.json || true
+              ;;
+            k8s-agent)
+              echo "🧪 k8s-agent E2E (kind)"
+              cd agents/k8s-agent
+              export USE_EXISTING_CLUSTER=true
+              export KIND_CLUSTER=aegis-e2e
+              IMAGE="${K8S_AGENT_IMAGE_OUTPUT}"
+              if [[ -z "${IMAGE}" ]]; then
+                if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${MANUAL_IMAGE_TAG}"
+                else
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${DEFAULT_E2E_IMAGE_TAG}"
+                fi
+              fi
+              export K8S_AGENT_E2E_IMAGE="${IMAGE}"
+              export K8S_AGENT_E2E_SKIP_BUILD=true
+              make test-e2e
+              ;;
+            *)
+              echo "Unknown suite '${SUITE}'" >&2
+              exit 1
+              ;;
+          esac
 
   promote-images:
     name: Promote Images to :latest

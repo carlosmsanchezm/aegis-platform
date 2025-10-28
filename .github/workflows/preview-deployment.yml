@@ -611,10 +611,44 @@ jobs:
           fi
 
           export PLATFORM_DNS PROXY_DNS
-          python3 -c $'import os,socket,sys,time\nhosts=[os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]\nfor host in hosts:\n    print(f"Waiting for DNS {host} to resolve...", flush=True)\n    for attempt in range(120):\n        try:\n            socket.getaddrinfo(host, None)\n            break\n        except socket.gaierror as exc:\n            if attempt == 119:\n                print(f"DNS name {host} did not resolve within 10 minutes: {exc}", file=sys.stderr, flush=True)\n                sys.exit(1)\n            time.sleep(5)\n'
+          ORIGINAL_PLATFORM_DNS="${PLATFORM_DNS}"
+          ORIGINAL_PROXY_DNS="${PROXY_DNS}"
+          CONNECT_PLATFORM_DNS="${PLATFORM_DNS}"
+          CONNECT_PROXY_DNS="${PROXY_DNS}"
 
-          echo "PLATFORM_DNS=${PLATFORM_DNS}" >> "$GITHUB_ENV"
-          echo "PROXY_DNS=${PROXY_DNS}"       >> "$GITHUB_ENV"
+          if ! python3 -c $'import os,socket,sys,time\nhosts=[os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]\nfor host in hosts:\n    print(f"Waiting for DNS {host} to resolve...", flush=True)\n    for attempt in range(120):\n        try:\n            socket.getaddrinfo(host, None)\n            break\n        except socket.gaierror as exc:\n            if attempt == 119:\n                print(f"DNS name {host} did not resolve within 10 minutes: {exc}", file=sys.stderr, flush=True)\n                sys.exit(1)\n            time.sleep(5)\n'; then
+            echo "DNS records not available; attempting to fall back to load balancer hostnames..." >&2
+            # Wait briefly to let services settle.
+            sleep 5
+            PLATFORM_LB=""
+            PROXY_LB=""
+            for i in {1..60}; do
+              PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [[ -n "${PLATFORM_LB}" ]] && break
+              sleep 5
+            done
+            for i in {1..60}; do
+              PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [[ -n "${PROXY_LB}" ]] && break
+              sleep 5
+            done
+            if [[ -z "${PLATFORM_LB}" || -z "${PROXY_LB}" ]]; then
+              echo "Unable to obtain load balancer hostnames for fallback" >&2
+              exit 1
+            fi
+            CONNECT_PLATFORM_DNS="${PLATFORM_LB}"
+            CONNECT_PROXY_DNS="${PROXY_LB}"
+            FALLBACK_USED=1
+            echo "Using load balancer hostnames for connectivity while retaining TLS server name ${ORIGINAL_PLATFORM_DNS}." >&2
+          else
+            FALLBACK_USED=0
+          fi
+
+          echo "PLATFORM_DNS=${CONNECT_PLATFORM_DNS}" >> "$GITHUB_ENV"
+          echo "PROXY_DNS=${CONNECT_PROXY_DNS}"       >> "$GITHUB_ENV"
+          echo "PLATFORM_TLS_HOST=${ORIGINAL_PLATFORM_DNS}" >> "$GITHUB_ENV"
+          echo "PROXY_TLS_HOST=${ORIGINAL_PROXY_DNS}"       >> "$GITHUB_ENV"
+          echo "DNS_FALLBACK_USED=${FALLBACK_USED}" >> "$GITHUB_ENV"
 
           CA_SECRET="${HELM_RELEASE}-platform-api-tls"
           TMP_CHAIN=$(mktemp)
@@ -658,9 +692,9 @@ jobs:
         id: out
         run: |
           set -euo pipefail
-          echo "grpc_addr=${PLATFORM_DNS}:8081"               >> "$GITHUB_OUTPUT"
-          echo "grpc_host=${PLATFORM_DNS}"                    >> "$GITHUB_OUTPUT"
-          echo "proxy_hostname=${PROXY_DNS}"                  >> "$GITHUB_OUTPUT"
+          echo "grpc_addr=${CONNECT_PLATFORM_DNS}:8081"       >> "$GITHUB_OUTPUT"
+          echo "grpc_host=${ORIGINAL_PLATFORM_DNS}"           >> "$GITHUB_OUTPUT"
+          echo "proxy_hostname=${CONNECT_PROXY_DNS}"          >> "$GITHUB_OUTPUT"
           CA_BUNDLE_B64=$(base64 "${CA_BUNDLE_PATH}" | tr -d '\n')
           echo "grpc_ca_b64=${CA_BUNDLE_B64}"                 >> "$GITHUB_OUTPUT"
 

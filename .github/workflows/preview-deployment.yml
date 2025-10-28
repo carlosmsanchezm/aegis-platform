@@ -453,7 +453,6 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform init for outputs
-        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         run: |
           set -euo pipefail
           cd terraform
@@ -462,7 +461,6 @@ jobs:
           terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
 
       - name: Deploy via Terraform helper (migrations included)
-        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         id: deploy
         env:
           PLATFORM_API_IMAGE_TAG: ${{ steps.image-uris.outputs.platform }}

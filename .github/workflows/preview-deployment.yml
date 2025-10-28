@@ -737,7 +737,7 @@ jobs:
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     concurrency:
-      group: tests-${{ needs.resolve-settings.outputs.preview_id }}
+      group: tests-${{ needs.resolve-settings.outputs.preview_id }}-${{ matrix.suite || 'all' }}
       cancel-in-progress: false
     strategy:
       fail-fast: false

@@ -45,17 +45,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  # Compute PREVIEW_ID for PRs or workflow_dispatch
-  PREVIEW_ID: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.preview_number != '' && github.event.inputs.preview_number) || (github.event_name == 'pull_request' && github.event.number) || github.run_number }}
-  PREVIEW_NAMESPACE: preview-${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.preview_number != '' && github.event.inputs.preview_number) || (github.event_name == 'pull_request' && github.event.number) || github.run_number }}
-  PREVIEW_RELEASE: preview-${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.preview_number != '' && github.event.inputs.preview_number) || (github.event_name == 'pull_request' && github.event.number) || github.run_number }}
-  RUN_SUBSET: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset != '' && github.event.inputs.run_subset) || 'all' }}
-  TEARDOWN_POLICY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.teardown_policy != '' && github.event.inputs.teardown_policy) || 'auto-on-success' }}
-  KEEP_ON_FAILURE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.keep_on_failure != '' && github.event.inputs.keep_on_failure) || 'true' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
-  MANUAL_IMAGE_TAG: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag) || '' }}
-  E2E_SUITES: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.suites != '' && github.event.inputs.suites) || 'all' }}
-  # For Buildx cache scopes
   CACHE_SCOPE_PREFIX: aegis-preview
 
 permissions:
@@ -65,14 +55,94 @@ permissions:
 # -------------------------------------------------------------------
 
 jobs:
+  resolve-settings:
+    name: Resolve Preview Settings
+    runs-on: ubuntu-latest
+    outputs:
+      preview_id: ${{ steps.compute.outputs.preview_id }}
+      preview_namespace: ${{ steps.compute.outputs.preview_namespace }}
+      preview_release: ${{ steps.compute.outputs.preview_release }}
+      run_subset: ${{ steps.compute.outputs.run_subset }}
+      teardown_policy: ${{ steps.compute.outputs.teardown_policy }}
+      keep_on_failure: ${{ steps.compute.outputs.keep_on_failure }}
+      manual_image_tag: ${{ steps.compute.outputs.manual_image_tag }}
+      e2e_suites: ${{ steps.compute.outputs.e2e_suites }}
+    steps:
+      - name: Compute workflow settings
+        id: compute
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json, os
+
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          event_name = os.environ.get("GITHUB_EVENT_NAME")
+          with open(event_path, "r", encoding="utf-8") as fh:
+              event = json.load(fh)
+
+          inputs = event.get("inputs") or {}
+
+          def _normalize(value, default=""):
+              if value is None:
+                  return default
+              if isinstance(value, str):
+                  value = value.strip()
+              return value or default
+
+          preview_number = _normalize(inputs.get("preview_number"))
+          run_subset = _normalize(inputs.get("run_subset"), "all")
+          teardown_policy = _normalize(inputs.get("teardown_policy"), "auto-on-success")
+          keep_on_failure_raw = inputs.get("keep_on_failure")
+          if keep_on_failure_raw is None or keep_on_failure_raw == "":
+              keep_on_failure = "true"
+          else:
+              keep_on_failure = str(keep_on_failure_raw).lower()
+          manual_image_tag = _normalize(inputs.get("image_tag"))
+          e2e_suites = _normalize(inputs.get("suites"), "all")
+
+          if event_name == "pull_request":
+              preview_number = str(event.get("number") or "")
+
+          if not preview_number:
+              preview_number = str(os.environ.get("GITHUB_RUN_NUMBER"))
+
+          if event_name != "workflow_dispatch":
+              manual_image_tag = ""
+
+          preview_id = preview_number
+          preview_namespace = f"preview-{preview_id}"
+          preview_release = preview_namespace
+
+          output_path = os.environ["GITHUB_OUTPUT"]
+          with open(output_path, "a", encoding="utf-8") as fh:
+              fh.write(f"preview_id={preview_id}\n")
+              fh.write(f"preview_namespace={preview_namespace}\n")
+              fh.write(f"preview_release={preview_release}\n")
+              fh.write(f"run_subset={run_subset}\n")
+              fh.write(f"teardown_policy={teardown_policy}\n")
+              fh.write(f"keep_on_failure={keep_on_failure}\n")
+              fh.write(f"manual_image_tag={manual_image_tag}\n")
+              fh.write(f"e2e_suites={e2e_suites}\n")
+          PY
+
   lint-and-unit-test:
     name: Lint & Unit Test
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    needs: resolve-settings
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
       group: lint-unit-${{ github.sha }}
       cancel-in-progress: true
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - name: Skip for non-all subsets
         if: ${{ env.RUN_SUBSET != 'all' }}
@@ -126,7 +196,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: lint-and-unit-test
+    needs:
+      - resolve-settings
+      - lint-and-unit-test
     strategy:
       fail-fast: false
       matrix:
@@ -159,6 +231,15 @@ jobs:
     concurrency:
       group: build-${{ matrix.name }}-${{ github.sha }}
       cancel-in-progress: false
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -218,14 +299,25 @@ jobs:
     name: Provision Preview (Terraform)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: build-and-push
-    if: ${{ contains('all,deploy,deploy-no-teardown,provision-only,tests-only', env.RUN_SUBSET) }}
+    needs:
+      - resolve-settings
+      - build-and-push
+    if: ${{ contains('all,deploy,deploy-no-teardown,provision-only,tests-only', needs.resolve-settings.outputs.run_subset) }}
     concurrency:
-      group: provision-${{ env.PREVIEW_ID }}
+      group: provision-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: true
     outputs:
       provisioned: ${{ steps.flag.outputs.provisioned || 'false' }}
       vpc_id:      ${{ steps.tf-outputs.outputs.vpc_id || '' }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - uses: actions/checkout@v4
 
@@ -276,13 +368,21 @@ jobs:
     name: Deploy Control Plane (Helm + scripts)
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    needs: [build-and-push, provision-infra]
-    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', env.RUN_SUBSET) }}
+    needs: [resolve-settings, build-and-push, provision-infra]
+    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
     concurrency:
-      group: deploy-${{ env.PREVIEW_ID }}
+      group: deploy-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: true
     env:
       USE_EXISTING_CLUSTER: 'true'
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     outputs:
       fresh_deploy: ${{ steps.mark-deploy.outputs.fresh || 'false' }}
     steps:
@@ -398,14 +498,23 @@ jobs:
     name: Resolve E2E Endpoints (fresh or existing)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [provision-infra, deploy-control-plane]
+    needs: [resolve-settings, provision-infra, deploy-control-plane]
     # Run for all except destroy-only
-    if: ${{ env.RUN_SUBSET != 'destroy-only' }}
+    if: ${{ needs.resolve-settings.outputs.run_subset != 'destroy-only' }}
     outputs:
       grpc_addr:     ${{ steps.out.outputs.grpc_addr }}
       grpc_host:     ${{ steps.out.outputs.grpc_host }}
       proxy_hostname: ${{ steps.out.outputs.proxy_hostname }}
       grpc_ca:       ${{ steps.out.outputs.grpc_ca }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -491,11 +600,20 @@ jobs:
     name: E2E Test Matrix
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: [e2e-endpoints, build-and-push]
-    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', env.RUN_SUBSET) }}
+    needs: [resolve-settings, e2e-endpoints, build-and-push]
+    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
     concurrency:
-      group: tests-${{ env.PREVIEW_ID }}
+      group: tests-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: false
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     strategy:
       fail-fast: false
       matrix:
@@ -589,8 +707,17 @@ jobs:
     name: Promote Images to :latest
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [build-and-push, e2e-tests]
-    if: ${{ env.RUN_SUBSET == 'all' && needs.e2e-tests.result == 'success' }}
+    needs: [resolve-settings, build-and-push, e2e-tests]
+    if: ${{ needs.resolve-settings.outputs.run_subset == 'all' && needs.e2e-tests.result == 'success' }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -629,7 +756,7 @@ jobs:
     name: Teardown Preview
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: [provision-infra, e2e-tests]
+    needs: [resolve-settings, provision-infra, e2e-tests]
     # Safe gating: only if infra actually provisioned AND policy allows it.
     if: >-
       ${{
@@ -637,17 +764,26 @@ jobs:
         needs.provision-infra.result != 'skipped' &&
         needs.provision-infra.outputs.provisioned == 'true' &&
         (
-          (env.TEARDOWN_POLICY == 'always') ||
-          (env.TEARDOWN_POLICY == 'auto-on-success' && needs.e2e-tests.result == 'success') ||
-          (env.TEARDOWN_POLICY == 'manual' && false)
+          (needs.resolve-settings.outputs.teardown_policy == 'always') ||
+          (needs.resolve-settings.outputs.teardown_policy == 'auto-on-success' && needs.e2e-tests.result == 'success') ||
+          (needs.resolve-settings.outputs.teardown_policy == 'manual' && false)
         ) &&
         (
-          env.KEEP_ON_FAILURE == 'false' || needs.e2e-tests.result == 'success'
+          needs.resolve-settings.outputs.keep_on_failure == 'false' || needs.e2e-tests.result == 'success'
         )
       }}
     concurrency:
-      group: teardown-${{ env.PREVIEW_ID }}
+      group: teardown-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: false
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
       - uses: actions/checkout@v4
 

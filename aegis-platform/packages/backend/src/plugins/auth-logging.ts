@@ -46,7 +46,7 @@ export default createBackendModule({
         logger: coreServices.logger,
         httpRouter: coreServices.httpRouter,
       },
-      init({ logger, httpRouter }) {
+      async init({ logger, httpRouter }) {
         const router = express.Router();
 
         router.use(AUTH_BASE_PATH, (req, res, next) => {

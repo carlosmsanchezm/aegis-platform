@@ -181,9 +181,9 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	policy, err := authz.LoadPolicyFromEnv()
 	if err != nil {
 		if log != nil {
-			log.Warn("failed to load authorization policy", zap.Error(err))
+			log.Fatal("failed to load authorization policy", zap.Error(err))
 		}
-		policy = &authz.Policy{}
+		panic(fmt.Errorf("failed to load authorization policy: %w", err))
 	}
 	return &Server{
 		log:                  log,

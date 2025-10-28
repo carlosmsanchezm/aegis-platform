@@ -1,4 +1,4 @@
-name: Preview: Provision, Test & Optional Destroy
+name: "Preview: Provision, Test & Optional Destroy"
 
 on:
   pull_request:
@@ -316,7 +316,7 @@ jobs:
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     concurrency:
-      group: provision-${{ env.PREVIEW_ID }}
+      group: provision-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -381,7 +381,7 @@ jobs:
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     concurrency:
-      group: deploy-${{ env.PREVIEW_ID }}
+      group: deploy-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: true
     outputs:
       fresh_deploy: ${{ steps.mark-deploy.outputs.fresh || 'false' }}
@@ -612,7 +612,7 @@ jobs:
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     concurrency:
-      group: tests-${{ env.PREVIEW_ID }}
+      group: tests-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
@@ -628,9 +628,9 @@ jobs:
               export GRPC_CA="${{ needs.e2e-endpoints.outputs.grpc_ca }}"
               export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
-              export AEGIS_PLATFORM_NAMESPACE="${{ env.PREVIEW_NAMESPACE }}"
-              export AEGIS_PLATFORM_SERVICE="${{ env.PREVIEW_RELEASE }}-platform-api"
-              export AEGIS_PLATFORM_DEPLOYMENT="${{ env.PREVIEW_RELEASE }}-platform-api"
+              export AEGIS_PLATFORM_NAMESPACE="${{ needs.resolve-settings.outputs.preview_namespace }}"
+              export AEGIS_PLATFORM_SERVICE="${{ needs.resolve-settings.outputs.preview_release }}-platform-api"
+              export AEGIS_PLATFORM_DEPLOYMENT="${{ needs.resolve-settings.outputs.preview_release }}-platform-api"
               bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
           - suite: workspace
             run: |
@@ -641,7 +641,7 @@ jobs:
               export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export WORKSPACE_NAMESPACE=aegis-workloads
               export CLEANUP=1
-              IMAGE="${{ (contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) && needs.build-and-push.outputs.workspace_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:{0}', env.MANUAL_IMAGE_TAG != '' && env.MANUAL_IMAGE_TAG || env.DEFAULT_E2E_IMAGE_TAG) }}"
+              IMAGE="${{ (contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) && needs.build-and-push.outputs.workspace_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:{0}', needs.resolve-settings.outputs.manual_image_tag != '' && needs.resolve-settings.outputs.manual_image_tag || '4439705b81f1478e1b7e38529a171a9232feb691') }}"
               scripts/test-workspace-connection.sh "${IMAGE}"
               cat .aegis/workspace-session.json || true
               rm -f .aegis/workspace-session.json || true
@@ -651,7 +651,7 @@ jobs:
               cd agents/k8s-agent
               export USE_EXISTING_CLUSTER=true
               export KIND_CLUSTER=aegis-e2e
-              export K8S_AGENT_E2E_IMAGE="${{ (contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) && needs.build-and-push.outputs.k8s_agent_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:{0}', env.MANUAL_IMAGE_TAG != '' && env.MANUAL_IMAGE_TAG || env.DEFAULT_E2E_IMAGE_TAG) }}"
+              export K8S_AGENT_E2E_IMAGE="${{ (contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) && needs.build-and-push.outputs.k8s_agent_image) || format('567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:{0}', needs.resolve-settings.outputs.manual_image_tag != '' && needs.resolve-settings.outputs.manual_image_tag || '4439705b81f1478e1b7e38529a171a9232feb691') }}"
               export K8S_AGENT_E2E_SKIP_BUILD=true
               make test-e2e
     steps:
@@ -782,7 +782,7 @@ jobs:
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     concurrency:
-      group: teardown-${{ env.PREVIEW_ID }}
+      group: teardown-${{ needs.resolve-settings.outputs.preview_id }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4

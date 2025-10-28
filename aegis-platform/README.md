@@ -12,6 +12,26 @@ make deploy-local && make port-forward && make dev-backstage
 # Access at http://localhost:3000
 ```
 
+### Keycloak SSO setup
+
+```bash
+# Install the Keycloak CRDs (done automatically when you deploy `aegis-services`)
+kubectl get crd keycloaks.k8s.keycloak.org
+
+# Enable Keycloak in the chart with forceRender for the first install
+helm upgrade --install aegis-services charts/aegis-services \
+  -f charts/aegis-services/values/common.yaml \
+  -f charts/aegis-services/values/local.yaml \
+  -f charts/aegis-services/values/local-tls.yaml \
+  --set keycloak.forceRender=true \
+  --namespace aegis-system --create-namespace --wait
+
+# Populate Backstage environment variables
+cp aegis-platform/.env.development aegis-platform/.env
+```
+
+The `.env.development` file points Backstage at the local Keycloak instance (`https://keycloak.localtest.me`). Adjust the values if you deploy Keycloak to a different hostname or realm.
+
 ### Cloud Development
 
 ```bash

@@ -232,6 +232,11 @@ const postJson = async <TReq extends object, TRes>(
   }
 
   if (!subject) {
+    if (options?.requireAuth) {
+      throw new Error(
+        'Authentication did not yield a subject. Refresh and sign in with Keycloak.',
+      );
+    }
     subject = 'user:default/guest';
   }
 

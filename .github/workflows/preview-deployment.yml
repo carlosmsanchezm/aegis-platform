@@ -303,9 +303,6 @@ jobs:
       - resolve-settings
       - build-and-push
     if: ${{ contains('all,deploy,deploy-no-teardown,provision-only,tests-only', needs.resolve-settings.outputs.run_subset) }}
-    concurrency:
-      group: provision-${{ needs.resolve-settings.outputs.preview_id }}
-      cancel-in-progress: true
     outputs:
       provisioned: ${{ steps.flag.outputs.provisioned || 'false' }}
       vpc_id:      ${{ steps.tf-outputs.outputs.vpc_id || '' }}
@@ -318,6 +315,9 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: provision-${{ env.PREVIEW_ID }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -370,9 +370,6 @@ jobs:
     timeout-minutes: 35
     needs: [resolve-settings, build-and-push, provision-infra]
     if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
-    concurrency:
-      group: deploy-${{ needs.resolve-settings.outputs.preview_id }}
-      cancel-in-progress: true
     env:
       USE_EXISTING_CLUSTER: 'true'
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
@@ -383,6 +380,9 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: deploy-${{ env.PREVIEW_ID }}
+      cancel-in-progress: true
     outputs:
       fresh_deploy: ${{ steps.mark-deploy.outputs.fresh || 'false' }}
     steps:
@@ -602,9 +602,6 @@ jobs:
     timeout-minutes: 40
     needs: [resolve-settings, e2e-endpoints, build-and-push]
     if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
-    concurrency:
-      group: tests-${{ needs.resolve-settings.outputs.preview_id }}
-      cancel-in-progress: false
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
       PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
@@ -614,6 +611,9 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: tests-${{ env.PREVIEW_ID }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -772,9 +772,6 @@ jobs:
           needs.resolve-settings.outputs.keep_on_failure == 'false' || needs.e2e-tests.result == 'success'
         )
       }}
-    concurrency:
-      group: teardown-${{ needs.resolve-settings.outputs.preview_id }}
-      cancel-in-progress: false
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
       PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
@@ -784,6 +781,9 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: teardown-${{ env.PREVIEW_ID }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 

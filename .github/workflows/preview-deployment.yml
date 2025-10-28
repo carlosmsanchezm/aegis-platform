@@ -610,18 +610,27 @@ jobs:
             exit 1
           fi
 
-          for HOST in "${PLATFORM_DNS}" "${PROXY_DNS}"; do
-            echo "Waiting for DNS ${HOST} to resolve..."
-            ATTEMPTS=0
-            until getent ahosts "${HOST}" >/dev/null 2>&1; do
-              ((ATTEMPTS++))
-              if (( ATTEMPTS >= 60 )); then
-                echo "DNS name ${HOST} did not resolve within 5 minutes" >&2
-                exit 1
-              fi
-              sleep 5
-            done
-          done
+          export PLATFORM_DNS PROXY_DNS
+          python <<'PY'
+          import os
+          import socket
+          import sys
+          import time
+
+          hosts = [os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]
+
+          for host in hosts:
+              print(f"Waiting for DNS {host} to resolve...", flush=True)
+              for attempt in range(60):
+                  try:
+                      socket.getaddrinfo(host, None)
+                      break
+                  except socket.gaierror:
+                      if attempt == 59:
+                          print(f"DNS name {host} did not resolve within 5 minutes", file=sys.stderr, flush=True)
+                          sys.exit(1)
+                      time.sleep(5)
+          PY
 
           echo "PLATFORM_DNS=${PLATFORM_DNS}" >> "$GITHUB_ENV"
           echo "PROXY_DNS=${PROXY_DNS}"       >> "$GITHUB_ENV"

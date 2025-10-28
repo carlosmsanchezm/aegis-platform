@@ -1,0 +1,19 @@
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if $backstage.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aegis-services.backstage.serviceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+spec:
+  type: {{ $backstage.service.type | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ $backstage.service.port | default 7007 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "aegis-services.backstage.selectorLabels" . | nindent 4 }}
+{{- end }}

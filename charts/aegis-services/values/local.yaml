@@ -22,6 +22,31 @@ ingress-nginx:
       enabled: false
 
 #################################################################
+# Backstage Configuration - Local
+#################################################################
+backstage:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: backstage
+    tag: latest
+    pullPolicy: Never
+  service:
+    type: ClusterIP
+    port: 7007
+  env:
+    BACKEND_SECRET: "dev-secret"
+    AUTH_SESSION_SECRET: "dev-session-secret"
+    KEYCLOAK_BASE_URL: "https://keycloak.localtest.me"
+    KEYCLOAK_REALM: "aegis"
+    KEYCLOAK_CLIENT_ID: "backstage"
+    KEYCLOAK_CLIENT_SECRET: "local-backstage-client-secret"
+    KEYCLOAK_ISSUER: "https://keycloak.localtest.me/realms/aegis"
+    KEYCLOAK_SCOPE: "openid profile email offline_access"
+  caBundle:
+    secretName: aegis-backstage-ca
+
+#################################################################
 # Platform API Configuration - Local
 #################################################################
 platformApi:
@@ -57,10 +82,11 @@ platformApi:
     LOG_LEVEL: "debug"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
-    AUTH_STATIC_TOKEN: "supersecret"
-    AUTH_STATIC_SUBJECT: "dev-user@example.com"
-    # AEGIS_PROXY_MTLS_ENABLED: "false"  # set to "true" when proxy mTLS is required
     AEGIS_STORE_BACKEND: "memory"
+    OIDC_ISSUER_URL: "https://keycloak.localtest.me/realms/aegis"
+    OIDC_AUDIENCE: "backstage"
+    REQUIRE_PHISHING_RESISTANT_MFA: "true"
+    ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
 
   tls:
     enabled: false

@@ -11,3 +11,16 @@ spec:
   type: website
   owner: john@example.com
   lifecycle: experimental
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: cms553
+  annotations:
+    backstage.io/email: cms553@cornell.edu
+spec:
+  profile:
+    displayName: cms553
+    email: cms553@cornell.edu
+  memberOf: []

@@ -319,6 +319,73 @@ platformApi:
     failureThreshold: 3
 ```
 
+## Keycloak SSO (Red Hat Build of Keycloak)
+
+The chart can deploy a full Red Hat Build of Keycloak (RHBK) stack—operator, Keycloak CR, PostgreSQL backend, and a hardened realm import for Backstage. Defaults target RHBK `26.2-11`, enforce HTTPS, and enable token exchange for Backstage.
+
+### Prerequisites
+
+1. Create a Red Hat registry service account and download the Docker config JSON (for example `aegis-keycloak-prod-auth.json`) from the [terms-based registry](https://access.redhat.com/terms-based-registry/).
+2. (Optional) Log in locally so you can pre-pull images:
+
+   ```bash
+   docker login registry.redhat.io \
+     -u '11111111|service-account' \
+     -p '<registry-token>'
+   ```
+
+3. Create the image pull secret in the Keycloak namespace. The chart looks for `redhat-pull-secret`:
+
+   ```bash
+   kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f -
+   kubectl create secret generic redhat-pull-secret \
+     --namespace keycloak \
+     --from-file=.dockerconfigjson=./aegis-keycloak-prod-auth.json \
+     --type=kubernetes.io/dockerconfigjson
+   ```
+
+### Enabling Keycloak
+
+For local TLS validation the overlay already enables the component. Deploy and verify:
+
+```bash
+make deploy-local-tls
+kubectl get pods -n keycloak
+kubectl logs -n keycloak deployment/keycloak-operator
+kubectl logs -n keycloak statefulset/aegis-services-keycloak
+```
+
+In other environments enable the component and point the TLS secret at your certificate (leave `create: false` when you bring an existing secret):
+
+```yaml
+keycloak:
+  enabled: true
+  operator:
+    imagePullSecrets:
+      - name: redhat-pull-secret
+  imagePullSecrets:
+    - name: redhat-pull-secret
+  hostname:
+    hostname: keycloak.example.com
+    admin: admin.keycloak.example.com
+  tls:
+    secret:
+      name: keycloak-tls
+      create: false
+   ```
+
+The `keycloak.realm` block enforces TOTP MFA, PKCE, and registers the Backstage confidential client. Override redirect URIs, client secret placeholders, or add more clients as needed. To run RHBK in FIPS mode, add the recommended `additionalOptions` or environment overrides described in the [official RHBK FIPS guide](https://access.redhat.com/documentation/en-us/red_hat_build_of_keycloak/).
+
+> **Rendering note:** By default the Keycloak templates render only when the CRDs already exist in the cluster. When you ship the CRDs with this chart (the files under `crds/`) Helm installs them automatically, but discovery does not see them until the next render. Set `keycloak.forceRender: true` for the first install so the resources apply immediately:
+>
+> ```yaml
+> keycloak:
+>   enabled: true
+>   forceRender: true
+> ```
+>
+> Subsequent upgrades can leave `forceRender` disabled because the API server will advertise the CRDs.
+
 ## Volume Management
 
 ### Volume Mounts

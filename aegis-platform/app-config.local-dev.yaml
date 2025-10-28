@@ -1,6 +1,35 @@
 # Local development configuration - points to local platform-api via port-forward
 # Requires: make port-forward (forwards to localhost:10080)
 
+backend:
+  auth:
+    keys:
+      - secret: dev-secret
+
+auth:
+  session:
+    secret: dev-session-secret
+    cookie:
+      secure: false
+      sameSite: lax
+      domain: localhost
+  providers:
+    keycloak:
+      development:
+        metadataUrl: https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration
+        authUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/auth
+        tokenUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/token
+        userInfoUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/userinfo
+        logoutUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/logout
+        clientId: backstage
+        clientSecret: local-backstage-client-secret
+        callbackUrl: http://localhost:7008/api/auth/keycloak/handler/frame
+        prompt: login
+        signIn:
+          resolvers:
+            - resolver: emailMatchingUserEntityProfileEmail
+            - resolver: emailLocalPartMatchingUserEntityName
+
 proxy:
   endpoints:
     '/aegis':

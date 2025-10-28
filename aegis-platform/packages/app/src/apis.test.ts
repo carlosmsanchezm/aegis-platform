@@ -29,11 +29,19 @@ describe('Keycloak auth API wiring', () => {
     });
     expect(factory).toBeDefined();
 
-    const discoveryApi = { getBaseUrl: jest.fn(async () => 'http://example.com') };
+    const discoveryApi = {
+      getBaseUrl: jest.fn(async () => 'http://example.com'),
+    };
     const oauthRequestApi = new OAuthRequestManager();
-    const configApi = new ConfigReader({ auth: { environment: 'development' } });
+    const configApi = new ConfigReader({
+      auth: { environment: 'development' },
+    });
 
-    const instance = (factory as any).factory({ discoveryApi, oauthRequestApi, configApi });
+    const instance = (factory as any).factory({
+      discoveryApi,
+      oauthRequestApi,
+      configApi,
+    });
     expect(instance).toBeDefined();
     expect(typeof instance.signIn).toBe('function');
   });

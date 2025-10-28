@@ -74,7 +74,9 @@ const app = createApp({
   },
   components: {
     // Force explicit Keycloak SSO; disables automatic guest sessions for compliance.
-    SignInPage: props => <SignInPage {...props} providers={keycloakSignInProviders} />,
+    SignInPage: props => (
+      <SignInPage {...props} providers={keycloakSignInProviders} />
+    ),
   },
 });
 

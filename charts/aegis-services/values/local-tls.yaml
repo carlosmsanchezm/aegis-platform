@@ -8,6 +8,11 @@
 #     -f charts/aegis-services/values/local-tls.yaml \
 #     --namespace aegis-system --create-namespace
 
+ingress-nginx:
+  controller:
+    admissionWebhooks:
+      timeoutSeconds: 30
+
 platformApi:
   ingress:
     enabled: true
@@ -153,3 +158,145 @@ proxy:
       lxAjmoBL8JAlI07MqFfnK1SgxEYxiTWgKHDU+HlFwBf2seC8oE/JEdeO3XVejxv9
       lL12XeIUe1q6US4l8fWYUQ==
       -----END PRIVATE KEY-----
+
+keycloak:
+  enabled: true
+  forceRender: true
+  createNamespace: false
+  operator:
+    imagePullSecrets:
+      - name: redhat-pull-secret
+  imagePullSecrets:
+    - name: redhat-pull-secret
+  http:
+    httpEnabled: false
+  admin:
+    secret:
+      create: true
+      name: keycloak-admin-secret
+      username: admin
+      password: SuperSecureAdmin123!
+  database:
+    secret:
+      create: true
+      name: keycloak-db-secret
+      username: keycloak
+      password: SuperSecureDb123!
+  realm:
+    enabled: true
+    name: aegis
+    displayName: Aegis
+    client:
+      id: backstage
+      name: Backstage
+      redirectUris:
+        - http://localhost:7008/*
+        - https://backstage.localtest.me/*
+      webOrigins:
+        - http://localhost:3000
+        - https://backstage.localtest.me
+      secret:
+        create: true
+        name: keycloak-backstage-client-secret
+        value: local-backstage-client-secret
+        placeholder: BACKSTAGE_CLIENT_SECRET
+    requiredActions:
+      - alias: CONFIGURE_TOTP
+        name: Configure OTP
+        providerId: CONFIGURE_TOTP
+        defaultAction: true
+        enabled: true
+  tls:
+    secret:
+      create: true
+      name: keycloak-tls
+      cert: |
+        -----BEGIN CERTIFICATE-----
+        MIIDTjCCAjagAwIBAgIJAO7PYN9VNKhEMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
+        BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTE1WhcNMjgwMTMw
+        MjI1NTE1WjAgMR4wHAYDVQQDDBVrZXljbG9hay5sb2NhbHRlc3QubWUwggEiMA0G
+        CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDH5BruSvmyhcF1VMe+IlYok1UqgQER
+        OXhKJZ3K65OslhKsGbfsGc6aL8vEZmkkf4G1Zu/Eb1NJ44tYNY+eFePLXkbvB5Wz
+        R/sfhxKeTOQ0QMIS4LkSYsoCf0sougKQ1g99j5oaU09K7USkSMVC5H1/5wB4kjKJ
+        Vx9SzqHUCSKtHT4IB3ed+pFA1VKM7BA6gWuk355SoY7Si09h7mZrQPS4+PnDFCvB
+        GwiziZnef7bqeWzjKEI52Gi/gnQCz5ghTrTvslrlT7Qj81ZnrqtRuwfmgfcqk1FO
+        Ec/gPI25KbjPbSZXTD4GPWO/FP+87Ie6B1b2jp7uMbiZCwwUfvxGCP2PAgMBAAGj
+        gYwwgYkwVAYDVR0RBE0wS4IVa2V5Y2xvYWsubG9jYWx0ZXN0Lm1lgjJhZWdpcy1z
+        ZXJ2aWNlcy1rZXljbG9hay5rZXljbG9hay5zdmMuY2x1c3Rlci5sb2NhbDAOBgNV
+        HQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAN
+        BgkqhkiG9w0BAQsFAAOCAQEAipOLIMIRqwnBXTeSZLGf1rpX5nQZ89ErdESdsQZu
+        WvE3TCpmwp/r6olW1+WHhj6pZJurIWxUQR6sxmvD8gHYd1pbV82czEwdXPe3JzwC
+        Knfd/mfiG7zJ27K25xdWy4gwvG9Vj3VGgXtNVCF6sPxBReX0sb5AYSU4z1aLGF+2
+        vgKGLDrRKWGGjAGp1ITmU6DQnTdU5M/GJiqIgeb06QUFZf2MOMcmglqaUcW+gi2a
+        /pPzVr214M81vRvfjKESBFGLTW5OglEAOGFvnfby0uaPyUv7+jlSTYblFg/i62Nx
+        rbvGzZfvh6CDjYLYO9F9vM9aB4HQwiWs0sEsBljJ0sWclw==
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
+        BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTEwWhcNMzAxMDI2
+        MjI1NTEwWjAeMRwwGgYDVQQDDBNBZWdpcyBMb2NhbCBSb290IENBMIIBIjANBgkq
+        hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrYo0p4zwNNZQd7OFeRKZGGtDePhAleu
+        AUBaxstOyy9eJyCOge38xdHnL730+0Imm69sXubek/Np+L3M8wpoQK3NrJU9XL+3
+        A51Pt5gJrZqjzCVU8+bvEj7nHAJwoLDMXcaVtzVR0spc9fp61tbQLiszzoQ6egXJ
+        cculV2njeIN8iaoAgr3Fxzmjra9aaR4IFVq8UwEGztW3mqNvkSVOx6G2nzBBX7eT
+        deJcK3mcvGd6xp3AW0VthF9t1QjvX2BNIrFZraegT9K2sfR+l9bW9LZ1wCjQFuJR
+        CmAS/geYS7hCKHisa/YXFGL0kNSzcpAjHrfZzrgwOeFsrZVLPAudoQIDAQABo2Mw
+        YTAdBgNVHQ4EFgQUTs43RzMxzkN3MLSdEdo3l7xITx8wHwYDVR0jBBgwFoAUTs43
+        RzMxzkN3MLSdEdo3l7xITx8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+        AYYwDQYJKoZIhvcNAQELBQADggEBAHo96vpGI7os8pYqe/lM7uBSFc40a9SbjFj8
+        M20Zgm1/UL6w3lJsfnQzDmDDtdO7J4kQR8TVuEkbMw039D1yu7Z5P4u7tefxZHwf
+        AkEUFZI0lc8D+iApYQen+VppI9GZcAStVu2MqhAhNyVZK37CHDSlgGxwwL6NsV9g
+        DE+t1TnpH6wbqXU1+FpSVHzKPWgyjq+XMF8EDTSmh5+qBETfHSaX5EGOk1c+6SdR
+        qvbpoMnc963JWRVjqqelLbsU8562E8FE3YJrUJnEBmSl1POv19c/Ev1rPX6HmBzt
+        M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
+        -----END CERTIFICATE-----
+      key: |
+        -----BEGIN RSA PRIVATE KEY-----
+        MIIEowIBAAKCAQEAx+Qa7kr5soXBdVTHviJWKJNVKoEBETl4SiWdyuuTrJYSrBm3
+        7BnOmi/LxGZpJH+BtWbvxG9TSeOLWDWPnhXjy15G7weVs0f7H4cSnkzkNEDCEuC5
+        EmLKAn9LKLoCkNYPfY+aGlNPSu1EpEjFQuR9f+cAeJIyiVcfUs6h1AkirR0+CAd3
+        nfqRQNVSjOwQOoFrpN+eUqGO0otPYe5ma0D0uPj5wxQrwRsIs4mZ3n+26nls4yhC
+        Odhov4J0As+YIU6077Ja5U+0I/NWZ66rUbsH5oH3KpNRThHP4DyNuSm4z20mV0w+
+        Bj1jvxT/vOyHugdW9o6e7jG4mQsMFH78Rgj9jwIDAQABAoIBAQCnxu5T1NqA3YPj
+        16VQEcH/jKqPYnhi3Ln6glhPWiw5UD2b9npJ0d93y2ZdExhtahiVCjF1z3s5KaRs
+        BYjmR7lLmXYwa01bja9aZyVZeXCR60j6T2UH6aNlNTMAnCBLMWEPItlV/1curLhQ
+        rEPmQaKVGG9sxElmvZmtB4MNVh2k7siL9nPmppWh9PCLmWHKOCQcSWUMZIuWl6oy
+        /m2IMI0agAWkBQA715FXSk9nODN+B6URhqpqp+gcQX2bDZtb3MVuwqTZEf+fF9jf
+        GdfsZudPoOsgjrbUsdIqpA1E5nAFKTeyIFzOCsPk3CBe6U5LnDo8W9ZUhLZJPS/A
+        KRMWJgsBAoGBAPwCXacMnTGJBMQAySIJtNwU+yIZxQUPE2TesVIPYBWP4BT0W74V
+        5+ZiU3VUgFwBP3d7/FtmOrkMNHMMmEZqysNxuEu06EjzoKfaFo3165bx7s8eIjy+
+        0n++XtzFryjj4NMCvAG8aEqsiZF91Y/kkBLN3M8V8NDjIzaL1jdH2rWTAoGBAMsO
+        dFoJuIhVn+vrjObgaJD0zMzWYNHdg9OHXkl+cAmNaSm9i28BUNuCYGfrgdZD8ZE1
+        hndZ3CWg8UC3naypTD1juobLeetVJZhn1FJYsDlza2sOtEj3AcaLDTxNVka+mskm
+        lTq7bRDPFQMLXj27DrHNJxOtiRU3YPEY2dMk7tWVAoGASesLu0744Km3CyLL3D8K
+        nK9Oxj7WylgUsTacvlwiK9Dqwlq2ejgEsE/Q+Q5TJCl9izeD2u9OdC6/R6u/EpCK
+        bu9xRkuHArbrPbC7guJKOxk1mezV0AmMxsl5G7qkWRMWQ+5+ZOf1k0muhE1rkexR
+        0iIuDVP7Mdod3wb/S3G5Fh8CgYAmrHAYnfVZcgVtZ4WEi4Ue5qEC+mmiTvBGn2ej
+        08L+7sHywzkFQVjnFePKpx4pcvNVVr5viNvXBtosG0yaj/wHTTE/bw2fdq4cYtob
+        fOzDZGo3D6viobji2aUBsTEXdEICwah2cTAKnYZA+C9Qzomz74DbzJdpRQzfnn4O
+        KuCaKQKBgFk+/3F1QE0xTi4s3unrlImpAWWzbV6lETjmhZvEuW2QG5fukZ9utW+E
+        Sy3R61/alqm5rtFgJYYTKjmNiBy77ukPDddBnwc/1YAoZ7843aWKQ+BEsw72nAvV
+        OlK5lNolXCk9+YvHrq5S8IBOwXqhh7/3e5qZAiVeS+UPjuEZkqyY
+        -----END RSA PRIVATE KEY-----
+  hostname:
+    hostname: https://keycloak.localtest.me
+    admin: ""
+    adminUrl: https://keycloak.localtest.me
+    strict: false
+  additionalOptions:
+    - name: hostname-admin
+      value: https://keycloak.localtest.me
+    - name: hostname-admin-url
+      value: https://keycloak.localtest.me/
+  ingress:
+    enabled: false
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  customIngress:
+    enabled: true
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"

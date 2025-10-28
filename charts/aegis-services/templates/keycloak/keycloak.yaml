@@ -1,0 +1,125 @@
+{{- $kc := .Values.keycloak | default dict }}
+{{- $crdReady := or (.Capabilities.APIVersions.Has "k8s.keycloak.org/v2alpha1") ($kc.forceRender | default false) }}
+{{- if and ($kc.enabled | default false) $crdReady }}
+{{- $ns := include "aegis-services.keycloak.namespace" . }}
+{{- $adminCfg := $kc.admin | default dict }}
+{{- $admin := $adminCfg.secret | default dict }}
+{{- $db := $kc.database | default dict }}
+{{- $dbSecret := $db.secret | default dict }}
+{{- $http := $kc.http | default dict }}
+{{- $hostname := $kc.hostname | default dict }}
+{{- $ingress := $kc.ingress | default dict }}
+{{- $networkPolicy := $kc.networkPolicy | default dict }}
+{{- $features := $kc.features | default dict }}
+{{- $resources := $kc.resources | default dict }}
+{{- $additional := $kc.additionalOptions | default list }}
+{{- $image := $kc.image | default "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11" }}
+{{- $imagePullSecrets := $kc.imagePullSecrets | default list }}
+{{- $realm := $kc.realm | default dict }}
+{{- $tls := $kc.tls | default dict }}
+{{- $tlsSecret := $tls.secret | default dict }}
+{{- $tlsSecretName := ($tlsSecret.name | default "") }}
+---
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: {{ include "aegis-services.keycloak.fullname" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis-services.keycloak.labels" . | nindent 4 }}
+spec:
+  instances: {{ default 1 $kc.instances }}
+  {{- if and $admin.name (not $kc.bootstrapAdminDisabled) }}
+  bootstrapAdmin:
+    user:
+      secret: {{ $admin.name }}
+  {{- end }}
+  image: {{ $image }}
+  {{- if $imagePullSecrets }}
+  imagePullSecrets:
+    {{- range $imagePullSecrets }}
+    - name: {{ .name }}
+    {{- end }}
+  {{- end }}
+  {{- if $additional }}
+  additionalOptions:
+    {{- toYaml $additional | nindent 4 }}
+  {{- end }}
+  {{- if hasKey $kc "startOptimized" }}
+  startOptimized: {{ $kc.startOptimized }}
+  {{- end }}
+  db:
+    vendor: {{ default "postgres" $db.vendor }}
+    host: {{ default (printf "%s.%s.svc.cluster.local" (include "aegis-services.keycloak.postgresServiceName" .) $ns) $db.host | quote }}
+    port: {{ default 5432 $db.port }}
+    database: {{ default "keycloak" $db.database | quote }}
+    usernameSecret:
+      name: {{ $dbSecret.name }}
+      key: {{ default "username" $dbSecret.usernameKey }}
+    passwordSecret:
+      name: {{ $dbSecret.name }}
+      key: {{ default "password" $dbSecret.passwordKey }}
+  hostname:
+    {{- if $hostname.hostname }}
+    hostname: {{ $hostname.hostname }}
+    {{- end }}
+    {{- if $hostname.admin }}
+    admin: {{ $hostname.admin }}
+    {{- end }}
+    {{- if hasKey $hostname "strict" }}
+    strict: {{ $hostname.strict }}
+    {{- end }}
+    {{- if hasKey $hostname "backchannelDynamic" }}
+    backchannelDynamic: {{ $hostname.backchannelDynamic }}
+    {{- end }}
+  http:
+    httpEnabled: {{ default false $http.httpEnabled }}
+    httpsPort: {{ default 8443 $http.httpsPort }}
+    {{- if $tlsSecretName }}
+    tlsSecret: {{ $tlsSecretName }}
+    {{- end }}
+    {{- with $http.annotations }}
+    annotations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $http.labels }}
+    labels:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- if $kc.podDisruptionBudget }}
+  podDisruptionBudget:
+    {{- toYaml $kc.podDisruptionBudget | nindent 4 }}
+  {{- end }}
+  {{- if or $features.enabled $features.disabled }}
+  features:
+    {{- with $features.enabled }}
+    enabled:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $features.disabled }}
+    disabled:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  ingress:
+    enabled: {{ default true $ingress.enabled }}
+    className: {{ $ingress.className | default "ingress-nginx" }}
+    {{- with $ingress.annotations }}
+    annotations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $ingress.labels }}
+    labels:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  networkPolicy:
+    enabled: {{ default true $networkPolicy.enabled }}
+    {{- with $networkPolicy.http }}
+    http:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with $resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

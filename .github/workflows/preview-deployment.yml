@@ -610,7 +610,7 @@ jobs:
             exit 1
           fi
 
-          python -c $'import os,socket,sys,time\nhosts=[os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]\nfor host in hosts:\n    print(f"Waiting for DNS {host} to resolve...", flush=True)\n    for attempt in range(120):\n        try:\n            socket.getaddrinfo(host, None)\n            break\n        except socket.gaierror as exc:\n            if attempt == 119:\n                print(f"DNS name {host} did not resolve within 10 minutes: {exc}", file=sys.stderr, flush=True)\n                sys.exit(1)\n            time.sleep(5)\n'
+          python3 -c $'import os,socket,sys,time\nhosts=[os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]\nfor host in hosts:\n    print(f"Waiting for DNS {host} to resolve...", flush=True)\n    for attempt in range(120):\n        try:\n            socket.getaddrinfo(host, None)\n            break\n        except socket.gaierror as exc:\n            if attempt == 119:\n                print(f"DNS name {host} did not resolve within 10 minutes: {exc}", file=sys.stderr, flush=True)\n                sys.exit(1)\n            time.sleep(5)\n'
 
           echo "PLATFORM_DNS=${PLATFORM_DNS}" >> "$GITHUB_ENV"
           echo "PROXY_DNS=${PROXY_DNS}"       >> "$GITHUB_ENV"

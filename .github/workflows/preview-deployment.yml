@@ -551,6 +551,15 @@ jobs:
           # If deploy-control-plane succeeded, wait for LBs and update DNS (fresh path)
           if [[ "${{ needs.deploy-control-plane.outputs.fresh_deploy }}" == "true" ]]; then
             echo "Using fresh deploy to discover endpoints..."
+            pushd terraform >/dev/null
+            TF_WS="preview-${{ env.PREVIEW_ID }}"
+            STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+            terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+            KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
+            popd >/dev/null
+            if [[ -n "${KUBECTL_CMD}" ]]; then
+              eval "${KUBECTL_CMD}"
+            fi
             # Wait up to 5 minutes for LBs
             for i in {1..60}; do
               PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")

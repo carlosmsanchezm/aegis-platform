@@ -103,7 +103,7 @@ platformApi:
 proxy:
   image:
     repository: aegis-proxy
-    tag: latest
+    tag: "16"
     pullPolicy: IfNotPresent
   
   replicas: 3
@@ -367,6 +367,157 @@ imageSecurity:
     allowedRegistries:
       - harbor.example.com
       - ghcr.io/aegis-project
+
+# Keycloak SSO deployment
+keycloak:
+  enabled: false
+  createNamespace: false
+  namespace: keycloak
+  instances: 1
+  forceRender: false
+  operator:
+    install: true
+    image: "registry.redhat.io/rhbk/keycloak-rhel9-operator:26.2-11"
+    keycloakImage: "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11"
+    imagePullPolicy: Always
+    annotations: {}
+    imagePullSecrets: []
+    resources:
+      limits:
+        cpu: 700m
+        memory: 450Mi
+      requests:
+        cpu: 300m
+        memory: 450Mi
+  image: "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11"
+  imagePullSecrets: []
+  admin:
+    secret:
+      name: keycloak-admin-secret
+      create: false
+      usernameKey: username
+      passwordKey: password
+      username: admin
+      password: change-me
+  database:
+    vendor: postgres
+    host: ""
+    port: 5432
+    database: keycloak
+    secret:
+      name: keycloak-db-secret
+      create: false
+      usernameKey: username
+      passwordKey: password
+      username: keycloak
+      password: supersecure
+  postgres:
+    enabled: true
+    initChown: true
+    initImage: registry.access.redhat.com/ubi9/ubi-minimal:9.3
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: Always
+    storage:
+      size: 5Gi
+      className: ""
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 999
+      fsGroup: 999
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 999
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  tls:
+    secret:
+      name: keycloak-tls
+      create: false
+      cert: ""
+      key: ""
+  http:
+    httpEnabled: false
+    httpsPort: 8443
+    annotations: {}
+    labels: {}
+  hostname:
+    hostname: https://keycloak.localtest.me
+    admin: https://keycloak.localtest.me
+    strict: true
+  ingress:
+    enabled: true
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    labels: {}
+  networkPolicy:
+    enabled: true
+    http:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: aegis-system
+  features:
+    enabled:
+      - token-exchange
+  additionalOptions:
+    - name: metrics-enabled
+      value: "true"
+    - name: proxy
+      value: edge
+  startOptimized: false
+  realm:
+    enabled: true
+    name: aegis
+    displayName: Aegis
+    accessTokenLifespan: 300
+    client:
+      id: backstage
+      name: Backstage
+      redirectUris:
+        - http://localhost:7008/*
+        - https://backstage.localtest.me/*
+      webOrigins:
+        - https://backstage.localtest.me
+        - http://localhost:3000
+      secret:
+        create: false
+        name: keycloak-backstage-client-secret
+        key: clientSecret
+        value: ""
+        placeholder: BACKSTAGE_CLIENT_SECRET
+      attributes: {}
+    otp:
+      type: totp
+      algorithm: HmacSHA1
+      digits: 6
+      period: 30
+    requiredActions: []
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  securityContext:
+    runAsNonRoot: true
+    fsGroup: 1000
 
 # PodSecurity Standards Enforcement
 podSecurity:

@@ -68,6 +68,52 @@ app.kubernetes.io/component: platform-api
 app.kubernetes.io/component: proxy
 {{- end -}}
 
+{{/* Keycloak helpers */}}
+{{- define "aegis-services.keycloak.namespace" -}}
+{{- $kc := .Values.keycloak | default dict }}
+{{- if $kc.namespace -}}
+{{- $kc.namespace -}}
+{{- else -}}
+{{- .Release.Namespace -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "aegis-services.keycloak.fullname" -}}
+{{- printf "%s-keycloak" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.keycloak.serviceName" -}}
+{{- include "aegis-services.keycloak.fullname" . -}}
+{{- end -}}
+
+{{- define "aegis-services.keycloak.labels" -}}
+{{ include "aegis-services.labels" . }}
+app.kubernetes.io/component: keycloak
+{{- end -}}
+
+{{- define "aegis-services.keycloak.selectorLabels" -}}
+{{ include "aegis-services.selectorLabels" . }}
+app.kubernetes.io/component: keycloak
+{{- end -}}
+
+{{- define "aegis-services.keycloak.postgresFullname" -}}
+{{- printf "%s-db" (include "aegis-services.keycloak.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.keycloak.postgresServiceName" -}}
+{{- include "aegis-services.keycloak.postgresFullname" . -}}
+{{- end -}}
+
+{{- define "aegis-services.keycloak.postgres.labels" -}}
+{{ include "aegis-services.labels" . }}
+app.kubernetes.io/component: keycloak-postgres
+{{- end -}}
+
+{{- define "aegis-services.keycloak.postgres.selectorLabels" -}}
+{{ include "aegis-services.selectorLabels" . }}
+app.kubernetes.io/component: keycloak-postgres
+{{- end -}}
+
 {{- define "aegis-services.proxy.tlsIngress" -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

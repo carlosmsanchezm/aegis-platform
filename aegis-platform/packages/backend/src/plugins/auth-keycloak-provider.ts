@@ -40,7 +40,7 @@ export default createBackendModule({
       deps: {
         providers: authProvidersExtensionPoint,
       },
-      init({ providers }) {
+      async init({ providers }) {
         registerKeycloakProvider(providers);
       },
     });

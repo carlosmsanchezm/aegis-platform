@@ -703,6 +703,13 @@ jobs:
             echo "Skipping suite '${suite}' based on E2E_SUITES='${raw_input}'"
           fi
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
       - uses: hashicorp/setup-terraform@v2
         if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
         with:

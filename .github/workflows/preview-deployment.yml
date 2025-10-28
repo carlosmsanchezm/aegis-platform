@@ -542,10 +542,10 @@ jobs:
     # Run for all except destroy-only
     if: ${{ needs.resolve-settings.outputs.run_subset != 'destroy-only' }}
     outputs:
-      grpc_addr:     ${{ steps.out.outputs.grpc_addr }}
-      grpc_host:     ${{ steps.out.outputs.grpc_host }}
-      proxy_hostname: ${{ steps.out.outputs.proxy_hostname }}
-      grpc_ca_b64:   ${{ steps.out.outputs.grpc_ca_b64 }}
+      grpc_addr:     ${{ steps.endpoints.outputs.grpc_addr }}
+      grpc_host:     ${{ steps.endpoints.outputs.grpc_host }}
+      proxy_hostname: ${{ steps.endpoints.outputs.proxy_hostname }}
+      grpc_ca_b64:   ${{ steps.endpoints.outputs.grpc_ca_b64 }}
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
       PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
@@ -668,10 +668,12 @@ jobs:
             FALLBACK_USED=0
           fi
 
+          PLATFORM_TLS_HOST="${ORIGINAL_PLATFORM_DNS}"
+          PROXY_TLS_HOST="${ORIGINAL_PROXY_DNS}"
           echo "PLATFORM_DNS=${CONNECT_PLATFORM_DNS}" >> "$GITHUB_ENV"
           echo "PROXY_DNS=${CONNECT_PROXY_DNS}"       >> "$GITHUB_ENV"
-          echo "PLATFORM_TLS_HOST=${ORIGINAL_PLATFORM_DNS}" >> "$GITHUB_ENV"
-          echo "PROXY_TLS_HOST=${ORIGINAL_PROXY_DNS}"       >> "$GITHUB_ENV"
+          echo "PLATFORM_TLS_HOST=${PLATFORM_TLS_HOST}" >> "$GITHUB_ENV"
+          echo "PROXY_TLS_HOST=${PROXY_TLS_HOST}"       >> "$GITHUB_ENV"
           echo "DNS_FALLBACK_USED=${FALLBACK_USED}" >> "$GITHUB_ENV"
 
           CA_SECRET="${HELM_RELEASE}-platform-api-tls"
@@ -711,16 +713,13 @@ jobs:
           rm -f "${TMP_CHAIN}"
 
           echo "CA_BUNDLE_PATH=${CA_BUNDLE_PATH}" >> "$GITHUB_ENV"
-
-      - name: Output endpoints for E2E
-        id: out
-        run: |
-          set -euo pipefail
-          echo "grpc_addr=${PLATFORM_DNS}:8081"               >> "$GITHUB_OUTPUT"
-          echo "grpc_host=${PLATFORM_TLS_HOST}"               >> "$GITHUB_OUTPUT"
-          echo "proxy_hostname=${PROXY_DNS}"                  >> "$GITHUB_OUTPUT"
           CA_BUNDLE_B64=$(base64 "${CA_BUNDLE_PATH}" | tr -d '\n')
-          echo "grpc_ca_b64=${CA_BUNDLE_B64}"                 >> "$GITHUB_OUTPUT"
+          {
+            echo "grpc_addr=${CONNECT_PLATFORM_DNS}:8081"
+            echo "grpc_host=${PLATFORM_TLS_HOST}"
+            echo "proxy_hostname=${CONNECT_PROXY_DNS}"
+            echo "grpc_ca_b64=${CA_BUNDLE_B64}"
+          } >> "$GITHUB_OUTPUT"
 
   e2e-tests:
     name: E2E Test Matrix

@@ -549,68 +549,107 @@ jobs:
           K8S_NAMESPACE:   ${{ env.PREVIEW_NAMESPACE }}
         run: |
           set -euo pipefail
-          # If deploy-control-plane succeeded, wait for LBs and update DNS (fresh path)
-          if [[ "${{ needs.deploy-control-plane.outputs.fresh_deploy }}" == "true" ]]; then
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          FRESH_DEPLOY="${{ needs.deploy-control-plane.outputs.fresh_deploy }}"
+
+          pushd terraform >/dev/null
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
+          popd >/dev/null
+
+          if [[ -z "${KUBECTL_CMD}" ]]; then
+            echo "Failed to retrieve kubectl configuration command from Terraform outputs" >&2
+            exit 1
+          fi
+
+          eval "${KUBECTL_CMD}"
+
+          if [[ "${FRESH_DEPLOY}" == "true" ]]; then
             echo "Using fresh deploy to discover endpoints..."
-            pushd terraform >/dev/null
-            TF_WS="preview-${{ env.PREVIEW_ID }}"
-            STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
-            terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
-            KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
-            popd >/dev/null
-            if [[ -n "${KUBECTL_CMD}" ]]; then
-              eval "${KUBECTL_CMD}"
-            fi
             # Wait up to 5 minutes for LBs
             for i in {1..60}; do
               PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-              [ -n "$PLATFORM_LB" ] && break || sleep 5
+              [ -n "${PLATFORM_LB}" ] && break || sleep 5
             done
             for i in {1..60}; do
               PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-              [ -n "$PROXY_LB" ] && break || sleep 5
+              [ -n "${PROXY_LB}" ] && break || sleep 5
             done
-            if [ -z "${PLATFORM_LB}" ] || [ -z "${PROXY_LB}" ]; then
-              echo "Failed to get LB hostnames from fresh deploy" >&2
+            if [[ -z "${PLATFORM_LB}" || -z "${PROXY_LB}" ]]; then
+              echo "Failed to get LoadBalancer hostnames from fresh deploy" >&2
               exit 1
             fi
 
-            cd terraform
-            TF_WS="preview-${{ env.PREVIEW_ID }}"
-            STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+            pushd terraform >/dev/null
             terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
-
             terraform apply -auto-approve \
               -var="platform_api_lb_hostname=${PLATFORM_LB}" \
               -var="proxy_lb_hostname=${PROXY_LB}" \
               -target=aws_route53_record.platform_api_grpc \
               -target=aws_route53_record.platform_api_http \
               -target=aws_route53_record.proxy
-
-            PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
-            PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
-            PLATFORM_DNS=${PLATFORM_DNS%.}
-            PROXY_DNS=${PROXY_DNS%.}
-
-            echo "PLATFORM_DNS=${PLATFORM_DNS}" >> $GITHUB_ENV
-            echo "PROXY_DNS=${PROXY_DNS}"       >> $GITHUB_ENV
+            popd >/dev/null
           else
             echo "Using existing Terraform state to get endpoints (tests-only or deploy skipped)..."
-            cd terraform
-            TF_WS="preview-${{ env.PREVIEW_ID }}"
-            STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+            pushd terraform >/dev/null
             terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
-            PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
-            PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
-            PLATFORM_DNS=${PLATFORM_DNS%.}
-            PROXY_DNS=${PROXY_DNS%.}
-            echo "PLATFORM_DNS=${PLATFORM_DNS}" >> $GITHUB_ENV
-            echo "PROXY_DNS=${PROXY_DNS}"       >> $GITHUB_ENV
-            if [ -z "${PLATFORM_DNS}" ] || [ -z "${PROXY_DNS}" ]; then
-              echo "No DNS endpoints in existing state; cannot run tests." >&2
-              exit 1
-            fi
+            popd >/dev/null
           fi
+
+          pushd terraform >/dev/null
+          PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
+          PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
+          popd >/dev/null
+
+          PLATFORM_DNS=${PLATFORM_DNS%.}
+          PROXY_DNS=${PROXY_DNS%.}
+
+          if [[ -z "${PLATFORM_DNS}" || -z "${PROXY_DNS}" ]]; then
+            echo "No DNS endpoints available; cannot run tests." >&2
+            exit 1
+          fi
+
+          echo "PLATFORM_DNS=${PLATFORM_DNS}" >> "$GITHUB_ENV"
+          echo "PROXY_DNS=${PROXY_DNS}"       >> "$GITHUB_ENV"
+
+          CA_SECRET="${HELM_RELEASE}-platform-api-tls"
+          TMP_CHAIN=$(mktemp)
+
+          if ! kubectl get secret "${CA_SECRET}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+            echo "Failed to locate TLS secret ${CA_SECRET} in namespace ${K8S_NAMESPACE}" >&2
+            exit 1
+          fi
+
+          kubectl get secret "${CA_SECRET}" -n "${K8S_NAMESPACE}" -o jsonpath='{.data.tls\.crt}' | base64 -d > "${TMP_CHAIN}"
+
+          CA_BUNDLE_PATH="${HOME}/aegis-platform-api-ca.crt"
+          LAST_CERT=""
+          CURRENT=""
+          while IFS= read -r line; do
+            if [[ "${line}" == "-----BEGIN CERTIFICATE-----" ]]; then
+              CURRENT="${line}"$'\n'
+              continue
+            fi
+            if [[ -n "${CURRENT}" ]]; then
+              CURRENT+="${line}"$'\n'
+            fi
+            if [[ "${line}" == "-----END CERTIFICATE-----" ]]; then
+              LAST_CERT="${CURRENT}"
+              CURRENT=""
+            fi
+          done < "${TMP_CHAIN}"
+
+          if [[ -z "${LAST_CERT}" ]]; then
+            echo "Failed to extract CA certificate from TLS chain" >&2
+            exit 1
+          fi
+
+          printf "%s" "${LAST_CERT}" > "${CA_BUNDLE_PATH}"
+          chmod 600 "${CA_BUNDLE_PATH}"
+          rm -f "${TMP_CHAIN}"
+
+          echo "CA_BUNDLE_PATH=${CA_BUNDLE_PATH}" >> "$GITHUB_ENV"
 
       - name: Output endpoints for E2E
         id: out
@@ -619,7 +658,7 @@ jobs:
           echo "grpc_addr=${PLATFORM_DNS}:8081"               >> "$GITHUB_OUTPUT"
           echo "grpc_host=${PLATFORM_DNS}"                    >> "$GITHUB_OUTPUT"
           echo "proxy_hostname=${PROXY_DNS}"                  >> "$GITHUB_OUTPUT"
-          echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt"    >> "$GITHUB_OUTPUT"
+          echo "grpc_ca=${CA_BUNDLE_PATH}"                    >> "$GITHUB_OUTPUT"
 
   e2e-tests:
     name: E2E Test Matrix

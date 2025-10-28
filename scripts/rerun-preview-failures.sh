@@ -51,10 +51,10 @@ if [[ $# -eq 1 ]]; then
 fi
 
 current_sha="$(git rev-parse HEAD)"
-run_json="$(gh run view "${RUN_ID}" --json status,conclusion,headSha,headBranch,event,pullRequests)"
+run_json="$(gh run view "${RUN_ID}" --json status,conclusion,headSha,headBranch,event)"
 run_head_sha="$(echo "${run_json}" | jq -r '.headSha')"
 run_branch="$(echo "${run_json}" | jq -r '.headBranch')"
-pr_number="$(echo "${run_json}" | jq -r '.pullRequests[0].number // empty')"
+pr_number="$(gh pr list --state all --head \"${run_branch}\" --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo \"\")"
 
 if [[ -z "${run_head_sha}" || "${run_head_sha}" == "null" ]]; then
   echo "Unable to determine head SHA for run ${RUN_ID}" >&2

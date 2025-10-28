@@ -818,7 +818,7 @@ jobs:
               export AEGIS_PROXY_HOSTNAME="${{ needs.e2e-endpoints.outputs.proxy_hostname }}"
               export GRPC_TLS=1
               export GRPC_CA="${GRPC_CA_PATH}"
-              export GRPC_TLS_SERVER_NAME="${PLATFORM_TLS_HOST}"
+              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
               export AEGIS_PLATFORM_NAMESPACE="${PREVIEW_NAMESPACE}"
               export AEGIS_PLATFORM_SERVICE="${PREVIEW_RELEASE}-platform-api"
@@ -830,7 +830,7 @@ jobs:
               export GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
               export GRPC_TLS=1
               export GRPC_CA="${GRPC_CA_PATH}"
-              export GRPC_TLS_SERVER_NAME="${PLATFORM_TLS_HOST}"
+              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export WORKSPACE_NAMESPACE=aegis-workloads
               export CLEANUP=1
               IMAGE="${WORKSPACE_IMAGE_OUTPUT}"

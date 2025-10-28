@@ -426,6 +426,15 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Terraform init for outputs
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
+        run: |
+          set -euo pipefail
+          cd terraform
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+
       - name: Deploy via Terraform helper (migrations included)
         if: ${{ env.RUN_SUBSET != 'tests-only' }}
         id: deploy

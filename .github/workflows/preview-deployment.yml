@@ -143,6 +143,7 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+      VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
     steps:
       - name: Skip for non-all subsets
         if: ${{ env.RUN_SUBSET != 'all' }}
@@ -700,6 +701,25 @@ jobs:
           echo "enabled=$should_run" >> "$GITHUB_OUTPUT"
           if [ "$should_run" != "true" ]; then
             echo "Skipping suite '${suite}' based on E2E_SUITES='${raw_input}'"
+          fi
+
+      - uses: hashicorp/setup-terraform@v2
+        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
+        with:
+          terraform_wrapper: false
+
+      - name: Configure kubectl for suite
+        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
+        run: |
+          set -euo pipefail
+          pushd terraform >/dev/null
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
+          popd >/dev/null
+          if [[ -n "${KUBECTL_CMD}" ]]; then
+            eval "${KUBECTL_CMD}"
           fi
 
       - name: Install test tooling (grpcurl + jq)

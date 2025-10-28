@@ -13,6 +13,10 @@ ingress-nginx:
     admissionWebhooks:
       timeoutSeconds: 30
 
+backstage:
+  caBundle:
+    create: true
+
 platformApi:
   ingress:
     enabled: true
@@ -22,6 +26,9 @@ platformApi:
       nginx.ingress.kubernetes.io/proxy-ssl-secret: "aegis-system/aegis-services-platform-api-tls"
       nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
       nginx.ingress.kubernetes.io/proxy-ssl-server-name: "platform-api-grpc.localtest.me"
+      nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+      nginx.ingress.kubernetes.io/ssl-ciphers: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+      nginx.ingress.kubernetes.io/ssl-prefer-server-ciphers: "true"
     tls:
       - secretName: aegis-services-platform-api-tls
         hosts:

@@ -37,13 +37,10 @@ auth:
   providers:
     keycloak:
       production:
-        metadataUrl: ${KEYCLOAK_METADATA_URL}
-        authUrl: ${KEYCLOAK_AUTH_URL}
-        tokenUrl: ${KEYCLOAK_TOKEN_URL}
-        userInfoUrl: ${KEYCLOAK_USERINFO_URL}
-        logoutUrl: ${KEYCLOAK_LOGOUT_URL}
         clientId: ${KEYCLOAK_CLIENT_ID}
         clientSecret: ${KEYCLOAK_CLIENT_SECRET}
+        issuer: ${KEYCLOAK_ISSUER}
+        scope: ${KEYCLOAK_SCOPE}
         callbackUrl: '${BACKEND_BASE_URL}/api/auth/keycloak/handler/frame'
         prompt: 'login'
 

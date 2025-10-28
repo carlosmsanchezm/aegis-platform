@@ -14,6 +14,7 @@ import (
 
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
@@ -325,6 +326,46 @@ func TestMaybeBootstrapWorkspaceDeps_CreatesCatalogWhenEnabled(t *testing.T) {
 	}
 	// Ensure idempotency
 	srv.maybeBootstrapWorkspaceDeps(context.Background(), workload)
+}
+
+func TestSubmitWorkload_BootstrapUsesPolicyDefaults(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+
+	srv.policyOverlay.Set(&infraapi.ProjectPlacementSpec{
+		ProjectID:     "proj-policy",
+		DefaultFlavor: "cpu-small",
+	})
+
+	req := &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-policy",
+			Queue:     "queue-policy",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{
+					Image: "alpine:3.19",
+				},
+			},
+		},
+	}
+
+	_, err := srv.SubmitWorkload(context.Background(), req)
+	if code := status.Code(err); code != codes.Internal && code != codes.FailedPrecondition {
+		t.Fatalf("unexpected error code %v: %v", code, err)
+	}
+
+	if srv.store.GetProject("proj-policy") == nil {
+		t.Fatalf("expected project proj-policy to be bootstrapped")
+	}
+	if srv.store.GetQueue("queue-policy") == nil {
+		t.Fatalf("expected queue queue-policy to be bootstrapped")
+	}
+	if srv.store.GetFlavor("cpu-small") == nil {
+		t.Fatalf("expected flavor cpu-small to be bootstrapped")
+	}
+	if ws, ok := req.Workload.GetKind().(*aegis.Workload_Workspace); !ok || ws.Workspace.GetFlavor() != "cpu-small" {
+		t.Fatalf("expected workspace flavor to be defaulted, got %+v", req.Workload.GetKind())
+	}
 }
 
 func TestSubmitWorkload_BootstrapDisabledRequiresProject(t *testing.T) {

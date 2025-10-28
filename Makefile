@@ -155,6 +155,10 @@ PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev
 PROXY_IMAGE ?= carlosmsanchez/aegis-proxy:dev
 WORKSPACE_IMAGE ?= carlosmsanchez/aegis-workspace-vscode:latest
 
+RHBK_USERNAME ?= un1cornsl4yer69
+RHBK_PASSWORD ?= P1rac1cab@16love
+RHBK_EMAIL ?= aegis@local.test
+
 AWS_ECR_REGISTRY ?= 567751785679.dkr.ecr.us-east-1.amazonaws.com
 CLOUD_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
@@ -245,6 +249,26 @@ deploy-local-tls: setup-local
 	echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
 	echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
 	helm dependency update charts/aegis-services >/dev/null; \
+	if [[ -n "$(RHBK_USERNAME)" && -n "$(RHBK_PASSWORD)" ]]; then \
+	  echo "Configuring registry.redhat.io pull secret in keycloak namespace"; \
+	  if kubectl get namespace keycloak >/dev/null 2>&1; then \
+	    phase=$$(kubectl get namespace keycloak -o jsonpath='{.status.phase}'); \
+	    if [[ "$$phase" == "Terminating" ]]; then \
+	      echo "Waiting for keycloak namespace to finish terminating"; \
+	      kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true; \
+	    fi; \
+	  fi; \
+	  kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
+	  kubectl delete secret redhat-pull-secret -n keycloak --ignore-not-found >/dev/null; \
+	  kubectl create secret docker-registry redhat-pull-secret \
+	    --namespace keycloak \
+	    --docker-server=registry.redhat.io \
+	    --docker-username="$(RHBK_USERNAME)" \
+	    --docker-password="$(RHBK_PASSWORD)" \
+	    --docker-email="$(RHBK_EMAIL)" >/dev/null; \
+	else \
+	  echo "RHBK_USERNAME/RHBK_PASSWORD not set; skipping redhat-pull-secret creation (Keycloak pods must already have access)."; \
+	fi; \
 	echo "Deploying Aegis services locally with TLS..."; \
 	helm upgrade --install aegis-services charts/aegis-services \
 	  -f charts/aegis-services/values/common.yaml \
@@ -254,22 +278,77 @@ deploy-local-tls: setup-local
 	  --set platformApi.image.tag=$$PLATFORM_API_TAG \
 	  --namespace aegis-system --create-namespace \
 	  --wait --timeout 5m; \
+	kubectl rollout status deployment/keycloak-operator -n keycloak --timeout=3m >/dev/null 2>&1 || true; \
+	kubectl rollout status deployment/aegis-services-ingress-nginx-controller -n aegis-system --timeout=3m >/dev/null 2>&1 || true; \
+	kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=controller -n aegis-system --timeout=3m >/dev/null 2>&1 || true; \
+	for i in $$(seq 1 30); do \
+	  if kubectl get endpoints aegis-services-ingress-nginx-controller-admission -n aegis-system -o jsonpath='{.subsets[0].addresses[0].ip}' >/dev/null 2>&1; then \
+	    break; \
+	  fi; \
+	  sleep 2; \
+	done; \
+	admission_ready=0; \
+	for attempt in $$(seq 1 6); do \
+	  probe=ingress-admission-probe-$$RANDOM; \
+	  if kubectl run $$probe --namespace aegis-system --rm -i --restart=Never --image=curlimages/curl:8.11.1 --image-pull-policy=IfNotPresent --command -- curl -k -sS -o /dev/null -w "%{http_code}" -m 5 https://aegis-services-ingress-nginx-controller-admission.aegis-system.svc:443/networking/v1/ingresses >/tmp/ingress-admission-probe.log 2>&1; then \
+	    admission_ready=1; \
+	    break; \
+	  fi; \
+	  kubectl delete pod $$probe -n aegis-system --ignore-not-found >/dev/null 2>&1 || true; \
+	  sleep 5; \
+	done; \
+	if [[ $$admission_ready -ne 1 ]]; then \
+	  echo "Ingress admission webhook did not respond after multiple attempts. See /tmp/ingress-admission-probe.log for details."; \
+	  cat /tmp/ingress-admission-probe.log; \
+	  exit 1; \
+	fi; \
+	KEYCLOAK_HOST_RAW=$$(kubectl get keycloak aegis-services-keycloak -n keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || echo "keycloak.localtest.me"); \
+	KEYCLOAK_HOST=$${KEYCLOAK_HOST_RAW#https://}; \
+	KEYCLOAK_HOST=$${KEYCLOAK_HOST#http://}; \
+	KEYCLOAK_HOST=$${KEYCLOAK_HOST%/}; \
+	KEYCLOAK_TLS_SECRET=$$(kubectl get keycloak aegis-services-keycloak -n keycloak -o jsonpath='{.spec.http.tlsSecret}' 2>/dev/null || echo "keycloak-tls"); \
+	if [[ -n "$$KEYCLOAK_HOST" && -n "$$KEYCLOAK_TLS_SECRET" ]]; then \
+	  echo "Ensuring Keycloak ingress TLS routes $$KEYCLOAK_HOST with secret $$KEYCLOAK_TLS_SECRET"; \
+	  kubectl patch ingress aegis-services-keycloak-ingress -n keycloak --type merge -p "{\"spec\":{\"tls\":[{\"hosts\":[\"$$KEYCLOAK_HOST\"],\"secretName\":\"$$KEYCLOAK_TLS_SECRET\"}]}}" >/dev/null 2>&1 || true; \
+	fi; \
 	echo "Deploying Aegis spoke locally with TLS..."; \
-	helm upgrade --install aegis-spoke charts/aegis-spoke \
-	  -f charts/aegis-spoke/values.yaml \
-	  -f charts/aegis-spoke/values-local.yaml \
-	  -f charts/aegis-spoke/values-local-tls.yaml \
-	  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
-	  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
-	  --set k8sAgent.image.pullPolicy=Always \
-	  --namespace aegis-system --create-namespace; \
+	success=0; \
+	for attempt in 1 2 3; do \
+	  if helm upgrade --install aegis-spoke charts/aegis-spoke \
+	    -f charts/aegis-spoke/values.yaml \
+	    -f charts/aegis-spoke/values-local.yaml \
+	    -f charts/aegis-spoke/values-local-tls.yaml \
+	    --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
+	    --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+	    --set k8sAgent.image.pullPolicy=Always \
+	    --namespace aegis-system --create-namespace; then \
+	      success=1; \
+	      break; \
+	  fi; \
+	  echo "Ingress webhook not ready (attempt $$attempt/3); waiting before retry"; \
+	  sleep 15; \
+	done; \
+	if [[ $$success -ne 1 ]]; then \
+	  echo "Failed to deploy aegis-spoke after retries"; \
+	  exit 1; \
+	fi; \
+	if [[ ! -f aegis-platform/.env ]]; then \
+	  cp aegis-platform/.env.development aegis-platform/.env; \
+	  echo "Created aegis-platform/.env from .env.development"; \
+	fi; \
 	echo "Syncing platform API certificate to $$HOME/aegis-platform-api-ca.crt ..."; \
 	kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; \
 	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; \
-	echo "   CA bundle refreshed."; \
-	echo "   To trust it system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
+	echo "Syncing Keycloak certificate to $$HOME/keycloak.localtest.me.crt ..."; \
+	kubectl get secret keycloak-tls -n keycloak -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; \
+	chmod 0644 "$$HOME/keycloak.localtest.me.crt"; \
+	cat "$$HOME/aegis-platform-api-ca.crt" "$$HOME/keycloak.localtest.me.crt" > "$$HOME/aegis-local-trust.pem"; \
+	chmod 0644 "$$HOME/aegis-local-trust.pem"; \
+	echo "   CA bundles refreshed."; \
+	echo "   Combined trust store: $$HOME/aegis-local-trust.pem"; \
+	echo "   To trust the platform API system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
 	echo "   Launch VS Code with TLS trust:"; \
-	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-platform-api-ca.crt \"; \
+	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-local-trust.pem \"; \
 	echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
 	echo "✅ Deployed with TLS using self-signed certificates"; \
 	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
@@ -295,7 +374,7 @@ port-forward:
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
 	@echo "   Backend: http://platform-api.localtest.me (ingress, no port-forward required)"
-	@cd aegis-platform && yarn dev
+	@cd aegis-platform && NODE_EXTRA_CA_CERTS="$${NODE_EXTRA_CA_CERTS:-$$HOME/aegis-local-trust.pem}" yarn dev
 
 dev-backstage-cloud:
 	@echo "Starting Backstage development server (cloud mode)..."
@@ -316,3 +395,5 @@ clean-local:
 			echo "Skipping $$release (not installed)"; \
 		fi; \
 	done
+	@kubectl delete namespace keycloak --ignore-not-found >/dev/null 2>&1 || true
+	@kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true

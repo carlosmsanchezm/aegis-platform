@@ -521,7 +521,7 @@ jobs:
       grpc_addr:     ${{ steps.out.outputs.grpc_addr }}
       grpc_host:     ${{ steps.out.outputs.grpc_host }}
       proxy_hostname: ${{ steps.out.outputs.proxy_hostname }}
-      grpc_ca:       ${{ steps.out.outputs.grpc_ca }}
+      grpc_ca_b64:   ${{ steps.out.outputs.grpc_ca_b64 }}
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
       PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
@@ -658,7 +658,8 @@ jobs:
           echo "grpc_addr=${PLATFORM_DNS}:8081"               >> "$GITHUB_OUTPUT"
           echo "grpc_host=${PLATFORM_DNS}"                    >> "$GITHUB_OUTPUT"
           echo "proxy_hostname=${PROXY_DNS}"                  >> "$GITHUB_OUTPUT"
-          echo "grpc_ca=${CA_BUNDLE_PATH}"                    >> "$GITHUB_OUTPUT"
+          CA_BUNDLE_B64=$(base64 "${CA_BUNDLE_PATH}" | tr -d '\n')
+          echo "grpc_ca_b64=${CA_BUNDLE_B64}"                 >> "$GITHUB_OUTPUT"
 
   e2e-tests:
     name: E2E Test Matrix
@@ -689,7 +690,7 @@ jobs:
               export AEGIS_GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
               export AEGIS_PROXY_HOSTNAME="${{ needs.e2e-endpoints.outputs.proxy_hostname }}"
               export GRPC_TLS=1
-              export GRPC_CA="${{ needs.e2e-endpoints.outputs.grpc_ca }}"
+              export GRPC_CA="${GRPC_CA_PATH}"
               export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
               export AEGIS_PLATFORM_NAMESPACE="${{ needs.resolve-settings.outputs.preview_namespace }}"
@@ -701,7 +702,7 @@ jobs:
               echo "🧪 Workspace connectivity smoke"
               export GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
               export GRPC_TLS=1
-              export GRPC_CA="${{ needs.e2e-endpoints.outputs.grpc_ca }}"
+              export GRPC_CA="${GRPC_CA_PATH}"
               export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export WORKSPACE_NAMESPACE=aegis-workloads
               export CLEANUP=1
@@ -767,6 +768,21 @@ jobs:
           if [[ -n "${KUBECTL_CMD}" ]]; then
             eval "${KUBECTL_CMD}"
           fi
+
+      - name: Write CA bundle for suite
+        if: ${{ steps.suite-filter.outputs.enabled == 'true' }}
+        env:
+          GRPC_CA_B64: ${{ needs.e2e-endpoints.outputs.grpc_ca_b64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GRPC_CA_B64:-}" ]]; then
+            echo "Missing GRPC_CA_B64 from endpoints job" >&2
+            exit 1
+          fi
+          CA_PATH="${HOME}/aegis-platform-api-ca.crt"
+          printf '%s' "${GRPC_CA_B64}" | base64 --decode > "${CA_PATH}"
+          chmod 600 "${CA_PATH}"
+          echo "GRPC_CA_PATH=${CA_PATH}" >> "$GITHUB_ENV"
 
       - name: Install test tooling (grpcurl + jq)
         if: ${{ steps.suite-filter.outputs.enabled == 'true' }}

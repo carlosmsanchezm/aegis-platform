@@ -610,6 +610,19 @@ jobs:
             exit 1
           fi
 
+          for HOST in "${PLATFORM_DNS}" "${PROXY_DNS}"; do
+            echo "Waiting for DNS ${HOST} to resolve..."
+            ATTEMPTS=0
+            until getent ahosts "${HOST}" >/dev/null 2>&1; do
+              ((ATTEMPTS++))
+              if (( ATTEMPTS >= 60 )); then
+                echo "DNS name ${HOST} did not resolve within 5 minutes" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+          done
+
           echo "PLATFORM_DNS=${PLATFORM_DNS}" >> "$GITHUB_ENV"
           echo "PROXY_DNS=${PROXY_DNS}"       >> "$GITHUB_ENV"
 

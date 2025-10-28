@@ -50,11 +50,30 @@ if [[ $# -eq 1 ]]; then
   fi
 fi
 
+if [[ -z "${RUN_ID}" ]]; then
+  if [[ -z "${BRANCH}" ]]; then
+    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  fi
+
+  echo "Searching for failed runs on branch '${BRANCH}' in ${WORKFLOW_FILE}..." >&2
+  RUN_ID="$(gh run list \
+    --workflow "${WORKFLOW_FILE}" \
+    --branch "${BRANCH}" \
+    --limit 20 \
+    --json databaseId,status,conclusion \
+    --jq 'map(select(.status == "completed" and .conclusion != "success")) | first | .databaseId')" || true
+
+  if [[ -z "${RUN_ID}" || "${RUN_ID}" == "null" ]]; then
+    echo "No failed runs found for branch '${BRANCH}'." >&2
+    exit 1
+  fi
+fi
+
 current_sha="$(git rev-parse HEAD)"
 run_json="$(gh run view "${RUN_ID}" --json status,conclusion,headSha,headBranch,event)"
 run_head_sha="$(echo "${run_json}" | jq -r '.headSha')"
 run_branch="$(echo "${run_json}" | jq -r '.headBranch')"
-pr_number="$(gh pr view \"${run_branch}\" --json number --jq '.number' 2>/dev/null || echo \"\")"
+pr_number="$(gh pr view "${run_branch}" --json number --jq '.number' 2>/dev/null || echo "")"
 
 if [[ -z "${run_head_sha}" || "${run_head_sha}" == "null" ]]; then
   echo "Unable to determine head SHA for run ${RUN_ID}" >&2
@@ -103,30 +122,4 @@ echo "Dispatched run ${new_run_id} for preview ${pr_number}." >&2
 if [[ "${WATCH}" == "1" ]]; then
   echo "Watching run ${new_run_id}..." >&2
   gh run watch "${new_run_id}" --exit-status
-fi
-if [[ -z "${RUN_ID}" ]]; then
-  if [[ -z "${BRANCH}" ]]; then
-    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-  fi
-
-  echo "Searching for failed runs on branch '${BRANCH}' in ${WORKFLOW_FILE}..." >&2
-  RUN_ID="$(gh run list \
-    --workflow "${WORKFLOW_FILE}" \
-    --branch "${BRANCH}" \
-    --limit 20 \
-    --json databaseId,status,conclusion \
-    --jq 'map(select(.status == "completed" and .conclusion != "success")) | first | .databaseId')" || true
-
-  if [[ -z "${RUN_ID}" || "${RUN_ID}" == "null" ]]; then
-    echo "No failed runs found for branch '${BRANCH}'." >&2
-    exit 1
-  fi
-fi
-
-echo "Rerunning failed jobs for workflow run ${RUN_ID}..." >&2
-gh run rerun "${RUN_ID}" --failed
-
-if [[ "${WATCH}" == "1" ]]; then
-  echo "Watching rerun ${RUN_ID}..." >&2
-  gh run watch "${RUN_ID}" --exit-status
 fi

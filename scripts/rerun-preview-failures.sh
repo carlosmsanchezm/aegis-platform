@@ -7,6 +7,8 @@ WORKFLOW_FILE="${WORKFLOW_FILE:-preview-deployment.yml}"
 RUN_ID="${RUN_ID:-}"
 BRANCH="${BRANCH:-}"
 WATCH="${WATCH:-0}"
+SUITES="${SUITES:-platform-api}"
+RUN_SUBSET="${RUN_SUBSET:-tests-only}"
 
 usage() {
   cat <<'EOF'
@@ -24,6 +26,8 @@ Environment variables:
   RUN_ID          Explicit workflow run ID to rerun
   BRANCH          Branch to inspect for failed runs (default: current branch)
   WATCH           Set to 1 to watch the rerun to completion
+  RUN_SUBSET      Workflow input run_subset when dispatching new runs (default: tests-only)
+  SUITES          Workflow input suites when dispatching new runs (default: platform-api)
 EOF
 }
 
@@ -46,6 +50,60 @@ if [[ $# -eq 1 ]]; then
   fi
 fi
 
+current_sha="$(git rev-parse HEAD)"
+run_json="$(gh run view "${RUN_ID}" --json status,conclusion,headSha,headBranch,event,pullRequests)"
+run_head_sha="$(echo "${run_json}" | jq -r '.headSha')"
+run_branch="$(echo "${run_json}" | jq -r '.headBranch')"
+pr_number="$(echo "${run_json}" | jq -r '.pullRequests[0].number // empty')"
+
+if [[ -z "${run_head_sha}" || "${run_head_sha}" == "null" ]]; then
+  echo "Unable to determine head SHA for run ${RUN_ID}" >&2
+  exit 1
+fi
+
+if [[ "${run_head_sha}" == "${current_sha}" ]]; then
+  echo "Rerunning failed jobs for workflow run ${RUN_ID} (same commit)..." >&2
+  gh run rerun "${RUN_ID}" --failed
+
+  if [[ "${WATCH}" == "1" ]]; then
+    echo "Watching rerun ${RUN_ID}..." >&2
+    gh run watch "${RUN_ID}" --exit-status
+  fi
+  exit 0
+fi
+
+# Workflow definition changed; dispatch a targeted rerun using the latest workflow file.
+if [[ -z "${pr_number}" ]]; then
+  echo "Run ${RUN_ID} is not associated with a pull request; cannot compute preview number for dispatch." >&2
+  exit 1
+fi
+
+echo "Workflow definition changed since run ${RUN_ID}; dispatching ${RUN_SUBSET} run for preview ${pr_number} on branch ${run_branch}..." >&2
+gh workflow run "${WORKFLOW_FILE}" \
+  --ref "${run_branch}" \
+  -f run_subset="${RUN_SUBSET}" \
+  -f suites="${SUITES}" \
+  -f preview_number="${pr_number}"
+
+# Give GitHub a moment to register the new run, then pick it up for watching.
+sleep 10
+new_run_id="$(gh run list \
+  --workflow "${WORKFLOW_FILE}" \
+  --branch "${run_branch}" \
+  --limit 10 \
+  --json databaseId,status,headSha,createdAt \
+  --jq 'map(select(.status != "completed")) | sort_by(.createdAt) | last | .databaseId')" || true
+
+if [[ -z "${new_run_id}" || "${new_run_id}" == "null" ]]; then
+  echo "Unable to identify the dispatched run; check GitHub Actions manually." >&2
+  exit 1
+fi
+
+echo "Dispatched run ${new_run_id} for preview ${pr_number}." >&2
+if [[ "${WATCH}" == "1" ]]; then
+  echo "Watching run ${new_run_id}..." >&2
+  gh run watch "${new_run_id}" --exit-status
+fi
 if [[ -z "${RUN_ID}" ]]; then
   if [[ -z "${BRANCH}" ]]; then
     BRANCH="$(git rev-parse --abbrev-ref HEAD)"

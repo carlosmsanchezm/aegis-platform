@@ -158,7 +158,7 @@ WORKSPACE_IMAGE ?= carlosmsanchez/aegis-workspace-vscode:latest
 
 .PHONY: rerun-preview-failures
 rerun-preview-failures:
-	@WORKFLOW_FILE="$(WORKFLOW_FILE)" RUN_ID="$(RUN_ID)" BRANCH="$(BRANCH)" WATCH="$(WATCH)" ./scripts/rerun-preview-failures.sh $(TARGET)
+	@WORKFLOW_FILE="$(WORKFLOW_FILE)" RUN_ID="$(RUN_ID)" BRANCH="$(BRANCH)" WATCH="$(WATCH)" RUN_SUBSET="$(RUN_SUBSET)" SUITES="$(SUITES)" ./scripts/rerun-preview-failures.sh $(TARGET)
 
 RHBK_USERNAME ?= un1cornsl4yer69
 RHBK_PASSWORD ?= P1rac1cab@16love

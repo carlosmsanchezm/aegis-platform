@@ -16,6 +16,7 @@ This guide summarizes the most common `make` targets in the repository so you do
 | `make workspace-image-push` | Push the workspace image to the registry. |
 | `make preview` | Run the full preview workflow locally (terraform + helm + smoke tests). |
 | `make preview-clean` | Tear down the preview infrastructure locally. |
+| `make rerun-preview-failures` | Rerun only the failed jobs from the latest preview GitHub Actions run (see `scripts/rerun-preview-failures.sh`). |
 
 ## agents/k8s-agent
 
@@ -62,6 +63,7 @@ While not Make targets, these scripts are often invoked by the Makefile or CI:
 - `./scripts/test-local-with-tls.sh` – Local smoke test against the platform API + workspace.
 - `./scripts/test-workspace-connection.sh` – Workspace VS Code connectivity smoke test.
 - `./scripts/test-workspace-crd.sh` – Validates new workspace CRDs.
+- `./scripts/rerun-preview-failures.sh` – Uses the GitHub CLI to rerun only failed jobs from a preview workflow run (`WORKFLOW_FILE`, `RUN_ID`, `BRANCH`, and `WATCH` env vars customize behavior).
 
 ## Tips
 

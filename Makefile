@@ -25,7 +25,8 @@ PF_PROXY_HTTP_PORT ?= 10085
 
 .PHONY: all proto tidy build test verify run-api run-operator stop \
 	setup-local deploy-local deploy-local-tls port-forward \
-	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local
+	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local \
+	rerun-preview-failures
 
 all: proto tidy build
 
@@ -154,6 +155,10 @@ K8S_AGENT_IMAGE ?= carlosmsanchez/aegis-k8s-agent:dev
 PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev
 PROXY_IMAGE ?= carlosmsanchez/aegis-proxy:dev
 WORKSPACE_IMAGE ?= carlosmsanchez/aegis-workspace-vscode:latest
+
+.PHONY: rerun-preview-failures
+rerun-preview-failures:
+	@WORKFLOW_FILE="$(WORKFLOW_FILE)" RUN_ID="$(RUN_ID)" BRANCH="$(BRANCH)" WATCH="$(WATCH)" ./scripts/rerun-preview-failures.sh $(TARGET)
 
 RHBK_USERNAME ?= un1cornsl4yer69
 RHBK_PASSWORD ?= P1rac1cab@16love

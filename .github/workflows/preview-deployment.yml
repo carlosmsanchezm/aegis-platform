@@ -692,9 +692,9 @@ jobs:
         id: out
         run: |
           set -euo pipefail
-          echo "grpc_addr=${CONNECT_PLATFORM_DNS}:8081"       >> "$GITHUB_OUTPUT"
-          echo "grpc_host=${ORIGINAL_PLATFORM_DNS}"           >> "$GITHUB_OUTPUT"
-          echo "proxy_hostname=${CONNECT_PROXY_DNS}"          >> "$GITHUB_OUTPUT"
+          echo "grpc_addr=${PLATFORM_DNS}:8081"               >> "$GITHUB_OUTPUT"
+          echo "grpc_host=${PLATFORM_TLS_HOST}"               >> "$GITHUB_OUTPUT"
+          echo "proxy_hostname=${PROXY_DNS}"                  >> "$GITHUB_OUTPUT"
           CA_BUNDLE_B64=$(base64 "${CA_BUNDLE_PATH}" | tr -d '\n')
           echo "grpc_ca_b64=${CA_BUNDLE_B64}"                 >> "$GITHUB_OUTPUT"
 

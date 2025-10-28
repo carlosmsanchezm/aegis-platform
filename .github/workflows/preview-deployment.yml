@@ -46,21 +46,17 @@ on:
 env:
   AWS_REGION: us-east-1
   # Compute PREVIEW_ID for PRs or workflow_dispatch
-  PREVIEW_ID: ${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number
+  PREVIEW_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.preview_number != '' && github.event.inputs.preview_number
     || ( github.event_name == 'pull_request' && github.event.number
     || github.run_number ) }}
-  PREVIEW_NAMESPACE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number
-    || ( github.event_name == 'pull_request' && github.event.number
-    || github.run_number ) }}
-  PREVIEW_RELEASE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number
-    || ( github.event_name == 'pull_request' && github.event.number
-    || github.run_number ) }}
-  RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
-  TEARDOWN_POLICY: ${{ github.event.inputs.teardown_policy != '' && github.event.inputs.teardown_policy || 'auto-on-success' }}
-  KEEP_ON_FAILURE: ${{ github.event.inputs.keep_on_failure != '' && github.event.inputs.keep_on_failure || 'true' }}
+  PREVIEW_NAMESPACE: preview-${{ env.PREVIEW_ID }}
+  PREVIEW_RELEASE: preview-${{ env.PREVIEW_ID }}
+  RUN_SUBSET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
+  TEARDOWN_POLICY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.teardown_policy != '' && github.event.inputs.teardown_policy || 'auto-on-success' }}
+  KEEP_ON_FAILURE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.keep_on_failure != '' && github.event.inputs.keep_on_failure || 'true' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
-  MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
-  E2E_SUITES: ${{ github.event.inputs.suites != '' && github.event.inputs.suites || 'all' }}
+  MANUAL_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || '' }}
+  E2E_SUITES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.suites != '' && github.event.inputs.suites || 'all' }}
   # For Buildx cache scopes
   CACHE_SCOPE_PREFIX: aegis-preview
 

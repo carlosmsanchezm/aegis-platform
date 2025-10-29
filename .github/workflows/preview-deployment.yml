@@ -831,6 +831,17 @@ jobs:
               export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
               export WORKSPACE_NAMESPACE=aegis-workloads
               export CLEANUP=1
+              echo "🔍 Inspecting kubeconfig distribution before workspace test..."
+              if kubectl get secret aegis-kubeconfigs -n "${PREVIEW_NAMESPACE}" >/dev/null 2>&1; then
+                echo "   • aegis-kubeconfigs keys:"
+                kubectl get secret aegis-kubeconfigs -n "${PREVIEW_NAMESPACE}" -o json | jq -r '.data | keys[]' | sed 's/^/     - /'
+              else
+                echo "   ⚠️ Secret aegis-kubeconfigs not found in namespace ${PREVIEW_NAMESPACE}"
+              fi
+              if kubectl rollout status "deployment/${PREVIEW_RELEASE}-platform-api" -n "${PREVIEW_NAMESPACE}" --timeout=5s >/dev/null 2>&1; then
+                echo "   • Files mounted at /etc/kubeconfigs inside platform-api pod:"
+                kubectl exec deploy/"${PREVIEW_RELEASE}-platform-api" -n "${PREVIEW_NAMESPACE}" -- ls /etc/kubeconfigs 2>/dev/null | sed 's/^/     - /' || echo "     (ls failed)"
+              fi
               IMAGE="${WORKSPACE_IMAGE_OUTPUT}"
               if [[ -z "${IMAGE}" ]]; then
                 if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then

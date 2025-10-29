@@ -481,12 +481,14 @@ jobs:
         run: echo "fresh=true" >> "$GITHUB_OUTPUT"
 
       - name: Build pulumi preview CLI
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         run: |
           set -euo pipefail
           mkdir -p bin
           go build -o bin/pulumi-preview ./services/platform-api/cmd/pulumi-preview
 
       - name: Apply pulumi preview ProjectInfra manifest
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         id: pulumi-preview-manifest
         env:
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
@@ -504,6 +506,7 @@ jobs:
           echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
 
       - name: Run pulumi preview CLI
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         env:
           PROJECT_INFRA_NAME:      ${{ steps.pulumi-preview-manifest.outputs.name }}
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
@@ -520,7 +523,7 @@ jobs:
           ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}" --kubeconfig "${KUBE_PATH}"
 
       - name: Cleanup pulumi preview ProjectInfra
-        if: ${{ always() }}
+        if: ${{ env.RUN_SUBSET != 'tests-only' && always() }}
         env:
           PROJECT_INFRA_NAME:      ${{ steps.pulumi-preview-manifest.outputs.name }}
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}

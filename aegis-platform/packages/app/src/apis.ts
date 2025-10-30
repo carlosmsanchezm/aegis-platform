@@ -29,7 +29,6 @@ export const buildKeycloakProviderInfo = (): AuthProviderInfo => ({
 
 export const keycloakAuthApiRef = createApiRef<OAuth2>({
   id: 'internal.auth.keycloak',
-  description: 'OIDC auth API for Keycloak-backed sign-in',
 });
 
 export const apis: AnyApiFactory[] = [

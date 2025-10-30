@@ -4,7 +4,6 @@ import {
   Page,
   Header,
   Content,
-  ContentHeader,
   Progress,
   WarningPanel,
   InfoCard,
@@ -16,6 +15,7 @@ import {
   CopyTextButton,
 } from '@backstage/core-components';
 import { Box, Button, Typography } from '@material-ui/core';
+import { makeStyles, Theme } from '@material-ui/core/styles';
 import {
   alertApiRef,
   discoveryApiRef,
@@ -37,6 +37,111 @@ import {
   buildKubectlDescribeCommand,
 } from '../api/aegisClient';
 import { ConnectModal } from './ConnectModal';
+
+const useStyles = makeStyles((theme: Theme) => ({
+  page: {
+    position: 'relative',
+  },
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(4),
+    position: 'relative',
+    zIndex: 1,
+  },
+  hero: {
+    position: 'relative',
+    borderRadius: 32,
+    padding: theme.spacing(4.5, 5),
+    overflow: 'hidden',
+    background:
+      'linear-gradient(140deg, rgba(0, 245, 255, 0.16) 0%, rgba(7, 20, 44, 0.9) 55%, rgba(16, 8, 30, 0.88) 100%)',
+    boxShadow: '0 36px 64px rgba(3, 12, 35, 0.55)',
+  },
+  heroGlow: {
+    position: 'absolute',
+    inset: '-20% -25% auto auto',
+    width: '60%',
+    height: '160%',
+    background:
+      'radial-gradient(circle, rgba(76, 255, 166, 0.4) 0%, rgba(76, 255, 166, 0) 65%)',
+    filter: 'blur(12px)',
+    opacity: 0.4,
+  },
+  heroHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: theme.spacing(2),
+  },
+  overline: {
+    letterSpacing: '0.28em',
+    textTransform: 'uppercase',
+    color: 'rgba(197, 226, 255, 0.72)',
+  },
+  heroTitle: {
+    marginTop: theme.spacing(1.5),
+    letterSpacing: '0.2em',
+    textTransform: 'uppercase',
+  },
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing(2),
+    marginTop: theme.spacing(3),
+    flexWrap: 'wrap',
+  },
+  statusMessage: {
+    color: 'rgba(197, 226, 255, 0.72)',
+  },
+  metaGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: theme.spacing(2),
+    marginTop: theme.spacing(3),
+  },
+  metaTile: {
+    padding: theme.spacing(1.6, 2),
+    borderRadius: 18,
+    border: '1px solid rgba(0, 245, 255, 0.16)',
+    backgroundColor: 'rgba(0, 245, 255, 0.05)',
+  },
+  metaLabel: {
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+    color: 'rgba(124, 154, 196, 0.9)',
+    fontSize: '0.7rem',
+  },
+  heroActions: {
+    marginTop: theme.spacing(3),
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(1),
+    alignItems: 'flex-start',
+  },
+  connectButton: {
+    minWidth: 220,
+  },
+  cards: {
+    display: 'grid',
+    gap: theme.spacing(3),
+    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+  },
+  infoCard: {
+    borderRadius: 24,
+    border: '1px solid rgba(0, 245, 255, 0.14)',
+    background:
+      'linear-gradient(170deg, rgba(6, 16, 38, 0.92) 0%, rgba(10, 24, 48, 0.88) 45%, rgba(16, 8, 30, 0.84) 100%)',
+    boxShadow: '0 28px 52px rgba(3, 12, 35, 0.4)',
+  },
+  link: {
+    color: '#00f5ff',
+    textDecoration: 'none',
+  },
+  warning: {
+    marginTop: theme.spacing(2),
+  },
+}));
 
 const statusChip = (status: string) => {
   const mapped = mapDisplayStatus(status);
@@ -316,110 +421,135 @@ export const WorkloadDetailsPage: FC = () => {
   );
 
   return (
-    <Page themeId="tool">
-      <Header title="Workload Details" subtitle={id} />
+    <Page themeId="tool" className={classes.page}>
+      <Header
+        title="ÆGIS — Mission Detail"
+        subtitle={id ?? 'Mission Identifier'}
+      />
       <Content>
-        <ContentHeader title="Overview">
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/aegis/workloads')}
-          >
-            Back to list
-          </Button>
-        </ContentHeader>
+        <div className={classes.content}>
+          {loading && <Progress />}
 
-        {loading && <Progress />}
+          {error && (
+            <div className={classes.warning}>
+              <WarningPanel title="Failed to load workload" severity="error">
+                {error}
+              </WarningPanel>
+            </div>
+          )}
 
-        {error && (
-          <WarningPanel title="Failed to load workload" severity="error">
-            {error}
-          </WarningPanel>
-        )}
-
-        {workload && (
-          <Box display="flex" flexDirection="column" gridGap={16}>
-            <InfoCard title="Status">
-              <Box display="flex" flexDirection="column" gridGap={12}>
-                <Box display="flex" alignItems="center" gridGap={16}>
+          {workload && (
+            <>
+              <div className={classes.hero}>
+                <div className={classes.heroGlow} />
+                <div className={classes.heroHeader}>
+                  <Typography variant="overline" className={classes.overline}>
+                    Project {workload.projectId ?? '—'}
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<ArrowBackIcon />}
+                    onClick={() => navigate('/aegis/workloads')}
+                  >
+                    Mission Log
+                  </Button>
+                </div>
+                <Typography variant="h2" className={classes.heroTitle}>
+                  {workload.id ?? 'Workspace' }
+                </Typography>
+                <div className={classes.statusRow}>
                   {statusChip(rawStatus)}
                   {workload.message && (
-                    <Typography variant="body2" color="textSecondary">
+                    <Typography variant="body2" className={classes.statusMessage}>
                       {workload.message}
                     </Typography>
                   )}
-                </Box>
+                </div>
+                <div className={classes.metaGrid}>
+                  {[{ label: 'Flavor', value: getFlavor(workload) || '—' },
+                    { label: 'Queue', value: workload.queue ?? '—' },
+                    { label: 'Cluster', value: workload.clusterId ?? '—' },
+                    { label: 'Endpoint', value: workload.url ?? '—' },
+                  ].map(tile => (
+                    <div key={tile.label} className={classes.metaTile}>
+                      <Typography variant="caption" className={classes.metaLabel}>
+                        {tile.label}
+                      </Typography>
+                      <Typography variant="body2">{tile.value}</Typography>
+                    </div>
+                  ))}
+                </div>
                 {canConnect && (
-                  <Box>
+                  <div className={classes.heroActions}>
                     <Button
                       variant="contained"
                       color="primary"
                       disabled={connectButtonDisabled}
                       onClick={handleConnect}
+                      className={classes.connectButton}
                     >
-                      {sessionLoading ? 'Preparing session…' : 'Connect'}
+                      {sessionLoading ? 'Preparing secure channel…' : 'Open Secure Channel'}
                     </Button>
                     {!isRunning && (
-                      <Typography
-                        variant="caption"
-                        color="textSecondary"
-                        display="block"
-                      >
+                      <Typography variant="caption" color="textSecondary">
                         Workspace must be running before connecting.
                       </Typography>
                     )}
-                  </Box>
+                  </div>
                 )}
-              </Box>
-            </InfoCard>
+              </div>
 
-            <InfoCard title="Metadata">
-              <StructuredMetadataTable metadata={metadata} />
-            </InfoCard>
+              <div className={classes.cards}>
+                <InfoCard title="Mission Metadata" className={classes.infoCard}>
+                  <StructuredMetadataTable metadata={metadata} />
+                </InfoCard>
 
-            {kubectlCmd && (
-              <InfoCard title="Debug commands">
-                <Box display="flex" alignItems="center" gridGap={8}>
-                  <Typography variant="body2">{kubectlCmd}</Typography>
-                  <CopyTextButton
-                    text={kubectlCmd}
-                    tooltip="Copy kubectl describe"
-                  />
-                </Box>
-              </InfoCard>
-            )}
+                {kubectlCmd && (
+                  <InfoCard title="Field Diagnostics" className={classes.infoCard}>
+                    <Box display="flex" alignItems="center" gridGap={8}>
+                      <Typography variant="body2">{kubectlCmd}</Typography>
+                      <CopyTextButton
+                        text={kubectlCmd}
+                        tooltip="Copy kubectl describe"
+                      />
+                    </Box>
+                  </InfoCard>
+                )}
 
-            {(workload.workspace || workload.training) && (
-              <InfoCard title="Specification">
-                <StructuredMetadataTable
-                  metadata={{
-                    Type: workload.workspace ? 'Workspace' : 'Training',
-                    Image:
-                      workload.workspace?.image ??
-                      workload.training?.image ??
-                      '—',
-                    Command:
-                      workload.workspace?.command?.join(' ') ??
-                      workload.training?.command?.join(' ') ??
-                      '—',
-                  }}
-                />
-              </InfoCard>
-            )}
+                {(workload.workspace || workload.training) && (
+                  <InfoCard title="Launch Specification" className={classes.infoCard}>
+                    <StructuredMetadataTable
+                      metadata={{
+                        Type: workload.workspace ? 'Workspace' : 'Training',
+                        Image:
+                          workload.workspace?.image ??
+                          workload.training?.image ??
+                          '—',
+                        Command:
+                          workload.workspace?.command?.join(' ') ??
+                          workload.training?.command?.join(' ') ??
+                          '—',
+                      }}
+                    />
+                  </InfoCard>
+                )}
+              </div>
 
-            {loc && (
-              <Typography variant="body2">
-                View Kubernetes object{' '}
-                <RouterLink
-                  to={`/kubernetes/overview?namespace=${loc.namespace}`}
-                >
-                  {loc.kind} {loc.name}
-                </RouterLink>
-              </Typography>
-            )}
-          </Box>
-        )}
+              {loc && (
+                <Typography variant="body2">
+                  View Kubernetes object{' '}
+                  <RouterLink
+                    to={`/kubernetes/overview?namespace=${loc.namespace}`}
+                    className={classes.link}
+                  >
+                    {loc.kind} {loc.name}
+                  </RouterLink>
+                </Typography>
+              )}
+            </>
+          )}
+        </div>
       </Content>
       <ConnectModal
         open={connectOpen}

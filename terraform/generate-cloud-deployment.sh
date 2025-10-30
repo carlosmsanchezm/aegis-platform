@@ -29,6 +29,8 @@ PLATFORM_API_RELEASE_NAME="${RELEASE_BASENAME}-platform-api"
 PROXY_RELEASE_NAME="${RELEASE_BASENAME}-proxy"
 SPOKE_HELM_RELEASE=${SPOKE_HELM_RELEASE:-${HELM_RELEASE}-spoke}
 SPOKE_NAMESPACE=${SPOKE_NAMESPACE:-${K8S_NAMESPACE}}
+KEYCLOAK_SERVICE_NAME="${RELEASE_BASENAME}-keycloak"
+KEYCLOAK_INTERNAL_HOST="${KEYCLOAK_SERVICE_NAME}.${K8S_NAMESPACE}.svc.cluster.local"
 
 usage() {
 cat <<'EOF'
@@ -76,11 +78,26 @@ TLS_CA_KEY_PATH=/tmp/proxy-ca-key.pem
 TLS_CERT_CSR_PATH=/tmp/proxy-cert.csr
 TLS_CERT_EXT_PATH=/tmp/proxy-cert-ext.cnf
 TLS_CERT_CHAIN_PATH=/tmp/proxy-cert-chain.pem
+KEYCLOAK_CERT_PATH=/tmp/keycloak-cert.pem
+KEYCLOAK_KEY_PATH=/tmp/keycloak-key.pem
+KEYCLOAK_CERT_CSR_PATH=/tmp/keycloak-cert.csr
+KEYCLOAK_CERT_EXT_PATH=/tmp/keycloak-cert-ext.cnf
+KEYCLOAK_CERT_CHAIN_PATH=/tmp/keycloak-cert-chain.pem
 PLATFORM_API_SERVICE_ACCOUNT=${PLATFORM_API_SERVICE_ACCOUNT:-aegis-platform-api}
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
 MIGRATIONS_UP_FILE=""
+KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:-admin}
+KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-PreviewAdmin123!}
+KEYCLOAK_DB_USERNAME=${KEYCLOAK_DB_USERNAME:-keycloak}
+KEYCLOAK_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-PreviewKeycloakDb123!}
+KEYCLOAK_BACKSTAGE_CLIENT_SECRET=${KEYCLOAK_BACKSTAGE_CLIENT_SECRET:-preview-backstage-client-secret}
+KEYCLOAK_ADMIN_SECRET_NAME=${KEYCLOAK_ADMIN_SECRET_NAME:-keycloak-admin-secret}
+KEYCLOAK_DB_SECRET_NAME=${KEYCLOAK_DB_SECRET_NAME:-keycloak-db-secret}
+KEYCLOAK_CLIENT_SECRET_NAME=${KEYCLOAK_CLIENT_SECRET_NAME:-keycloak-backstage-client-secret}
+KEYCLOAK_TLS_SECRET_NAME=${KEYCLOAK_TLS_SECRET_NAME:-keycloak-tls}
+KEYCLOAK_INTERNAL_PORT=${KEYCLOAK_INTERNAL_PORT:-8443}
 
 IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG}")"
 IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG}")"
@@ -89,12 +106,14 @@ IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_imag
 cleanup() {
   rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
     "${TLS_CERT_CSR_PATH}" "${TLS_CERT_EXT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl" \
+    "${KEYCLOAK_CERT_CSR_PATH}" "${KEYCLOAK_CERT_EXT_PATH}" "${KEYCLOAK_KEY_PATH}" "${KEYCLOAK_CERT_PATH}" "${KEYCLOAK_CERT_CHAIN_PATH}" \
     "${MIGRATIONS_UP_FILE}"
 }
 trap cleanup EXIT
 
 echo "🔐 Enforcing TLS for platform-api and proxy"
-rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl"
+rm -f "${TLS_CERT_PATH}" "${TLS_KEY_PATH}" "${TLS_CA_CERT_PATH}" "${TLS_CA_KEY_PATH}" "${TLS_CERT_CSR_PATH}" "${TLS_CERT_CHAIN_PATH}" "${TLS_CA_CERT_PATH}.srl" \
+  "${KEYCLOAK_CERT_PATH}" "${KEYCLOAK_KEY_PATH}" "${KEYCLOAK_CERT_CSR_PATH}" "${KEYCLOAK_CERT_CHAIN_PATH}" "${KEYCLOAK_CERT_EXT_PATH}"
 
 echo "🚀 Generating Helm values from Terraform outputs..."
 echo "📖 See DEPLOYMENT_AND_TESTING_GUIDE.md for complete deployment guide"
@@ -232,6 +251,24 @@ kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl a
 kubectl create secret generic aegis-platform-secrets \
   --from-literal=db-password="${DB_PASSWORD}" \
   --from-literal=proxy-jwt-secret="${JWT_SECRET}" \
+  --namespace "${K8S_NAMESPACE}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+echo "   ℹ️  Ensuring Keycloak secrets exist"
+kubectl create secret generic "${KEYCLOAK_ADMIN_SECRET_NAME}" \
+  --from-literal=username="${KEYCLOAK_ADMIN_USERNAME}" \
+  --from-literal=password="${KEYCLOAK_ADMIN_PASSWORD}" \
+  --namespace "${K8S_NAMESPACE}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic "${KEYCLOAK_DB_SECRET_NAME}" \
+  --from-literal=username="${KEYCLOAK_DB_USERNAME}" \
+  --from-literal=password="${KEYCLOAK_DB_PASSWORD}" \
+  --namespace "${K8S_NAMESPACE}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic "${KEYCLOAK_CLIENT_SECRET_NAME}" \
+  --from-literal=clientSecret="${KEYCLOAK_BACKSTAGE_CLIENT_SECRET}" \
   --namespace "${K8S_NAMESPACE}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
@@ -443,6 +480,27 @@ if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
     helm uninstall "${HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
     helm uninstall "${SPOKE_HELM_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
     kubectl delete namespace "${K8S_NAMESPACE}" --ignore-not-found --wait >/dev/null 2>&1 || true
+    echo "   🔁 Recreating namespace ${K8S_NAMESPACE} and required secrets"
+    kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret generic aegis-platform-secrets \
+      --from-literal=db-password="${DB_PASSWORD}" \
+      --from-literal=proxy-jwt-secret="${JWT_SECRET}" \
+      --namespace "${K8S_NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret generic "${KEYCLOAK_ADMIN_SECRET_NAME}" \
+      --from-literal=username="${KEYCLOAK_ADMIN_USERNAME}" \
+      --from-literal=password="${KEYCLOAK_ADMIN_PASSWORD}" \
+      --namespace "${K8S_NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret generic "${KEYCLOAK_DB_SECRET_NAME}" \
+      --from-literal=username="${KEYCLOAK_DB_USERNAME}" \
+      --from-literal=password="${KEYCLOAK_DB_PASSWORD}" \
+      --namespace "${K8S_NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret generic "${KEYCLOAK_CLIENT_SECRET_NAME}" \
+      --from-literal=clientSecret="${KEYCLOAK_BACKSTAGE_CLIENT_SECRET}" \
+      --namespace "${K8S_NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f -
   else
     echo ""
     echo "4️⃣  Reusing existing namespace ${K8S_NAMESPACE} (skipping reset)"
@@ -497,6 +555,32 @@ EOF
 
   cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
   mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
+
+  openssl req -new -newkey rsa:2048 \
+    -keyout "${KEYCLOAK_KEY_PATH}" \
+    -out "${KEYCLOAK_CERT_CSR_PATH}" \
+    -nodes \
+    -subj "/CN=${KEYCLOAK_INTERNAL_HOST}" \
+    -addext "subjectAltName=DNS:${KEYCLOAK_INTERNAL_HOST}" >/dev/null 2>&1
+
+  cat <<EOF > "${KEYCLOAK_CERT_EXT_PATH}"
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:${KEYCLOAK_INTERNAL_HOST}
+EOF
+
+  openssl x509 -req \
+    -in "${KEYCLOAK_CERT_CSR_PATH}" \
+    -CA "${TLS_CA_CERT_PATH}" \
+    -CAkey "${TLS_CA_KEY_PATH}" \
+    -CAcreateserial \
+    -out "${KEYCLOAK_CERT_PATH}" \
+    -days 365 \
+    -extfile "${KEYCLOAK_CERT_EXT_PATH}" >/dev/null 2>&1
+
+  cat "${KEYCLOAK_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${KEYCLOAK_CERT_CHAIN_PATH}"
+  mv "${KEYCLOAK_CERT_CHAIN_PATH}" "${KEYCLOAK_CERT_PATH}"
 fi
 
 mkdir -p "$(dirname "${CA_BUNDLE}")"
@@ -533,6 +617,9 @@ OVERRIDE_FILE=$(mktemp)
   fi
   echo "  env:"
   echo "    DATABASE_URL: \"${DB_URL}\""
+  echo "    OIDC_ISSUER_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis\""
+  echo "    OIDC_AUDIENCE: \"backstage\""
+  echo "    OIDC_JWKS_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/certs\""
   if [[ -n "${DNS_PROXY}" ]]; then
     echo "    AEGIS_PROXY_BASE_URL: \"wss://${DNS_PROXY}:8080\""
   fi
@@ -551,6 +638,36 @@ OVERRIDE_FILE=$(mktemp)
     echo "    tag: \"${PROXY_IMAGE_TAG_VALUE}\""
   fi
   echo "  jwtSecret: \"${JWT_SECRET}\""
+  echo "keycloak:"
+  echo "  enabled: true"
+  echo "  namespace: ${K8S_NAMESPACE}"
+  echo "  hostname:"
+  echo "    hostname: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
+  echo "    admin: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
+  echo "    strict: false"
+  echo "  ingress:"
+  echo "    enabled: false"
+  echo "  customIngress:"
+  echo "    enabled: false"
+  echo "  http:"
+  echo "    httpEnabled: false"
+  echo "  admin:"
+  echo "    secret:"
+  echo "      name: ${KEYCLOAK_ADMIN_SECRET_NAME}"
+  echo "      create: false"
+  echo "  database:"
+  echo "    secret:"
+  echo "      name: ${KEYCLOAK_DB_SECRET_NAME}"
+  echo "      create: false"
+  echo "  realm:"
+  echo "    client:"
+  echo "      secret:"
+  echo "        name: ${KEYCLOAK_CLIENT_SECRET_NAME}"
+  echo "        create: false"
+  echo "  tls:"
+  echo "    secret:"
+  echo "      name: ${KEYCLOAK_TLS_SECRET_NAME}"
+  echo "      create: false"
 } > "${OVERRIDE_FILE}"
 
 TLS_OVERRIDE_FILE=$(mktemp)
@@ -574,6 +691,12 @@ TLS_OVERRIDE_FILE=$(mktemp)
 cd "${OUTPUT_DIR}"
 kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete secret "${KEYCLOAK_TLS_SECRET_NAME}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl create secret tls "${KEYCLOAK_TLS_SECRET_NAME}" \
+  --cert="${KEYCLOAK_CERT_PATH}" \
+  --key="${KEYCLOAK_KEY_PATH}" \
+  --namespace "${K8S_NAMESPACE}" \
+  --dry-run=client -o yaml | kubectl apply -f -
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services
   -f ./aegis-services/values/common.yaml
@@ -600,6 +723,11 @@ kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}"
 echo "   ⏳ Waiting for deployments to become ready"
 kubectl rollout status "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" --timeout=5m
 kubectl rollout status "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" --timeout=5m
+echo "   ⏳ Waiting for Keycloak components to become ready"
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak -n "${K8S_NAMESPACE}" --timeout=5m >/dev/null 2>&1 || \
+  echo "   ⚠️  Keycloak pods not ready within timeout"
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak-postgres -n "${K8S_NAMESPACE}" --timeout=5m >/dev/null 2>&1 || \
+  echo "   ⚠️  Keycloak Postgres pods not ready within timeout"
 
 # Step 7: Wait for Load Balancers
 echo ""

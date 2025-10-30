@@ -249,11 +249,6 @@ jobs:
             context: workspace-images/openssh-vscode
             cache_scope: workspace-vscode
             repo: aegis/workspace-vscode
-    outputs:
-      platform_api_image: ${{ steps.outs.outputs.platform_api_image }}
-      proxy_image:        ${{ steps.outs.outputs.proxy_image }}
-      k8s_agent_image:    ${{ steps.outs.outputs.k8s_agent_image }}
-      workspace_image:    ${{ steps.outs.outputs.workspace_image }}
     concurrency:
       group: build-${{ matrix.name }}-${{ github.sha }}
       cancel-in-progress: false
@@ -315,17 +310,65 @@ jobs:
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE_PREFIX }}-${{ matrix.cache_scope }}
           cache-to:   type=gha,mode=max,scope=${{ env.CACHE_SCOPE_PREFIX }}-${{ matrix.cache_scope }}
 
-      - name: Set multi-image outputs (once)
-        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) && matrix.name == 'workspace-vscode' }}
-        id: outs
+      - name: Persist image reference
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
         run: |
           set -euo pipefail
-          REG="${{ steps.ecr.outputs.registry }}"
-          TAG="${{ steps.names.outputs.tag }}"
-          echo "platform_api_image=${REG}/aegis/platform-api:${TAG}" >> "$GITHUB_OUTPUT"
-          echo "proxy_image=${REG}/aegis/proxy:${TAG}" >> "$GITHUB_OUTPUT"
-          echo "k8s_agent_image=${REG}/aegis/k8s-agent:${TAG}" >> "$GITHUB_OUTPUT"
-          echo "workspace_image=${REG}/aegis/workspace-vscode:${TAG}" >> "$GITHUB_OUTPUT"
+          FILE="$RUNNER_TEMP/image.txt"
+          echo "${{ steps.names.outputs.image }}" > "$FILE"
+          echo "IMAGE_FILE=$FILE" >> "$GITHUB_ENV"
+
+      - name: Upload image reference artifact
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.name }}
+          path: ${{ env.IMAGE_FILE }}
+          if-no-files-found: error
+
+  collect-built-images:
+    name: Collect Build Image Outputs
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-settings
+      - build-and-push
+    if: ${{ contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) }}
+    outputs:
+      platform_api_image: ${{ steps.collect.outputs.platform_api_image }}
+      proxy_image:        ${{ steps.collect.outputs.proxy_image }}
+      k8s_agent_image:    ${{ steps.collect.outputs.k8s_agent_image }}
+      workspace_image:    ${{ steps.collect.outputs.workspace_image }}
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
+          path: images
+
+      - name: Collect image references
+        id: collect
+        run: |
+          set -euo pipefail
+          read_image() {
+            local name="$1"
+            local file="images/image-${name}/image.txt"
+            if [[ -f "$file" ]]; then
+              tr -d '\n' < "$file"
+            else
+              echo "Missing artifact for ${name}" >&2
+              exit 1
+            fi
+          }
+
+          platform=$(read_image "platform-api")
+          proxy=$(read_image "proxy")
+          agent=$(read_image "k8s-agent")
+          workspace=$(read_image "workspace-vscode")
+
+          echo "platform_api_image=${platform}" >> "$GITHUB_OUTPUT"
+          echo "proxy_image=${proxy}" >> "$GITHUB_OUTPUT"
+          echo "k8s_agent_image=${agent}" >> "$GITHUB_OUTPUT"
+          echo "workspace_image=${workspace}" >> "$GITHUB_OUTPUT"
 
   provision-infra:
     name: Provision Preview (Terraform)
@@ -400,7 +443,7 @@ jobs:
     name: Deploy Control Plane (Helm + scripts)
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    needs: [resolve-settings, build-and-push, provision-infra]
+    needs: [resolve-settings, provision-infra, collect-built-images]
     if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
     env:
       USE_EXISTING_CLUSTER: 'true'
@@ -429,10 +472,10 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${RUN_SUBSET}" == "all" || "${RUN_SUBSET}" == "deploy" || "${RUN_SUBSET}" == "deploy-no-teardown" ]]; then
-            echo "platform=${{ needs.build-and-push.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
-            echo "proxy=${{ needs.build-and-push.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
-            echo "agent=${{ needs.build-and-push.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
-            echo "workspace=${{ needs.build-and-push.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
+            echo "platform=${{ needs.collect-built-images.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
+            echo "proxy=${{ needs.collect-built-images.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
+            echo "agent=${{ needs.collect-built-images.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
+            echo "workspace=${{ needs.collect-built-images.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
           else
             IMAGE_TAG="${MANUAL_IMAGE_TAG:-${DEFAULT_E2E_IMAGE_TAG}}"
             ECR_REGISTRY="567751785679.dkr.ecr.us-east-1.amazonaws.com"
@@ -724,7 +767,7 @@ jobs:
     name: E2E Test Matrix
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: [resolve-settings, e2e-endpoints, build-and-push]
+    needs: [resolve-settings, e2e-endpoints, collect-built-images]
     if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
@@ -804,8 +847,8 @@ jobs:
 
       - name: Run suite
         env:
-          WORKSPACE_IMAGE_OUTPUT: ${{ needs.build-and-push.outputs.workspace_image }}
-          K8S_AGENT_IMAGE_OUTPUT: ${{ needs.build-and-push.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE_OUTPUT: ${{ needs.collect-built-images.outputs.workspace_image }}
+          K8S_AGENT_IMAGE_OUTPUT: ${{ needs.collect-built-images.outputs.k8s_agent_image }}
         run: |
           set -euo pipefail
           SUITE="${{ matrix.suite }}"
@@ -881,7 +924,7 @@ jobs:
     name: Promote Images to :latest
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [resolve-settings, build-and-push, e2e-tests]
+    needs: [resolve-settings, collect-built-images, e2e-tests]
     if: ${{ needs.resolve-settings.outputs.run_subset == 'all' && needs.e2e-tests.result == 'success' }}
     env:
       PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
@@ -901,10 +944,10 @@ jobs:
           aws-region:            ${{ env.AWS_REGION }}
       - name: Promote to latest
         env:
-          PLATFORM_IMAGE:  ${{ needs.build-and-push.outputs.platform_api_image }}
-          PROXY_IMAGE:     ${{ needs.build-and-push.outputs.proxy_image }}
-          K8S_AGENT_IMAGE: ${{ needs.build-and-push.outputs.k8s_agent_image }}
-          WORKSPACE_IMAGE: ${{ needs.build-and-push.outputs.workspace_image }}
+          PLATFORM_IMAGE:  ${{ needs.collect-built-images.outputs.platform_api_image }}
+          PROXY_IMAGE:     ${{ needs.collect-built-images.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ needs.collect-built-images.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ needs.collect-built-images.outputs.workspace_image }}
         run: |
           set -euo pipefail
           promote() {
@@ -935,15 +978,24 @@ jobs:
     if: >-
       ${{
         always() &&
-        needs.provision-infra.result != 'skipped' &&
-        needs.provision-infra.outputs.provisioned == 'true' &&
         (
-          (needs.resolve-settings.outputs.teardown_policy == 'always') ||
-          (needs.resolve-settings.outputs.teardown_policy == 'auto-on-success' && needs.e2e-tests.result == 'success') ||
-          (needs.resolve-settings.outputs.teardown_policy == 'manual' && false)
-        ) &&
-        (
-          needs.resolve-settings.outputs.keep_on_failure == 'false' || needs.e2e-tests.result == 'success'
+          needs.resolve-settings.outputs.run_subset == 'destroy-only'
+          || (
+            needs.provision-infra.result != 'skipped'
+            && needs.provision-infra.outputs.provisioned == 'true'
+            && (
+              needs.resolve-settings.outputs.teardown_policy == 'always'
+              || (
+                needs.resolve-settings.outputs.teardown_policy == 'auto-on-success'
+                && needs.e2e-tests.result == 'success'
+              )
+              || (needs.resolve-settings.outputs.teardown_policy == 'manual' && false)
+            )
+            && (
+              needs.resolve-settings.outputs.keep_on_failure == 'false'
+              || needs.e2e-tests.result == 'success'
+            )
+          )
         )
       }}
     env:

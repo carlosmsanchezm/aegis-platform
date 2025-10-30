@@ -533,8 +533,36 @@ keycloak:
     - name: proxy
       value: edge
   startOptimized: false
+  theme:
+    enabled: true
+    name: aegis-vscode
+    configMap:
+      name: aegis-keycloak-theme
+      volumeName: keycloak-theme
+      mountPath: /opt/keycloak/themes/aegis-vscode
+      readOnly: true
+    files:
+      - key: login-theme.properties
+        file: keycloak/theme/aegis-vscode/login/theme.properties
+        path: login/theme.properties
+      - key: login-redirect.ftl
+        file: keycloak/theme/aegis-vscode/login/redirect.ftl
+        path: login/redirect.ftl
+      - key: messages-en.properties
+        file: keycloak/theme/aegis-vscode/messages/messages_en.properties
+        path: messages/messages_en.properties
   realm:
     enabled: true
+    source: file
+    file: keycloak/aegis-realm.json
+    configMap:
+      enabled: true
+      name: aegis-keycloak-realm
+      file: keycloak/aegis-realm.json
+      key: aegis-realm.json
+      mountPath: /opt/keycloak/data/import
+      volumeName: realm-config
+      readOnly: true
     name: aegis
     displayName: Aegis
     accessTokenLifespan: 300

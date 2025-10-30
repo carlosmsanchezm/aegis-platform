@@ -96,14 +96,25 @@ func TestAuthorizeEvaluatesRoleAndScopes(t *testing.T) {
 	}
 }
 
-func TestAuthorizeWithEmptyPolicyAllowsAll(t *testing.T) {
+func TestAuthorizeWithEmptyPolicyDeniesAll(t *testing.T) {
 	t.Setenv("AUTHZ_ROLE_BINDINGS_JSON", "")
 	policy, err := LoadPolicyFromEnv()
 	if err != nil {
 		t.Fatalf("LoadPolicyFromEnv returned error: %v", err)
 	}
-	if !policy.Authorize(&mw.Identity{Roles: []string{"anything"}}, "project-1", "queue-1") {
-		t.Fatal("expected empty policy to allow requests")
+	if policy.Authorize(&mw.Identity{Roles: []string{"anything"}}, "project-1", "queue-1") {
+		t.Fatal("expected empty policy to deny all requests (fail-closed)")
+	}
+}
+
+func TestAuthorizeWithEmptyArrayDeniesAll(t *testing.T) {
+	t.Setenv("AUTHZ_ROLE_BINDINGS_JSON", "[]")
+	policy, err := LoadPolicyFromEnv()
+	if err != nil {
+		t.Fatalf("LoadPolicyFromEnv returned error: %v", err)
+	}
+	if policy.Authorize(&mw.Identity{Roles: []string{"anything"}}, "project-1", "queue-1") {
+		t.Fatal("expected empty array policy to deny all requests (fail-closed)")
 	}
 }
 

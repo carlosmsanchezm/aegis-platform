@@ -39,10 +39,10 @@ backstage:
     AUTH_SESSION_SECRET: "dev-session-secret"
     KEYCLOAK_BASE_URL: "https://keycloak.localtest.me"
     KEYCLOAK_REALM: "aegis"
-    KEYCLOAK_CLIENT_ID: "backstage"
-    KEYCLOAK_CLIENT_SECRET: "local-backstage-client-secret"
-    KEYCLOAK_ISSUER: "https://keycloak.localtest.me/realms/aegis"
-    KEYCLOAK_SCOPE: "openid profile email offline_access"
+  KEYCLOAK_CLIENT_ID: "backstage"
+  KEYCLOAK_CLIENT_SECRET: "local-backstage-client-secret"
+  KEYCLOAK_ISSUER: "https://keycloak.localtest.me/realms/aegis"
+  KEYCLOAK_METADATA_URL: "https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration"
   caBundle:
     secretName: aegis-backstage-ca
 

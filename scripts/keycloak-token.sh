@@ -42,29 +42,245 @@ need() {
 need curl
 need jq
 
+cleanup_files=()
+cleanup() {
+  local status=$?
+  if [[ ${#cleanup_files[@]} -gt 0 ]]; then
+    rm -f "${cleanup_files[@]}" 2>/dev/null || true
+  fi
+  exit $status
+}
+
+trap cleanup EXIT
+
 KEYCLOAK_REALM=${KEYCLOAK_REALM:-aegis}
 TOKEN_URL=${KEYCLOAK_TOKEN_URL:-}
+CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
+CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
+USERNAME=${KEYCLOAK_USERNAME:-}
+PASSWORD=${KEYCLOAK_PASSWORD:-}
+SCOPE=${KEYCLOAK_SCOPE:-}
+GRANT_TYPE=${KEYCLOAK_GRANT_TYPE:-}
+
+ensure_automation_user() {
+  local ns="$1"
+  local auto_username="${USERNAME:-automation@test.com}"
+  local auto_password="${PASSWORD:-Automation123!}"
+  local admin_secret="${KEYCLOAK_ADMIN_SECRET_NAME:-keycloak-admin-secret}"
+  local admin_user_key="${KEYCLOAK_ADMIN_USERNAME_KEY:-username}"
+  local admin_pass_key="${KEYCLOAK_ADMIN_PASSWORD_KEY:-password}"
+
+  if [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]]; then
+    return
+  fi
+
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]] || ! command -v kubectl >/dev/null 2>&1; then
+    USERNAME=${USERNAME:-$auto_username}
+    PASSWORD=${PASSWORD:-$auto_password}
+    return
+  fi
+
+  local admin_username admin_password
+  admin_username=$(kubectl get secret "${admin_secret}" -n "${ns}" -o "jsonpath={.data.${admin_user_key}}" 2>/dev/null | base64 --decode 2>/dev/null || true)
+  admin_password=$(kubectl get secret "${admin_secret}" -n "${ns}" -o "jsonpath={.data.${admin_pass_key}}" 2>/dev/null | base64 --decode 2>/dev/null || true)
+  if [[ -z "${admin_username}" || -z "${admin_password}" ]]; then
+    USERNAME=${USERNAME:-$auto_username}
+    PASSWORD=${PASSWORD:-$auto_password}
+    return
+  fi
+
+  local admin_token
+  admin_token=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+    -X POST "${KEYCLOAK_BASE_URL}/realms/master/protocol/openid-connect/token" \
+    -d "grant_type=password" \
+    -d "client_id=admin-cli" \
+    -d "username=${admin_username}" \
+    -d "password=${admin_password}" \
+    | jq -r '.access_token' 2>/dev/null || true)
+
+  if [[ -z "${admin_token}" || "${admin_token}" == "null" ]]; then
+    USERNAME=${USERNAME:-$auto_username}
+    PASSWORD=${PASSWORD:-$auto_password}
+    return
+  fi
+
+  local encoded_username
+  encoded_username=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${auto_username}" 2>/dev/null || true)
+  if [[ -z "${encoded_username}" ]]; then
+    encoded_username="${auto_username}"
+  fi
+
+  local user_json user_id
+  user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
+    2>/dev/null || true)
+  user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
+
+  if [[ -z "${user_id}" || "${user_id}" == "null" ]]; then
+    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      -H "Authorization: Bearer ${admin_token}" \
+      -H "Content-Type: application/json" \
+      -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users" \
+      -d "{\"username\":\"${auto_username}\",\"email\":\"${auto_username}\",\"firstName\":\"automation\",\"lastName\":\"user\",\"enabled\":true,\"emailVerified\":true,\"credentials\":[{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}]}" >/dev/null 2>&1 || true
+    user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      -H "Authorization: Bearer ${admin_token}" \
+      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
+      2>/dev/null || true)
+    user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
+  else
+    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      -H "Authorization: Bearer ${admin_token}" \
+      -H "Content-Type: application/json" \
+      -X PUT "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/reset-password" \
+      -d "{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "${user_id}" && "${user_id}" != "null" ]]; then
+    local role_json
+    role_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      -H "Authorization: Bearer ${admin_token}" \
+      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/roles/workspace-admin" \
+      2>/dev/null || true)
+    if [[ -n "${role_json}" && "${role_json}" != "null" ]]; then
+      curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+        -H "Authorization: Bearer ${admin_token}" \
+        -H "Content-Type: application/json" \
+        -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/role-mappings/realm" \
+        -d "[${role_json}]" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  USERNAME=${USERNAME:-$auto_username}
+  PASSWORD=${PASSWORD:-$auto_password}
+}
+
+detect_with_kubectl() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    ensure_automation_user "" || true
+    return
+  fi
+
+  local kc_json
+  kc_json=$(kubectl get keycloak -A -o json 2>/dev/null || true)
+  if [[ -z "${kc_json}" || "${kc_json}" == "{}" ]]; then
+    ensure_automation_user "" || true
+    return
+  fi
+
+  local detected_ns detected_host tls_secret
+  detected_ns=$(echo "${kc_json}" | jq -r '.items[0].metadata.namespace // empty' 2>/dev/null || true)
+  detected_host=$(echo "${kc_json}" | jq -r '.items[0].spec.hostname.hostname // empty' 2>/dev/null || true)
+  tls_secret=$(echo "${kc_json}" | jq -r '.items[0].spec.http.tlsSecret // empty' 2>/dev/null || true)
+
+  if [[ -n "${detected_ns}" ]]; then
+    KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-${detected_ns}}"
+  fi
+  local ns="${KEYCLOAK_NAMESPACE:-keycloak}"
+
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" && -n "${detected_host}" ]]; then
+    if [[ "${detected_host}" =~ ^https?:// ]]; then
+      KEYCLOAK_BASE_URL="${detected_host}"
+    else
+      KEYCLOAK_BASE_URL="https://${detected_host}"
+    fi
+  elif [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+    local host
+    host=$(kubectl get keycloak -n "${ns}" -o jsonpath='{.items[0].spec.hostname.hostname}' 2>/dev/null || true)
+    if [[ -n "${host}" ]]; then
+      if [[ "${host}" =~ ^https?:// ]]; then
+        KEYCLOAK_BASE_URL="${host}"
+      else
+        KEYCLOAK_BASE_URL="https://${host}"
+      fi
+    fi
+  fi
+
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+    local ingress_json ingress_host ingress_ns ingress_tls
+    ingress_json=$(kubectl get ingress -A -o json 2>/dev/null || true)
+    if [[ -n "${ingress_json}" ]]; then
+      ingress_host=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .spec.rules[]?.host | select(. != null and . != "")' 2>/dev/null | head -n1 || true)
+      if [[ -n "${ingress_host}" ]]; then
+        ingress_ns=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .metadata.namespace' 2>/dev/null | head -n1 || true)
+        ingress_tls=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .spec.tls[0].secretName // empty' 2>/dev/null | head -n1 || true)
+        if [[ -n "${ingress_ns}" ]]; then
+          KEYCLOAK_NAMESPACE="${ingress_ns}"
+          ns="${ingress_ns}"
+        fi
+        if [[ -n "${ingress_host}" ]]; then
+          if [[ "${ingress_host}" =~ ^https?:// ]]; then
+            KEYCLOAK_BASE_URL="${ingress_host}"
+          else
+            KEYCLOAK_BASE_URL="https://${ingress_host}"
+          fi
+        fi
+        if [[ -n "${ingress_tls}" && -z "${KEYCLOAK_TLS_SECRET_NAME:-}" ]]; then
+          KEYCLOAK_TLS_SECRET_NAME="${ingress_tls}"
+        fi
+      fi
+    fi
+  fi
+
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+    local svc_json svc_host svc_ns
+    svc_json=$(kubectl get svc -A -o json 2>/dev/null || true)
+    if [[ -n "${svc_json}" ]]; then
+      svc_host=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .status.loadBalancer.ingress[0].hostname // .status.loadBalancer.ingress[0].ip // empty' 2>/dev/null | head -n1 || true)
+      if [[ -n "${svc_host}" ]]; then
+        svc_ns=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .metadata.namespace' 2>/dev/null | head -n1 || true)
+        if [[ -n "${svc_ns}" ]]; then
+          KEYCLOAK_NAMESPACE="${svc_ns}"
+          ns="${svc_ns}"
+        fi
+        if [[ "${svc_host}" =~ ^https?:// ]]; then
+          KEYCLOAK_BASE_URL="${svc_host}"
+        else
+          KEYCLOAK_BASE_URL="https://${svc_host}"
+        fi
+      fi
+    fi
+  fi
+
+  if [[ -n "${tls_secret}" ]]; then
+    KEYCLOAK_TLS_SECRET_NAME="${KEYCLOAK_TLS_SECRET_NAME:-${tls_secret}}"
+  fi
+
+  if [[ -z "${KEYCLOAK_CA_CERT:-}" ]]; then
+    local secret_name="${KEYCLOAK_TLS_SECRET_NAME:-keycloak-tls}"
+    local ca_tmp
+    ca_tmp=$(mktemp) || true
+    if [[ -n "${ca_tmp}" ]] && kubectl get secret "${secret_name}" -n "${ns}" -o 'jsonpath={.data.tls\.crt}' 2>/dev/null | base64 --decode >"${ca_tmp}" 2>/dev/null; then
+      KEYCLOAK_CA_CERT="${ca_tmp}"
+      cleanup_files+=("${ca_tmp}")
+    else
+      [[ -n "${ca_tmp}" ]] && rm -f "${ca_tmp}" 2>/dev/null || true
+    fi
+  fi
+
+  if [[ -z "${CLIENT_SECRET}" ]]; then
+    local client_secret_name="${KEYCLOAK_CLIENT_SECRET_NAME:-keycloak-backstage-client-secret}"
+    CLIENT_SECRET=$(kubectl get secret "${client_secret_name}" -n "${ns}" -o 'jsonpath={.data.clientSecret}' 2>/dev/null | base64 --decode 2>/dev/null || true)
+  fi
+
+  ensure_automation_user "${ns}" || true
+}
+
+detect_with_kubectl
+
 if [[ -z "${TOKEN_URL}" ]]; then
   if [[ -n "${KEYCLOAK_BASE_URL:-}" ]]; then
-    base=${KEYCLOAK_BASE_URL%/}
-    TOKEN_URL="${base}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token"
+    TOKEN_URL="${KEYCLOAK_BASE_URL%/}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token"
   else
     echo "✖ KEYCLOAK_TOKEN_URL or KEYCLOAK_BASE_URL must be set" >&2
     exit 1
   fi
 fi
 
-CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
 if [[ -z "${CLIENT_ID}" ]]; then
-  echo "✖ KEYCLOAK_CLIENT_ID must be provided" >&2
-  exit 1
+  CLIENT_ID="backstage"
 fi
 
-CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
-USERNAME=${KEYCLOAK_USERNAME:-}
-PASSWORD=${KEYCLOAK_PASSWORD:-}
-SCOPE=${KEYCLOAK_SCOPE:-}
-GRANT_TYPE=${KEYCLOAK_GRANT_TYPE:-}
 
 if [[ -z "${GRANT_TYPE}" ]]; then
   if [[ -n "${USERNAME}" || -n "${PASSWORD}" ]]; then

@@ -40,8 +40,10 @@ aegis-connect is installed at: `~/.local/bin/aegis-connect`
 # Port-forward to platform-api (if not already running)
 kubectl port-forward -n aegis-services svc/aegis-services-aegis-services-platform-api 8081:8081 &
 
+TOKEN=$(./scripts/keycloak-token.sh)
+
 # Create connection session
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-ssh-workspace","client":"vscode"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession | \
   jq -r '.sshConfig' | sed 's/User aegis-[a-z0-9]*/User aegis/' >> ~/.ssh/config
@@ -72,7 +74,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/aegis_workspace_key -N ""
 
 ```bash
 # Get fresh session
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+TOKEN=$(./scripts/keycloak-token.sh)
+
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-ssh-workspace","client":"vscode"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession | \
   jq -r '.sshConfig' | sed 's/User aegis-[a-z0-9]*/User aegis/' > /tmp/temp-ssh.config
@@ -87,7 +91,9 @@ sshpass -p 'aegis123' ssh -F /tmp/temp-ssh.config -o StrictHostKeyChecking=no ae
 
 ```bash
 # Get new session and add key reference
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+TOKEN=$(./scripts/keycloak-token.sh)
+
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-ssh-workspace","client":"vscode"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession | \
   jq -r '.sshConfig' | sed 's/User aegis-[a-z0-9]*/User aegis/' > /tmp/final-ssh.config
@@ -148,7 +154,9 @@ If you prefer not to use the helper script:
 
 1. **Create new JWT token** (they're one-time use):
    ```bash
-   grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+   TOKEN=$(./scripts/keycloak-token.sh)
+
+   grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
      -d '{"workload_id":"wl-ssh-workspace","client":"vscode"}' \
      localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession | \
      jq -r '.sshConfig' | sed 's/User aegis-[a-z0-9]*/User aegis/' > /tmp/new-session.txt
@@ -244,7 +252,9 @@ kubectl logs -n aegis-services deployment/aegis-services-aegis-services-proxy --
 Same process, just use different workload ID:
 
 ```bash
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+TOKEN=$(./scripts/keycloak-token.sh)
+
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-gpu-workspace","client":"vscode"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession
 ```

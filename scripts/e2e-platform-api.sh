@@ -33,6 +33,24 @@ else
   GRPC_ARGS+=(-plaintext)
 fi
 
+AUTH_TOKEN="${AEGIS_BEARER_TOKEN:-${BEARER_TOKEN:-}}"
+if [[ -z "${AUTH_TOKEN}" ]]; then
+  if [[ -x "${SCRIPT_DIR}/keycloak-token.sh" ]]; then
+    if ! AUTH_TOKEN="$("${SCRIPT_DIR}/keycloak-token.sh")"; then
+      AUTH_TOKEN=""
+    fi
+  else
+    echo "✖ scripts/keycloak-token.sh not found; provide AEGIS_BEARER_TOKEN." >&2
+  fi
+fi
+
+if [[ -z "${AUTH_TOKEN}" ]]; then
+  echo "✖ Unable to obtain Keycloak bearer token. Configure Keycloak env vars or set AEGIS_BEARER_TOKEN." >&2
+  exit 1
+fi
+
+GRPC_ARGS+=(-H "authorization: Bearer ${AUTH_TOKEN}")
+
 EPOCH="$(date +%s)"
 PROJECT_ID="p-e2e-${EPOCH}"
 QUEUE="default"

@@ -353,7 +353,9 @@ kubectl run test-ssh --rm -i --restart=Never --image=alpine -- \
 ### 6.2 Create Connection Session
 
 ```bash
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+TOKEN=$(./scripts/keycloak-token.sh)
+
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-ssh-workspace","client":"cli"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession
 ```
@@ -370,7 +372,7 @@ This returns a JSON response with:
 
 ```bash
 # Get the SSH config and save it
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"wl-ssh-workspace","client":"cli"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession \
   | jq -r '.sshConfig' > ~/.ssh/aegis-workspace-config

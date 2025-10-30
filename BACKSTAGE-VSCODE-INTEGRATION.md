@@ -344,7 +344,7 @@ export const WorkspaceCard = ({ workspace }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-aegis-user': 'user@company.com' // from Backstage auth context
+          Authorization: `Bearer ${token}` // token from Backstage identity API
         },
         body: JSON.stringify({
           workload_id: workspace.id,
@@ -503,9 +503,10 @@ export class PlatformAPIClient {
     const request = new ListWorkloadsRequest();
     request.setProjectId('p-demo');
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const metadata = new grpc.Metadata();
-      metadata.add('x-aegis-user', user);
+      const token = await this.identityApi.getIdToken();
+      metadata.add('authorization', `Bearer ${token}`);
 
       this.client.listWorkloads(request, metadata, (err, response) => {
         if (err) reject(err);

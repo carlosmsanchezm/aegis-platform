@@ -87,6 +87,17 @@ platformApi:
     OIDC_AUDIENCE: "backstage"
     REQUIRE_PHISHING_RESISTANT_MFA: "true"
     ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
+  envFromSecret: null
+  secrets: null
 
   tls:
     enabled: false

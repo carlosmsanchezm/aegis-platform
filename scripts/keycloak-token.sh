@@ -43,10 +43,22 @@ need curl
 need jq
 
 cleanup_files=()
+port_forward_pid=""
+port_forward_log=""
+port_forward_port=""
+port_forward_host=""
+
 cleanup() {
   local status=$?
   if [[ ${#cleanup_files[@]} -gt 0 ]]; then
     rm -f "${cleanup_files[@]}" 2>/dev/null || true
+  fi
+  if [[ -n "${port_forward_pid}" ]]; then
+    kill "${port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${port_forward_pid}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${port_forward_log}" ]]; then
+    rm -f "${port_forward_log}" 2>/dev/null || true
   fi
   exit $status
 }
@@ -64,17 +76,40 @@ GRANT_TYPE=${KEYCLOAK_GRANT_TYPE:-}
 
 ensure_automation_user() {
   local ns="$1"
-  local auto_username="${USERNAME:-automation@test.com}"
-  local auto_password="${PASSWORD:-Automation123!}"
+  local auto_username="${USERNAME:-cloud@test.com}"
+  local auto_password="${PASSWORD:-password}"
   local admin_secret="${KEYCLOAK_ADMIN_SECRET_NAME:-keycloak-admin-secret}"
   local admin_user_key="${KEYCLOAK_ADMIN_USERNAME_KEY:-username}"
   local admin_pass_key="${KEYCLOAK_ADMIN_PASSWORD_KEY:-password}"
+  local base_url="${KEYCLOAK_BASE_URL%/}"
+  local realm="${KEYCLOAK_REALM:-aegis}"
+  local ca_path=""
+  local curl_base=(-sS --fail)
 
   if [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]]; then
     return
   fi
 
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]] || ! command -v kubectl >/dev/null 2>&1; then
+  if [[ -z "${base_url}" ]]; then
+    base_url="https://keycloak.localtest.me"
+  fi
+
+  if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
+    ca_path="${KEYCLOAK_CA_CERT}"
+  elif [[ -n "${KEYCLOAK_CA_BUNDLE:-}" && -f "${KEYCLOAK_CA_BUNDLE}" ]]; then
+    ca_path="${KEYCLOAK_CA_BUNDLE}"
+  elif [[ -f "${HOME}/keycloak.localtest.me.crt" ]]; then
+    ca_path="${HOME}/keycloak.localtest.me.crt"
+  fi
+  if [[ -n "${ca_path}" ]]; then
+    curl_base+=(--cacert "${ca_path}")
+  fi
+
+  if [[ -n "${port_forward_host}" && -n "${port_forward_port}" ]]; then
+    curl_base+=(--resolve "${port_forward_host}:${port_forward_port}:127.0.0.1")
+  fi
+
+  if [[ -z "${ns}" ]] || ! command -v kubectl >/dev/null 2>&1; then
     USERNAME=${USERNAME:-$auto_username}
     PASSWORD=${PASSWORD:-$auto_password}
     return
@@ -90,8 +125,8 @@ ensure_automation_user() {
   fi
 
   local admin_token
-  admin_token=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-    -X POST "${KEYCLOAK_BASE_URL}/realms/master/protocol/openid-connect/token" \
+  admin_token=$(curl "${curl_base[@]}" \
+    -X POST "${base_url}/realms/master/protocol/openid-connect/token" \
     -d "grant_type=password" \
     -d "client_id=admin-cli" \
     -d "username=${admin_username}" \
@@ -111,42 +146,46 @@ ensure_automation_user() {
   fi
 
   local user_json user_id
-  user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+  user_json=$(curl "${curl_base[@]}" \
     -H "Authorization: Bearer ${admin_token}" \
-    "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
+    "${base_url}/admin/realms/${realm}/users?search=${encoded_username}&exact=true" \
     2>/dev/null || true)
   user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
 
   if [[ -z "${user_id}" || "${user_id}" == "null" ]]; then
-    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+    local payload
+    payload=$(printf '{"username":"%s","email":"%s","firstName":"cloud","lastName":"user","enabled":true,"emailVerified":true,"credentials":[{"type":"password","value":"%s","temporary":false}]}' "${auto_username}" "${auto_username}" "${auto_password}")
+    curl "${curl_base[@]}" \
       -H "Authorization: Bearer ${admin_token}" \
       -H "Content-Type: application/json" \
-      -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users" \
-      -d "{\"username\":\"${auto_username}\",\"email\":\"${auto_username}\",\"firstName\":\"automation\",\"lastName\":\"user\",\"enabled\":true,\"emailVerified\":true,\"credentials\":[{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}]}" >/dev/null 2>&1 || true
-    user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      -X POST "${base_url}/admin/realms/${realm}/users" \
+      -d "${payload}" >/dev/null 2>&1 || true
+    user_json=$(curl "${curl_base[@]}" \
       -H "Authorization: Bearer ${admin_token}" \
-      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
+      "${base_url}/admin/realms/${realm}/users?search=${encoded_username}&exact=true" \
       2>/dev/null || true)
     user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
   else
-    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+    local payload
+    payload=$(printf '{"type":"password","value":"%s","temporary":false}' "${auto_password}")
+    curl "${curl_base[@]}" \
       -H "Authorization: Bearer ${admin_token}" \
       -H "Content-Type: application/json" \
-      -X PUT "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/reset-password" \
-      -d "{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}" >/dev/null 2>&1 || true
+      -X PUT "${base_url}/admin/realms/${realm}/users/${user_id}/reset-password" \
+      -d "${payload}" >/dev/null 2>&1 || true
   fi
 
   if [[ -n "${user_id}" && "${user_id}" != "null" ]]; then
     local role_json
-    role_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+    role_json=$(curl "${curl_base[@]}" \
       -H "Authorization: Bearer ${admin_token}" \
-      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/roles/workspace-admin" \
+      "${base_url}/admin/realms/${realm}/roles/workspace-admin" \
       2>/dev/null || true)
     if [[ -n "${role_json}" && "${role_json}" != "null" ]]; then
-      curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
+      curl "${curl_base[@]}" \
         -H "Authorization: Bearer ${admin_token}" \
         -H "Content-Type: application/json" \
-        -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/role-mappings/realm" \
+        -X POST "${base_url}/admin/realms/${realm}/users/${user_id}/role-mappings/realm" \
         -d "[${role_json}]" >/dev/null 2>&1 || true
     fi
   fi
@@ -154,6 +193,8 @@ ensure_automation_user() {
   USERNAME=${USERNAME:-$auto_username}
   PASSWORD=${PASSWORD:-$auto_password}
 }
+
+
 
 detect_with_kubectl() {
   if ! command -v kubectl >/dev/null 2>&1; then
@@ -309,10 +350,130 @@ detect_with_kubectl() {
     CLIENT_SECRET=$(kubectl get secret "${client_secret_name}" -n "${ns}" -o 'jsonpath={.data.clientSecret}' 2>/dev/null | base64 --decode 2>/dev/null || true)
   fi
 
-  ensure_automation_user "${ns}" || true
+}
+
+maybe_port_forward() {
+  if [[ -n "${port_forward_pid}" ]]; then
+    return
+  fi
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+    return
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    return
+  fi
+
+  local parsed scheme host port remote_port
+  if ! parsed=$(python3 - "$KEYCLOAK_BASE_URL" <<'PY'
+from urllib.parse import urlparse
+import sys
+url = urlparse(sys.argv[1])
+scheme = url.scheme or ''
+host = url.hostname or ''
+port = url.port or 0
+if port == 0:
+    if scheme == 'https':
+        port = 8443
+    elif scheme == 'http':
+        port = 8080
+remote = port
+print(scheme)
+print(host)
+print(port)
+print(remote)
+PY
+  ); then
+    return
+  fi
+  if [[ -z "${parsed}" ]]; then
+    return
+  fi
+  read -r scheme host port remote_port <<<"${parsed}"
+  if [[ -z "${host}" ]]; then
+    return
+  fi
+  if [[ "${KEYCLOAK_PORT_FORWARD:-0}" != "1" && "${host}" != *".svc."* && "${host}" != *".cluster.local" ]]; then
+    return
+  fi
+  if ! command -v kubectl >/dev/null 2>&1; then
+    return
+  fi
+
+  local ns="${KEYCLOAK_NAMESPACE:-}"
+  local svc="${KEYCLOAK_SERVICE_NAME:-}"
+  if [[ -z "${svc}" ]]; then
+    svc="${host%%.*}"
+  fi
+  if [[ -z "${ns}" && "${host}" == *"."* ]]; then
+    local remainder="${host#${svc}.}"
+    if [[ "${remainder}" != "${host}" ]]; then
+      ns="${remainder%%.*}"
+    fi
+  fi
+  ns=${ns:-keycloak}
+  KEYCLOAK_NAMESPACE="${ns}"
+  KEYCLOAK_SERVICE_NAME="${svc}"
+  if [[ -z "${svc}" ]]; then
+    svc=$(kubectl get svc -n "${ns}" -l app.kubernetes.io/component=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  fi
+  if [[ -z "${svc}" ]]; then
+    return
+  fi
+
+  local remote="${remote_port:-8443}"
+  local local_port="${KEYCLOAK_PORT_FORWARD_PORT:-${remote}}"
+  if [[ -z "${local_port}" || "${local_port}" == "0" ]]; then
+    local_port="${remote}"
+  fi
+
+  port_forward_log=$(mktemp)
+  kubectl -n "${ns}" port-forward "svc/${svc}" "${local_port}:${remote}" --address 127.0.0.1 >"${port_forward_log}" 2>&1 &
+  port_forward_pid=$!
+  for _ in {1..50}; do
+    if command -v nc >/dev/null 2>&1; then
+      if nc -z 127.0.0.1 "${local_port}" >/dev/null 2>&1; then
+        port_forward_port="${local_port}"
+        port_forward_host="${host}"
+        break
+      fi
+    else
+      if python3 - "${local_port}" <<'PY'
+import socket
+import sys
+port = int(sys.argv[1])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(0.1)
+    try:
+        sock.connect(("127.0.0.1", port))
+    except OSError:
+        sys.exit(1)
+PY
+      then
+        port_forward_port="${local_port}"
+        port_forward_host="${host}"
+        break
+      fi
+    fi
+    if ! kill -0 "${port_forward_pid}" >/dev/null 2>&1; then
+      cat "${port_forward_log}" >&2 || true
+      port_forward_pid=""
+      return
+    fi
+    sleep 0.2
+  done
+  if [[ -z "${port_forward_port}" ]]; then
+    echo "✖ Failed to establish port-forward to Keycloak" >&2
+    return
+  fi
+
+  KEYCLOAK_BASE_URL="${scheme}://${host}:${local_port}"
 }
 
 detect_with_kubectl
+
+maybe_port_forward
+
+ensure_automation_user "${KEYCLOAK_NAMESPACE:-keycloak}" || true
 
 if [[ -z "${TOKEN_URL}" ]]; then
   if [[ -n "${KEYCLOAK_BASE_URL:-}" ]]; then
@@ -337,6 +498,9 @@ if [[ -z "${GRANT_TYPE}" ]]; then
 fi
 
 declare -a CURL_ARGS=("-sS" "--fail" "--request" "POST" "${TOKEN_URL}")
+if [[ -n "${port_forward_port}" && -n "${port_forward_host}" ]]; then
+  CURL_ARGS+=(--resolve "${port_forward_host}:${port_forward_port}:127.0.0.1")
+fi
 if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
   CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_CERT}")
 elif [[ -n "${KEYCLOAK_CA_BUNDLE:-}" && -f "${KEYCLOAK_CA_BUNDLE}" ]]; then

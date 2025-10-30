@@ -65,8 +65,8 @@ ensure_automation_user() {
     log "Skipped automation user sync (admin token unavailable)"
     return
   fi
-  local encoded_username="automation%40test.com"
-  local desired_username="automation@test.com"
+  local encoded_username="cloud%40test.com"
+  local desired_username="cloud@test.com"
   user_json=$(
     curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
       -H "Authorization: Bearer $admin_token" \
@@ -80,14 +80,14 @@ ensure_automation_user() {
       -H "Content-Type: application/json" \
       -X POST "https://keycloak.localtest.me/admin/realms/aegis/users" \
       -d '{
-        "username": "automation@test.com",
-        "email": "automation@test.com",
-        "firstName": "automation",
+        "username": "cloud@test.com",
+        "email": "cloud@test.com",
+        "firstName": "cloud",
         "lastName": "user",
         "enabled": true,
         "emailVerified": true,
         "credentials": [
-          {"type":"password","value":"Automation123!","temporary": false}
+          {"type":"password","value":"password","temporary": false}
         ]
       }' >/dev/null 2>&1 || true
     user_json=$(
@@ -102,7 +102,7 @@ ensure_automation_user() {
       -H "Authorization: Bearer $admin_token" \
       -H "Content-Type: application/json" \
       -X PUT "https://keycloak.localtest.me/admin/realms/aegis/users/${user_id}/reset-password" \
-      -d '{"type":"password","value":"Automation123!","temporary":false}' >/dev/null 2>&1 || true
+      -d '{"type":"password","value":"password","temporary":false}' >/dev/null 2>&1 || true
   fi
   if [[ -z "$user_id" || "$user_id" == "null" ]]; then
     log "Failed to reconcile automation user in Keycloak"
@@ -208,8 +208,8 @@ if (( ${#TLS_ARGS[@]} )); then
       KEYCLOAK_REALM="aegis" \
       KEYCLOAK_CLIENT_ID="backstage" \
       KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
-      KEYCLOAK_USERNAME="automation@test.com" \
-      KEYCLOAK_PASSWORD="Automation123!" \
+      KEYCLOAK_USERNAME="cloud@test.com" \
+      KEYCLOAK_PASSWORD="password" \
       KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
       ./scripts/test-all-local.sh "${TLS_ARGS[@]}"
 else
@@ -228,8 +228,8 @@ else
       KEYCLOAK_REALM="aegis" \
       KEYCLOAK_CLIENT_ID="backstage" \
       KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
-      KEYCLOAK_USERNAME="automation@test.com" \
-      KEYCLOAK_PASSWORD="Automation123!" \
+      KEYCLOAK_USERNAME="cloud@test.com" \
+      KEYCLOAK_PASSWORD="password" \
       KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
       ./scripts/test-all-local.sh
 fi

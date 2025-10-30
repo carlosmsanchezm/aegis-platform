@@ -1,4 +1,5 @@
-{{- if and .Values.platformApi.enabled .Values.platformApi.httpIngress.enabled }}
+{{- $httpIngress := .Values.platformApi.httpIngress | default (dict) -}}
+{{- if and .Values.platformApi.enabled ($httpIngress.enabled | default false) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -7,17 +8,17 @@ metadata:
   labels:
     {{- include "aegis-services.labels" . | nindent 4 }}
     app.kubernetes.io/component: platform-api
-  {{- with .Values.platformApi.httpIngress.annotations }}
+  {{- with $httpIngress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .Values.platformApi.httpIngress.className }}
-  ingressClassName: {{ .Values.platformApi.httpIngress.className }}
+  {{- if $httpIngress.className }}
+  ingressClassName: {{ $httpIngress.className }}
   {{- end }}
-  {{- if .Values.platformApi.httpIngress.tls }}
+  {{- if $httpIngress.tls }}
   tls:
-    {{- range .Values.platformApi.httpIngress.tls }}
+    {{- range $httpIngress.tls }}
     - hosts:
         {{- range .hosts }}
         - {{ . | quote }}
@@ -26,7 +27,7 @@ spec:
     {{- end }}
   {{- end }}
   rules:
-    {{- range .Values.platformApi.httpIngress.hosts }}
+    {{- range $httpIngress.hosts }}
     - host: {{ .host | quote }}
       http:
         paths:

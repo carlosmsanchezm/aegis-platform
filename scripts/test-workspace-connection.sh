@@ -133,25 +133,57 @@ ensure_project_queue() {
 ensure_project_queue
 
 echo "→ Submitting workspace with image ${WORKSPACE_IMAGE}"
-SUBMIT_JSON=$(
-  grpcurl "${GRPCURL_OPTS[@]}" \
-    -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
-    -d "{
-      \"workload\": {
-        \"projectId\": \"p-demo\",
-        \"queue\": \"default\",
-        \"workspace\": {
-          \"flavor\": \"cpu-small\",
-          \"interactive\": true,
-          \"image\": \"${WORKSPACE_IMAGE}\",
-          \"env\": {
-            \"VSCODE_QUALITY\": \"${QUALITY}\",
-            \"VSCODE_COMMIT\": \"${COMMIT}\"
+TMP_SUBMIT_ERR=$(mktemp)
+SUBMIT_JSON=""
+SUBMIT_MAX_ATTEMPTS=${SUBMIT_MAX_ATTEMPTS:-8}
+SUBMIT_BACKOFF_SECONDS=${SUBMIT_BACKOFF_SECONDS:-15}
+submit_attempt=1
+while (( submit_attempt <= SUBMIT_MAX_ATTEMPTS )); do
+  if SUBMIT_JSON=$(
+    grpcurl "${GRPCURL_OPTS[@]}" \
+      -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
+      -d "{
+        \"workload\": {
+          \"projectId\": \"p-demo\",
+          \"queue\": \"default\",
+          \"workspace\": {
+            \"flavor\": \"cpu-small\",
+            \"interactive\": true,
+            \"image\": \"${WORKSPACE_IMAGE}\",
+            \"env\": {
+              \"VSCODE_QUALITY\": \"${QUALITY}\",
+              \"VSCODE_COMMIT\": \"${COMMIT}\"
+            }
           }
         }
-      }
-    }" "${GRPC_ADDR}" aegis.v1.AegisPlatform/SubmitWorkload
-)
+      }" "${GRPC_ADDR}" aegis.v1.AegisPlatform/SubmitWorkload
+  2>"${TMP_SUBMIT_ERR}"
+  ); then
+    break
+  fi
+
+  submit_status=$?
+  submit_error=$(<"${TMP_SUBMIT_ERR}")
+  if grep -qiE 'failed to resolve cluster client|no eligible cluster|context deadline exceeded' <<<"${submit_error}"; then
+    echo "   ⚠️  SubmitWorkload attempt ${submit_attempt}/${SUBMIT_MAX_ATTEMPTS} failed (${submit_error//[$'\n']/ })"
+    (( submit_attempt++ ))
+    if (( submit_attempt > SUBMIT_MAX_ATTEMPTS )); then
+      break
+    fi
+    sleep "${SUBMIT_BACKOFF_SECONDS}"
+    continue
+  fi
+
+  echo "✖ SubmitWorkload request failed (${submit_status}): ${submit_error}" >&2
+  rm -f "${TMP_SUBMIT_ERR}"
+  exit 1
+done
+rm -f "${TMP_SUBMIT_ERR}"
+
+if (( submit_attempt > SUBMIT_MAX_ATTEMPTS )) || [[ -z "${SUBMIT_JSON}" ]]; then
+  echo "✖ SubmitWorkload did not succeed after ${SUBMIT_MAX_ATTEMPTS} attempts." >&2
+  exit 1
+fi
 
 WORKLOAD_ID=$(echo "${SUBMIT_JSON}" | jq -r '.id')
 if [[ -z "${WORKLOAD_ID}" || "${WORKLOAD_ID}" == "null" ]]; then

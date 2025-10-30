@@ -1620,10 +1620,11 @@ func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*a
 }
 
 func (s *Server) ListBudgets(ctx context.Context, req *aegis.ListBudgetsRequest) (*aegis.ListBudgetsResponse, error) {
-	if req != nil && req.GetProjectId() != "" {
-		if err := s.authorize(ctx, req.GetProjectId(), "", "listBudgets"); err != nil {
-			return nil, err
-		}
+	if req == nil || req.GetProjectId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
+	}
+	if err := s.authorize(ctx, req.GetProjectId(), "", "listBudgets"); err != nil {
+		return nil, err
 	}
 	items := []*aegis.BudgetWithUsage{}
 	for _, b := range s.store.ListBudgets(req.GetProjectId()) {

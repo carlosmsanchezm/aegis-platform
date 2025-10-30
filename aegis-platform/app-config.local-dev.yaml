@@ -19,7 +19,9 @@ auth:
         clientId: backstage
         clientSecret: local-backstage-client-secret
         issuer: https://keycloak.localtest.me/realms/aegis
-        scope: 'openid profile email offline_access'
+        metadataUrl: https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration
+        additionalScopes:
+          - offline_access
         callbackUrl: http://localhost:7008/api/auth/keycloak/handler/frame
         prompt: login
         signIn:
@@ -30,7 +32,7 @@ auth:
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://localhost:10080'
+      target: 'https://platform-api.localtest.me'
       changeOrigin: true
       credentials: forward
       allowedHeaders:

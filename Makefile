@@ -352,6 +352,7 @@ deploy-local-tls: setup-local
 	echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
 	echo "✅ Deployed with TLS using self-signed certificates"; \
 	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
+	echo "   Platform API HTTPS: https://platform-api.localtest.me"; \
 	echo "   Proxy: https://proxy.localtest.me"; \
 	echo ""; \
 	echo "   For E2E tests with TLS:"; \
@@ -373,7 +374,7 @@ port-forward:
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
-	@echo "   Backend: http://platform-api.localtest.me (ingress, no port-forward required)"
+	@echo "   Backend: https://platform-api.localtest.me (ingress, no port-forward required)"
 	@cd aegis-platform && NODE_EXTRA_CA_CERTS="$${NODE_EXTRA_CA_CERTS:-$$HOME/aegis-local-trust.pem}" yarn dev
 
 dev-backstage-cloud:

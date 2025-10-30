@@ -118,6 +118,28 @@ func TestAuthenticateMissingAMR(t *testing.T) {
 	}
 }
 
+func TestAuthenticateUsesAzpFallback(t *testing.T) {
+	auth, key, cleanup := newTestAuthenticator(t, false)
+	defer cleanup()
+
+	token := signedToken(t, key, tokenClaims{
+		Issuer:          auth.cfg.IssuerURL,
+		Subject:         "fallback@example.com",
+		Audience:        []string{auth.cfg.Audience},
+		Expires:         time.Now().Add(time.Hour),
+		AMR:             []string{"hwk"},
+		ClientID:        "",
+		AuthorizedParty: "backstage",
+	})
+	identity, err := auth.Authenticate(context.Background(), token, RequestMeta{})
+	if err != nil {
+		t.Fatalf("Authenticate returned error: %v", err)
+	}
+	if identity.ClientID != "backstage" {
+		t.Fatalf("expected client id to fall back to azp, got %q", identity.ClientID)
+	}
+}
+
 func TestUnaryInterceptorMissingToken(t *testing.T) {
 	auth, _, cleanup := newTestAuthenticator(t, false)
 	defer cleanup()
@@ -135,12 +157,14 @@ func TestUnaryInterceptorMissingToken(t *testing.T) {
 // --- helpers ---
 
 type tokenClaims struct {
-	Issuer   string
-	Subject  string
-	Audience []string
-	Expires  time.Time
-	AMR      []string
-	TokenID  string
+	Issuer          string
+	Subject         string
+	Audience        []string
+	Expires         time.Time
+	AMR             []string
+	TokenID         string
+	ClientID        string
+	AuthorizedParty string
 }
 
 func signedToken(t *testing.T, key *rsa.PrivateKey, claims tokenClaims) string {
@@ -158,6 +182,8 @@ func signedToken(t *testing.T, key *rsa.PrivateKey, claims tokenClaims) string {
 	tc := &TokenClaims{
 		RegisteredClaims: rc,
 		AMR:              claims.AMR,
+		ClientID:         claims.ClientID,
+		AuthorizedParty:  claims.AuthorizedParty,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tc)
 	token.Header["kid"] = "test-key"

@@ -98,6 +98,16 @@ platformApi:
     allowPrivilegeEscalation: false
     seccompProfile:
       type: RuntimeDefault
+  env:
+    OIDC_ISSUER_URL: "https://keycloak.example.com/realms/aegis"
+    OIDC_AUDIENCE: "aegis-platform"
+    REQUIRE_PHISHING_RESISTANT_MFA: "true"
+    ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
+  envFromSecret:
+    AUTHZ_ROLE_BINDINGS_JSON: authz-role-bindings.json
+  secrets:
+    authz-role-bindings.json: |
+      []
 
 # Proxy Configuration
 proxy:
@@ -194,6 +204,48 @@ proxy:
     allowPrivilegeEscalation: false
     seccompProfile:
       type: RuntimeDefault
+
+# Backstage Configuration
+backstage:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: backstage
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 7007
+  env: {}
+  envFromSecrets: []
+  caBundle:
+    create: false
+    secretName: ""
+    data: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+  podAnnotations: {}
+  podLabels: {}
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraVolumeMounts: []
+  extraVolumes: []
+  volumeMounts: []
+  volumes: []
 
 # SC-7: Boundary Protection
 networkPolicy:
@@ -481,8 +533,36 @@ keycloak:
     - name: proxy
       value: edge
   startOptimized: false
+  theme:
+    enabled: true
+    name: aegis-vscode
+    configMap:
+      name: aegis-keycloak-theme
+      volumeName: keycloak-theme
+      mountPath: /opt/keycloak/themes/aegis-vscode
+      readOnly: true
+    files:
+      - key: login-theme.properties
+        file: keycloak/theme/aegis-vscode/login/theme.properties
+        path: login/theme.properties
+      - key: login-redirect.ftl
+        file: keycloak/theme/aegis-vscode/login/redirect.ftl
+        path: login/redirect.ftl
+      - key: messages-en.properties
+        file: keycloak/theme/aegis-vscode/messages/messages_en.properties
+        path: messages/messages_en.properties
   realm:
     enabled: true
+    source: file
+    file: keycloak/aegis-realm.json
+    configMap:
+      enabled: true
+      name: aegis-keycloak-realm
+      file: keycloak/aegis-realm.json
+      key: aegis-realm.json
+      mountPath: /opt/keycloak/data/import
+      volumeName: realm-config
+      readOnly: true
     name: aegis
     displayName: Aegis
     accessTokenLifespan: 300

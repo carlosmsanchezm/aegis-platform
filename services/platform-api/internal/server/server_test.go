@@ -9,13 +9,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
+	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
 
@@ -34,8 +34,7 @@ func newTestServer(t *testing.T) *Server {
 }
 
 func contextWithSubject(subject string) context.Context {
-	md := metadata.New(map[string]string{"x-aegis-user": subject})
-	return metadata.NewIncomingContext(context.Background(), md)
+	return mw.ContextWithIdentity(context.Background(), &mw.Identity{Subject: subject})
 }
 
 func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Workload {

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 GRPC_ADDR="${GRPC_ADDR:-localhost:10081}"
 if [[ $# -gt 0 && "${1}" != "" ]]; then
   WORKSPACE_IMAGE="${1}"
@@ -9,7 +11,6 @@ else
   WORKSPACE_IMAGE="${WORKSPACE_IMAGE:-aegis-workspace:latest}"
 fi
 WORKSPACE_NAMESPACE="${WORKSPACE_NAMESPACE:-aegis-workloads-local}"
-AEGIS_USER_HEADER="${AEGIS_WORKSPACE_USER:-testuser@test.com}"
 QUALITY="${VSCODE_QUALITY:-stable}"
 COMMIT="${VSCODE_COMMIT:-}"
 TIMEOUT_SECONDS="${WORKSPACE_TIMEOUT:-600}"
@@ -31,7 +32,15 @@ Environment variables:
   VSCODE_QUALITY         VS Code channel to fetch (default: stable)
   WORKSPACE_NAMESPACE    Namespace for workloads (default: aegis-workloads-local)
   WORKSPACE_TIMEOUT      Seconds to wait for pod readiness (default: 600)
-  AEGIS_WORKSPACE_USER   Value for the x-aegis-user header (default: testuser@test.com)
+  KEYCLOAK_TOKEN_URL     Override token endpoint; derived from KEYCLOAK_BASE_URL/KEYCLOAK_REALM when omitted
+  KEYCLOAK_BASE_URL      Keycloak base URL (used when KEYCLOAK_TOKEN_URL unset)
+  KEYCLOAK_REALM         Keycloak realm (default: aegis)
+  KEYCLOAK_CLIENT_ID     OAuth client identifier (required for auto token fetch)
+  KEYCLOAK_CLIENT_SECRET Client secret when required by the client
+  KEYCLOAK_USERNAME      Username for Resource Owner Password flow (optional)
+  KEYCLOAK_PASSWORD      Password for Resource Owner Password flow (optional)
+  KEYCLOAK_SCOPE         Additional scopes to request (optional)
+  AEGIS_BEARER_TOKEN     Pre-fetched bearer token; skips scripts/keycloak-token.sh
   GRPC_TLS               Set to 1 to enable TLS (default: 0)
   GRPC_CA                Path to CA bundle when GRPC_TLS=1
   GRPC_TLS_SERVER_NAME   Expected server name (SNI) when GRPC_TLS=1
@@ -118,6 +127,24 @@ for dep in grpcurl jq kubectl awk sed curl; do
   fi
 done
 
+AUTH_TOKEN="${AEGIS_BEARER_TOKEN:-${BEARER_TOKEN:-}}"
+if [[ -z "${AUTH_TOKEN}" ]]; then
+  if [[ -x "${SCRIPT_DIR}/keycloak-token.sh" ]]; then
+    if ! AUTH_TOKEN="$("${SCRIPT_DIR}/keycloak-token.sh")"; then
+      AUTH_TOKEN=""
+    fi
+  else
+    echo "✖ scripts/keycloak-token.sh not found; provide AEGIS_BEARER_TOKEN." >&2
+  fi
+fi
+
+if [[ -z "${AUTH_TOKEN}" ]]; then
+  echo "✖ Unable to obtain Keycloak bearer token. Configure Keycloak env vars or set AEGIS_BEARER_TOKEN." >&2
+  exit 1
+fi
+
+GRPCURL_OPTS+=(-H "authorization: Bearer ${AUTH_TOKEN}")
+
 ensure_project_queue() {
   grpcurl "${GRPCURL_OPTS[@]}" -d '{"project":{"id":"p-demo"}}' "${GRPC_ADDR}" aegis.v1.AegisPlatform/CreateProject >/dev/null || true
   grpcurl "${GRPCURL_OPTS[@]}" -d '{"flavor":{"name":"cpu-small","gpuCount":0}}' "${GRPC_ADDR}" aegis.v1.AegisPlatform/UpsertFlavor >/dev/null || true
@@ -141,7 +168,6 @@ submit_attempt=1
 while (( submit_attempt <= SUBMIT_MAX_ATTEMPTS )); do
   if SUBMIT_JSON=$(
     grpcurl "${GRPCURL_OPTS[@]}" \
-      -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
       -d "{
         \"workload\": {
           \"projectId\": \"p-demo\",
@@ -275,7 +301,6 @@ ASSIGNED_CLUSTER_ID=$(echo "${SUBMIT_JSON}" | jq -r '.clusterId // empty')
 if [[ -z "${ASSIGNED_CLUSTER_ID}" ]]; then
   WORKLOAD_STATE=$(
     grpcurl "${GRPCURL_OPTS[@]}" \
-      -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
       -d "{\"id\":\"${WORKLOAD_ID}\"}" \
       "${GRPC_ADDR}" aegis.v1.AegisPlatform/GetWorkload || true
   )
@@ -287,7 +312,6 @@ fi
 if [[ -n "${ASSIGNED_CLUSTER_ID}" ]]; then
   echo "→ Marking workload ${WORKLOAD_ID} as RUNNING via StartWorkload (${ASSIGNED_CLUSTER_ID})"
   grpcurl "${GRPCURL_OPTS[@]}" \
-    -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
     -d "{\"id\":\"${WORKLOAD_ID}\",\"clusterId\":\"${ASSIGNED_CLUSTER_ID}\"}" \
     "${GRPC_ADDR}" aegis.v1.AegisPlatform/StartWorkload >/dev/null || true
 fi
@@ -295,7 +319,6 @@ fi
 echo "→ Requesting connection session..."
 SESSION_JSON=$(
   grpcurl "${GRPCURL_OPTS[@]}" \
-    -H "x-aegis-user: ${AEGIS_USER_HEADER}" \
     -d "{\"workload_id\":\"${WORKLOAD_ID}\",\"client\":\"vscode\"}" \
     "${GRPC_ADDR}" aegis.v1.AegisPlatform/CreateConnectionSession
 )

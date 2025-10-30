@@ -1,4 +1,5 @@
 import { ChangeEvent, FC, FormEvent, useMemo, useState } from 'react';
+import clsx from 'clsx';
 import {
   Page,
   Header,
@@ -36,6 +37,7 @@ import {
 import { SubmitWorkspaceRequest, submitWorkspace } from '../api/aegisClient';
 import { parseEnvInput, parsePortsInput } from './workspaceFormUtils';
 import { workloadsRouteRef } from '../routes';
+import { useFuturisticPageStyles } from './useFuturisticPageStyles';
 
 type WorkspaceTypeId = 'vscode' | 'jupyter' | 'cli';
 
@@ -229,6 +231,7 @@ export const LaunchWorkspacePage: FC = () => {
   const alertApi = useApi(alertApiRef);
   const workloadsLink = useRouteRef(workloadsRouteRef);
   const navigate = useNavigate();
+  const classes = useFuturisticPageStyles();
 
   const [activeStep, setActiveStep] = useState(0);
   const [workspaceTypeId, setWorkspaceTypeId] =
@@ -406,15 +409,16 @@ export const LaunchWorkspacePage: FC = () => {
           <Grid item xs={12} md={4} key={option.id}>
             <Card
               variant="outlined"
-              style={{
-                borderColor: selected ? '#1976d2' : undefined,
-                borderWidth: selected ? 2 : 1,
-              }}
+              className={clsx(classes.selectionCard, {
+                [classes.selectionCardActive]: selected,
+              })}
             >
               <CardActionArea onClick={() => handleWorkspaceTypeSelect(option)}>
                 <CardContent>
-                  <Typography variant="h6">{option.title}</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="h6" className={classes.selectionCardTitle}>
+                    {option.title}
+                  </Typography>
+                  <Typography variant="body2" className={classes.selectionCardSubtitle}>
                     {option.description}
                   </Typography>
                 </CardContent>
@@ -441,15 +445,22 @@ export const LaunchWorkspacePage: FC = () => {
             <Grid item xs={12} md={6} key={template.id}>
               <Card
                 variant="outlined"
-                style={{
-                  borderColor: selected ? '#1976d2' : undefined,
-                  borderWidth: selected ? 2 : 1,
-                }}
+                className={clsx(classes.selectionCard, {
+                  [classes.selectionCardActive]: selected,
+                })}
               >
                 <CardActionArea onClick={() => handleTemplateSelect(template)}>
                   <CardContent>
-                    <Typography variant="h6">{template.title}</Typography>
-                    <Typography variant="body2" color="textSecondary">
+                    <Typography
+                      variant="h6"
+                      className={classes.selectionCardTitle}
+                    >
+                      {template.title}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      className={classes.selectionCardSubtitle}
+                    >
                       {template.description}
                     </Typography>
                   </CardContent>
@@ -470,18 +481,22 @@ export const LaunchWorkspacePage: FC = () => {
           <Grid item xs={12} md={4} key={option.id}>
             <Card
               variant="outlined"
-              style={{
-                borderColor: selected ? '#1976d2' : undefined,
-                borderWidth: selected ? 2 : 1,
-              }}
+              className={clsx(classes.selectionCard, {
+                [classes.selectionCardActive]: selected,
+              })}
             >
               <CardActionArea onClick={() => handleFlavorSelect(option)}>
                 <CardContent>
-                  <Typography variant="h6">{option.title}</Typography>
-                  <Typography variant="subtitle2" color="textSecondary">
+                  <Typography variant="h6" className={classes.selectionCardTitle}>
+                    {option.title}
+                  </Typography>
+                  <Typography
+                    variant="subtitle2"
+                    className={classes.selectionCardSubtitle}
+                  >
                     {option.resources}
                   </Typography>
-                  <Typography variant="body2" color="textSecondary">
+                  <Typography variant="body2" className={classes.selectionCardSubtitle}>
                     {option.description}
                   </Typography>
                 </CardContent>
@@ -494,20 +509,38 @@ export const LaunchWorkspacePage: FC = () => {
   );
 
   return (
-    <Page themeId="tool">
-      <Header title="Launch Interactive Workspace" />
-      <Content>
-        <ContentHeader title="Workspace Wizard" />
+    <Page themeId="tool" className={classes.page}>
+      <div className={classes.background} />
+      <Header
+        title="Mission Workspace Orchestrator"
+        subtitle="Assemble interactive developer surfaces with curated GPU templates and zero-trust overlays."
+        className={classes.header}
+      >
+        <Typography variant="subtitle2" className={classes.headerSubtitle}>
+          Step {activeStep + 1} of {steps.length} ·{' '}
+          {selectedWorkspaceType?.title ?? 'Select a mission surface'}
+        </Typography>
+      </Header>
+      <Content className={classes.content}>
+        <ContentHeader
+          title="Workspace Wizard"
+          className={classes.sectionTitle}
+        />
         <form onSubmit={handleSubmit}>
-          <Stepper activeStep={activeStep} alternativeLabel>
+          <Box className={classes.holoPanel}>
+            <Stepper
+              activeStep={activeStep}
+              alternativeLabel
+              className={classes.stepper}
+            >
             {steps.map(step => (
               <Step key={step}>
                 <StepLabel>{step}</StepLabel>
               </Step>
             ))}
-          </Stepper>
+            </Stepper>
 
-          <Box mt={4}>
+            <Box mt={4}>
             {activeStep === 0 && (
               <Grid container spacing={3}>
                 <Grid item xs={12} md={6}>
@@ -614,7 +647,7 @@ export const LaunchWorkspacePage: FC = () => {
             )}
 
             {activeStep === 2 && (
-              <InfoCard title="Review selection">
+              <InfoCard title="Review selection" className={classes.holoPanel}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2">Project</Typography>
@@ -681,50 +714,51 @@ export const LaunchWorkspacePage: FC = () => {
             )}
           </Box>
 
-          <Box
-            mt={4}
-            display="flex"
-            alignItems="center"
-            justifyContent="space-between"
-          >
-            <Box display="flex" gridGap={16}>
-              <Button
-                type="button"
-                variant="outlined"
-                disabled={activeStep === 0 || submitting}
-                onClick={goPreviousStep}
-              >
-                Back
-              </Button>
-              {activeStep < steps.length - 1 && (
+            <Box
+              mt={4}
+              display="flex"
+              alignItems="center"
+              justifyContent="space-between"
+            >
+              <Box display="flex" gridGap={16}>
                 <Button
                   type="button"
-                  color="primary"
-                  variant="contained"
-                  disabled={
-                    submitting ||
-                    (activeStep === 0 && !canProceedFromBasics) ||
-                    (activeStep === 1 && !canProceedFromResources)
-                  }
-                  onClick={goNextStep}
+                  variant="outlined"
+                  disabled={activeStep === 0 || submitting}
+                  onClick={goPreviousStep}
                 >
-                  Next
+                  Back
                 </Button>
+                {activeStep < steps.length - 1 && (
+                  <Button
+                    type="button"
+                    color="primary"
+                    variant="contained"
+                    disabled={
+                      submitting ||
+                      (activeStep === 0 && !canProceedFromBasics) ||
+                      (activeStep === 1 && !canProceedFromResources)
+                    }
+                    onClick={goNextStep}
+                  >
+                    Next
+                  </Button>
+                )}
+              </Box>
+              {activeStep === steps.length - 1 && (
+                <Box display="flex" alignItems="center" gridGap={16}>
+                  <Button
+                    type="submit"
+                    color="primary"
+                    variant="contained"
+                    disabled={isSubmitDisabled}
+                  >
+                    Launch Workspace
+                  </Button>
+                  {submitting && <Progress />}
+                </Box>
               )}
             </Box>
-            {activeStep === steps.length - 1 && (
-              <Box display="flex" alignItems="center" gridGap={16}>
-                <Button
-                  type="submit"
-                  color="primary"
-                  variant="contained"
-                  disabled={isSubmitDisabled}
-                >
-                  Launch Workspace
-                </Button>
-                {submitting && <Progress />}
-              </Box>
-            )}
           </Box>
         </form>
 

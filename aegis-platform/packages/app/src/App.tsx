@@ -24,6 +24,7 @@ import { apis } from './apis';
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
 import { Root } from './components/Root';
+import { AegisHomePage } from './components/Home';
 
 import {
   AlertDisplay,
@@ -44,6 +45,9 @@ import {
   AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
 import { keycloakAuthApiRef } from './apis';
+import { aegisFuturisticTheme } from './theme/aegisFuturisticTheme';
+import SecurityIcon from '@material-ui/icons/Security';
+import { CssBaseline, ThemeProvider } from '@material-ui/core';
 
 export const keycloakSignInProvider = {
   id: 'keycloak',
@@ -54,6 +58,22 @@ export const keycloakSignInProvider = {
 
 const app = createApp({
   apis,
+  themes: [
+    {
+      id: 'aegis-dark',
+      title: 'ÆGIS Command Dark',
+      variant: 'dark',
+      icon: <SecurityIcon />,
+      Provider: ({ children }) => (
+        <ThemeProvider theme={aegisFuturisticTheme}>
+          <CssBaseline />
+          {children}
+        </ThemeProvider>
+      ),
+      theme: aegisFuturisticTheme,
+    },
+  ],
+  defaultThemeId: 'aegis-dark',
   bindRoutes({ bind }) {
     bind(catalogPlugin.externalRoutes, {
       createComponent: scaffolderPlugin.routes.root,
@@ -81,7 +101,8 @@ const app = createApp({
 
 const routes = (
   <FlatRoutes>
-    <Route path="/" element={<Navigate to="catalog" />} />
+    <Route path="/" element={<Navigate to="dashboard" />} />
+    <Route path="/dashboard" element={<AegisHomePage />} />
     <Route path="/catalog" element={<CatalogIndexPage />} />
     <Route
       path="/catalog/:namespace/:kind/:name"

@@ -44,6 +44,7 @@ import {
   buildKubectlDescribeCommand,
 } from '../api/aegisClient';
 import { createWorkspaceRouteRef } from '../routes';
+import { useFuturisticPageStyles } from './useFuturisticPageStyles';
 
 const statusChip = (status: string) => {
   const mapped = mapDisplayStatus(status);
@@ -72,6 +73,7 @@ export const WorkloadListPage: FC = () => {
   const navigate = useNavigate();
   const createWorkspaceLink = useRouteRef(createWorkspaceRouteRef);
   const createWorkspacePath = createWorkspaceLink();
+  const classes = useFuturisticPageStyles();
 
   const [projectId, setProjectId] = useState('p-demo');
   const [rows, setRows] = useState<WorkloadRow[]>([]);
@@ -245,13 +247,27 @@ export const WorkloadListPage: FC = () => {
   const completedCount = rows.filter(r => isTerminalStatus(r.status)).length;
 
   return (
-    <Page themeId="tool">
+    <Page themeId="home" className={classes.page}>
+      <div className={classes.background} />
       <Header
-        title="Aegis — Workload Status"
-        subtitle="Monitor submitted workloads"
-      />
-      <Content>
-        <ContentHeader title="Filters">
+        title="Mission Workload Telemetry"
+        subtitle="Real-time state of GPU workloads, sovereign placement, and compliance posture across multi-cloud theaters."
+        className={classes.header}
+      >
+        <Box className={classes.headerActions}>
+          <Typography variant="subtitle2" className={classes.inlineStat}>
+            Active · {activeCount}
+          </Typography>
+          <Typography variant="subtitle2" className={classes.inlineStat}>
+            Terminal · {completedCount}
+          </Typography>
+        </Box>
+      </Header>
+      <Content className={classes.content}>
+        <ContentHeader
+          title="Mission Filters"
+          className={classes.sectionTitle}
+        >
           <Box display="flex" gridGap={8}>
             <Button
               variant="outlined"
@@ -272,41 +288,47 @@ export const WorkloadListPage: FC = () => {
           </Box>
         </ContentHeader>
 
-        <Grid container spacing={2} alignItems="flex-end">
-          <Grid item xs={12} md={4}>
-            <TextField
-              label="Project ID"
-              fullWidth
-              value={projectId}
-              onChange={handleProjectChange}
-            />
+        <Box className={classes.holoPanel}>
+          <Grid container spacing={2} alignItems="flex-end">
+            <Grid item xs={12} md={4}>
+              <TextField
+                label="Project ID"
+                fullWidth
+                value={projectId}
+                onChange={handleProjectChange}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                label="Search by Workload ID"
+                fullWidth
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Select
+                fullWidth
+                value={statusFilter}
+                onChange={handleStatusFilter}
+                displayEmpty
+                inputProps={{ 'aria-label': 'Status filter' }}
+              >
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="active">Active</MenuItem>
+                <MenuItem value="terminal">Terminal</MenuItem>
+              </Select>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField
-              label="Search by Workload ID"
-              fullWidth
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Select
-              fullWidth
-              value={statusFilter}
-              onChange={handleStatusFilter}
-              displayEmpty
-              inputProps={{ 'aria-label': 'Status filter' }}
-            >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="active">Active</MenuItem>
-              <MenuItem value="terminal">Terminal</MenuItem>
-            </Select>
-          </Grid>
-        </Grid>
 
-        <Box mt={2} display="flex" gridGap={16}>
-          <Typography variant="body2">Active: {activeCount}</Typography>
-          <Typography variant="body2">Completed: {completedCount}</Typography>
+          <Box mt={2} display="flex" gridGap={16}>
+            <Typography variant="body2" className={classes.selectionCardSubtitle}>
+              Polling every 4s while missions are active
+            </Typography>
+            <Typography variant="body2" className={classes.selectionCardSubtitle}>
+              {shouldPoll ? 'Live telemetry engaged' : 'Telemetry paused — all missions terminal'}
+            </Typography>
+          </Box>
         </Box>
 
         {loading && <Progress />}
@@ -319,7 +341,7 @@ export const WorkloadListPage: FC = () => {
           </Box>
         )}
 
-        <Box mt={2}>
+        <Box mt={3} className={classes.tablePaper}>
           <Table
             options={{
               paging: false,
@@ -332,7 +354,7 @@ export const WorkloadListPage: FC = () => {
             }}
             data={filteredRows}
             columns={columns}
-            title="Workloads"
+            title="Mission Workloads"
             onRowClick={(_, row) => {
               if (row?.id) {
                 navigate(`/aegis/workloads/${row.id}`);

@@ -1,0 +1,1 @@
+export { AegisHomePage } from './AegisHomePage';

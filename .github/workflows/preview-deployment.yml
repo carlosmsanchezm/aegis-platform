@@ -1,53 +1,180 @@
-name: Build, Test, and Deploy Preview
+name: "Preview: Provision, Test & Optional Destroy"
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       run_subset:
-        description: "Select which portion of the workflow to run"
+        description: "Which portion to run"
         type: choice
+        required: true
         default: all
         options:
           - all
+          - provision-only
           - deploy
           - deploy-no-teardown
-          - e2e-only
+          - tests-only
+          - destroy-only
       preview_number:
         description: "Preview identifier (defaults to PR number or workflow run id)"
         required: false
       image_tag:
-        description: "Override image tag for e2e-only runs (expects image already pushed)"
+        description: "Override image tag for tests-only runs (expects image already pushed)"
         required: false
+      suites:
+        description: "E2E suites to run (comma or space separated). Options: all, platform-api, workspace, k8s-agent"
+        required: false
+        default: all
+      teardown_policy:
+        description: "When should teardown run?"
+        type: choice
+        required: true
+        default: auto-on-success
+        options:
+          - auto-on-success
+          - never
+          - always
+          - manual
+      keep_on_failure:
+        description: "Keep preview infra if any job fails (recommended: true)"
+        type: boolean
+        required: true
+        default: true
 
 env:
   AWS_REGION: us-east-1
-  PREVIEW_ID: ${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
-  PREVIEW_NAMESPACE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
-  PREVIEW_RELEASE: preview-${{ github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number }}
-  RUN_SUBSET: ${{ github.event.inputs.run_subset != '' && github.event.inputs.run_subset || 'all' }}
   DEFAULT_E2E_IMAGE_TAG: 4439705b81f1478e1b7e38529a171a9232feb691
-  MANUAL_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
-# Requires repository secrets:
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
+  CACHE_SCOPE_PREFIX: aegis-preview
+  VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
 
-concurrency:
-  group: preview-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.preview_number != '' && github.event.inputs.preview_number || github.run_number) || github.event.number }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+
+# We handle concurrency at the job level so tests-only runs are not canceled by other runs.
+# -------------------------------------------------------------------
 
 jobs:
+  resolve-settings:
+    name: Resolve Preview Settings
+    runs-on: ubuntu-latest
+    outputs:
+      preview_id: ${{ steps.compute.outputs.preview_id }}
+      preview_namespace: ${{ steps.compute.outputs.preview_namespace }}
+      preview_release: ${{ steps.compute.outputs.preview_release }}
+      run_subset: ${{ steps.compute.outputs.run_subset }}
+      teardown_policy: ${{ steps.compute.outputs.teardown_policy }}
+      keep_on_failure: ${{ steps.compute.outputs.keep_on_failure }}
+      manual_image_tag: ${{ steps.compute.outputs.manual_image_tag }}
+      e2e_suites: ${{ steps.compute.outputs.e2e_suites }}
+      e2e_suite_matrix: ${{ steps.compute.outputs.e2e_suite_matrix }}
+    steps:
+      - name: Compute workflow settings
+        id: compute
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json, os
+
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          event_name = os.environ.get("GITHUB_EVENT_NAME")
+          with open(event_path, "r", encoding="utf-8") as fh:
+              event = json.load(fh)
+
+          inputs = event.get("inputs") or {}
+
+          def _normalize(value, default=""):
+              if value is None:
+                  return default
+              if isinstance(value, str):
+                  value = value.strip()
+              return value or default
+
+          preview_number = _normalize(inputs.get("preview_number"))
+          run_subset = _normalize(inputs.get("run_subset"), "all")
+          teardown_policy = _normalize(inputs.get("teardown_policy"), "auto-on-success")
+          keep_on_failure_raw = inputs.get("keep_on_failure")
+          if keep_on_failure_raw is None or keep_on_failure_raw == "":
+              keep_on_failure = "true"
+          else:
+              keep_on_failure = str(keep_on_failure_raw).lower()
+          manual_image_tag = _normalize(inputs.get("image_tag"))
+          e2e_suites = _normalize(inputs.get("suites"), "all")
+
+          if event_name == "pull_request":
+              preview_number = str(event.get("number") or "")
+
+          if not preview_number:
+              preview_number = str(os.environ.get("GITHUB_RUN_NUMBER"))
+
+          if event_name != "workflow_dispatch":
+              manual_image_tag = ""
+
+          preview_id = preview_number
+          preview_namespace = f"preview-{preview_id}"
+          preview_release = preview_namespace
+
+          allowed_suites = ["platform-api", "workspace", "k8s-agent"]
+          normalized = (
+              e2e_suites.lower()
+              .replace(",", " ")
+              .replace(";", " ")
+              .split()
+          )
+          matrix_entries = []
+          if not normalized or "all" in normalized:
+              matrix_entries = allowed_suites
+          else:
+              seen = set()
+              for token in normalized:
+                  token = token.strip()
+                  if token in allowed_suites and token not in seen:
+                      matrix_entries.append(token)
+                      seen.add(token)
+          if not matrix_entries:
+              matrix_entries = allowed_suites
+
+          matrix_json = json.dumps(matrix_entries)
+
+          output_path = os.environ["GITHUB_OUTPUT"]
+          with open(output_path, "a", encoding="utf-8") as fh:
+              fh.write(f"preview_id={preview_id}\n")
+              fh.write(f"preview_namespace={preview_namespace}\n")
+              fh.write(f"preview_release={preview_release}\n")
+              fh.write(f"run_subset={run_subset}\n")
+              fh.write(f"teardown_policy={teardown_policy}\n")
+              fh.write(f"keep_on_failure={keep_on_failure}\n")
+              fh.write(f"manual_image_tag={manual_image_tag}\n")
+              fh.write(f"e2e_suites={e2e_suites}\n")
+              fh.write(f"e2e_suite_matrix={matrix_json}\n")
+          PY
+
   lint-and-unit-test:
     name: Lint & Unit Test
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    needs: resolve-settings
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 20
+    concurrency:
+      group: lint-unit-${{ github.sha }}
+      cancel-in-progress: true
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+      VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
     steps:
-      - name: Skipping lint/unit for deploy-only run
+      - name: Skip for non-all subsets
         if: ${{ env.RUN_SUBSET != 'all' }}
-        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping lint and unit tests."
+        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping lint & unit"
 
-      - name: Checkout code
+      - name: Checkout
         if: ${{ env.RUN_SUBSET == 'all' }}
         uses: actions/checkout@v4
 
@@ -56,16 +183,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
-      - name: Run Go unit & integration tests
+      - name: Go unit & integration tests
         if: ${{ env.RUN_SUBSET == 'all' }}
         run: |
           set -euo pipefail
+          go env GOPATH
           go work sync
-
-          echo "Running make test in agents/k8s-agent"
           (cd agents/k8s-agent && make test)
-
           for module in pkg/workspace services/platform-api services/proxy; do
             echo "Running go test in $module"
             (cd "$module" && go test ./...)
@@ -79,166 +205,217 @@ jobs:
           cache: yarn
           cache-dependency-path: aegis-platform/yarn.lock
 
-      - name: Install frontend dependencies
+      - name: Install frontend deps
         if: ${{ env.RUN_SUBSET == 'all' }}
         run: |
           cd aegis-platform
           yarn install --immutable
 
-      - name: Run frontend unit tests
+      - name: Frontend unit tests
         if: ${{ env.RUN_SUBSET == 'all' }}
         run: |
           cd aegis-platform
           yarn test --watchAll=false
 
   build-and-push:
-    name: Build & Push Images
+    name: Build & Push Images (parallel)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    needs: lint-and-unit-test
-    permissions:
-      contents: read
-    outputs:
-      platform_api_image: ${{ steps.image-data.outputs.platform_api_image }}
-      proxy_image: ${{ steps.image-data.outputs.proxy_image }}
-      k8s_agent_image: ${{ steps.image-data.outputs.k8s_agent_image }}
-      workspace_image: ${{ steps.image-data.outputs.workspace_image }}
+    timeout-minutes: 60
+    needs:
+      - resolve-settings
+      - lint-and-unit-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: platform-api
+            dockerfile: services/platform-api/Dockerfile
+            context: .
+            cache_scope: platform-api
+            repo: aegis/platform-api
+          - name: proxy
+            dockerfile: services/proxy/Dockerfile
+            context: .
+            cache_scope: proxy
+            repo: aegis/proxy
+          - name: k8s-agent
+            dockerfile: agents/k8s-agent/Dockerfile
+            context: .
+            cache_scope: k8s-agent
+            repo: aegis/k8s-agent
+          - name: workspace-vscode
+            dockerfile: workspace-images/openssh-vscode/Dockerfile
+            context: workspace-images/openssh-vscode
+            cache_scope: workspace-vscode
+            repo: aegis/workspace-vscode
+    concurrency:
+      group: build-${{ matrix.name }}-${{ github.sha }}
+      cancel-in-progress: false
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Skip build for non-full run
-        if: ${{ env.RUN_SUBSET != 'all' }}
+      - name: Skip build for run subsets without builds
+        if: ${{ !contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
         run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping image build."
 
-      - name: Set up Docker Buildx
-        if: ${{ env.RUN_SUBSET == 'all' }}
-        uses: docker/setup-buildx-action@v3
-
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (ECR)
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
-        id: login-ecr
+      - name: Login to Amazon ECR
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Determine image tags
-        if: ${{ env.RUN_SUBSET == 'all' }}
-        id: image-data
+      - name: Configure Docker Buildx
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+
+      - name: Compute image tag and name
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        id: names
         run: |
           set -euo pipefail
-          ECR_REGISTRY='${{ steps.login-ecr.outputs.registry }}'
-          IMAGE_TAG='${{ github.sha }}'
-          echo "platform_api_image=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "proxy_image=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "k8s_agent_image=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "workspace_image=${ECR_REGISTRY}/aegis/workspace-vscode:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "registry=${{ steps.ecr.outputs.registry }}" >> "$GITHUB_OUTPUT"
+          # Compose the fully qualified image ref for this matrix entry
+          echo "image=${{ steps.ecr.outputs.registry }}/${{ matrix.repo }}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Check if images already exist
-        if: ${{ env.RUN_SUBSET == 'all' }}
-        id: check-images
-        env:
-          PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
-          PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
-          K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
-          WORKSPACE_IMAGE: ${{ steps.image-data.outputs.workspace_image }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      - name: Build & push with Buildx (cached)
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        uses: docker/build-push-action@v5
+        with:
+          context:  ${{ matrix.context }}
+          file:     ${{ matrix.dockerfile }}
+          push:     true
+          tags:     ${{ steps.names.outputs.image }}
+          provenance: false
+          cache-from: type=gha,scope=${{ env.CACHE_SCOPE_PREFIX }}-${{ matrix.cache_scope }}
+          cache-to:   type=gha,mode=max,scope=${{ env.CACHE_SCOPE_PREFIX }}-${{ matrix.cache_scope }}
+
+      - name: Persist image reference
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
         run: |
           set -euo pipefail
-          needs_build=0
-          for image in "$PLATFORM_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE" "$WORKSPACE_IMAGE"; do
-            repo="${image%:*}"
-            tag="${image##*:}"
-            repo_name="${repo#${ECR_REGISTRY}/}"
-            if ! aws ecr describe-images --repository-name "$repo_name" --image-ids imageTag="$tag" >/dev/null 2>&1; then
-              echo "Image $repo_name:$tag missing; will build"
-              needs_build=1
-            else
-              echo "Image $repo_name:$tag already exists"
-            fi
-          done
-          echo "needs_build=$needs_build" >> "$GITHUB_OUTPUT"
+          FILE="$RUNNER_TEMP/image.txt"
+          echo "${{ steps.names.outputs.image }}" > "$FILE"
+          echo "IMAGE_FILE=$FILE" >> "$GITHUB_ENV"
 
-      - name: Build, tag, and push images
-        if: ${{ env.RUN_SUBSET == 'all' && steps.check-images.outputs.needs_build == '1' }}
-        env:
-          PLATFORM_IMAGE: ${{ steps.image-data.outputs.platform_api_image }}
-          PROXY_IMAGE: ${{ steps.image-data.outputs.proxy_image }}
-          K8S_AGENT_IMAGE: ${{ steps.image-data.outputs.k8s_agent_image }}
-          WORKSPACE_IMAGE: ${{ steps.image-data.outputs.workspace_image }}
-        run: |
-          set -euo pipefail
-          docker build -t "${PLATFORM_IMAGE}" -f services/platform-api/Dockerfile .
-          docker build -t "${PROXY_IMAGE}" -f services/proxy/Dockerfile .
-          docker build -t "${K8S_AGENT_IMAGE}" -f agents/k8s-agent/Dockerfile .
-          docker build -t "${WORKSPACE_IMAGE}" workspace-images/openssh-vscode
+      - name: Upload image reference artifact
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.name }}
+          path: ${{ env.IMAGE_FILE }}
+          if-no-files-found: error
 
-          docker push "${PLATFORM_IMAGE}"
-          docker push "${PROXY_IMAGE}"
-          docker push "${K8S_AGENT_IMAGE}"
-          docker push "${WORKSPACE_IMAGE}"
-
-  deploy-preview-and-test:
-    name: Deploy Preview & Run E2E Tests
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+  collect-built-images:
+    name: Collect Build Image Outputs
     runs-on: ubuntu-latest
-    needs: build-and-push
-    permissions:
-      contents: read
+    needs:
+      - resolve-settings
+      - build-and-push
+    if: ${{ contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) }}
     outputs:
-      preview_host: ${{ steps.deploy.outputs.preview_host }}
-    env:
-      USE_EXISTING_CLUSTER: 'true'
+      platform_api_image: ${{ steps.collect.outputs.platform_api_image }}
+      proxy_image:        ${{ steps.collect.outputs.proxy_image }}
+      k8s_agent_image:    ${{ steps.collect.outputs.k8s_agent_image }}
+      workspace_image:    ${{ steps.collect.outputs.workspace_image }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
         with:
-          go-version: '1.22.5'
+          pattern: image-*
+          path: images
 
-      - name: Determine image URIs for deployment
-        id: image-uris
+      - name: Collect image references
+        id: collect
         run: |
           set -euo pipefail
-          if [[ "${RUN_SUBSET}" == "all" ]]; then
-            echo "platform=${{ needs.build-and-push.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
-            echo "proxy=${{ needs.build-and-push.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
-            echo "agent=${{ needs.build-and-push.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
-            echo "workspace=${{ needs.build-and-push.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
-          else
-            IMAGE_TAG="${MANUAL_IMAGE_TAG}"
-            if [[ -z "${IMAGE_TAG}" ]]; then
-              IMAGE_TAG="${DEFAULT_E2E_IMAGE_TAG}"
+          read_image() {
+            local name="$1"
+            local file="images/image-${name}/image.txt"
+            if [[ -f "$file" ]]; then
+              tr -d '\n' < "$file"
+            else
+              echo "Missing artifact for ${name}" >&2
+              exit 1
             fi
-            ECR_REGISTRY="567751785679.dkr.ecr.us-east-1.amazonaws.com"
-            echo "platform=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "proxy=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "agent=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "workspace=${ECR_REGISTRY}/aegis/workspace-vscode:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          fi
+          }
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+          platform=$(read_image "platform-api")
+          proxy=$(read_image "proxy")
+          agent=$(read_image "k8s-agent")
+          workspace=$(read_image "workspace-vscode")
+
+          echo "platform_api_image=${platform}" >> "$GITHUB_OUTPUT"
+          echo "proxy_image=${proxy}" >> "$GITHUB_OUTPUT"
+          echo "k8s_agent_image=${agent}" >> "$GITHUB_OUTPUT"
+          echo "workspace_image=${workspace}" >> "$GITHUB_OUTPUT"
+
+  provision-infra:
+    name: Provision Preview (Terraform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs:
+      - resolve-settings
+      - build-and-push
+    if: ${{ contains('all,deploy,deploy-no-teardown,provision-only,tests-only', needs.resolve-settings.outputs.run_subset) }}
+    outputs:
+      provisioned: ${{ steps.flag.outputs.provisioned || 'false' }}
+      vpc_id:      ${{ steps.tf-outputs.outputs.vpc_id || '' }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: provision-${{ needs.resolve-settings.outputs.preview_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - uses: hashicorp/setup-terraform@v2
         with:
           terraform_wrapper: false
 
+      - name: Skip provisioning (tests-only)
+        if: ${{ env.RUN_SUBSET == 'tests-only' }}
+        run: echo "RUN_SUBSET=${RUN_SUBSET}; skipping terraform apply for tests-only run."
+
       - name: Terraform init & apply
+        id: tf-apply
         env:
           TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
           TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         run: |
           set -euo pipefail
           cd terraform
@@ -248,43 +425,117 @@ jobs:
           terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
           terraform apply -auto-approve
 
-      - name: Capture preview infrastructure outputs
-        id: preview-outputs
+      - name: Capture outputs
+        id: tf-outputs
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         run: |
           set -euo pipefail
           cd terraform
           VPC_ID=$(terraform output -raw vpc_id)
           echo "vpc_id=${VPC_ID}" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy control plane via Helm
+      - name: Mark provisioned
+        id: flag
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
+        run: echo "provisioned=true" >> "$GITHUB_OUTPUT"
+
+  deploy-control-plane:
+    name: Deploy Control Plane (Helm + scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [resolve-settings, provision-infra, collect-built-images]
+    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
+    env:
+      USE_EXISTING_CLUSTER: 'true'
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: deploy-${{ needs.resolve-settings.outputs.preview_id }}
+      cancel-in-progress: true
+    outputs:
+      fresh_deploy: ${{ steps.mark-deploy.outputs.fresh || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Determine image URIs
+        id: image-uris
+        run: |
+          set -euo pipefail
+          if [[ "${RUN_SUBSET}" == "all" || "${RUN_SUBSET}" == "deploy" || "${RUN_SUBSET}" == "deploy-no-teardown" ]]; then
+            echo "platform=${{ needs.collect-built-images.outputs.platform_api_image }}" >> "$GITHUB_OUTPUT"
+            echo "proxy=${{ needs.collect-built-images.outputs.proxy_image }}" >> "$GITHUB_OUTPUT"
+            echo "agent=${{ needs.collect-built-images.outputs.k8s_agent_image }}" >> "$GITHUB_OUTPUT"
+            echo "workspace=${{ needs.collect-built-images.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
+          else
+            IMAGE_TAG="${MANUAL_IMAGE_TAG:-${DEFAULT_E2E_IMAGE_TAG}}"
+            ECR_REGISTRY="567751785679.dkr.ecr.us-east-1.amazonaws.com"
+            echo "platform=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "proxy=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "agent=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "workspace=${ECR_REGISTRY}/aegis/workspace-vscode:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init for outputs
+        run: |
+          set -euo pipefail
+          cd terraform
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+
+      - name: Deploy via Terraform helper (migrations included)
         id: deploy
         env:
           PLATFORM_API_IMAGE_TAG: ${{ steps.image-uris.outputs.platform }}
-          PROXY_IMAGE_TAG: ${{ steps.image-uris.outputs.proxy }}
-          K8S_AGENT_IMAGE_TAG: ${{ steps.image-uris.outputs.agent }}
-          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
-          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
-          SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
-          SKIP_ROUTE53_UPDATE: '1'
-          REUSE_EXISTING_DEPLOYMENT: ${{ env.RUN_SUBSET == 'e2e-only' && '1' || '0' }}
-          AEGIS_PLATFORM_API_CERT: ${{ steps.image-uris.outputs.platform_api_cert }}
+          PROXY_IMAGE_TAG:       ${{ steps.image-uris.outputs.proxy }}
+          K8S_AGENT_IMAGE_TAG:   ${{ steps.image-uris.outputs.agent }}
+          HELM_RELEASE:          ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE:         ${{ env.PREVIEW_NAMESPACE }}
+          SPOKE_HELM_RELEASE:    ${{ env.PREVIEW_RELEASE }}-spoke
+          SKIP_ROUTE53_UPDATE:   '1'
+          REUSE_EXISTING_DEPLOYMENT: ${{ env.RUN_SUBSET == 'tests-only' && '1' || '0' }}
         run: |
           set -euo pipefail
-
-          # Deploy via Terraform helper (skips Route53 update but now includes migrations)
           ./terraform/generate-cloud-deployment.sh --non-interactive --tls
 
+      - name: Mark fresh deploy
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
+        id: mark-deploy
+        run: echo "fresh=true" >> "$GITHUB_OUTPUT"
+
       - name: Build pulumi preview CLI
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         run: |
           set -euo pipefail
           mkdir -p bin
           go build -o bin/pulumi-preview ./services/platform-api/cmd/pulumi-preview
 
       - name: Apply pulumi preview ProjectInfra manifest
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         id: pulumi-preview-manifest
         env:
           K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
-          PREVIEW_VPC_ID: ${{ steps.preview-outputs.outputs.vpc_id }}
+          PREVIEW_VPC_ID: ${{ needs.provision-infra.outputs.vpc_id }}
         run: |
           set -euo pipefail
           kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
@@ -298,8 +549,9 @@ jobs:
           echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
 
       - name: Run pulumi preview CLI
+        if: ${{ env.RUN_SUBSET != 'tests-only' }}
         env:
-          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAME:      ${{ steps.pulumi-preview-manifest.outputs.name }}
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
         run: |
           set -euo pipefail
@@ -314,207 +566,388 @@ jobs:
           ./bin/pulumi-preview --namespace "${PROJECT_INFRA_NAMESPACE}" --name "${PROJECT_INFRA_NAME}" --kubeconfig "${KUBE_PATH}"
 
       - name: Cleanup pulumi preview ProjectInfra
-        if: always()
+        if: ${{ env.RUN_SUBSET != 'tests-only' && always() }}
         env:
-          PROJECT_INFRA_NAME: ${{ steps.pulumi-preview-manifest.outputs.name }}
+          PROJECT_INFRA_NAME:      ${{ steps.pulumi-preview-manifest.outputs.name }}
           PROJECT_INFRA_NAMESPACE: ${{ steps.pulumi-preview-manifest.outputs.namespace }}
         run: |
           set -euo pipefail
           if [[ -n "${PROJECT_INFRA_NAME}" ]]; then
             kubectl delete projectinfra "${PROJECT_INFRA_NAME}" -n "${PROJECT_INFRA_NAMESPACE}" --ignore-not-found
           fi
-      - name: Update Route53 and configure E2E endpoints
-        id: configure-e2e
+
+  e2e-endpoints:
+    name: Resolve E2E Endpoints (fresh or existing)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [resolve-settings, provision-infra, deploy-control-plane]
+    # Run for all except destroy-only
+    if: ${{ needs.resolve-settings.outputs.run_subset != 'destroy-only' }}
+    outputs:
+      grpc_addr:     ${{ steps.endpoints.outputs.grpc_addr }}
+      grpc_host:     ${{ steps.endpoints.outputs.grpc_host }}
+      proxy_hostname: ${{ steps.endpoints.outputs.proxy_hostname }}
+      grpc_ca_b64:   ${{ steps.endpoints.outputs.grpc_ca_b64 }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Use fresh deploy if available; otherwise read from state
+        id: endpoints
         env:
-          HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}
-          K8S_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
-          TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
+          HELM_RELEASE:    ${{ env.PREVIEW_RELEASE }}
+          K8S_NAMESPACE:   ${{ env.PREVIEW_NAMESPACE }}
         run: |
           set -euo pipefail
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          FRESH_DEPLOY="${{ needs.deploy-control-plane.outputs.fresh_deploy }}"
 
-          # Extract actual LoadBalancer hostnames from Kubernetes services
-          echo "⏳ Waiting for LoadBalancers to be provisioned..."
+          pushd terraform >/dev/null
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
+          popd >/dev/null
 
-          # Wait for platform-api LoadBalancer (max 5 minutes)
-          for i in {1..60}; do
-            PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            if [ -n "${PLATFORM_LB}" ]; then
-              echo "✅ Platform API LoadBalancer ready: ${PLATFORM_LB}"
-              break
-            fi
-            echo "  Waiting for platform-api LoadBalancer... (${i}/60)"
-            sleep 5
-          done
-
-          # Wait for proxy LoadBalancer (max 5 minutes)
-          for i in {1..60}; do
-            PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            if [ -n "${PROXY_LB}" ]; then
-              echo "✅ Proxy LoadBalancer ready: ${PROXY_LB}"
-              break
-            fi
-            echo "  Waiting for proxy LoadBalancer... (${i}/60)"
-            sleep 5
-          done
-
-          # Verify LoadBalancers were obtained
-          if [ -z "${PLATFORM_LB}" ] || [ -z "${PROXY_LB}" ]; then
-            echo "❌ Failed to get LoadBalancer hostnames after 5 minutes"
+          if [[ -z "${KUBECTL_CMD}" ]]; then
+            echo "Failed to retrieve kubectl configuration command from Terraform outputs" >&2
             exit 1
           fi
 
-          # Update Route53 DNS records with actual LoadBalancer hostnames
-          echo ""
-          echo "🌐 Updating Route53 DNS records..."
-          cd terraform
-          terraform apply -auto-approve \
-            -var="platform_api_lb_hostname=${PLATFORM_LB}" \
-            -var="proxy_lb_hostname=${PROXY_LB}" \
-            -target=aws_route53_record.platform_api_grpc \
-            -target=aws_route53_record.platform_api_http \
-            -target=aws_route53_record.proxy
+          eval "${KUBECTL_CMD}"
 
-          # Get the DNS names from Terraform outputs (now updated)
+          if [[ "${FRESH_DEPLOY}" == "true" ]]; then
+            echo "Using fresh deploy to discover endpoints..."
+            # Wait up to 5 minutes for LBs
+            for i in {1..60}; do
+              PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [ -n "${PLATFORM_LB}" ] && break || sleep 5
+            done
+            for i in {1..60}; do
+              PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [ -n "${PROXY_LB}" ] && break || sleep 5
+            done
+            if [[ -z "${PLATFORM_LB}" || -z "${PROXY_LB}" ]]; then
+              echo "Failed to get LoadBalancer hostnames from fresh deploy" >&2
+              exit 1
+            fi
+
+            pushd terraform >/dev/null
+            terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+            terraform apply -auto-approve \
+              -var="platform_api_lb_hostname=${PLATFORM_LB}" \
+              -var="proxy_lb_hostname=${PROXY_LB}" \
+              -target=aws_route53_record.platform_api_grpc \
+              -target=aws_route53_record.platform_api_http \
+              -target=aws_route53_record.proxy
+            popd >/dev/null
+          else
+            echo "Using existing Terraform state to get endpoints (tests-only or deploy skipped)..."
+            pushd terraform >/dev/null
+            terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+            popd >/dev/null
+          fi
+
+          pushd terraform >/dev/null
           PLATFORM_DNS=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "")
           PROXY_DNS=$(terraform output -raw dns_proxy 2>/dev/null || echo "")
+          popd >/dev/null
 
-          # Remove trailing dots from DNS names if present
           PLATFORM_DNS=${PLATFORM_DNS%.}
           PROXY_DNS=${PROXY_DNS%.}
 
-          echo "✅ Route53 records updated:"
-          echo "   ${PLATFORM_DNS} → ${PLATFORM_LB}"
-          echo "   ${PROXY_DNS} → ${PROXY_LB}"
-
-          echo ""
-          echo "🔍 Resolving LoadBalancer IPs for local overrides..."
-          PLATFORM_IP=$(dig +short "${PLATFORM_LB}" | head -1)
-          PROXY_IP=$(dig +short "${PROXY_LB}" | head -1)
-
-          if [ -n "${PLATFORM_IP}" ]; then
-            echo "   Platform API LB IP: ${PLATFORM_IP}"
-            sudo sed -i.bak "/${PLATFORM_DNS}/d" /etc/hosts 2>/dev/null || true
-            echo "${PLATFORM_IP} ${PLATFORM_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          if [[ -z "${PLATFORM_DNS}" || -z "${PROXY_DNS}" ]]; then
+            echo "No DNS endpoints available; cannot run tests." >&2
+            exit 1
           fi
 
-          if [ -n "${PROXY_IP}" ]; then
-            echo "   Proxy LB IP: ${PROXY_IP}"
-            sudo sed -i.bak "/${PROXY_DNS}/d" /etc/hosts 2>/dev/null || true
-            echo "${PROXY_IP} ${PROXY_DNS}" | sudo tee -a /etc/hosts >/dev/null
+          export PLATFORM_DNS PROXY_DNS
+          ORIGINAL_PLATFORM_DNS="${PLATFORM_DNS}"
+          ORIGINAL_PROXY_DNS="${PROXY_DNS}"
+          CONNECT_PLATFORM_DNS="${PLATFORM_DNS}"
+          CONNECT_PROXY_DNS="${PROXY_DNS}"
+
+          if ! python3 -c $'import os,socket,sys,time\nhosts=[os.environ["PLATFORM_DNS"], os.environ["PROXY_DNS"]]\nfor host in hosts:\n    print(f"Waiting for DNS {host} to resolve...", flush=True)\n    for attempt in range(120):\n        try:\n            socket.getaddrinfo(host, None)\n            break\n        except socket.gaierror as exc:\n            if attempt == 119:\n                print(f"DNS name {host} did not resolve within 10 minutes: {exc}", file=sys.stderr, flush=True)\n                sys.exit(1)\n            time.sleep(5)\n'; then
+            echo "DNS records not available; attempting to fall back to load balancer hostnames..." >&2
+            # Wait briefly to let services settle.
+            sleep 5
+            PLATFORM_LB=""
+            PROXY_LB=""
+            for i in {1..60}; do
+              PLATFORM_LB=$(kubectl get svc "${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [[ -n "${PLATFORM_LB}" ]] && break
+              sleep 5
+            done
+            for i in {1..60}; do
+              PROXY_LB=$(kubectl get svc "${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+              [[ -n "${PROXY_LB}" ]] && break
+              sleep 5
+            done
+            if [[ -z "${PLATFORM_LB}" || -z "${PROXY_LB}" ]]; then
+              echo "Unable to obtain load balancer hostnames for fallback" >&2
+              exit 1
+            fi
+            CONNECT_PLATFORM_DNS="${PLATFORM_LB}"
+            CONNECT_PROXY_DNS="${PROXY_LB}"
+            FALLBACK_USED=1
+            echo "Using load balancer hostnames for connectivity while retaining TLS server name ${ORIGINAL_PLATFORM_DNS}." >&2
+          else
+            FALLBACK_USED=0
           fi
 
-          sudo resolvectl flush-caches || true
-          echo "🔄 Local resolver cache flushed (hosts file overrides in place)"
+          PLATFORM_TLS_HOST="${ORIGINAL_PLATFORM_DNS}"
+          PROXY_TLS_HOST="${ORIGINAL_PROXY_DNS}"
+          echo "PLATFORM_DNS=${CONNECT_PLATFORM_DNS}" >> "$GITHUB_ENV"
+          echo "PROXY_DNS=${CONNECT_PROXY_DNS}"       >> "$GITHUB_ENV"
+          echo "PLATFORM_TLS_HOST=${PLATFORM_TLS_HOST}" >> "$GITHUB_ENV"
+          echo "PROXY_TLS_HOST=${PROXY_TLS_HOST}"       >> "$GITHUB_ENV"
+          echo "DNS_FALLBACK_USED=${FALLBACK_USED}" >> "$GITHUB_ENV"
 
-          # Output DNS names for E2E tests (use DNS, not LoadBalancer directly)
-          echo "grpc_addr=${PLATFORM_DNS}:8081" >> "$GITHUB_OUTPUT"
-          echo "grpc_host=${PLATFORM_DNS}" >> "$GITHUB_OUTPUT"
-          echo "proxy_hostname=${PROXY_DNS}" >> "$GITHUB_OUTPUT"
-          echo "grpc_ca=${HOME}/aegis-platform-api-ca.crt" >> "$GITHUB_OUTPUT"
+          CA_SECRET="${HELM_RELEASE}-platform-api-tls"
+          TMP_CHAIN=$(mktemp)
 
-          echo ""
-          echo "📋 E2E Test Endpoints (via DNS):"
-          echo "   Platform API gRPC: ${PLATFORM_DNS}:8081"
-          echo "   Proxy:             ${PROXY_DNS}:8080"
-          echo "   CA Bundle:         ${HOME}/aegis-platform-api-ca.crt"
+          if ! kubectl get secret "${CA_SECRET}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+            echo "Failed to locate TLS secret ${CA_SECRET} in namespace ${K8S_NAMESPACE}" >&2
+            exit 1
+          fi
 
-      - name: Install test tooling
+          kubectl get secret "${CA_SECRET}" -n "${K8S_NAMESPACE}" -o jsonpath='{.data.tls\.crt}' | base64 -d > "${TMP_CHAIN}"
+
+          CA_BUNDLE_PATH="${HOME}/aegis-platform-api-ca.crt"
+          LAST_CERT=""
+          CURRENT=""
+          while IFS= read -r line; do
+            if [[ "${line}" == "-----BEGIN CERTIFICATE-----" ]]; then
+              CURRENT="${line}"$'\n'
+              continue
+            fi
+            if [[ -n "${CURRENT}" ]]; then
+              CURRENT+="${line}"$'\n'
+            fi
+            if [[ "${line}" == "-----END CERTIFICATE-----" ]]; then
+              LAST_CERT="${CURRENT}"
+              CURRENT=""
+            fi
+          done < "${TMP_CHAIN}"
+
+          if [[ -z "${LAST_CERT}" ]]; then
+            echo "Failed to extract CA certificate from TLS chain" >&2
+            exit 1
+          fi
+
+          printf "%s" "${LAST_CERT}" > "${CA_BUNDLE_PATH}"
+          chmod 600 "${CA_BUNDLE_PATH}"
+          rm -f "${TMP_CHAIN}"
+
+          echo "CA_BUNDLE_PATH=${CA_BUNDLE_PATH}" >> "$GITHUB_ENV"
+          CA_BUNDLE_B64=$(base64 "${CA_BUNDLE_PATH}" | tr -d '\n')
+          {
+            echo "grpc_addr=${CONNECT_PLATFORM_DNS}:8081"
+            echo "grpc_host=${PLATFORM_TLS_HOST}"
+            echo "proxy_hostname=${CONNECT_PROXY_DNS}"
+            echo "grpc_ca_b64=${CA_BUNDLE_B64}"
+          } >> "$GITHUB_OUTPUT"
+
+  e2e-tests:
+    name: E2E Test Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [resolve-settings, e2e-endpoints, collect-built-images]
+    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: tests-${{ needs.resolve-settings.outputs.preview_id }}-${{ matrix.suite || 'all' }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJson(needs.resolve-settings.outputs.e2e_suite_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Configure kubectl for suite
         run: |
           set -euo pipefail
-          cd "${{ github.workspace }}"
+          pushd terraform >/dev/null
+          TF_WS="preview-${PREVIEW_ID}"
+          STATE_KEY="aegis/previews/${TF_WS}/terraform.tfstate"
+          terraform init -backend-config=backend.hcl -backend-config="key=${STATE_KEY}"
+          KUBECTL_CMD=$(terraform output -raw kubectl_config_command 2>/dev/null || echo "")
+          popd >/dev/null
+          if [[ -n "${KUBECTL_CMD}" ]]; then
+            eval "${KUBECTL_CMD}"
+          fi
+
+      - name: Write CA bundle for suite
+        env:
+          GRPC_CA_B64: ${{ needs.e2e-endpoints.outputs.grpc_ca_b64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GRPC_CA_B64:-}" ]]; then
+            echo "Missing GRPC_CA_B64 from endpoints job" >&2
+            exit 1
+          fi
+          CA_PATH="${HOME}/aegis-platform-api-ca.crt"
+          printf '%s' "${GRPC_CA_B64}" | base64 --decode > "${CA_PATH}"
+          chmod 600 "${CA_PATH}"
+          echo "GRPC_CA_PATH=${CA_PATH}" >> "$GITHUB_ENV"
+
+      - name: Install test tooling (grpcurl + jq)
+        run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jq
           GRPCURL_VERSION=1.9.3
           ARCH=$(uname -m)
           case "$ARCH" in
-            x86_64|amd64)
-              GRPCURL_PACKAGE_ARCH=linux_x86_64
-              ;;
-            arm64|aarch64)
-              GRPCURL_PACKAGE_ARCH=linux_arm64
-              ;;
-            *)
-              echo "Unsupported architecture: $ARCH" >&2
-              exit 1
-              ;;
+            x86_64|amd64) GRPCURL_PACKAGE_ARCH=linux_x86_64 ;;
+            arm64|aarch64) GRPCURL_PACKAGE_ARCH=linux_arm64 ;;
+            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
           esac
           TMPDIR=$(mktemp -d)
           ASSET="grpcurl_${GRPCURL_VERSION}_${GRPCURL_PACKAGE_ARCH}.tar.gz"
           CURL_URL="https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/${ASSET}"
-          if ! curl -fsSL "$CURL_URL" -o "$TMPDIR/$ASSET"; then
-            echo "Failed to download grpcurl from $CURL_URL" >&2
-            exit 1
-          fi
+          curl -fsSL "$CURL_URL" -o "$TMPDIR/$ASSET"
           tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR" grpcurl
           sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
           rm -rf "$TMPDIR"
 
-      - name: Run platform API E2E tests
+      - name: Run suite
         env:
-          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
-          AEGIS_PROXY_HOSTNAME: ${{ steps.configure-e2e.outputs.proxy_hostname }}
-          GRPC_TLS: '1'
-          GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
-          GRPC_TLS_SERVER_NAME: ${{ steps.configure-e2e.outputs.grpc_host }}
-          AEGIS_WORKLOAD_NAMESPACE: aegis-workloads
-          AEGIS_PLATFORM_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
-          AEGIS_PLATFORM_SERVICE: ${{ env.PREVIEW_RELEASE }}-platform-api
-          AEGIS_PLATFORM_DEPLOYMENT: ${{ env.PREVIEW_RELEASE }}-platform-api
+          WORKSPACE_IMAGE_OUTPUT: ${{ needs.collect-built-images.outputs.workspace_image }}
+          K8S_AGENT_IMAGE_OUTPUT: ${{ needs.collect-built-images.outputs.k8s_agent_image }}
         run: |
           set -euo pipefail
-          echo "🧪 Running E2E tests against preview environment (via DNS):"
-          echo "   gRPC Address: ${AEGIS_GRPC_ADDR}"
-          echo "   Proxy:        ${AEGIS_PROXY_HOSTNAME}"
-          echo "   Namespace:    ${AEGIS_PLATFORM_NAMESPACE}"
-          echo "   CA Bundle:    ${GRPC_CA}"
-          echo "   TLS:          Enabled"
-          echo ""
+          SUITE="${{ matrix.suite }}"
+          case "${SUITE}" in
+            platform-api)
+              echo "🧪 Platform API E2E via DNS"
+              export AEGIS_GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
+              export AEGIS_PROXY_HOSTNAME="${{ needs.e2e-endpoints.outputs.proxy_hostname }}"
+              export GRPC_TLS=1
+              export GRPC_CA="${GRPC_CA_PATH}"
+              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
+              export AEGIS_WORKLOAD_NAMESPACE=aegis-workloads
+              export AEGIS_PLATFORM_NAMESPACE="${PREVIEW_NAMESPACE}"
+              export AEGIS_PLATFORM_SERVICE="${PREVIEW_RELEASE}-platform-api"
+              export AEGIS_PLATFORM_DEPLOYMENT="${PREVIEW_RELEASE}-platform-api"
+              bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
+              ;;
+            workspace)
+              echo "🧪 Workspace connectivity smoke"
+              export GRPC_ADDR="${{ needs.e2e-endpoints.outputs.grpc_addr }}"
+              export GRPC_TLS=1
+              export GRPC_CA="${GRPC_CA_PATH}"
+              export GRPC_TLS_SERVER_NAME="${{ needs.e2e-endpoints.outputs.grpc_host }}"
+              export WORKSPACE_NAMESPACE=aegis-workloads
+              export CLEANUP=1
+              echo "🔍 Inspecting kubeconfig distribution before workspace test..."
+              if kubectl get secret aegis-kubeconfigs -n "${PREVIEW_NAMESPACE}" >/dev/null 2>&1; then
+                echo "   • aegis-kubeconfigs keys:"
+                kubectl get secret aegis-kubeconfigs -n "${PREVIEW_NAMESPACE}" -o json | jq -r '.data | keys[]' | sed 's/^/     - /'
+              else
+                echo "   ⚠️ Secret aegis-kubeconfigs not found in namespace ${PREVIEW_NAMESPACE}"
+              fi
+              if kubectl rollout status "deployment/${PREVIEW_RELEASE}-platform-api" -n "${PREVIEW_NAMESPACE}" --timeout=5s >/dev/null 2>&1; then
+                echo "   • Files mounted at /etc/kubeconfigs inside platform-api pod:"
+                kubectl exec deploy/"${PREVIEW_RELEASE}-platform-api" -n "${PREVIEW_NAMESPACE}" -- ls /etc/kubeconfigs 2>/dev/null | sed 's/^/     - /' || echo "     (ls failed)"
+              fi
+              IMAGE="${WORKSPACE_IMAGE_OUTPUT}"
+              if [[ -z "${IMAGE}" ]]; then
+                if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${MANUAL_IMAGE_TAG}"
+                else
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${DEFAULT_E2E_IMAGE_TAG}"
+                fi
+              fi
+              scripts/test-workspace-connection.sh "${IMAGE}"
+              cat .aegis/workspace-session.json || true
+              rm -f .aegis/workspace-session.json || true
+              ;;
+            k8s-agent)
+              echo "🧪 k8s-agent E2E (kind)"
+              cd agents/k8s-agent
+              export USE_EXISTING_CLUSTER=true
+              export KIND_CLUSTER=aegis-e2e
+              IMAGE="${K8S_AGENT_IMAGE_OUTPUT}"
+              if [[ -z "${IMAGE}" ]]; then
+                if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${MANUAL_IMAGE_TAG}"
+                else
+                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${DEFAULT_E2E_IMAGE_TAG}"
+                fi
+              fi
+              export K8S_AGENT_E2E_IMAGE="${IMAGE}"
+              export K8S_AGENT_E2E_SKIP_BUILD=true
+              make test-e2e
+              ;;
+            *)
+              echo "Unknown suite '${SUITE}'" >&2
+              exit 1
+              ;;
+          esac
 
-          SCRIPT_ROOT="${{ github.workspace }}"
-          bash "${SCRIPT_ROOT}/scripts/e2e-platform-api.sh"
-
-      - name: Workspace connectivity smoke test
-        if: ${{ env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'e2e-only' }}
+  promote-images:
+    name: Promote Images to :latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [resolve-settings, collect-built-images, e2e-tests]
+    if: ${{ needs.resolve-settings.outputs.run_subset == 'all' && needs.e2e-tests.result == 'success' }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+      - name: Promote to latest
         env:
-          WORKSPACE_IMAGE: ${{ steps.image-uris.outputs.workspace }}
-          AEGIS_GRPC_ADDR: ${{ steps.configure-e2e.outputs.grpc_addr }}
-          AEGIS_GRPC_CA: ${{ steps.configure-e2e.outputs.grpc_ca }}
-          AEGIS_GRPC_HOST: ${{ steps.configure-e2e.outputs.grpc_host }}
-          VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
-        run: |
-          set -euo pipefail
-          echo "🧪 Workspace connectivity smoke test using image ${WORKSPACE_IMAGE}"
-          export GRPC_ADDR=${AEGIS_GRPC_ADDR}
-          export GRPC_TLS=1
-          export GRPC_CA=${AEGIS_GRPC_CA}
-          export GRPC_TLS_SERVER_NAME=${AEGIS_GRPC_HOST}
-          export WORKSPACE_NAMESPACE=aegis-workloads
-          export CLEANUP=1
-          scripts/test-workspace-connection.sh "${WORKSPACE_IMAGE}"
-          cat .aegis/workspace-session.json || true
-          rm -f .aegis/workspace-session.json || true
-
-      - name: Run k8s-agent E2E tests
-        if: ${{ env.RUN_SUBSET == '' || env.RUN_SUBSET == 'all' || env.RUN_SUBSET == 'deploy-no-teardown' || env.RUN_SUBSET == 'e2e-only' }}
-
-        env:
-          USE_EXISTING_CLUSTER: ${{ env.USE_EXISTING_CLUSTER }}
-          KIND_CLUSTER: aegis-e2e
-          K8S_AGENT_E2E_IMAGE: ${{ steps.image-uris.outputs.agent }}
-          K8S_AGENT_E2E_SKIP_BUILD: 'true'
-        run: |
-          cd agents/k8s-agent
-          make test-e2e
-
-      - name: Promote images to latest
-        if: ${{ env.RUN_SUBSET == 'all' && success() }}
-        env:
-          PLATFORM_IMAGE: ${{ needs.build-and-push.outputs.platform_api_image }}
-          PROXY_IMAGE: ${{ needs.build-and-push.outputs.proxy_image }}
-          K8S_AGENT_IMAGE: ${{ needs.build-and-push.outputs.k8s_agent_image }}
-          WORKSPACE_IMAGE: ${{ needs.build-and-push.outputs.workspace_image }}
+          PLATFORM_IMAGE:  ${{ needs.collect-built-images.outputs.platform_api_image }}
+          PROXY_IMAGE:     ${{ needs.collect-built-images.outputs.proxy_image }}
+          K8S_AGENT_IMAGE: ${{ needs.collect-built-images.outputs.k8s_agent_image }}
+          WORKSPACE_IMAGE: ${{ needs.collect-built-images.outputs.workspace_image }}
         run: |
           set -euo pipefail
           promote() {
@@ -524,20 +957,12 @@ jobs:
             local registry="${repo%%/*}"
             local repo_name="${repo#${registry}/}"
             echo "Promoting ${repo_name}:${tag} -> latest"
-            local manifest
             manifest=$(aws ecr batch-get-image \
               --repository-name "$repo_name" \
               --image-ids imageTag="$tag" \
               --query 'images[0].imageManifest' \
               --output text)
-            if [ -z "$manifest" ]; then
-              echo "Failed to retrieve manifest for ${repo_name}:${tag}" >&2
-              exit 1
-            fi
-            aws ecr put-image \
-              --repository-name "$repo_name" \
-              --image-tag latest \
-              --image-manifest "$manifest" >/dev/null
+            aws ecr put-image --repository-name "$repo_name" --image-tag latest --image-manifest "$manifest" >/dev/null
           }
           promote "$PLATFORM_IMAGE"
           promote "$PROXY_IMAGE"
@@ -545,25 +970,56 @@ jobs:
           promote "$WORKSPACE_IMAGE"
 
   teardown-preview:
-    name: Teardown Preview Environment
-    if: ${{ false }}  # Temporarily disabled for testing
+    name: Teardown Preview
     runs-on: ubuntu-latest
-    needs: deploy-preview-and-test
-    permissions:
-      contents: read
+    timeout-minutes: 25
+    needs: [resolve-settings, provision-infra, e2e-tests]
+    # Safe gating: only if infra actually provisioned AND policy allows it.
+    if: >-
+      ${{
+        always() &&
+        (
+          needs.resolve-settings.outputs.run_subset == 'destroy-only'
+          || (
+            needs.provision-infra.result != 'skipped'
+            && needs.provision-infra.outputs.provisioned == 'true'
+            && (
+              needs.resolve-settings.outputs.teardown_policy == 'always'
+              || (
+                needs.resolve-settings.outputs.teardown_policy == 'auto-on-success'
+                && needs.e2e-tests.result == 'success'
+              )
+              || (needs.resolve-settings.outputs.teardown_policy == 'manual' && false)
+            )
+            && (
+              needs.resolve-settings.outputs.keep_on_failure == 'false'
+              || needs.e2e-tests.result == 'success'
+            )
+          )
+        )
+      }}
+    env:
+      PREVIEW_ID: ${{ needs.resolve-settings.outputs.preview_id }}
+      PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+      PREVIEW_RELEASE: ${{ needs.resolve-settings.outputs.preview_release }}
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      TEARDOWN_POLICY: ${{ needs.resolve-settings.outputs.teardown_policy }}
+      KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+    concurrency:
+      group: teardown-${{ needs.resolve-settings.outputs.preview_id }}
+      cancel-in-progress: false
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - uses: hashicorp/setup-terraform@v2
         with:
           terraform_wrapper: false
 
@@ -571,7 +1027,7 @@ jobs:
         env:
           TF_WORKSPACE: preview-${{ env.PREVIEW_ID }}
           PREVIEW_NAMESPACE: ${{ env.PREVIEW_NAMESPACE }}
-          PREVIEW_RELEASE: ${{ env.PREVIEW_RELEASE }}
+          PREVIEW_RELEASE:   ${{ env.PREVIEW_RELEASE }}
           SPOKE_HELM_RELEASE: ${{ env.PREVIEW_RELEASE }}-spoke
           TF_VAR_environment: ${{ env.PREVIEW_RELEASE }}
         run: |

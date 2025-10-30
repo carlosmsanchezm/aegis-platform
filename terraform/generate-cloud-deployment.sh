@@ -734,8 +734,6 @@ proxy:
       allowedHeaders:
         - authorization
         - Authorization
-        - x-aegis-user
-        - X-Aegis-User
 EOF_BACKSTAGE
 )
 

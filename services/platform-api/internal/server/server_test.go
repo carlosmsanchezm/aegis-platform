@@ -34,7 +34,12 @@ func newTestServer(t *testing.T) *Server {
 }
 
 func contextWithSubject(subject string) context.Context {
-	return mw.ContextWithIdentity(context.Background(), &mw.Identity{Subject: subject})
+	identity := &mw.Identity{
+		Subject:  subject,
+		Roles:    []string{"default-roles-aegis", "workspace-admin"},
+		ClientID: "backstage",
+	}
+	return mw.ContextWithIdentity(context.Background(), identity)
 }
 
 func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Workload {
@@ -348,7 +353,9 @@ func TestSubmitWorkload_BootstrapUsesPolicyDefaults(t *testing.T) {
 		},
 	}
 
-	_, err := srv.SubmitWorkload(context.Background(), req)
+	ctx := contextWithSubject("policy@example.com")
+
+	_, err := srv.SubmitWorkload(ctx, req)
 	if code := status.Code(err); code != codes.Internal && code != codes.FailedPrecondition {
 		t.Fatalf("unexpected error code %v: %v", code, err)
 	}
@@ -383,7 +390,9 @@ func TestSubmitWorkload_BootstrapDisabledRequiresProject(t *testing.T) {
 		},
 	}
 
-	_, err := srv.SubmitWorkload(context.Background(), req)
+	ctx := contextWithSubject("missing@example.com")
+
+	_, err := srv.SubmitWorkload(ctx, req)
 	if err == nil {
 		t.Fatal("expected error when project is missing")
 	}

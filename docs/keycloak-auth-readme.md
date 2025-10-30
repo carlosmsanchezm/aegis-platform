@@ -52,6 +52,23 @@ After the Platform API trusts the caller, it mints a short-lived *session token*
 
 *Why not signed by Keycloak?* Because the proxy and Platform API already trust the Keycloak-issued access token used to request the session ticket. The session token just carries routing metadata and an expiration; keeping it internal avoids extra network calls to Keycloak and lets the control plane encode implementation-specific fields.
 
+### 2.4 CLI Token Helper
+
+Automation and smoke tests rely on `scripts/keycloak-token.sh` to mint access tokens on demand. Configure it with the standard Keycloak environment variables:
+
+```bash
+export KEYCLOAK_BASE_URL=https://keycloak.localtest.me
+export KEYCLOAK_REALM=aegis
+export KEYCLOAK_CLIENT_ID=backstage
+export KEYCLOAK_CLIENT_SECRET=local-backstage-client-secret
+export KEYCLOAK_USERNAME=automation@test.com
+export KEYCLOAK_PASSWORD=Automation123!
+export KEYCLOAK_CA_CERT=$HOME/keycloak.localtest.me.crt
+TOKEN=$(./scripts/keycloak-token.sh)
+```
+
+When `KEYCLOAK_USERNAME` / `KEYCLOAK_PASSWORD` are omitted the script falls back to the client-credentials grant (for clients with service accounts enabled). The resulting bearer token is exported to the smoke-test scripts via `Authorization: Bearer …`.
+
 ---
 
 ## 3. Transport Security Layers
@@ -78,7 +95,7 @@ The VS Code Remote Extension Host communicates using SSH semantics (the Microsof
 ## 4. Workspace Provisioning Flow (End-to-End)
 
 1. **Submit Workload**
-   - Client calls `SubmitWorkload` with the Keycloak access token and user header `x-aegis-user`.
+   - Client calls `SubmitWorkload` with the Keycloak access token using the `Authorization: Bearer …` header.
    - Platform API schedules an `AegisWorkload` CRD; controller creates a job/pod running the workspace image (`aegis-workspace:dev` locally).
 
 2. **Pod Ready Check**
@@ -132,10 +149,11 @@ The architecture, token flow, and cryptographic protections remain identical acr
 ## 7. Operational Checklist
 
 1. **Realm import** – `charts/aegis-services/files/keycloak/aegis-realm.json` must be deployed so Keycloak has the correct clients, scopes, users, and required actions.
-2. **Workspace image** – `workspace-images/openssh-vscode` must be built and loaded into the cluster (`kind load` or push to registry). For kind, avoid the `:latest` tag to prevent `imagePullPolicy=Always`.
-3. **Port-forward (local dev)** – `make port-forward` for ports 10080/10081/10085.
-4. **Smoke test** – `scripts/test-workspace-connection.sh` to validate gRPC, workspace spin-up, proxy token flow, and VS Code server readiness.
-5. **Backstage upstream** – Catalog must contain a `User` entity whose email matches the Keycloak account, otherwise the login resolver will fail.
+2. **Authorization bindings** – `AUTHZ_ROLE_BINDINGS_JSON` must allow the calling clients/roles. The default binding authorizes the `backstage` and `vscode-extension` clients when their tokens include the `workspace-admin` realm role.
+3. **Workspace image** – `workspace-images/openssh-vscode` must be built and loaded into the cluster (`kind load` or push to registry). For kind, avoid the `:latest` tag to prevent `imagePullPolicy=Always`.
+4. **Port-forward (local dev)** – `make port-forward` for ports 10080/10081/10085.
+5. **Smoke test** – `scripts/test-workspace-connection.sh` validates gRPC, workspace spin-up, proxy token flow, and VS Code server readiness using real bearer tokens.
+6. **Backstage upstream** – Catalog must contain a `User` entity whose email matches the Keycloak account, otherwise the login resolver will fail.
 
 ---
 
@@ -168,7 +186,12 @@ export VSCODE_COMMIT=$(code --version | sed -n '2p' | awk '{print $NF}')
 GRPC_TLS=1 \
 GRPC_CA=$HOME/aegis-local-trust.pem \
 GRPC_TLS_SERVER_NAME=platform-api.localtest.me \
-AEGIS_WORKSPACE_USER=cms553@cornell.edu \
+KEYCLOAK_BASE_URL=https://keycloak.localtest.me \
+KEYCLOAK_REALM=aegis \
+KEYCLOAK_CLIENT_ID=backstage \
+KEYCLOAK_CLIENT_SECRET=local-backstage-client-secret \
+KEYCLOAK_USERNAME=local@test.com \
+KEYCLOAK_PASSWORD=supersecret \
 WORKSPACE_IMAGE=aegis-workspace:dev \
 ./scripts/test-workspace-connection.sh
 ```
@@ -215,8 +238,8 @@ sequenceDiagram
     Keycloak-->>Browser: ID + Access + Refresh tokens (incl. offline_access)
     Keycloak-->>VSCode: ID + Access + Refresh tokens (incl. offline_access)
 
-    Browser->>PlatformAPI: SubmitWorkload/GetWorkload (Keycloak access token + x-aegis-user)
-    VSCode->>PlatformAPI: SubmitWorkload/GetWorkload (Keycloak access token + x-aegis-user)
+    Browser->>PlatformAPI: SubmitWorkload/GetWorkload (Keycloak access token via Authorization header)
+    VSCode->>PlatformAPI: SubmitWorkload/GetWorkload (Keycloak access token via Authorization header)
     PlatformAPI->>Keycloak: Validate JWT (JWKS, RS256)
     Keycloak-->>PlatformAPI: JWT valid
     PlatformAPI->>PlatformAPI: Authorize request and schedule workspace pod

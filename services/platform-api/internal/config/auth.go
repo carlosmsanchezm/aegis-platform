@@ -11,6 +11,14 @@ import (
 const (
 	defaultJWKSCacheTTL        = 5 * time.Minute
 	defaultJWKSRefreshInterval = 1 * time.Minute
+	defaultRoleBindingsJSON    = `[
+  {
+    "clients": ["backstage", "vscode-extension"],
+    "roles": ["workspace-admin"],
+    "projects": ["*"],
+    "queues": ["*"]
+  }
+]`
 )
 
 // AuthConfig captures the runtime configuration for verifying OIDC access tokens.
@@ -22,6 +30,7 @@ type AuthConfig struct {
 	JWKSRefreshInterval         time.Duration
 	RequirePhishingResistantMFA bool
 	AllowedPhishingResistantAMR []string
+	DefaultRoleBindingsJSON     string
 }
 
 type rawAuthConfig struct {
@@ -41,6 +50,7 @@ func LoadAuthConfig() (*AuthConfig, error) {
 		JWKSCacheTTL:                defaultJWKSCacheTTL,
 		JWKSRefreshInterval:         defaultJWKSRefreshInterval,
 		AllowedPhishingResistantAMR: []string{"hwk", "webauthn", "piv", "piv-cac"},
+		DefaultRoleBindingsJSON:     defaultRoleBindingsJSON,
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("AUTH_CONFIG_JSON")); raw != "" {
@@ -79,6 +89,11 @@ func LoadAuthConfig() (*AuthConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// DefaultRoleBindingsJSON returns the built-in authorization bindings used when AUTHZ_ROLE_BINDINGS_JSON is unset.
+func DefaultRoleBindingsJSON() string {
+	return defaultRoleBindingsJSON
 }
 
 func applyRawConfig(cfg *AuthConfig, raw *rawAuthConfig) {

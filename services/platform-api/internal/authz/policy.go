@@ -9,11 +9,12 @@ import (
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 )
 
-// Binding associates one or more roles with permitted project and queue scopes.
+// Binding associates one or more roles and client identifiers with permitted project and queue scopes.
 type Binding struct {
 	Roles    []string `json:"roles"`
 	Projects []string `json:"projects"`
 	Queues   []string `json:"queues"`
+	Clients  []string `json:"clients"`
 }
 
 // Policy represents an in-memory authorization map derived from static configuration.
@@ -24,8 +25,11 @@ type Policy struct {
 // LoadPolicyFromEnv loads a policy from the AUTHZ_ROLE_BINDINGS_JSON environment variable.
 // The variable accepts a JSON array of bindings. When unset or empty, the resulting policy
 // denies all requests (fail-closed for security).
-func LoadPolicyFromEnv() (*Policy, error) {
+func LoadPolicyFromEnv(defaultJSON string) (*Policy, error) {
 	raw := strings.TrimSpace(os.Getenv("AUTHZ_ROLE_BINDINGS_JSON"))
+	if raw == "" {
+		raw = strings.TrimSpace(defaultJSON)
+	}
 	if raw == "" {
 		return &Policy{}, nil
 	}
@@ -37,6 +41,7 @@ func LoadPolicyFromEnv() (*Policy, error) {
 		bindings[i].Roles = normalize(bindingStrings(bindings[i].Roles))
 		bindings[i].Projects = normalize(bindingStrings(bindings[i].Projects))
 		bindings[i].Queues = normalize(bindingStrings(bindings[i].Queues))
+		bindings[i].Clients = normalize(bindingStrings(bindings[i].Clients))
 	}
 	return &Policy{bindings: bindings}, nil
 }
@@ -56,8 +61,12 @@ func (p *Policy) Authorize(identity *mw.Identity, projectID, queue string) bool 
 	}
 	project := strings.ToLower(strings.TrimSpace(projectID))
 	queueID := strings.ToLower(strings.TrimSpace(queue))
+	clientID := strings.ToLower(strings.TrimSpace(identity.ClientID))
 
 	for _, binding := range p.bindings {
+		if !matchesClient(clientID, binding.Clients) {
+			continue
+		}
 		if !hasRoleIntersection(roles, binding.Roles) {
 			continue
 		}
@@ -93,6 +102,21 @@ func matchesScope(value string, allowed []string) bool {
 		case "*":
 			return true
 		case value:
+			return true
+		}
+	}
+	return false
+}
+
+func matchesClient(client string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	if client == "" {
+		return false
+	}
+	for _, candidate := range allowed {
+		if candidate == client {
 			return true
 		}
 	}

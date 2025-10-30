@@ -43,6 +43,8 @@ const metricsServiceName = "k8s-agent-controller-manager-metrics-service"
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "k8s-agent-metrics-binding"
 
+var useExistingCluster = os.Getenv("USE_EXISTING_CLUSTER") == "true"
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -83,9 +85,13 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "undeploy")
 		_, _ = utils.Run(cmd)
 
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
+		if useExistingCluster {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CRD uninstall (USE_EXISTING_CLUSTER=true)\\n")
+		} else {
+			By("uninstalling CRDs")
+			cmd = exec.Command("make", "uninstall")
+			_, _ = utils.Run(cmd)
+		}
 
 		By("removing manager namespace")
 		cmd = exec.Command("kubectl", "delete", "ns", namespace)

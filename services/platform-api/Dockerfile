@@ -14,9 +14,12 @@ WORKDIR /app/services/platform-api
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -o platform-api .
 
 # Final stage
-FROM alpine:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN microdnf update -y \
+    && microdnf install -y ca-certificates tzdata crypto-policies \
+    && microdnf clean all \
+    && update-crypto-policies --set FIPS
 
 WORKDIR /root/
 

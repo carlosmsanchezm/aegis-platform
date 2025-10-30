@@ -20,7 +20,7 @@ import {
 import { TechDocsAddons } from '@backstage/plugin-techdocs-react';
 import { ReportIssue } from '@backstage/plugin-techdocs-module-addons-contrib';
 import { UserSettingsPage } from '@backstage/plugin-user-settings';
-import { apis, keycloakAuthApiRef } from './apis';
+import { apis } from './apis';
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
 import { Root } from './components/Root';
@@ -43,15 +43,14 @@ import {
   AegisWorkloadDetailsPage,
   AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
+import { keycloakAuthApiRef } from './apis';
 
-export const keycloakSignInProviders = [
-  {
-    id: 'keycloak',
-    title: 'Keycloak',
-    message: 'Use Keycloak SSO with MFA enforcement.',
-    apiRef: keycloakAuthApiRef,
-  },
-];
+export const keycloakSignInProvider = {
+  id: 'keycloak',
+  title: 'Sign in with Keycloak',
+  message: "You'll be redirected to Keycloak (CAC/TOTP).",
+  apiRef: keycloakAuthApiRef,
+};
 
 const app = createApp({
   apis,
@@ -73,9 +72,9 @@ const app = createApp({
     });
   },
   components: {
-    // Force explicit Keycloak SSO; disables automatic guest sessions for compliance.
+    // Force Keycloak SSO with automatic redirect to eliminate guest fallback paths.
     SignInPage: props => (
-      <SignInPage {...props} providers={keycloakSignInProviders} />
+      <SignInPage {...props} auto provider={keycloakSignInProvider} />
     ),
   },
 });

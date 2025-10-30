@@ -3,10 +3,9 @@
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://platform-api.aegist.dev:8080'
+      target: 'https://platform-api.aegist.dev:443'
       changeOrigin: true
       credentials: forward
-      secure: false
       allowedHeaders:
         - authorization
         - Authorization

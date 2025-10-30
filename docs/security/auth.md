@@ -16,6 +16,43 @@ for identity, transport protection, and audit logging.
   Backstage identity tokens that are forwarded to the Aegis proxy. Guest
   identities are rejected whenever `requireAuth` is set, preventing silent
   privilege escalation.
+- **Token flow** – Browser → Keycloak (Auth Code + PKCE) → Backstage frontend
+  → Backstage backend OIDC provider → Platform API. Access tokens issued at the
+  Backstage layer are forwarded verbatim to the Platform API gateway where they
+  are re-validated against the issuer.
+
+### Runtime Configuration
+
+Platform API authentication is controlled with environment variables (or the
+`AUTH_CONFIG_JSON` overlay if you prefer a single blob):
+
+- `OIDC_ISSUER_URL` – Keycloak issuer, e.g. `https://keycloak.localtest.me/realms/aegis`
+- `OIDC_AUDIENCE` – Expected audience claim (Backstage client or API audience).
+- `OIDC_JWKS_URL` *(optional)* – Override JWKS endpoint; defaults to
+  `${OIDC_ISSUER_URL}/protocol/openid-connect/certs`.
+- `OIDC_JWKS_CACHE_TTL` / `OIDC_JWKS_REFRESH_INTERVAL` – Cache behaviour for
+  JWKS retrieval (Go duration strings).
+- `REQUIRE_PHISHING_RESISTANT_MFA` – When `true`, API calls are rejected unless
+  the token’s `amr` claim includes one of the factors below.
+- `ALLOWED_PHISHING_RESISTANT_AMR` – Comma separated list of AMR values that
+  qualify as phishing-resistant (defaults to `hwk,webauthn,piv,piv-cac`).
+
+Authorization bindings are provided through `AUTHZ_ROLE_BINDINGS_JSON`, a JSON
+array with entries such as:
+
+```json
+[
+  {
+    "roles": ["aegis-admin"],
+    "projects": ["*"],
+    "queues": ["*"]
+  }
+]
+```
+
+In Helm the value is sourced from the `authz-role-bindings.json` secret. Leaving
+the array empty permits all requests, which is acceptable for development but
+must be tightened for production.
 
 ## Cryptography & Transport Protection
 
@@ -36,6 +73,11 @@ for identity, transport protection, and audit logging.
 - **Cookie Hardening (SC-23)** – Session cookies are marked `Secure`,
   `HttpOnly`, and `SameSite=Lax` at the ingress/controller layer. Backstage’s
   backend sessions are signed with `BACKEND_SECRET`, ensuring integrity.
+- **Workspace Session TTL** – Platform API connection sessions issue one-time
+  tokens with a five-minute default TTL (`AEGIS_PROXY_TOKEN_TTL_SECONDS`),
+  capped at five minutes even if callers request longer durations. Renewals
+  require the same authenticated subject, satisfying AC-12 / SC-10 idle timeout
+  expectations.
 
 ## Audit & Accountability
 
@@ -43,8 +85,10 @@ for identity, transport protection, and audit logging.
   `/api/auth/**` now emits a structured `auth-event` log at INFO level with:
   UTC timestamp, event type (start, callback, refresh, logout, failure), HTTP
   method, response status, Keycloak provider, resolved subject (when
-  available), client IP (preferring `X-Forwarded-For`), user agent, and
-  request latency in milliseconds.
+  available), client IP (preferring `X-Forwarded-For`), user agent, request
+  latency in milliseconds, and the `decision` flag (`allow`/`deny`). Successful
+  authentications also include `client_id`, `amr`, `acr`, `token_id` (JWT JTI),
+  and `key_id` (JWKS kid) so downstream tooling can correlate events.
 - **Log Handling** – Ship these entries to the central SIEM with retention
   that satisfies AU-09 and AU-11. Downstream alerting should cover repeated
   failures and anomalous logout patterns.

@@ -26,7 +26,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -34,8 +33,11 @@ import (
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	"github.com/yourorg/aegis/services/platform-api/internal/authz"
+	"github.com/yourorg/aegis/services/platform-api/internal/config"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
+	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -57,6 +59,7 @@ type Server struct {
 	proxyTokenTTL        time.Duration
 	workspaceEnvDefaults map[string]string
 	autoBootstrap        bool
+	authzPolicy          *authz.Policy
 }
 
 type proxyClaims struct {
@@ -175,6 +178,13 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	if overlay == nil {
 		overlay = placement.NewPolicyOverlay()
 	}
+	policy, err := authz.LoadPolicyFromEnv()
+	if err != nil {
+		if log != nil {
+			log.Fatal("failed to load authorization policy", zap.Error(err))
+		}
+		panic(fmt.Errorf("failed to load authorization policy: %w", err))
+	}
 	return &Server{
 		log:                  log,
 		store:                st,
@@ -187,6 +197,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		proxyTokenTTL:        time.Duration(ttlSeconds) * time.Second,
 		workspaceEnvDefaults: defaults,
 		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
+		authzPolicy:          policy,
 	}
 }
 
@@ -224,6 +235,9 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 		return nil, err
 	}
 	p := req.Project
+	if err := s.authorize(ctx, p.GetId(), "", "createProject"); err != nil {
+		return nil, err
+	}
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
 	return p, nil
@@ -236,6 +250,9 @@ func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetReques
 		return nil, err
 	}
 	b := req.Budget
+	if err := s.authorize(ctx, b.GetProjectId(), b.GetQueue(), "upsertBudget"); err != nil {
+		return nil, err
+	}
 	s.store.PutBudget(b)
 	s.log.Info("budget upserted",
 		zap.String("project_id", b.GetProjectId()),
@@ -265,6 +282,9 @@ func (s *Server) UpsertQueue(ctx context.Context, req *aegis.UpsertQueueRequest)
 		return nil, err
 	}
 	q := req.Queue
+	if err := s.authorize(ctx, q.GetProjectId(), q.GetName(), "upsertQueue"); err != nil {
+		return nil, err
+	}
 	s.store.PutQueue(q)
 	s.log.Info("queue upserted", zap.String("queue", q.GetName()), zap.String("project_id", q.GetProjectId()), zap.String("priority_tier", q.GetPriorityTier()), zap.Int("allowed_flavors", len(q.GetAllowedFlavors())))
 	return q, nil
@@ -364,6 +384,9 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	}
 	if w.Id == "" {
 		w.Id = "w-" + RandID()
+	}
+	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "submitWorkload"); err != nil {
+		return nil, err
 	}
 
 	var (
@@ -650,6 +673,9 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 		s.log.Warn("workload not found", zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
+	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "getWorkload"); err != nil {
+		return nil, err
+	}
 	cache := make(map[string]client.Client)
 	s.enrichWorkloadUI(ctx, cache, w)
 	s.log.Info("workload retrieved", zap.String("workload_id", w.GetId()), zap.String("status", w.GetStatus()), zap.String("project_id", w.GetProjectId()))
@@ -756,6 +782,10 @@ func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewCon
 
 	ctxData, err := s.buildSessionContext(ctx, existing.WorkloadID)
 	if err != nil {
+		s.auditSession("session.renew", existing, err)
+		return nil, err
+	}
+	if err := s.authorize(ctx, ctxData.workload.GetProjectId(), ctxData.workload.GetQueue(), "renewConnectionSession"); err != nil {
 		s.auditSession("session.renew", existing, err)
 		return nil, err
 	}
@@ -968,6 +998,9 @@ func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, 
 
 	ctxData, err := s.buildSessionContext(ctx, workloadID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.authorize(ctx, ctxData.workload.GetProjectId(), ctxData.workload.GetQueue(), "mintConnectionSession"); err != nil {
 		return nil, err
 	}
 
@@ -1257,6 +1290,9 @@ func (s *Server) ListWorkloads(ctx context.Context, req *aegis.ListWorkloadsRequ
 	if req == nil || req.ProjectId == "" {
 		err := status.Error(codes.InvalidArgument, "project id required")
 		s.log.Warn("list workloads failed", zap.Error(err))
+		return nil, err
+	}
+	if err := s.authorize(ctx, req.GetProjectId(), "", "listWorkloads"); err != nil {
 		return nil, err
 	}
 	items := s.store.ListWorkloads(req.ProjectId)
@@ -1562,6 +1598,9 @@ func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*a
 	if req == nil || req.GetProjectId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
+	if err := s.authorize(ctx, req.GetProjectId(), req.GetQueue(), "getBudget"); err != nil {
+		return nil, err
+	}
 	b := s.store.GetBudgetExact(req.GetProjectId(), req.GetQueue())
 	if b == nil {
 		b = s.store.GetBudgetExact(req.GetProjectId(), "")
@@ -1581,6 +1620,12 @@ func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*a
 }
 
 func (s *Server) ListBudgets(ctx context.Context, req *aegis.ListBudgetsRequest) (*aegis.ListBudgetsResponse, error) {
+	if req == nil || req.GetProjectId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
+	}
+	if err := s.authorize(ctx, req.GetProjectId(), "", "listBudgets"); err != nil {
+		return nil, err
+	}
 	items := []*aegis.BudgetWithUsage{}
 	for _, b := range s.store.ListBudgets(req.GetProjectId()) {
 		view, _ := s.store.UsageView(b.GetProjectId(), b.GetQueue())
@@ -1603,10 +1648,23 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	if err != nil {
 		return err
 	}
+	authCfg, err := config.LoadAuthConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load auth config: %w", err)
+	}
+	authenticator, err := mw.NewAuthenticator(authCfg, log)
+	if err != nil {
+		return fmt.Errorf("failed to initialise authenticator: %w", err)
+	}
+
 	opts, err := grpcServerOptionsFromEnv(log)
 	if err != nil {
 		return err
 	}
+	opts = append(opts,
+		grpc.ChainUnaryInterceptor(authenticator.UnaryServerInterceptor()),
+		grpc.ChainStreamInterceptor(authenticator.StreamServerInterceptor()),
+	)
 	gs := grpc.NewServer(opts...)
 	reflection.Register(gs)
 	aegis.RegisterAegisPlatformServer(gs, svc)
@@ -1620,7 +1678,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
 	root := http.NewServeMux()
-	root.Handle("/", mux)
+	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}
 
@@ -2019,62 +2077,40 @@ func RandID() string {
 	return hex.EncodeToString(buf)
 }
 
+func (s *Server) authorize(ctx context.Context, projectID, queue, action string) error {
+	if s == nil || s.authzPolicy == nil {
+		return nil
+	}
+	identity := mw.IdentityFromContext(ctx)
+	if s.authzPolicy.Authorize(identity, projectID, queue) {
+		return nil
+	}
+	subject := subjectFromContext(ctx)
+	if s.log != nil {
+		s.log.Warn("authorization denied",
+			zap.String("action", action),
+			zap.String("subject", subject),
+			zap.String("project_id", projectID),
+			zap.String("queue", queue),
+		)
+	}
+	return status.Error(codes.PermissionDenied, "authorization denied")
+}
+
 func subjectFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return "unknown"
 	}
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		lower := md.Copy()
-		for key, values := range lower {
-			if len(values) == 0 {
-				continue
-			}
-			lk := strings.ToLower(key)
-			if strings.Contains(lk, "x-aegis-user") || strings.Contains(lk, "x-aegis-subject") {
-				candidate := strings.TrimSpace(values[0])
-				if candidate != "" {
-					return candidate
-				}
-			}
-			if strings.Contains(lk, "authorization") {
-				token := extractBearer(values[0])
-				subject := subjectFromToken(token)
-				if subject != "" {
-					return subject
-				}
-			}
+	if id := mw.IdentityFromContext(ctx); id != nil {
+		if id.Subject != "" {
+			return id.Subject
+		}
+		if id.Email != "" {
+			return id.Email
+		}
+		if id.PreferredUsername != "" {
+			return id.PreferredUsername
 		}
 	}
 	return "unknown"
-}
-
-func extractBearer(header string) string {
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) == 2 && !strings.EqualFold(parts[0], "bearer") {
-		return ""
-	}
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[1])
-	}
-	return strings.TrimSpace(header)
-}
-
-func subjectFromToken(token string) string {
-	if token == "" {
-		return ""
-	}
-	parser := new(jwt.Parser)
-	claims := jwt.MapClaims{}
-	_, _, err := parser.ParseUnverified(token, claims)
-	if err != nil {
-		return ""
-	}
-	for _, key := range []string{"sub", "email", "preferred_username", "user_entity"} {
-		if v, ok := claims[key]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				return strings.TrimSpace(s)
-			}
-		}
-	}
-	return ""
 }

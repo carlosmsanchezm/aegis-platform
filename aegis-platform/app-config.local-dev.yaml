@@ -16,13 +16,12 @@ auth:
   providers:
     keycloak:
       development:
-        metadataUrl: https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration
-        authUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/auth
-        tokenUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/token
-        userInfoUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/userinfo
-        logoutUrl: https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/logout
         clientId: backstage
         clientSecret: local-backstage-client-secret
+        issuer: https://keycloak.localtest.me/realms/aegis
+        metadataUrl: https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration
+        additionalScopes:
+          - offline_access
         callbackUrl: http://localhost:7008/api/auth/keycloak/handler/frame
         prompt: login
         signIn:
@@ -33,7 +32,7 @@ auth:
 proxy:
   endpoints:
     '/aegis':
-      target: 'http://localhost:10080'
+      target: 'https://platform-api.localtest.me'
       changeOrigin: true
       credentials: forward
       allowedHeaders:

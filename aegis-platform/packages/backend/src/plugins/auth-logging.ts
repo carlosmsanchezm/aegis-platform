@@ -68,13 +68,19 @@ export default createBackendModule({
             const durationMillis =
               Number(process.hrtime.bigint() - start) / 1_000_000;
 
-            logger.info(
-              `[auth-event] ts=${completed} event=${eventType} provider=${provider} method=${method} status=${
-                res.statusCode
-              } durationMs=${durationMillis.toFixed(
-                2,
-              )} path=${path} subject=${principal} ip=${clientIp} ua="${userAgent}"`,
-            );
+            logger.info({
+              event: 'auth_event',
+              action: eventType,
+              provider,
+              method,
+              status: res.statusCode,
+              durationMs: Number(durationMillis.toFixed(2)),
+              path,
+              subject: principal,
+              ip: clientIp,
+              userAgent,
+              completedAt: completed,
+            });
           });
 
           next();

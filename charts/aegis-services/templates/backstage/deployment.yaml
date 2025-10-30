@@ -1,0 +1,132 @@
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if $backstage.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-services.backstage.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $backstage.replicaCount | default $backstage.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "aegis-services.backstage.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- $ca := $backstage.caBundle | default dict -}}
+        {{- if $ca.create }}
+        checksum/ca-bundle: {{ include (print $.Template.BasePath "/backstage/secret-ca.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with $backstage.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "aegis-services.backstage.selectorLabels" . | nindent 8 }}
+        {{- with $backstage.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if $backstage.serviceAccountName }}
+      serviceAccountName: {{ $backstage.serviceAccountName }}
+      {{- end }}
+      {{- with $backstage.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $backstage.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backstage
+          image: "{{ $backstage.image.repository }}:{{ $backstage.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ $backstage.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ $backstage.service.port | default 7007 }}
+              protocol: TCP
+          {{- $secretName := include "aegis-services.backstage.caBundleSecretName" . | trim -}}
+          {{- $mountTrust := and $secretName (ne $secretName "") -}}
+          {{- $envMeta := dict "count" 0 -}}
+          {{- if $mountTrust }}
+          {{- $_ := set $envMeta "count" (add (index $envMeta "count") 1) -}}
+          {{- end }}
+          {{- $_ := set $envMeta "count" (add (index $envMeta "count") (len ($backstage.env | default dict))) -}}
+          {{- $_ := set $envMeta "count" (add (index $envMeta "count") (len ($backstage.envFromSecrets | default list))) -}}
+          {{- if gt (index $envMeta "count") 0 }}
+          env:
+            {{- if $mountTrust }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: "/etc/aegis/trust/aegis-local-trust.pem"
+            {{- end }}
+            {{- range $key, $value := ($backstage.env | default dict) }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $secretNameRef := ($backstage.envFromSecrets | default list) }}
+            - name: {{ $secretNameRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretNameRef.secret }}
+                  key: {{ $secretNameRef.key }}
+            {{- end }}
+          {{- end }}
+          {{- if or $mountTrust $backstage.volumeMounts $backstage.extraVolumeMounts }}
+          volumeMounts:
+            {{- if $mountTrust }}
+            - name: backstage-trust
+              mountPath: /etc/aegis/trust
+              readOnly: true
+            {{- end }}
+            {{- with $backstage.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $backstage.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with $backstage.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $backstage.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $backstage.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $backstage.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if or $mountTrust $backstage.volumes $backstage.extraVolumes }}
+      volumes:
+        {{- if $mountTrust }}
+        - name: backstage-trust
+          secret:
+            secretName: {{ include "aegis-services.backstage.caBundleSecretName" . }}
+        {{- end }}
+        {{- with $backstage.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $backstage.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with $backstage.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $backstage.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $backstage.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

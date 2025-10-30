@@ -57,6 +57,30 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-proxy-tls" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/* Backstage component names */}}
+{{- define "aegis-services.backstage.fullname" -}}
+{{- printf "%s-backstage" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.selectorLabels" -}}
+{{ include "aegis-services.selectorLabels" . }}
+app.kubernetes.io/component: backstage
+{{- end -}}
+
+{{- define "aegis-services.backstage.labels" -}}
+{{ include "aegis-services.labels" . }}
+app.kubernetes.io/component: backstage
+{{- end -}}
+
+{{- define "aegis-services.backstage.serviceName" -}}
+{{- include "aegis-services.backstage.fullname" . -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.caBundleSecretName" -}}
+{{- $name := .Values.backstage.caBundle.secretName | default (printf "%s-backstage-ca" (include "aegis-services.fullname" .)) -}}
+{{- $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{/* Component selector labels */}}
 {{- define "aegis-services.platformApi.selectorLabels" -}}
 {{ include "aegis-services.selectorLabels" . }}

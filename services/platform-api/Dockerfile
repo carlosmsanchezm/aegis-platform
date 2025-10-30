@@ -16,10 +16,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuff
 # Final stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
-RUN microdnf update -y \
-    && microdnf install -y ca-certificates tzdata crypto-policies \
-    && microdnf clean all \
-    && update-crypto-policies --set FIPS
+RUN if command -v microdnf >/dev/null 2>&1; then \
+      PKG_CMD="microdnf"; \
+    elif command -v dnf >/dev/null 2>&1; then \
+      PKG_CMD="dnf"; \
+    else \
+      echo "No supported package manager found (expected microdnf or dnf)" >&2; \
+      exit 1; \
+    fi; \
+    "$PKG_CMD" update -y && \
+    "$PKG_CMD" install -y ca-certificates tzdata crypto-policies && \
+    "$PKG_CMD" clean all && \
+    if command -v update-crypto-policies >/dev/null 2>&1; then update-crypto-policies --set FIPS; fi
 
 WORKDIR /root/
 

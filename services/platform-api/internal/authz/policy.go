@@ -23,7 +23,7 @@ type Policy struct {
 
 // LoadPolicyFromEnv loads a policy from the AUTHZ_ROLE_BINDINGS_JSON environment variable.
 // The variable accepts a JSON array of bindings. When unset or empty, the resulting policy
-// permits all requests (placeholder behaviour).
+// denies all requests (fail-closed for security).
 func LoadPolicyFromEnv() (*Policy, error) {
 	raw := strings.TrimSpace(os.Getenv("AUTHZ_ROLE_BINDINGS_JSON"))
 	if raw == "" {
@@ -42,10 +42,10 @@ func LoadPolicyFromEnv() (*Policy, error) {
 }
 
 // Authorize returns true when the supplied identity is allowed to act on the given project/queue.
-// When no bindings are configured the policy permits all requests.
+// When no bindings are configured the policy denies all requests (fail-closed for security).
 func (p *Policy) Authorize(identity *mw.Identity, projectID, queue string) bool {
 	if len(p.bindings) == 0 {
-		return true
+		return false
 	}
 	if identity == nil {
 		return false

@@ -889,6 +889,18 @@ jobs:
           sudo install "$TMPDIR/grpcurl" /usr/local/bin/grpcurl
           rm -rf "$TMPDIR"
 
+      - name: Wait for Keycloak readiness
+        if: ${{ matrix.suite == 'platform-api' }}
+        env:
+          PREVIEW_NAMESPACE: ${{ needs.resolve-settings.outputs.preview_namespace }}
+        run: |
+          set -euo pipefail
+          NS="${PREVIEW_NAMESPACE}"
+          echo "Waiting for Keycloak pods in namespace ${NS}..."
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=keycloak -n "${NS}" --timeout=300s
+          echo "Keycloak services exposed in ${NS}:"
+          kubectl get svc -n "${NS}" | grep -i keycloak || true
+
       - name: Run suite
         env:
           WORKSPACE_IMAGE_OUTPUT: ${{ needs.collect-built-images.outputs.workspace_image }}

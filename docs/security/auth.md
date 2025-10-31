@@ -103,3 +103,13 @@ must be tightened for production.
 4. Ensure all ingress controllers enforce TLS 1.2+ and HSTS.
 5. Forward Backstage backend logs to the compliance logging pipeline and
    verify the presence of `auth-event` entries during smoke tests.
+
+## Preview CI behaviour
+
+The preview GitHub Actions workflow now waits for the Keycloak pods to reach
+`Ready` status and reuses `scripts/keycloak-token.sh` to discover the exposed
+service ports automatically. The helper falls back to HTTP/8080 when TLS is
+disabled, probes the `.well-known/openid-configuration` endpoint before
+requesting an access token, and retries the token exchange with exponential
+backoff. This keeps the platform-api E2E jobs resilient to slow Keycloak
+startups while still enforcing TLS whenever the service exposes port 8443.

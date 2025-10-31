@@ -1,8 +1,14 @@
 import { PropsWithChildren } from 'react';
 import { makeStyles } from '@material-ui/core';
-import HomeIcon from '@material-ui/icons/Home';
+import DashboardIcon from '@material-ui/icons/DashboardOutlined';
+import TimelineIcon from '@material-ui/icons/Timeline';
+import SecurityIcon from '@material-ui/icons/Security';
+import CloudQueueIcon from '@material-ui/icons/CloudQueue';
+import LaptopIcon from '@material-ui/icons/LaptopMac';
+import MemoryIcon from '@material-ui/icons/Memory';
 import ExtensionIcon from '@material-ui/icons/Extension';
 import LibraryBooks from '@material-ui/icons/LibraryBooks';
+import MenuBookIcon from '@material-ui/icons/MenuBook';
 import CreateComponentIcon from '@material-ui/icons/AddCircleOutline';
 import LogoFull from './LogoFull';
 import LogoIcon from './LogoIcon';
@@ -18,17 +24,14 @@ import {
   SidebarGroup,
   SidebarItem,
   SidebarPage,
-  SidebarScrollWrapper,
   SidebarSpace,
   useSidebarOpenState,
   Link,
 } from '@backstage/core-components';
-import MenuIcon from '@material-ui/icons/Menu';
 import SearchIcon from '@material-ui/icons/Search';
 import { MyGroupsSidebarItem } from '@backstage/plugin-org';
 import GroupIcon from '@material-ui/icons/People';
 import { NotificationsSidebarItem } from '@backstage/plugin-notifications';
-import StorageIcon from '@material-ui/icons/Storage';
 
 const useSidebarLogoStyles = makeStyles({
   root: {
@@ -66,28 +69,24 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
         <SidebarSearchModal />
       </SidebarGroup>
       <SidebarDivider />
-      <SidebarGroup label="Menu" icon={<MenuIcon />}>
-        {/* Global nav, not org-specific */}
-        <SidebarItem icon={HomeIcon} to="catalog" text="Home" />
+      <SidebarGroup label="Mission Control" icon={<DashboardIcon />}>
+        <SidebarItem icon={DashboardIcon} to="catalog" text="Dashboard" />
+        <SidebarItem icon={TimelineIcon} to="catalog-graph" text="Telemetry" />
+        <SidebarItem icon={SecurityIcon} to="notifications" text="Live Posture" />
+        <SidebarItem icon={CloudQueueIcon} to="aegis/workloads" text="Clusters" />
+        <SidebarItem icon={LaptopIcon} to="aegis/workspaces/create" text="Secure Workspaces" />
+        <SidebarItem icon={MemoryIcon} to="aegis" text="GPU Broker" />
+      </SidebarGroup>
+      <SidebarDivider />
+      <SidebarGroup label="Resources" icon={<MenuBookIcon />}>
+        <SidebarItem icon={ExtensionIcon} to="api-docs" text="APIs" />
+        <SidebarItem icon={LibraryBooks} to="docs" text="Knowledge Base" />
+        <SidebarItem icon={CreateComponentIcon} to="create" text="Automations" />
         <MyGroupsSidebarItem
-          singularTitle="My Group"
-          pluralTitle="My Groups"
+          singularTitle="Mission Partner"
+          pluralTitle="Mission Partners"
           icon={GroupIcon}
         />
-        <SidebarItem icon={ExtensionIcon} to="api-docs" text="APIs" />
-        <SidebarItem icon={LibraryBooks} to="docs" text="Docs" />
-        <SidebarItem icon={CreateComponentIcon} to="create" text="Create..." />
-        <SidebarItem icon={StorageIcon} to="aegis" text="Submit Workload" />
-        <SidebarItem
-          icon={StorageIcon}
-          to="aegis/workloads"
-          text="My Workloads"
-        />
-        {/* End global nav */}
-        <SidebarDivider />
-        <SidebarScrollWrapper>
-          {/* Items in this group will be scrollable if they run out of space */}
-        </SidebarScrollWrapper>
       </SidebarGroup>
       <SidebarSpace />
       <SidebarDivider />

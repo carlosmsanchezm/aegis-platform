@@ -44,6 +44,7 @@ import {
   AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
 import { keycloakAuthApiRef } from './apis';
+import { aegisTheme } from './theme/aegisTheme';
 
 export const keycloakSignInProvider = {
   id: 'keycloak',
@@ -54,6 +55,7 @@ export const keycloakSignInProvider = {
 
 const app = createApp({
   apis,
+  themes: [aegisTheme],
   bindRoutes({ bind }) {
     bind(catalogPlugin.externalRoutes, {
       createComponent: scaffolderPlugin.routes.root,

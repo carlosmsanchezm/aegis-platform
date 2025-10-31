@@ -1,5 +1,6 @@
 import { makeStyles, Typography } from '@material-ui/core';
 import { useTheme } from '@material-ui/core/styles';
+import { useSidebarOpenState } from '@backstage/core-components';
 
 const useStyles = makeStyles(theme => ({
   root: {
@@ -29,6 +30,7 @@ const LogoFull = () => {
   const theme = useTheme();
   const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
   const isDark = paletteMode === 'dark';
+  const { isOpen } = useSidebarOpenState();
   return (
     <span className={classes.root} aria-label="ÆGIS logo">
       <img
@@ -41,9 +43,11 @@ const LogoFull = () => {
             : undefined
         }
       />
-      <Typography component="span" className={classes.wordmark}>
-        ÆGIS
-      </Typography>
+      {isOpen ? (
+        <Typography component="span" className={classes.wordmark}>
+          ÆGIS
+        </Typography>
+      ) : null}
     </span>
   );
 };

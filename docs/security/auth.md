@@ -106,10 +106,54 @@ must be tightened for production.
 
 ## Preview CI behaviour
 
-The preview GitHub Actions workflow now waits for the Keycloak pods to reach
-`Ready` status and reuses `scripts/keycloak-token.sh` to discover the exposed
-service ports automatically. The helper falls back to HTTP/8080 when TLS is
-disabled, probes the `.well-known/openid-configuration` endpoint before
-requesting an access token, and retries the token exchange with exponential
-backoff. This keeps the platform-api E2E jobs resilient to slow Keycloak
-startups while still enforcing TLS whenever the service exposes port 8443.
+The `preview-deployment.yml` “tests-only” path provisions the control plane in
+an ephemeral namespace (for example `preview-29`), deploys Keycloak, and runs the
+Platform API E2E suite against the public DNS endpoints. The flow is:
+
+1. **Ensure Keycloak comes online**
+   - Helm installs both the Keycloak operator and in-cluster RHBK instance.
+   - We bind the PostgreSQL PVC to the EKS `gp2` storage class and, on every
+     run, delete any existing Keycloak stateful sets and PVCs so RHBK can
+     provision storage cleanly. (See
+     `charts/aegis-services/values/cloud.yaml` and
+     `terraform/generate-cloud-deployment.sh`.)
+   - The workflow step **Wait for Keycloak readiness** blocks until the pods
+     with `app=keycloak` report `Ready`. If they never reach that state the job
+     fails early, which prevents the E2Es from running with a half-configured
+     SSO stack.
+
+2. **Obtain a real bearer token**
+   - `scripts/e2e-platform-api.sh` exports the preview namespace/release
+     (e.g. `KEYCLOAK_NAMESPACE=preview-29`,
+     `KEYCLOAK_SERVICE_NAME=preview-29-keycloak-service`) and calls
+     `scripts/keycloak-token.sh`.
+   - `keycloak-token.sh` discovers the service, waits for the Keycloak pods,
+     establishes a port-forward if the service is internal-only, and requests
+     an access token via the Resource Owner Password grant using the automation
+     user (`cloud@test.com`) and the Backstage client secret.
+   - Successful responses include a non-empty `access_token`, which the script
+     prints to stdout. The E2E harness captures it and exports
+     `AEGIS_BEARER_TOKEN`.
+
+3. **Exercise the Platform API with OIDC**
+   - All subsequent gRPC calls in the suite add
+     `Authorization: Bearer ${AEGIS_BEARER_TOKEN}`. No `x-aegis-user` fallback
+     is accepted.
+   - The suite performs the following checks end to end:
+       * `SubmitWorkload` issues a ticket for a real `workspace` job in the
+         preview cluster.
+       * The new workload transitions through `PLACED` to `SUCCEEDED`, proving
+         the control plane, kube-agent, and namespace wiring honour the token.
+       * `AckWorkload` confirms the caller received the ticket and the job can
+         be cleaned up.
+
+4. **Success criteria**
+   - Token exchange returns HTTP 200 and the bearer token is present in logs.
+   - The workload status observed by the suite reaches `SUCCEEDED` (the logs
+     show `status":"SUCCEEDED", "uiStatus":"SUCCEEDED"` for the workload).
+   - The job exits 0; the GitHub Actions run is marked `conclusion: success`
+     and linked from the PR/Jira updates.
+
+If any of the steps above fail (e.g. Keycloak pods crash, PVC cannot bind, the
+token endpoint returns 4xx), the workflow stops and surfaces the failure so we
+can debug before merging.

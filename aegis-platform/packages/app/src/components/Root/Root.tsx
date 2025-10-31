@@ -15,6 +15,7 @@ import TimelineIcon from '@material-ui/icons/Timeline';
 import GroupIcon from '@material-ui/icons/Group';
 import LogoFull from './LogoFull';
 import LogoIcon from './LogoIcon';
+import { SidebarPrimaryItem } from './SidebarPrimaryItem';
 import {
   Settings as SidebarSettings,
   UserSettingsSignInAvatar,
@@ -123,12 +124,12 @@ export const Root = ({ children }: PropsWithChildren<{}>) => {
         <SidebarDivider />
 
         <NavSection label="Create" icon={<AddCircleOutlineIcon />}>
-          <SidebarItem
+          <SidebarPrimaryItem
             icon={LockIcon}
             to="aegis/workspaces/create"
             text="Launch Secure Workspace"
           />
-          <SidebarItem icon={BuildIcon} to="aegis" text="Launch Workload" />
+          <SidebarPrimaryItem icon={BuildIcon} to="aegis" text="Launch Workload" />
         </NavSection>
 
         <SidebarDivider />

@@ -57,48 +57,45 @@ const typography = {
 
 const createPalette = (mode: Mode) => {
   const isDark = mode === 'dark';
-  const baseBackground = isDark ? '#0E0E0E' : '#F5F5F3';
-  const paperBackground = isDark ? '#151516' : '#FFFFFF';
-  const primaryMain = '#8B5CF6';
-  const secondaryMain = '#22D3EE';
-  const textPrimary = isDark ? '#F5F5F5' : '#161616';
-  const textSecondary = isDark ? '#B3B3B9' : '#3C3C43';
-  const divider = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(18,18,23,0.08)';
-  const navigationBackground = isDark ? '#090909' : '#F8F8F6';
+  const baseBackground = isDark ? '#050505' : '#F7F7F7';
+  const paperBackground = isDark ? '#0F0F0F' : '#FFFFFF';
+  const primaryMain = isDark ? '#FFFFFF' : '#1A1A1A';
+  const secondaryMain = isDark ? '#CFCFCF' : '#2B2B2B';
+  const textPrimary = isDark ? '#F5F5F5' : '#111111';
+  const textSecondary = isDark ? '#B5B5B5' : '#4F4F4F';
+  const divider = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(17,17,17,0.12)';
+  const navigationBackground = isDark ? '#080808' : '#EFEFEF';
   const hoverBackground = isDark
-    ? 'rgba(139, 92, 246, 0.12)'
-    : 'rgba(109, 40, 217, 0.08)';
-  const submenuBackground = isDark ? '#151516' : '#F1F1EF';
-  const bannerInfo = isDark ? '#1E2533' : '#E7ECFA';
-  const bannerError = isDark ? '#371A24' : '#FCE8EB';
-  const infoBackground = isDark ? 'rgba(96, 165, 250, 0.16)' : '#E0F2FE';
-  const warningBackground = isDark
-    ? 'rgba(250, 204, 21, 0.18)'
-    : 'rgba(251, 191, 36, 0.2)';
-  const errorBackground = isDark
-    ? 'rgba(239, 68, 68, 0.18)'
-    : 'rgba(248, 113, 113, 0.16)';
+    ? 'rgba(255,255,255,0.1)'
+    : 'rgba(0,0,0,0.06)';
+  const submenuBackground = isDark ? '#111111' : '#FFFFFF';
+  const bannerInfo = isDark ? '#101010' : '#F1F1F1';
+  const bannerError = isDark ? '#141414' : '#E6E6E6';
+  const infoBackground = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+  const warningBackground = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)';
+  const errorBackground = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+  const indicator = isDark ? '#FFFFFF' : '#111111';
 
   return {
     type: mode,
     primary: {
       main: primaryMain,
-      light: '#A78BFA',
-      dark: '#6D28D9',
+      light: isDark ? '#FFFFFF' : '#3C3C3C',
+      dark: isDark ? '#D0D0D0' : '#000000',
     },
     secondary: {
       main: secondaryMain,
-      light: '#38E8FF',
-      dark: '#0EA5E9',
+      light: isDark ? '#E0E0E0' : '#3F3F3F',
+      dark: isDark ? '#A0A0A0' : '#141414',
     },
     error: {
-      main: '#F87171',
+      main: isDark ? '#E0E0E0' : '#303030',
     },
     warning: {
-      main: '#F59E0B',
+      main: isDark ? '#D0D0D0' : '#444444',
     },
     success: {
-      main: '#22C55E',
+      main: isDark ? '#C4C4C4' : '#3A3A3A',
     },
     background: {
       default: baseBackground,
@@ -107,13 +104,13 @@ const createPalette = (mode: Mode) => {
     text: {
       primary: textPrimary,
       secondary: textSecondary,
-      hint: isDark ? '#6B7280' : '#6D6D76',
+      hint: isDark ? '#8A8A8A' : '#6D6D6D',
     },
     divider,
     navigation: {
       background: navigationBackground,
-      indicator: primaryMain,
-      color: isDark ? '#C8C8D0' : '#4B4B52',
+      indicator,
+      color: textSecondary,
       selectedColor: textPrimary,
       navItem: {
         hoverBackground,
@@ -126,66 +123,66 @@ const createPalette = (mode: Mode) => {
       info: bannerInfo,
       error: bannerError,
       text: textPrimary,
-      link: primaryMain,
+      link: textPrimary,
     },
-    link: primaryMain,
-    linkHover: isDark ? '#C4B5FD' : '#7C3AED',
-    errorText: isDark ? '#FCA5A5' : '#B91C1C',
-    infoText: isDark ? '#BFDBFE' : '#1E3A8A',
-    warningText: isDark ? '#FCE7AA' : '#854D0E',
+    link: textPrimary,
+    linkHover: isDark ? '#FFFFFF' : '#000000',
+    errorText: textSecondary,
+    infoText: textSecondary,
+    warningText: textSecondary,
     errorBackground,
     warningBackground,
     infoBackground,
     neutral: {
-      main: isDark ? '#A1A1AA' : '#52525B',
+      main: textSecondary,
     },
-    navigationIndicator: primaryMain,
+    navigationIndicator: indicator,
     tabbar: {
-      indicator: primaryMain,
+      indicator,
     },
     status: {
-      ok: '#16A34A',
-      warning: '#FACC15',
-      error: '#EF4444',
-      running: '#38BDF8',
-      pending: '#F59E0B',
-      aborted: '#6B7280',
+      ok: isDark ? '#E0E0E0' : '#303030',
+      warning: isDark ? '#BFBFBF' : '#4A4A4A',
+      error: isDark ? '#F0F0F0' : '#202020',
+      running: isDark ? '#D6D6D6' : '#2E2E2E',
+      pending: isDark ? '#AFAFAF' : '#3A3A3A',
+      aborted: isDark ? '#7D7D7D' : '#5C5C5C',
     },
     bursts: {
       fontColor: textPrimary,
-      slackChannelText: isDark ? '#F0F9FF' : '#0F172A',
+      slackChannelText: textPrimary,
       backgroundColor: {
         default: baseBackground,
       },
       gradient: {
         linear: isDark
-          ? 'linear-gradient(135deg, rgba(139,92,246,0.28), rgba(34,211,238,0.16))'
-          : 'linear-gradient(135deg, rgba(109,40,217,0.16), rgba(14,165,233,0.12))',
+          ? 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02))'
+          : 'linear-gradient(135deg, rgba(0,0,0,0.06), rgba(0,0,0,0.02))',
       },
     },
     pinSidebarButton: {
-      icon: isDark ? '#111827' : '#F9FAFB',
-      background: isDark ? 'rgba(148,163,184,0.45)' : 'rgba(17,24,39,0.28)',
+      icon: isDark ? '#050505' : '#F5F5F5',
+      background: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.18)',
     },
   } as unknown as BackstageTheme['palette'];
 };
 
 const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
   const isDark = mode === 'dark';
-  const subtle = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(17,24,39,0.05)';
+  const subtle = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
   const bodyGradient = isDark
-    ? 'radial-gradient(circle at 10% 10%, rgba(139, 92, 246, 0.18), transparent 50%), radial-gradient(circle at 85% 15%, rgba(34, 211, 238, 0.18), transparent 55%), #0E0E0E'
-    : 'radial-gradient(circle at 5% 10%, rgba(109, 40, 217, 0.12), transparent 45%), radial-gradient(circle at 90% 15%, rgba(14, 165, 233, 0.1), transparent 55%), #F5F5F3';
-  const headerBorder = alpha(theme.palette.text.primary, isDark ? 0.12 : 0.08);
+    ? 'radial-gradient(circle at 15% 20%, rgba(255,255,255,0.12), transparent 55%), radial-gradient(circle at 85% 12%, rgba(255,255,255,0.06), transparent 55%), #050505'
+    : 'radial-gradient(circle at 12% 18%, rgba(0,0,0,0.06), transparent 50%), radial-gradient(circle at 88% 12%, rgba(0,0,0,0.04), transparent 55%), #F7F7F7';
+  const sidebarBorder = alpha(theme.palette.text.primary, isDark ? 0.22 : 0.12);
 
   return {
     ':root': {
       '--aegis-card-surface': theme.palette.background.paper,
-      '--aegis-card-border': isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+      '--aegis-card-border': isDark ? 'rgba(255,255,255,0.1)' : 'rgba(17,17,17,0.08)',
       '--aegis-card-shadow': isDark
         ? '0 18px 45px rgba(0, 0, 0, 0.5)'
-        : '0 18px 45px rgba(15, 23, 42, 0.18)',
-      '--aegis-muted': isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)',
+        : '0 18px 45px rgba(0, 0, 0, 0.14)',
+      '--aegis-muted': isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
     },
     body: {
       background: bodyGradient,
@@ -194,16 +191,26 @@ const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
       letterSpacing: '-0.01em',
       minHeight: '100vh',
     },
+    '.BackstageSidebar-root': {
+      backgroundColor: theme.palette.navigation.background,
+      borderRight: `1px solid ${sidebarBorder}`,
+    },
     '.BackstageHeader-header': {
       backgroundColor: 'transparent',
       backgroundImage: 'none !important',
-      boxShadow: 'none',
-      padding: theme.spacing(2.5, 3, 1.75),
-      minHeight: 'initial',
-      borderBottom: `1px solid ${headerBorder}`,
+      boxShadow: 'none !important',
+      border: 'none',
+      padding: theme.spacing(3, 0, 2),
+      minHeight: 'auto',
+      margin: 0,
+    },
+    '.BackstageHeader-type, .BackstageHeader-subtitle, .BackstageHeader-breadcrumb': {
+      display: 'none',
     },
     '.BackstageHeader-title, .BackstageHeader-label, .BackstageHeader-subtitle': {
       color: theme.palette.text.primary,
+      letterSpacing: '-0.02em',
+      fontWeight: 600,
     },
     '.BackstageSidebarItem-open': {
       paddingRight: theme.spacing(2.5),
@@ -263,13 +270,13 @@ const createOverrides = (theme: BackstageTheme, mode: Mode) => {
       },
       containedPrimary: {
         backgroundImage: isDark
-          ? 'linear-gradient(135deg, #8B5CF6, #22D3EE)'
-          : 'linear-gradient(135deg, #6D28D9, #0EA5E9)',
-        color: '#0B0B10',
+          ? 'linear-gradient(135deg, #FFFFFF, #BEBEBE)'
+          : 'linear-gradient(135deg, #1A1A1A, #3A3A3A)',
+        color: isDark ? '#050505' : '#F7F7F7',
         '&:hover': {
           backgroundImage: isDark
-            ? 'linear-gradient(135deg, #A78BFA, #38E8FF)'
-            : 'linear-gradient(135deg, #7C3AED, #22D3EE)',
+            ? 'linear-gradient(135deg, #F0F0F0, #CFCFCF)'
+            : 'linear-gradient(135deg, #262626, #4B4B4B)',
         },
       },
       outlined: {
@@ -291,7 +298,7 @@ const createOverrides = (theme: BackstageTheme, mode: Mode) => {
         },
       },
       text: {
-        fill: isDark ? '#050505' : '#F9FAFB',
+        fill: isDark ? '#050505' : '#F7F7F7',
         fontWeight: 600,
       },
     },
@@ -303,7 +310,7 @@ const createOverrides = (theme: BackstageTheme, mode: Mode) => {
     MuiOutlinedInput: {
       root: {
         borderRadius: 14,
-        backgroundColor: isDark ? '#111112' : '#FBFBFA',
+        backgroundColor: isDark ? '#0D0D0D' : '#F9F9F9',
         '& $notchedOutline': {
           borderColor: 'var(--aegis-card-border)',
         },
@@ -337,63 +344,67 @@ const createOverrides = (theme: BackstageTheme, mode: Mode) => {
 const createPageThemes = (mode: Mode) => {
   const isDark = mode === 'dark';
   const gradientBase = isDark
-    ? 'linear-gradient(120deg, rgba(139,92,246,0.28), rgba(14,165,233,0.18))'
-    : 'linear-gradient(120deg, rgba(109,40,217,0.22), rgba(14,165,233,0.16))';
+    ? 'linear-gradient(120deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))'
+    : 'linear-gradient(120deg, rgba(0,0,0,0.06), rgba(0,0,0,0.02))';
+  const paletteColors = (isDark
+    ? ['#F5F5F5', '#BEBEBE']
+    : ['#1A1A1A', '#4A4A4A']) as string[];
+  const fontColor = isDark ? '#F5F5F5' : '#111111';
 
   return {
     home: {
-      colors: ['#8B5CF6', '#22D3EE'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#111827',
+      fontColor,
     },
     documentation: {
-      colors: ['#22D3EE', '#34D399'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#0F172A',
+      fontColor,
     },
     tool: {
-      colors: ['#8B5CF6', '#F472B6'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F9FAFB' : '#0B0D12',
+      fontColor,
     },
     service: {
-      colors: ['#22C55E', '#22D3EE'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#111827',
+      fontColor,
     },
     website: {
-      colors: ['#F59E0B', '#8B5CF6'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#0F172A',
+      fontColor,
     },
     library: {
-      colors: ['#6366F1', '#22D3EE'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#111827',
+      fontColor,
     },
     other: {
-      colors: ['#8B5CF6', '#22D3EE'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#0F172A',
+      fontColor,
     },
     app: {
-      colors: ['#0EA5E9', '#8B5CF6'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#111827',
+      fontColor,
     },
     apis: {
-      colors: ['#22D3EE', '#F472B6'] as string[],
+      colors: paletteColors,
       shape: 'gradient',
       backgroundImage: gradientBase,
-      fontColor: isDark ? '#F5F5F5' : '#111827',
+      fontColor,
     },
   } as Record<string, PageTheme>;
 };

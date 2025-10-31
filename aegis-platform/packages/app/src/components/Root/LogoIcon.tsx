@@ -1,4 +1,5 @@
 import { makeStyles, useTheme } from '@material-ui/core';
+import { alpha } from '@material-ui/core/styles/colorManipulator';
 
 const useStyles = makeStyles({
   glyph: {
@@ -10,8 +11,13 @@ const useStyles = makeStyles({
 const LogoIcon = () => {
   const classes = useStyles();
   const theme = useTheme();
-  const stroke = theme.palette.type === 'dark' ? '#F4F4F3' : '#050505';
-  const fill = theme.palette.type === 'dark' ? '#F4F4F3' : '#050505';
+  const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
+  const isDark = paletteMode === 'dark';
+  const stroke = theme.palette.text.primary;
+  const fill = theme.palette.text.primary;
+  const accent = isDark
+    ? alpha(theme.palette.text.primary, 0.12)
+    : alpha(theme.palette.text.primary, 0.18);
 
   return (
     <svg
@@ -23,7 +29,7 @@ const LogoIcon = () => {
     >
       <path
         d="M20 5.5l12.5 21.65H7.5L20 5.5z"
-        fill="none"
+        fill={accent}
         stroke={stroke}
         strokeWidth={2.4}
         strokeLinejoin="round"

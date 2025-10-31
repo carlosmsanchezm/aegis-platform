@@ -16,66 +16,86 @@ import {
   Page,
 } from '@backstage/core-components';
 
-const useStyles = makeStyles(theme => ({
-  pageContent: {
-    paddingBottom: theme.spacing(6),
-  },
-  tableWrapper: {
-    padding: theme.spacing(4),
-  },
-  table: {
-    borderCollapse: 'separate',
-    borderSpacing: '0 12px',
-    '& th': {
+const useStyles = makeStyles(theme => {
+  const isDark = theme.palette.type === 'dark';
+  const rowBackground = isDark
+    ? 'rgba(15, 23, 42, 0.6)'
+    : 'rgba(15, 23, 42, 0.06)';
+  const rowBorder = isDark
+    ? '1px solid rgba(148, 163, 184, 0.14)'
+    : '1px solid rgba(15, 23, 42, 0.08)';
+  const summaryBorder = isDark
+    ? '1px solid rgba(148, 163, 184, 0.2)'
+    : '1px solid rgba(15, 23, 42, 0.1)';
+  const summaryBackground = isDark
+    ? 'rgba(15, 23, 42, 0.75)'
+    : 'linear-gradient(135deg, rgba(246, 248, 252, 0.96), rgba(231, 235, 247, 0.9))';
+
+  return {
+    pageContent: {
+      paddingBottom: theme.spacing(6),
+    },
+    tableWrapper: {
+      padding: theme.spacing(4),
+      backgroundColor: isDark ? 'rgba(9, 13, 23, 0.88)' : '#FFFFFF',
+      borderRadius: 24,
+      border: rowBorder,
+    },
+    table: {
+      borderCollapse: 'separate',
+      borderSpacing: '0 12px',
+      '& th': {
+        color: theme.palette.text.secondary,
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        fontSize: '0.75rem',
+        letterSpacing: '0.14em',
+        borderBottom: 'none',
+      },
+      '& td': {
+        borderBottom: 'none',
+        backgroundColor: rowBackground,
+        border: rowBorder,
+        borderRight: 'none',
+        borderLeft: 'none',
+        padding: theme.spacing(2),
+      },
+      '& tr': {
+        borderRadius: 20,
+      },
+    },
+    firstCell: {
+      borderTopLeftRadius: 20,
+      borderBottomLeftRadius: 20,
+      borderLeft: rowBorder,
+    },
+    lastCell: {
+      borderTopRightRadius: 20,
+      borderBottomRightRadius: 20,
+      borderRight: rowBorder,
+    },
+    summaryCard: {
+      padding: theme.spacing(3),
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      border: summaryBorder,
+      marginBottom: theme.spacing(3),
+      background: summaryBackground,
+    },
+    summaryLabel: {
       color: theme.palette.text.secondary,
-      fontWeight: 500,
       textTransform: 'uppercase',
+      letterSpacing: '0.12em',
       fontSize: '0.75rem',
-      letterSpacing: '0.14em',
-      borderBottom: 'none',
     },
-    '& td': {
-      borderBottom: 'none',
-      backgroundColor: 'rgba(15, 23, 42, 0.6)',
-      border: '1px solid rgba(148, 163, 184, 0.14)',
-      borderRight: 'none',
-      borderLeft: 'none',
-      padding: theme.spacing(2),
+    summaryValue: {
+      fontSize: '2.1rem',
+      fontWeight: 600,
+      letterSpacing: '-0.03em',
     },
-    '& tr': {
-      borderRadius: 20,
-    },
-  },
-  firstCell: {
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
-    borderLeft: '1px solid rgba(148, 163, 184, 0.14)',
-  },
-  lastCell: {
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    borderRight: '1px solid rgba(148, 163, 184, 0.14)',
-  },
-  summaryCard: {
-    padding: theme.spacing(3),
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    marginBottom: theme.spacing(3),
-  },
-  summaryLabel: {
-    color: theme.palette.text.secondary,
-    textTransform: 'uppercase',
-    letterSpacing: '0.12em',
-    fontSize: '0.75rem',
-  },
-  summaryValue: {
-    fontSize: '2.1rem',
-    fontWeight: 600,
-    letterSpacing: '-0.03em',
-  },
-}));
+  };
+});
 
 const clusters = [
   {

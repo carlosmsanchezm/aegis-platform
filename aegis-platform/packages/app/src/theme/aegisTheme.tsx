@@ -205,16 +205,29 @@ const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
     '.BackstageHeader-title, .BackstageHeader-label, .BackstageHeader-subtitle': {
       color: theme.palette.text.primary,
     },
+    '.BackstageSidebarItem-root': {
+      minHeight: theme.spacing(8.5),
+      padding: theme.spacing(2, 2.4),
+    },
+    '.BackstageSidebarItem-iconContainer svg': {
+      fontSize: '3rem !important',
+    },
     '.BackstageSidebarItem-open': {
-      paddingRight: theme.spacing(2.5),
+      paddingRight: theme.spacing(2.6),
     },
     '.BackstageSidebarItem-label': {
-      width: 'auto !important',
-      maxWidth: 'none',
-      whiteSpace: 'normal',
-      overflow: 'visible',
-      textOverflow: 'unset',
-      lineHeight: 1.35,
+      width: '100% !important',
+      maxWidth: '100% !important',
+      minWidth: '0 !important',
+      flex: '1 1 auto !important',
+      whiteSpace: 'normal !important',
+      overflowWrap: 'anywhere !important',
+      wordBreak: 'break-word !important',
+      overflow: 'visible !important',
+      textOverflow: 'unset !important',
+      lineHeight: '1.45 !important',
+      fontSize: '1.6rem !important',
+      fontWeight: '700 !important',
       display: 'block',
     },
     a: {

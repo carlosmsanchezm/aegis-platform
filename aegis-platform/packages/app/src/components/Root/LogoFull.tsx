@@ -6,19 +6,22 @@ const useStyles = makeStyles(theme => ({
   root: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing(3),
-    padding: theme.spacing(1.75, 0),
-    minHeight: theme.spacing(11),
+    gap: theme.spacing(2.5),
+    padding: theme.spacing(1.5, 0),
+    minHeight: theme.spacing(12),
   },
   image: {
-    height: 88,
+    height: theme.spacing(12),
     width: 'auto',
+    maxWidth: '100%',
+    flexShrink: 0,
     display: 'block',
+    objectFit: 'contain',
   },
   wordmark: {
     fontWeight: 700,
-    fontSize: '2.2rem',
-    letterSpacing: '0.18em',
+    fontSize: '2.35rem',
+    letterSpacing: '0.2em',
     textTransform: 'uppercase',
     color: theme.palette.text.primary,
     whiteSpace: 'nowrap',
@@ -31,17 +34,16 @@ const LogoFull = () => {
   const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
   const isDark = paletteMode === 'dark';
   const { isOpen } = useSidebarOpenState();
+  const logoSrc = isDark
+    ? '/branding/aegis-logo-full-dark.svg'
+    : '/branding/aegis-logo-full.svg';
+
   return (
     <span className={classes.root} aria-label="ÆGIS logo">
       <img
-        src="/branding/aegis-logo-full.svg"
+        src={logoSrc}
         alt="ÆGIS emblem"
         className={classes.image}
-        style={
-          isDark
-            ? { filter: 'brightness(0) invert(1)' }
-            : undefined
-        }
       />
       {isOpen ? (
         <Typography component="span" className={classes.wordmark}>

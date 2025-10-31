@@ -365,7 +365,7 @@ wait_for_keycloak_ready() {
     return
   fi
   local ns="${KEYCLOAK_NAMESPACE:-keycloak}"
-  kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=keycloak -n "${ns}" --timeout=300s >/dev/null 2>&1 || true
+  kubectl wait --for=condition=Ready pod -l app=keycloak -n "${ns}" --timeout=300s >/dev/null 2>&1 || true
 }
 
 detect_service_port_and_scheme() {

@@ -897,7 +897,7 @@ jobs:
           set -euo pipefail
           NS="${PREVIEW_NAMESPACE}"
           echo "Waiting for Keycloak pods in namespace ${NS}..."
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=keycloak -n "${NS}" --timeout=300s
+          kubectl wait --for=condition=Ready pod -l app=keycloak -n "${NS}" --timeout=300s
           echo "Keycloak services exposed in ${NS}:"
           kubectl get svc -n "${NS}" | grep -i keycloak || true
 

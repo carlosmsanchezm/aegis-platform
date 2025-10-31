@@ -1,8 +1,8 @@
-import React, { PropsWithChildren } from 'react';
+import { PropsWithChildren } from 'react';
 import { CssBaseline, ThemeProvider } from '@material-ui/core';
 import { createTheme } from '@material-ui/core/styles';
 import { alpha } from '@material-ui/core/styles/colorManipulator';
-import type { BackstageTheme } from '@backstage/theme';
+import type { BackstageTheme, PageTheme } from '@backstage/theme';
 
 type Mode = 'dark' | 'light';
 
@@ -167,7 +167,7 @@ const createPalette = (mode: Mode) => {
       icon: isDark ? '#111827' : '#F9FAFB',
       background: isDark ? 'rgba(148,163,184,0.45)' : 'rgba(17,24,39,0.28)',
     },
-  } as BackstageTheme['palette'];
+  } as unknown as BackstageTheme['palette'];
 };
 
 const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
@@ -176,6 +176,7 @@ const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
   const bodyGradient = isDark
     ? 'radial-gradient(circle at 10% 10%, rgba(139, 92, 246, 0.18), transparent 50%), radial-gradient(circle at 85% 15%, rgba(34, 211, 238, 0.18), transparent 55%), #0E0E0E'
     : 'radial-gradient(circle at 5% 10%, rgba(109, 40, 217, 0.12), transparent 45%), radial-gradient(circle at 90% 15%, rgba(14, 165, 233, 0.1), transparent 55%), #F5F5F3';
+  const headerBorder = alpha(theme.palette.text.primary, isDark ? 0.12 : 0.08);
 
   return {
     ':root': {
@@ -194,13 +195,27 @@ const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
       minHeight: '100vh',
     },
     '.BackstageHeader-header': {
-      background: 'transparent',
+      backgroundColor: 'transparent',
+      backgroundImage: 'none !important',
       boxShadow: 'none',
-      padding: theme.spacing(3, 4, 2),
+      padding: theme.spacing(2.5, 3, 1.75),
       minHeight: 'initial',
+      borderBottom: `1px solid ${headerBorder}`,
     },
     '.BackstageHeader-title, .BackstageHeader-label, .BackstageHeader-subtitle': {
       color: theme.palette.text.primary,
+    },
+    '.BackstageSidebarItem-open': {
+      paddingRight: theme.spacing(2.5),
+    },
+    '.BackstageSidebarItem-label': {
+      width: 'auto !important',
+      maxWidth: 'none',
+      whiteSpace: 'normal',
+      overflow: 'visible',
+      textOverflow: 'unset',
+      lineHeight: 1.35,
+      display: 'block',
     },
     a: {
       color: theme.palette.link,
@@ -327,60 +342,60 @@ const createPageThemes = (mode: Mode) => {
 
   return {
     home: {
-      colors: ['#8B5CF6', '#22D3EE'],
+      colors: ['#8B5CF6', '#22D3EE'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#111827',
     },
     documentation: {
-      colors: ['#22D3EE', '#34D399'],
+      colors: ['#22D3EE', '#34D399'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#0F172A',
     },
     tool: {
-      colors: ['#8B5CF6', '#F472B6'],
+      colors: ['#8B5CF6', '#F472B6'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F9FAFB' : '#0B0D12',
     },
     service: {
-      colors: ['#22C55E', '#22D3EE'],
+      colors: ['#22C55E', '#22D3EE'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#111827',
     },
     website: {
-      colors: ['#F59E0B', '#8B5CF6'],
+      colors: ['#F59E0B', '#8B5CF6'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#0F172A',
     },
     library: {
-      colors: ['#6366F1', '#22D3EE'],
+      colors: ['#6366F1', '#22D3EE'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#111827',
     },
     other: {
-      colors: ['#8B5CF6', '#22D3EE'],
+      colors: ['#8B5CF6', '#22D3EE'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#0F172A',
     },
     app: {
-      colors: ['#0EA5E9', '#8B5CF6'],
+      colors: ['#0EA5E9', '#8B5CF6'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#111827',
     },
     apis: {
-      colors: ['#22D3EE', '#F472B6'],
+      colors: ['#22D3EE', '#F472B6'] as string[],
       shape: 'gradient',
       backgroundImage: gradientBase,
       fontColor: isDark ? '#F5F5F5' : '#111827',
     },
-  } as const;
+  } as Record<string, PageTheme>;
 };
 
 const createProvider = (theme: BackstageTheme) =>

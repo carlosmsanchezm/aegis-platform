@@ -123,12 +123,8 @@ export const Root = ({ children }: PropsWithChildren<{}>) => {
         <SidebarDivider />
 
         <NavSection label="Create" icon={<AddCircleOutlineIcon />}>
-          <SidebarItem
-            icon={LockIcon}
-            to="aegis/workspaces/create"
-            text="Launch Secure Workspace"
-          />
-          <SidebarItem icon={BuildIcon} to="aegis" text="Launch Workload" />
+          <SidebarItem icon={LockIcon} to="aegis/workspaces/create" text="Workspace" />
+          <SidebarItem icon={BuildIcon} to="aegis" text="Cluster" />
         </NavSection>
 
         <SidebarDivider />

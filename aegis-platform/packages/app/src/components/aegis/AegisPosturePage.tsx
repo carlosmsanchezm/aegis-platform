@@ -19,47 +19,65 @@ import CheckCircleIcon from '@material-ui/icons/CheckCircle';
 import ErrorOutlineIcon from '@material-ui/icons/ErrorOutline';
 import TimelineIcon from '@material-ui/icons/Timeline';
 
-const useStyles = makeStyles(theme => ({
-  pageContent: {
-    paddingBottom: theme.spacing(6),
-  },
-  card: {
-    padding: theme.spacing(3),
-    display: 'flex',
-    flexDirection: 'column',
-    gap: theme.spacing(2.5),
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    background:
-      'linear-gradient(150deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.55) 100%)',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing(2),
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: theme.spacing(1.5),
-    flexWrap: 'wrap',
-  },
-  avatar: {
-    background:
-      'linear-gradient(135deg, rgba(16,185,129,0.85), rgba(14,165,233,0.85))',
-  },
-  riskList: {
-    '& .MuiListItem-root': {
-      borderRadius: 16,
-      padding: theme.spacing(2),
-      border: '1px solid rgba(148, 163, 184, 0.14)',
-      backgroundColor: 'rgba(15, 23, 42, 0.55)',
-      marginBottom: theme.spacing(1.5),
+const useStyles = makeStyles(theme => {
+  const isDark = theme.palette.type === 'dark';
+  const cardBorder = isDark
+    ? '1px solid rgba(148, 163, 184, 0.2)'
+    : '1px solid rgba(15, 23, 42, 0.08)';
+  const cardBackground = isDark
+    ? 'linear-gradient(150deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.55) 100%)'
+    : 'linear-gradient(150deg, rgba(246,248,252,0.95) 0%, rgba(229,235,247,0.88) 100%)';
+  const listBackground = isDark
+    ? 'rgba(15, 23, 42, 0.55)'
+    : 'rgba(15, 23, 42, 0.04)';
+  const listBorder = isDark
+    ? '1px solid rgba(148, 163, 184, 0.14)'
+    : '1px solid rgba(15, 23, 42, 0.08)';
+  const avatarBackground = isDark
+    ? 'linear-gradient(135deg, rgba(16,185,129,0.85), rgba(14,165,233,0.85))'
+    : 'linear-gradient(135deg, rgba(99,102,241,0.8), rgba(14,165,233,0.8))';
+
+  return {
+    pageContent: {
+      paddingBottom: theme.spacing(6),
     },
-  },
-  subtle: {
-    color: theme.palette.text.secondary,
-  },
-}));
+    card: {
+      padding: theme.spacing(3),
+      display: 'flex',
+      flexDirection: 'column',
+      gap: theme.spacing(2.5),
+      border: cardBorder,
+      background: cardBackground,
+      borderRadius: 24,
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing(2),
+    },
+    badgeRow: {
+      display: 'flex',
+      gap: theme.spacing(1.5),
+      flexWrap: 'wrap',
+    },
+    avatar: {
+      background: avatarBackground,
+    },
+    riskList: {
+      '& .MuiListItem-root': {
+        borderRadius: 16,
+        padding: theme.spacing(2),
+        border: listBorder,
+        backgroundColor: listBackground,
+        marginBottom: theme.spacing(1.5),
+      },
+    },
+    subtle: {
+      color: theme.palette.text.secondary,
+    },
+  };
+});
 
 const postureHighlights = [
   {

@@ -274,6 +274,9 @@ kubectl create secret generic "${KEYCLOAK_CLIENT_SECRET_NAME}" \
 
 echo "   ℹ️  Resetting Keycloak PVCs to pick up storage class overrides"
 kubectl delete pvc -n "${K8S_NAMESPACE}" -l app.kubernetes.io/component=keycloak-postgres --ignore-not-found >/dev/null 2>&1 || true
+echo "   ℹ️  Resetting Keycloak StatefulSets to allow PVC recreation"
+kubectl delete statefulset "${HELM_RELEASE}-keycloak" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete statefulset "${HELM_RELEASE}-keycloak-db" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 
 echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
 

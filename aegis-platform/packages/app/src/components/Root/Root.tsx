@@ -10,7 +10,6 @@ import SecurityIcon from '@material-ui/icons/Security';
 import CloudQueueIcon from '@material-ui/icons/CloudQueue';
 import LaptopMacIcon from '@material-ui/icons/LaptopMac';
 import LayersIcon from '@material-ui/icons/Layers';
-import Brightness4Icon from '@material-ui/icons/Brightness4';
 import PlayCircleFilledIcon from '@material-ui/icons/PlayCircleFilled';
 import LogoFull from './LogoFull';
 import LogoIcon from './LogoIcon';
@@ -27,7 +26,6 @@ import {
   SidebarItem,
   SidebarPage,
   SidebarSpace,
-  SidebarThemeSwitcher,
   useSidebarOpenState,
   Link,
 } from '@backstage/core-components';
@@ -122,11 +120,6 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
         />
       </SidebarGroup>
       <SidebarSpace />
-      <SidebarDivider />
-      <SidebarGroup label="Theme" icon={<Brightness4Icon />}>
-        <SidebarThemeSwitcher />
-      </SidebarGroup>
-      <SidebarDivider />
       <SidebarGroup
         label="Settings"
         icon={<UserSettingsSignInAvatar />}

@@ -15,65 +15,79 @@ import {
   ContentHeader,
   Page,
 } from '@backstage/core-components';
+import { alpha } from '@material-ui/core/styles/colorManipulator';
 
-const useStyles = makeStyles(theme => ({
-  pageContent: {
-    paddingBottom: theme.spacing(6),
-  },
-  metricCard: {
-    padding: theme.spacing(3),
-    display: 'flex',
-    flexDirection: 'column',
-    gap: theme.spacing(2),
-    border: '1px solid rgba(148, 163, 184, 0.18)',
-    background:
-      'linear-gradient(160deg, rgba(15,23,42,0.88) 0%, rgba(15,23,42,0.55) 100%)',
-  },
-  metricHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  metricValue: {
-    fontSize: '2rem',
-    fontWeight: 600,
-    letterSpacing: '-0.02em',
-  },
-  metricTrend: {
-    color: theme.palette.success.main,
-  },
-  graph: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(148, 163, 184, 0.15)',
-    '& .MuiLinearProgress-barColorPrimary': {
+const useStyles = makeStyles(theme => {
+  const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
+  const isDark = paletteMode === 'dark';
+  const panelBorder = alpha(theme.palette.text.primary, isDark ? 0.2 : 0.1);
+  const panelBackground = isDark
+    ? 'linear-gradient(160deg, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.55) 100%)'
+    : 'linear-gradient(160deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.02) 100%)';
+  const accentTone = alpha(theme.palette.text.primary, isDark ? 0.82 : 0.62);
+  const progressTrack = alpha(theme.palette.text.secondary, isDark ? 0.28 : 0.12);
+  const progressFill = isDark
+    ? 'linear-gradient(135deg, rgba(255,255,255,0.7), rgba(210,210,210,0.88))'
+    : 'linear-gradient(135deg, rgba(0,0,0,0.65), rgba(120,120,120,0.78))';
+
+  return {
+    pageContent: {
+      paddingBottom: theme.spacing(6),
+    },
+    metricCard: {
+      padding: theme.spacing(3),
+      display: 'flex',
+      flexDirection: 'column',
+      gap: theme.spacing(2),
+      border: `1px solid ${panelBorder}`,
+      background: panelBackground,
+    },
+    metricHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    metricValue: {
+      fontSize: '2rem',
+      fontWeight: 600,
+      letterSpacing: '-0.02em',
+    },
+    metricTrend: {
+      color: accentTone,
+    },
+    graph: {
+      height: 8,
       borderRadius: 999,
-      background:
-        'linear-gradient(135deg, rgba(14,165,233,0.85), rgba(99,102,241,0.95))',
+      backgroundColor: progressTrack,
+      '& .MuiLinearProgress-barColorPrimary': {
+        borderRadius: 999,
+        background: progressFill,
+      },
     },
-  },
-  listItem: {
-    padding: theme.spacing(2, 0),
-    '&:not(:last-child)': {
-      borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+    listItem: {
+      padding: theme.spacing(2, 0),
+      '&:not(:last-child)': {
+        borderBottom: `1px solid ${alpha(theme.palette.text.primary, isDark ? 0.18 : 0.08)}`,
+      },
     },
-  },
-  subtle: {
-    color: theme.palette.text.secondary,
-  },
-  sparklines: {
-    display: 'flex',
-    gap: 4,
-    alignItems: 'flex-end',
-    height: 36,
-  },
-  sparkBar: {
-    width: 6,
-    borderRadius: 8,
-    background:
-      'linear-gradient(180deg, rgba(16,185,129,0.9) 0%, rgba(56,189,248,0.9) 100%)',
-  },
-}));
+    subtle: {
+      color: theme.palette.text.secondary,
+    },
+    sparklines: {
+      display: 'flex',
+      gap: 4,
+      alignItems: 'flex-end',
+      height: 36,
+    },
+    sparkBar: {
+      width: 6,
+      borderRadius: 8,
+      background: isDark
+        ? 'linear-gradient(180deg, rgba(255,255,255,0.65) 0%, rgba(150,150,150,0.8) 100%)'
+        : 'linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(120,120,120,0.75) 100%)',
+    },
+  };
+});
 
 const analytics = [
   {

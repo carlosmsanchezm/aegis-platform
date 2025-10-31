@@ -15,67 +15,80 @@ import {
   ContentHeader,
   Page,
 } from '@backstage/core-components';
+import { alpha } from '@material-ui/core/styles/colorManipulator';
 
-const useStyles = makeStyles(theme => ({
-  pageContent: {
-    paddingBottom: theme.spacing(6),
-  },
-  tableWrapper: {
-    padding: theme.spacing(4),
-  },
-  table: {
-    borderCollapse: 'separate',
-    borderSpacing: '0 12px',
-    '& th': {
+const useStyles = makeStyles(theme => {
+  const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
+  const isDark = paletteMode === 'dark';
+  const cellBorder = alpha(theme.palette.text.primary, isDark ? 0.22 : 0.12);
+  const cellBackground = isDark
+    ? 'rgba(255,255,255,0.08)'
+    : 'rgba(0,0,0,0.04)';
+  const summaryBorder = alpha(theme.palette.text.primary, isDark ? 0.2 : 0.12);
+
+  return {
+    pageContent: {
+      paddingBottom: theme.spacing(6),
+    },
+    tableWrapper: {
+      padding: theme.spacing(4),
+    },
+    table: {
+      borderCollapse: 'separate',
+      borderSpacing: '0 12px',
+      '& th': {
+        color: theme.palette.text.secondary,
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        fontSize: '0.75rem',
+        letterSpacing: '0.14em',
+        borderBottom: 'none',
+      },
+      '& td': {
+        borderBottom: 'none',
+        backgroundColor: cellBackground,
+        border: `1px solid ${cellBorder}`,
+        borderRight: 'none',
+        borderLeft: 'none',
+        padding: theme.spacing(2),
+      },
+      '& tr': {
+        borderRadius: 20,
+      },
+    },
+    firstCell: {
+      borderTopLeftRadius: 20,
+      borderBottomLeftRadius: 20,
+      borderLeft: `1px solid ${cellBorder}`,
+    },
+    lastCell: {
+      borderTopRightRadius: 20,
+      borderBottomRightRadius: 20,
+      borderRight: `1px solid ${cellBorder}`,
+    },
+    summaryCard: {
+      padding: theme.spacing(3),
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      border: `1px solid ${summaryBorder}`,
+      marginBottom: theme.spacing(3),
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+      borderRadius: 24,
+    },
+    summaryLabel: {
       color: theme.palette.text.secondary,
-      fontWeight: 500,
       textTransform: 'uppercase',
+      letterSpacing: '0.12em',
       fontSize: '0.75rem',
-      letterSpacing: '0.14em',
-      borderBottom: 'none',
     },
-    '& td': {
-      borderBottom: 'none',
-      backgroundColor: 'rgba(15, 23, 42, 0.6)',
-      border: '1px solid rgba(148, 163, 184, 0.14)',
-      borderRight: 'none',
-      borderLeft: 'none',
-      padding: theme.spacing(2),
+    summaryValue: {
+      fontSize: '2.1rem',
+      fontWeight: 600,
+      letterSpacing: '-0.03em',
     },
-    '& tr': {
-      borderRadius: 20,
-    },
-  },
-  firstCell: {
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
-    borderLeft: '1px solid rgba(148, 163, 184, 0.14)',
-  },
-  lastCell: {
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    borderRight: '1px solid rgba(148, 163, 184, 0.14)',
-  },
-  summaryCard: {
-    padding: theme.spacing(3),
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    marginBottom: theme.spacing(3),
-  },
-  summaryLabel: {
-    color: theme.palette.text.secondary,
-    textTransform: 'uppercase',
-    letterSpacing: '0.12em',
-    fontSize: '0.75rem',
-  },
-  summaryValue: {
-    fontSize: '2.1rem',
-    fontWeight: 600,
-    letterSpacing: '-0.03em',
-  },
-}));
+  };
+});
 
 const clusters = [
   {

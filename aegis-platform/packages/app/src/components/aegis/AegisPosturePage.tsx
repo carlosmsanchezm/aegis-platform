@@ -18,48 +18,62 @@ import SecurityIcon from '@material-ui/icons/Security';
 import CheckCircleIcon from '@material-ui/icons/CheckCircle';
 import ErrorOutlineIcon from '@material-ui/icons/ErrorOutline';
 import TimelineIcon from '@material-ui/icons/Timeline';
+import { alpha } from '@material-ui/core/styles/colorManipulator';
 
-const useStyles = makeStyles(theme => ({
-  pageContent: {
-    paddingBottom: theme.spacing(6),
-  },
-  card: {
-    padding: theme.spacing(3),
-    display: 'flex',
-    flexDirection: 'column',
-    gap: theme.spacing(2.5),
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    background:
-      'linear-gradient(150deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.55) 100%)',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing(2),
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: theme.spacing(1.5),
-    flexWrap: 'wrap',
-  },
-  avatar: {
-    background:
-      'linear-gradient(135deg, rgba(16,185,129,0.85), rgba(14,165,233,0.85))',
-  },
-  riskList: {
-    '& .MuiListItem-root': {
-      borderRadius: 16,
-      padding: theme.spacing(2),
-      border: '1px solid rgba(148, 163, 184, 0.14)',
-      backgroundColor: 'rgba(15, 23, 42, 0.55)',
-      marginBottom: theme.spacing(1.5),
+const useStyles = makeStyles(theme => {
+  const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
+  const isDark = paletteMode === 'dark';
+  const panelBorder = alpha(theme.palette.text.primary, isDark ? 0.22 : 0.12);
+  const panelBackground = isDark
+    ? 'linear-gradient(150deg, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.55) 100%)'
+    : 'linear-gradient(150deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.02) 100%)';
+  const listBorder = alpha(theme.palette.text.primary, isDark ? 0.2 : 0.1);
+  const listBackground = isDark
+    ? 'rgba(255,255,255,0.05)'
+    : 'rgba(0,0,0,0.04)';
+
+  return {
+    pageContent: {
+      paddingBottom: theme.spacing(6),
     },
-  },
-  subtle: {
-    color: theme.palette.text.secondary,
-  },
-}));
+    card: {
+      padding: theme.spacing(3),
+      display: 'flex',
+      flexDirection: 'column',
+      gap: theme.spacing(2.5),
+      border: `1px solid ${panelBorder}`,
+      background: panelBackground,
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing(2),
+    },
+    badgeRow: {
+      display: 'flex',
+      gap: theme.spacing(1.5),
+      flexWrap: 'wrap',
+    },
+    avatar: {
+      background: isDark
+        ? 'linear-gradient(135deg, rgba(255,255,255,0.8), rgba(150,150,150,0.85))'
+        : 'linear-gradient(135deg, rgba(0,0,0,0.75), rgba(110,110,110,0.8))',
+    },
+    riskList: {
+      '& .MuiListItem-root': {
+        borderRadius: 16,
+        padding: theme.spacing(2),
+        border: `1px solid ${listBorder}`,
+        backgroundColor: listBackground,
+        marginBottom: theme.spacing(1.5),
+      },
+    },
+    subtle: {
+      color: theme.palette.text.secondary,
+    },
+  };
+});
 
 const postureHighlights = [
   {

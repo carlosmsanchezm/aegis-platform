@@ -10,45 +10,79 @@ const useStyles = makeStyles(theme => ({
     padding: theme.spacing(1.5, 0),
     minHeight: theme.spacing(12),
   },
-  image: {
-    height: theme.spacing(12),
-    width: 'auto',
-    maxWidth: '100%',
+  emblem: {
+    height: theme.spacing(7.5),
+    width: theme.spacing(7.5),
     flexShrink: 0,
     display: 'block',
-    objectFit: 'contain',
+  },
+  wordmarkWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    minWidth: 0,
   },
   wordmark: {
     fontWeight: 700,
-    fontSize: '2.35rem',
-    letterSpacing: '0.2em',
+    fontSize: '2.1rem',
+    letterSpacing: '0.22em',
     textTransform: 'uppercase',
-    color: theme.palette.text.primary,
     whiteSpace: 'nowrap',
+    color: theme.palette.text.primary,
+  },
+  accent: {
+    color: theme.palette.text.secondary,
   },
 }));
 
 const LogoFull = () => {
   const classes = useStyles();
   const theme = useTheme();
+  const { isOpen } = useSidebarOpenState();
   const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
   const isDark = paletteMode === 'dark';
-  const { isOpen } = useSidebarOpenState();
-  const logoSrc = isDark
-    ? '/branding/aegis-logo-full-dark.svg'
-    : '/branding/aegis-logo-full.svg';
+  const primary = theme.palette.text.primary;
+  const secondary = isDark ? '#BDBDBD' : '#4A4A4A';
 
   return (
     <span className={classes.root} aria-label="ÆGIS logo">
-      <img
-        src={logoSrc}
-        alt="ÆGIS emblem"
-        className={classes.image}
-      />
+      <svg
+        className={classes.emblem}
+        viewBox="0 0 40 40"
+        role="presentation"
+        aria-hidden
+        focusable="false"
+      >
+        <path
+          d="M20 5.5l12.5 21.65H7.5L20 5.5z"
+          fill="none"
+          stroke={primary}
+          strokeWidth={2.4}
+          strokeLinejoin="round"
+        />
+        <circle cx={20} cy={16.2} r={2.6} fill={primary} />
+        <circle
+          cx={11.2}
+          cy={29.8}
+          r={2.8}
+          fill="none"
+          stroke={secondary}
+          strokeWidth={2.4}
+        />
+        <circle
+          cx={28.8}
+          cy={29.8}
+          r={2.8}
+          fill="none"
+          stroke={secondary}
+          strokeWidth={2.4}
+        />
+      </svg>
       {isOpen ? (
-        <Typography component="span" className={classes.wordmark}>
-          ÆGIS
-        </Typography>
+        <span className={classes.wordmarkWrapper}>
+          <Typography component="span" className={classes.wordmark}>
+            Æ<span className={classes.accent}>GIS</span>
+          </Typography>
+        </span>
       ) : null}
     </span>
   );

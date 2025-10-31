@@ -4,6 +4,14 @@ import HomeIcon from '@material-ui/icons/Home';
 import ExtensionIcon from '@material-ui/icons/Extension';
 import LibraryBooks from '@material-ui/icons/LibraryBooks';
 import CreateComponentIcon from '@material-ui/icons/AddCircleOutline';
+import DashboardIcon from '@material-ui/icons/Dashboard';
+import TimelineIcon from '@material-ui/icons/Timeline';
+import SecurityIcon from '@material-ui/icons/Security';
+import CloudQueueIcon from '@material-ui/icons/CloudQueue';
+import LaptopMacIcon from '@material-ui/icons/LaptopMac';
+import LayersIcon from '@material-ui/icons/Layers';
+import Brightness4Icon from '@material-ui/icons/Brightness4';
+import PlayCircleFilledIcon from '@material-ui/icons/PlayCircleFilled';
 import LogoFull from './LogoFull';
 import LogoIcon from './LogoIcon';
 import {
@@ -18,8 +26,8 @@ import {
   SidebarGroup,
   SidebarItem,
   SidebarPage,
-  SidebarScrollWrapper,
   SidebarSpace,
+  SidebarThemeSwitcher,
   useSidebarOpenState,
   Link,
 } from '@backstage/core-components';
@@ -27,23 +35,24 @@ import MenuIcon from '@material-ui/icons/Menu';
 import SearchIcon from '@material-ui/icons/Search';
 import { MyGroupsSidebarItem } from '@backstage/plugin-org';
 import GroupIcon from '@material-ui/icons/People';
-import { NotificationsSidebarItem } from '@backstage/plugin-notifications';
-import StorageIcon from '@material-ui/icons/Storage';
+import NotificationsActiveIcon from '@material-ui/icons/NotificationsActive';
 
-const useSidebarLogoStyles = makeStyles({
+const useSidebarLogoStyles = makeStyles(theme => ({
   root: {
     width: sidebarConfig.drawerWidthClosed,
     height: 3 * sidebarConfig.logoHeight,
     display: 'flex',
     flexFlow: 'row nowrap',
     alignItems: 'center',
-    marginBottom: -14,
+    paddingLeft: theme.spacing(3),
+    paddingRight: theme.spacing(2),
+    paddingTop: theme.spacing(3),
+    paddingBottom: theme.spacing(1),
   },
   link: {
-    width: sidebarConfig.drawerWidthClosed,
-    marginLeft: 24,
+    width: '100%',
   },
-});
+}));
 
 const SidebarLogo = () => {
   const classes = useSidebarLogoStyles();
@@ -66,9 +75,38 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
         <SidebarSearchModal />
       </SidebarGroup>
       <SidebarDivider />
-      <SidebarGroup label="Menu" icon={<MenuIcon />}>
-        {/* Global nav, not org-specific */}
-        <SidebarItem icon={HomeIcon} to="catalog" text="Home" />
+      <SidebarGroup label="Create" icon={<PlayCircleFilledIcon />}>
+        <SidebarItem
+          icon={LaptopMacIcon}
+          to="aegis/workspaces/create"
+          text="Launch Secure Workspace"
+        />
+        <SidebarItem icon={CreateComponentIcon} to="aegis" text="Launch Workload" />
+        {/* TODO: Add Agent Builder route when available */}
+      </SidebarGroup>
+      <SidebarDivider />
+      <SidebarGroup label="Manage" icon={<DashboardIcon />}>
+        <SidebarItem
+          icon={DashboardIcon}
+          to="aegis/dashboard"
+          text="Control Center"
+        />
+        <SidebarItem
+          icon={TimelineIcon}
+          to="aegis/telemetry"
+          text="Telemetry"
+        />
+        <SidebarItem
+          icon={SecurityIcon}
+          to="aegis/posture"
+          text="Live Posture"
+        />
+        <SidebarItem icon={CloudQueueIcon} to="aegis/clusters" text="Clusters" />
+        <SidebarItem icon={LayersIcon} to="aegis/workloads" text="Workspaces" />
+      </SidebarGroup>
+      <SidebarDivider />
+      <SidebarGroup label="Admin" icon={<MenuIcon />}>
+        <SidebarItem icon={HomeIcon} to="catalog" text="Catalog" />
         <MyGroupsSidebarItem
           singularTitle="My Group"
           pluralTitle="My Groups"
@@ -77,21 +115,17 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
         <SidebarItem icon={ExtensionIcon} to="api-docs" text="APIs" />
         <SidebarItem icon={LibraryBooks} to="docs" text="Docs" />
         <SidebarItem icon={CreateComponentIcon} to="create" text="Create..." />
-        <SidebarItem icon={StorageIcon} to="aegis" text="Submit Workload" />
         <SidebarItem
-          icon={StorageIcon}
-          to="aegis/workloads"
-          text="My Workloads"
+          icon={NotificationsActiveIcon}
+          to="notifications"
+          text="Notifications"
         />
-        {/* End global nav */}
-        <SidebarDivider />
-        <SidebarScrollWrapper>
-          {/* Items in this group will be scrollable if they run out of space */}
-        </SidebarScrollWrapper>
       </SidebarGroup>
       <SidebarSpace />
       <SidebarDivider />
-      <NotificationsSidebarItem />
+      <SidebarGroup label="Theme" icon={<Brightness4Icon />}>
+        <SidebarThemeSwitcher />
+      </SidebarGroup>
       <SidebarDivider />
       <SidebarGroup
         label="Settings"

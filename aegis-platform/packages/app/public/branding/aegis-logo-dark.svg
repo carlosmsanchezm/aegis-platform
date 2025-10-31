@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="220" height="48" viewBox="0 0 220 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AEGIS dark logo</title>
+  <desc id="desc">ÆGIS wordmark with luminous triangle emblem designed for dark backgrounds.</desc>
+  <defs>
+    <linearGradient id="markGradient" x1="12" y1="4" x2="36" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#9B87FF"/>
+    </linearGradient>
+    <filter id="markGlow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#markGlow)">
+    <path d="M24 6L39 36H9L24 6Z" fill="url(#markGradient)"/>
+    <path d="M24 14L33 32H15L24 14Z" fill="#0F172A"/>
+  </g>
+  <text x="60" y="33" fill="#F4F4F5" font-family="Inter, 'IBM Plex Sans', 'Segoe UI', sans-serif" font-size="28" font-weight="600" letter-spacing="0.08em">
+    ÆGIS
+  </text>
+</svg>

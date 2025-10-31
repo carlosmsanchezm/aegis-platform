@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="220" height="48" viewBox="0 0 220 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AEGIS light logo</title>
+  <desc id="desc">ÆGIS wordmark with radiant triangle emblem designed for light backgrounds.</desc>
+  <defs>
+    <linearGradient id="markGradientLight" x1="12" y1="4" x2="36" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4338CA"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 6L39 36H9L24 6Z" fill="url(#markGradientLight)"/>
+  <path d="M24 14L33 32H15L24 14Z" fill="#FFFFFF"/>
+  <text x="60" y="33" fill="#0F172A" font-family="Inter, 'IBM Plex Sans', 'Segoe UI', sans-serif" font-size="28" font-weight="600" letter-spacing="0.08em">
+    ÆGIS
+  </text>
+</svg>

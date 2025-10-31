@@ -19,7 +19,7 @@ import {
 } from '@backstage/plugin-techdocs';
 import { TechDocsAddons } from '@backstage/plugin-techdocs-react';
 import { ReportIssue } from '@backstage/plugin-techdocs-module-addons-contrib';
-import { UserSettingsPage } from '@backstage/plugin-user-settings';
+import { SettingsLayout, UserSettingsPage } from '@backstage/plugin-user-settings';
 import { apis } from './apis';
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
@@ -30,7 +30,7 @@ import {
   AegisPosturePage,
   AegisTelemetryPage,
 } from './components/aegis';
-import { aegisTheme } from './theme';
+import { aegisDarkTheme, aegisLightTheme } from './theme';
 
 import {
   AlertDisplay,
@@ -51,6 +51,8 @@ import {
   AegisCreateWorkspacePage,
 } from '@internal/plugin-aegis';
 import { keycloakAuthApiRef } from './apis';
+import { ThemeToggleButton } from './components/ThemeToggleButton';
+import { ThemePreferences } from './components/settings/ThemePreferences';
 
 export const keycloakSignInProvider = {
   id: 'keycloak',
@@ -61,7 +63,7 @@ export const keycloakSignInProvider = {
 
 const app = createApp({
   apis,
-  themes: [aegisTheme],
+  themes: [aegisDarkTheme, aegisLightTheme],
   bindRoutes({ bind }) {
     bind(catalogPlugin.externalRoutes, {
       createComponent: scaffolderPlugin.routes.root,
@@ -119,7 +121,16 @@ const routes = (
     <Route path="/search" element={<SearchPage />}>
       {searchPage}
     </Route>
-    <Route path="/settings" element={<UserSettingsPage />} />
+    <Route path="/settings/*" element={<UserSettingsPage />}>
+      <Route
+        path="theme"
+        element={
+          <SettingsLayout.Route path="theme" title="Theme & Appearance">
+            <ThemePreferences />
+          </SettingsLayout.Route>
+        }
+      />
+    </Route>
     <Route path="/catalog-graph" element={<CatalogGraphPage />} />
     <Route path="/notifications" element={<NotificationsPage />} />
     <Route path="/aegis" element={<AegisPage />} />
@@ -141,6 +152,7 @@ export default app.createRoot(
     <AlertDisplay />
     <OAuthRequestDialog />
     <SignalsDisplay />
+    <ThemeToggleButton />
     <AppRouter>
       <Root>{routes}</Root>
     </AppRouter>

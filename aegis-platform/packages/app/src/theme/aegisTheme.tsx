@@ -3,120 +3,37 @@ import { CssBaseline, ThemeProvider } from '@material-ui/core';
 import { createTheme } from '@material-ui/core/styles';
 import type { BackstageTheme } from '@backstage/theme';
 
-const palette = {
-  type: 'dark',
-  mode: 'dark',
-  status: {
-    ok: '#10b981',
-    warning: '#f59e0b',
-    error: '#f43f5e',
-    running: '#38bdf8',
-    pending: '#facc15',
-    aborted: '#64748b',
-  },
-  bursts: {
-    fontColor: '#f8fafc',
-    slackChannelText: '#cbd5f5',
-    backgroundColor: {
-      default: '#0f172a',
-    },
-    gradient: {
-      linear:
-        'linear-gradient(135deg, rgba(16,185,129,0.6), rgba(14,165,233,0.6))',
-    },
-  },
-  primary: {
-    main: '#10b981',
-    light: '#34d399',
-    dark: '#0f766e',
-  },
-  secondary: {
-    main: '#6366f1',
-    light: '#8b5cf6',
-    dark: '#4338ca',
-  },
-  error: {
-    main: '#f43f5e',
-  },
-  warning: {
-    main: '#f59e0b',
-  },
-  success: {
-    main: '#22c55e',
-  },
-  background: {
-    default: '#040711',
-    paper: '#0b1220',
-  },
-  border: 'rgba(148, 163, 184, 0.18)',
-  text: {
-    primary: '#f8fafc',
-    secondary: '#94a3b8',
-    hint: '#64748b',
-  },
-  textContrast: '#0f172a',
-  textVerySubtle: '#475569',
-  textSubtle: '#94a3b8',
-  highlight: 'rgba(14, 165, 233, 0.18)',
-  divider: 'rgba(148, 163, 184, 0.12)',
-  navigation: {
-    background: '#050a16',
-    indicator: '#10b981',
-    color: '#cbd5f5',
-    selectedColor: '#f8fafc',
-    navItem: {
-      hoverBackground: 'rgba(16, 185, 129, 0.08)',
-    },
-    submenu: {
-      background: '#0d1629',
-    },
-  },
-  banner: {
-    info: '#1e293b',
-    error: '#4c0519',
-    text: '#e2e8f0',
-    link: '#38bdf8',
-    warning: '#f59e0b',
-    closeButtonColor: '#f8fafc',
-  },
-  link: '#38bdf8',
-  linkHover: '#0ea5e9',
-  errorText: '#fecdd3',
-  infoText: '#bae6fd',
-  warningText: '#fef08a',
-  gold: '#facc15',
-  errorBackground: 'rgba(244, 63, 94, 0.12)',
-  warningBackground: 'rgba(245, 158, 11, 0.12)',
-  infoBackground: 'rgba(56, 189, 248, 0.12)',
-  pinSidebarButton: {
-    icon: '#0f172a',
-    background: 'rgba(148, 163, 184, 0.45)',
-  },
-  tabbar: {
-    indicator: '#10b981',
-  },
-} as const;
+export type AegisThemeId = 'aegis-dark' | 'aegis-light';
+
+type Mode = 'dark' | 'light';
+
+type ThemeConfig = {
+  id: AegisThemeId;
+  title: string;
+  mode: Mode;
+  description: string;
+};
 
 const typography = {
-  fontFamily: "'Inter', 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
+  fontFamily: "'Inter', 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif",
   fontWeightLight: 300,
   fontWeightRegular: 400,
   fontWeightMedium: 500,
-  fontWeightBold: 700,
+  fontWeightBold: 600,
   h1: {
     fontWeight: 600,
-    fontSize: '2.75rem',
+    fontSize: '2.5rem',
     letterSpacing: '-0.03em',
   },
   h2: {
     fontWeight: 600,
-    fontSize: '2.25rem',
-    letterSpacing: '-0.025em',
+    fontSize: '2rem',
+    letterSpacing: '-0.02em',
   },
   h3: {
     fontWeight: 600,
-    fontSize: '1.875rem',
-    letterSpacing: '-0.02em',
+    fontSize: '1.75rem',
+    letterSpacing: '-0.01em',
   },
   h4: {
     fontWeight: 600,
@@ -126,240 +43,512 @@ const typography = {
     fontWeight: 500,
     fontSize: '1.25rem',
   },
+  h6: {
+    fontWeight: 500,
+    fontSize: '1.125rem',
+  },
+  subtitle1: {
+    fontWeight: 500,
+    fontSize: '1rem',
+    letterSpacing: '-0.005em',
+  },
+  subtitle2: {
+    fontWeight: 500,
+    fontSize: '0.875rem',
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
+  },
   body1: {
     fontSize: '1rem',
-    lineHeight: 1.7,
+    lineHeight: 1.65,
   },
   body2: {
     fontSize: '0.875rem',
     lineHeight: 1.6,
   },
-  subtitle1: {
-    fontWeight: 500,
-    letterSpacing: '-0.01em',
-  },
   button: {
     fontWeight: 600,
-    letterSpacing: '-0.01em',
     textTransform: 'none',
+    letterSpacing: '0.02em',
+  },
+  caption: {
+    fontSize: '0.75rem',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
   },
 } as const;
 
-const overrides = {
-  MuiCssBaseline: {
-    '@global': {
-      body: {
-        background:
-          'radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.12), transparent 55%), radial-gradient(circle at 80% 10%, rgba(129, 140, 248, 0.1), transparent 55%), #040711',
-        color: '#f8fafc',
-        fontFeatureSettings: '"cv02","cv03","cv04","cv11"',
-        letterSpacing: '-0.01em',
-      },
-      a: {
-        color: '#34d399',
-      },
-      '*::-webkit-scrollbar': {
-        width: 8,
-        height: 8,
-      },
-      '*::-webkit-scrollbar-thumb': {
-        backgroundColor: 'rgba(148, 163, 184, 0.25)',
-        borderRadius: 999,
-      },
-      '*::-webkit-scrollbar-track': {
-        backgroundColor: 'transparent',
-      },
-    },
-  },
-  MuiPaper: {
-    root: {
-      backgroundColor: 'rgba(11, 18, 32, 0.9)',
-      backdropFilter: 'blur(12px)',
-      border: '1px solid rgba(148, 163, 184, 0.16)',
-      borderRadius: 20,
-      boxShadow:
-        '0 20px 45px rgba(15, 23, 42, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.02)',
-    },
-  },
-  MuiButton: {
-    root: {
-      borderRadius: 999,
-      textTransform: 'none',
-      fontWeight: 600,
-      padding: '10px 20px',
-      letterSpacing: '-0.01em',
-    },
-    containedPrimary: {
-      background:
-        'linear-gradient(135deg, rgba(16, 185, 129, 0.92), rgba(14, 165, 233, 0.92))',
-      boxShadow: '0 12px 30px rgba(14, 165, 233, 0.25)',
-      '&:hover': {
-        background:
-          'linear-gradient(135deg, rgba(16, 185, 129, 1), rgba(14, 165, 233, 1))',
-        boxShadow: '0 16px 36px rgba(16, 185, 129, 0.25)',
-      },
-    },
-    outlined: {
-      borderColor: 'rgba(148, 163, 184, 0.32)',
-      '&:hover': {
-        borderColor: 'rgba(148, 163, 184, 0.6)',
-        backgroundColor: 'rgba(148, 163, 184, 0.05)',
-      },
-    },
-  },
-  MuiDrawer: {
-    paper: {
-      backgroundColor: 'rgba(5, 10, 22, 0.85)',
-      backdropFilter: 'blur(14px)',
-      borderRight: '1px solid rgba(148, 163, 184, 0.18)',
-    },
-  },
-  MuiListItem: {
-    root: {
-      borderRadius: 12,
-      margin: '4px 12px',
-    },
-  },
-  MuiCard: {
-    root: {
-      borderRadius: 20,
-      border: '1px solid rgba(148, 163, 184, 0.14)',
-      background:
-        'linear-gradient(160deg, rgba(15,23,42,0.96) 0%, rgba(15,23,42,0.65) 100%)',
-      boxShadow: '0 14px 30px rgba(8, 15, 31, 0.45)',
-    },
-  },
-  MuiAppBar: {
-    colorPrimary: {
-      backgroundColor: 'rgba(4, 7, 17, 0.9)',
-      backdropFilter: 'blur(16px)',
-      borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
-    },
-  },
-  MuiChip: {
-    root: {
-      backgroundColor: 'rgba(148, 163, 184, 0.12)',
-      color: '#94a3b8',
-    },
-    colorPrimary: {
-      backgroundColor: 'rgba(16, 185, 129, 0.16)',
-      color: '#10b981',
-    },
-    colorSecondary: {
-      backgroundColor: 'rgba(99, 102, 241, 0.16)',
-      color: '#6366f1',
-    },
-  },
+const radii = {
+  sm: 8,
+  card: 12,
+  panel: 16,
 } as const;
 
-const props = {
+const buildPalette = (mode: Mode) => {
+  const isDark = mode === 'dark';
+
+  return {
+    type: mode,
+    mode,
+    status: {
+      ok: '#10b981',
+      warning: '#f59e0b',
+      error: '#ef4444',
+      running: '#38bdf8',
+      pending: '#facc15',
+      aborted: '#9ca3af',
+    },
+    bursts: {
+      fontColor: isDark ? '#EDEDED' : '#111827',
+      slackChannelText: isDark ? '#E0E7FF' : '#312E81',
+      backgroundColor: {
+        default: isDark ? '#0F1117' : '#EEF2FF',
+      },
+      gradient: {
+        linear: isDark
+          ? 'linear-gradient(135deg, rgba(155,135,255,0.65), rgba(34,211,238,0.45))'
+          : 'linear-gradient(135deg, rgba(79,70,229,0.55), rgba(14,165,233,0.45))',
+      },
+    },
+    primary: {
+      main: isDark ? '#9B87FF' : '#4F46E5',
+      light: isDark ? '#BAAFFF' : '#818CF8',
+      dark: isDark ? '#6C5DD3' : '#3730A3',
+      contrastText: isDark ? '#0F0F10' : '#FFFFFF',
+    },
+    secondary: {
+      main: isDark ? '#22D3EE' : '#0EA5E9',
+      light: isDark ? '#67E8F9' : '#38BDF8',
+      dark: isDark ? '#0E7490' : '#0369A1',
+      contrastText: '#0F172A',
+    },
+    error: {
+      main: '#f87171',
+    },
+    warning: {
+      main: '#f59e0b',
+    },
+    success: {
+      main: '#22c55e',
+    },
+    info: {
+      main: '#38bdf8',
+    },
+    background: {
+      default: isDark ? '#0E0E0E' : '#FBFAF7',
+      paper: isDark ? '#1F1F1F' : '#FFFFFF',
+    },
+    text: {
+      primary: isDark ? '#EEEDEE' : '#0B0B0B',
+      secondary: isDark ? '#A7A7A7' : '#525252',
+      disabled: isDark ? 'rgba(255,255,255,0.32)' : 'rgba(15,15,15,0.32)',
+      hint: isDark ? '#8E8E8E' : '#737373',
+    },
+    divider: isDark ? '#242424' : '#E7E7E7',
+    action: {
+      hover: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,15,15,0.04)',
+      selected: isDark ? 'rgba(155,135,255,0.16)' : 'rgba(79,70,229,0.12)',
+      focus: isDark ? 'rgba(155,135,255,0.28)' : 'rgba(79,70,229,0.24)',
+      active: isDark ? 'rgba(255,255,255,0.64)' : 'rgba(15,15,15,0.72)',
+      disabled: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(15,15,15,0.3)',
+      disabledBackground: isDark
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(15,15,15,0.06)',
+    },
+    navigation: {
+      background: isDark ? '#131313' : '#EFECE3',
+      indicator: isDark ? '#9B87FF' : '#4F46E5',
+      color: isDark ? '#D6D6D6' : '#3B3B3B',
+      selectedColor: isDark ? '#FFFFFF' : '#111827',
+      navItem: {
+        hoverBackground: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(79,70,229,0.08)',
+      },
+      submenu: {
+        background: isDark ? '#191919' : '#F8F7F1',
+      },
+    },
+    banner: {
+      info: isDark ? '#1E293B' : '#DBEAFE',
+      error: isDark ? '#4C0519' : '#FEE2E2',
+      text: isDark ? '#E2E8F0' : '#111827',
+      link: '#38bdf8',
+      warning: '#f59e0b',
+      closeButtonColor: isDark ? '#F8FAFC' : '#0F172A',
+    },
+    link: isDark ? '#67E8F9' : '#2563EB',
+    linkHover: isDark ? '#38BDF8' : '#1D4ED8',
+    errorText: isDark ? '#FECACA' : '#B91C1C',
+    infoText: isDark ? '#BAE6FD' : '#0F172A',
+    warningText: isDark ? '#FDE68A' : '#854D0E',
+    gold: '#facc15',
+    errorBackground: isDark ? 'rgba(248,113,113,0.12)' : 'rgba(248,113,113,0.18)',
+    warningBackground: isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.18)',
+    infoBackground: isDark ? 'rgba(56,189,248,0.12)' : 'rgba(56,189,248,0.16)',
+    pinSidebarButton: {
+      icon: isDark ? '#0F172A' : '#F9FAFB',
+      background: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(79,70,229,0.12)',
+    },
+    tabbar: {
+      indicator: isDark ? '#9B87FF' : '#4F46E5',
+    },
+  } as const;
+};
+
+const createOverrides = (theme: BackstageTheme, mode: Mode) => {
+  const isDark = mode === 'dark';
+  const focusContrast = isDark ? '#0E0E0E' : '#FFFFFF';
+  const focusColor = isDark ? 'rgba(155,135,255,0.65)' : 'rgba(79,70,229,0.55)';
+  const focusShadow = `0 0 0 2px ${focusContrast}, 0 0 0 4px ${focusColor}`;
+  const cardBorder = isDark
+    ? 'rgba(255,255,255,0.08)'
+    : 'rgba(15,23,42,0.08)';
+  const panelBorder = isDark
+    ? 'rgba(255,255,255,0.12)'
+    : 'rgba(15,23,42,0.1)';
+  const cardShadow = isDark
+    ? '0 20px 48px rgba(0,0,0,0.45)'
+    : '0 14px 32px rgba(15,23,42,0.14)';
+  const panelShadow = isDark
+    ? '0 30px 60px rgba(0,0,0,0.5)'
+    : '0 24px 48px rgba(15,23,42,0.16)';
+
+  return {
+    MuiCssBaseline: {
+      '@global': {
+        body: {
+          backgroundColor: theme.palette.background.default,
+          color: theme.palette.text.primary,
+          fontFeatureSettings: '"cv02","cv03","cv04","cv11"',
+          letterSpacing: '-0.01em',
+        },
+        a: {
+          color: theme.palette.link,
+        },
+        '*::-webkit-scrollbar': {
+          width: 10,
+          height: 10,
+        },
+        '*::-webkit-scrollbar-thumb': {
+          backgroundColor: isDark
+            ? 'rgba(255,255,255,0.18)'
+            : 'rgba(15,23,42,0.22)',
+          borderRadius: 999,
+        },
+        '*::-webkit-scrollbar-track': {
+          backgroundColor: 'transparent',
+        },
+      },
+    },
+    MuiPaper: {
+      rounded: {
+        borderRadius: radii.panel,
+      },
+      elevation1: {
+        borderRadius: radii.panel,
+        backgroundColor: theme.palette.background.paper,
+        border: `1px solid ${panelBorder}`,
+        boxShadow: panelShadow,
+      },
+    },
+    MuiCard: {
+      root: {
+        borderRadius: radii.card,
+        border: `1px solid ${cardBorder}`,
+        boxShadow: cardShadow,
+        backgroundColor: theme.palette.background.paper,
+        padding: theme.spacing(0),
+      },
+    },
+    MuiCardContent: {
+      root: {
+        padding: theme.spacing(6),
+        '&:last-child': {
+          paddingBottom: theme.spacing(6),
+        },
+      },
+    },
+    MuiButton: {
+      root: {
+        borderRadius: radii.sm,
+        padding: theme.spacing(1.5, 3),
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        '&:focus-visible': {
+          boxShadow: focusShadow,
+        },
+      },
+      outlined: {
+        borderWidth: 1,
+        '&:hover': {
+          borderWidth: 1,
+        },
+        '&:focus-visible': {
+          boxShadow: focusShadow,
+        },
+      },
+      containedPrimary: {
+        boxShadow: isDark
+          ? '0 16px 32px rgba(155,135,255,0.32)'
+          : '0 14px 30px rgba(79,70,229,0.28)',
+        '&:hover': {
+          boxShadow: isDark
+            ? '0 20px 36px rgba(155,135,255,0.4)'
+            : '0 16px 32px rgba(79,70,229,0.32)',
+        },
+      },
+      text: {
+        '&:focus-visible': {
+          boxShadow: focusShadow,
+        },
+      },
+    },
+    MuiIconButton: {
+      root: {
+        borderRadius: radii.card,
+        '&:focus-visible': {
+          boxShadow: focusShadow,
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      root: {
+        borderRadius: radii.sm,
+        transition: 'box-shadow 150ms ease, border-color 150ms ease',
+        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+          borderColor: theme.palette.primary.main,
+          boxShadow: focusShadow,
+        },
+      },
+    },
+    MuiInputBase: {
+      input: {
+        fontSize: '0.95rem',
+      },
+    },
+    MuiFormLabel: {
+      root: {
+        fontWeight: 500,
+      },
+    },
+    MuiStepper: {
+      root: {
+        padding: theme.spacing(0),
+        background: 'transparent',
+      },
+    },
+    MuiStepConnector: {
+      line: {
+        borderColor: isDark ? '#2F2F2F' : '#D4D4D8',
+      },
+    },
+    MuiStepLabel: {
+      label: {
+        fontWeight: 500,
+        color: theme.palette.text.secondary,
+        '&.MuiStepLabel-active': {
+          color: theme.palette.text.primary,
+        },
+        '&.MuiStepLabel-completed': {
+          color: theme.palette.text.primary,
+        },
+      },
+    },
+    MuiStepIcon: {
+      root: {
+        color: isDark ? '#3F3F46' : '#D4D4D8',
+        '&.MuiStepIcon-active': {
+          color: theme.palette.primary.main,
+        },
+        '&.MuiStepIcon-completed': {
+          color: theme.palette.primary.main,
+        },
+      },
+    },
+    MuiDrawer: {
+      paper: {
+        backgroundColor: theme.palette.navigation.background,
+        borderRight: `1px solid ${cardBorder}`,
+      },
+    },
+    MuiListItem: {
+      root: {
+        borderRadius: radii.card,
+      },
+    },
+    MuiDivider: {
+      root: {
+        backgroundColor: theme.palette.divider,
+        opacity: 1,
+      },
+    },
+    MuiTooltip: {
+      tooltip: {
+        borderRadius: radii.sm,
+        fontSize: '0.75rem',
+        padding: theme.spacing(1, 1.5),
+      },
+    },
+    MuiDialog: {
+      paper: {
+        borderRadius: radii.panel,
+        border: `1px solid ${panelBorder}`,
+      },
+    },
+  } as const;
+};
+
+const createProps = () => ({
   MuiButton: {
     disableElevation: true,
   },
+  MuiTooltip: {
+    arrow: true,
+  },
+}) as const;
+
+const pageThemes = {
+  home: {
+    colors: ['#9B87FF', '#22D3EE'],
+    shape:
+      'radial-gradient(circle at 20% 20%, rgba(155,135,255,0.18), transparent 60%), radial-gradient(circle at 80% 15%, rgba(34,211,238,0.18), transparent 60%)',
+    backgroundImage:
+      'radial-gradient(circle at 10% 30%, rgba(155,135,255,0.24), transparent 65%), radial-gradient(circle at 80% 70%, rgba(34,211,238,0.2), transparent 65%)',
+    fontColor: '#F4F4F5',
+  },
+  documentation: {
+    colors: ['#4F46E5', '#0EA5E9'],
+    shape:
+      'radial-gradient(circle at 35% 25%, rgba(79,70,229,0.18), transparent 65%), radial-gradient(circle at 75% 60%, rgba(14,165,233,0.18), transparent 65%)',
+    backgroundImage:
+      'radial-gradient(circle at 15% 15%, rgba(79,70,229,0.12), transparent 60%), radial-gradient(circle at 80% 45%, rgba(14,165,233,0.12), transparent 60%)',
+    fontColor: '#0B0B0B',
+  },
+  tool: {
+    colors: ['#22c55e', '#0ea5e9'],
+    shape:
+      'radial-gradient(circle at 30% 20%, rgba(34,197,94,0.16), transparent 60%), radial-gradient(circle at 80% 70%, rgba(14,165,233,0.16), transparent 60%)',
+    backgroundImage:
+      'radial-gradient(circle at 15% 50%, rgba(34,197,94,0.2), transparent 65%), radial-gradient(circle at 75% 40%, rgba(14,165,233,0.2), transparent 65%)',
+    fontColor: '#0F172A',
+  },
+  service: {
+    colors: ['#f59e0b', '#6366f1'],
+    shape:
+      'radial-gradient(circle at 30% 30%, rgba(245,158,11,0.18), transparent 60%), radial-gradient(circle at 75% 70%, rgba(99,102,241,0.18), transparent 60%)',
+    backgroundImage:
+      'radial-gradient(circle at 20% 20%, rgba(245,158,11,0.12), transparent 55%), radial-gradient(circle at 80% 60%, rgba(99,102,241,0.12), transparent 60%)',
+    fontColor: '#111827',
+  },
+  website: {
+    colors: ['#9B87FF', '#38BDF8'],
+    shape:
+      'radial-gradient(circle at 35% 30%, rgba(155,135,255,0.16), transparent 60%), radial-gradient(circle at 70% 60%, rgba(56,189,248,0.16), transparent 60%)',
+    backgroundImage:
+      'radial-gradient(circle at 25% 25%, rgba(155,135,255,0.12), transparent 55%), radial-gradient(circle at 80% 55%, rgba(56,189,248,0.12), transparent 55%)',
+    fontColor: '#0B1120',
+  },
+  library: {
+    colors: ['#6366F1', '#14B8A6'],
+    shape:
+      'radial-gradient(circle at 20% 40%, rgba(99,102,241,0.18), transparent 65%), radial-gradient(circle at 70% 60%, rgba(20,184,166,0.18), transparent 65%)',
+    backgroundImage:
+      'radial-gradient(circle at 30% 25%, rgba(99,102,241,0.12), transparent 60%), radial-gradient(circle at 80% 65%, rgba(20,184,166,0.12), transparent 60%)',
+    fontColor: '#0B1120',
+  },
+  apis: {
+    colors: ['#38BDF8', '#22C55E'],
+    shape:
+      'radial-gradient(circle at 20% 35%, rgba(56,189,248,0.18), transparent 60%), radial-gradient(circle at 70% 65%, rgba(34,197,94,0.18), transparent 60%)',
+    backgroundImage:
+      'radial-gradient(circle at 25% 25%, rgba(56,189,248,0.12), transparent 55%), radial-gradient(circle at 80% 60%, rgba(34,197,94,0.12), transparent 55%)',
+    fontColor: '#0B1120',
+  },
+  other: {
+    colors: ['#4F46E5', '#22D3EE'],
+    shape:
+      'radial-gradient(circle at 35% 20%, rgba(79,70,229,0.18), transparent 65%), radial-gradient(circle at 80% 65%, rgba(34,211,238,0.18), transparent 65%)',
+    backgroundImage:
+      'radial-gradient(circle at 20% 35%, rgba(79,70,229,0.12), transparent 60%), radial-gradient(circle at 75% 55%, rgba(34,211,238,0.12), transparent 60%)',
+    fontColor: '#0B1120',
+  },
 } as const;
 
-const baseTheme = createTheme({
-  palette: palette as any,
-  typography: typography as any,
-  shape: {
-    borderRadius: 18,
-  },
-  overrides: overrides as any,
-  props: props as any,
-}) as BackstageTheme;
+const buildTheme = (config: ThemeConfig): BackstageTheme => {
+  const palette = buildPalette(config.mode);
 
-baseTheme.defaultPageTheme = 'home';
+  const theme = createTheme({
+    palette: palette as any,
+    typography: typography as any,
+    shape: {
+      borderRadius: radii.card,
+    },
+    spacing: 4,
+    overrides: {},
+    props: createProps() as any,
+  }) as BackstageTheme;
 
-baseTheme.getPageTheme = ({ themeId }: { themeId: string }) => {
-  const pageThemes: Record<string, any> = {
-    home: {
-      colors: ['#10b981', '#0ea5e9'],
-      shape:
-        'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(14, 165, 233, 0.2))',
-      backgroundImage:
-        'radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.15), transparent 55%), radial-gradient(circle at 80% 15%, rgba(14, 165, 233, 0.15), transparent 55%)',
-      fontColor: '#f8fafc',
-    },
-    documentation: {
-      colors: ['#38bdf8', '#6366f1'],
-      shape:
-        'linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(99, 102, 241, 0.18))',
-      backgroundImage:
-        'radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.18), transparent 55%), radial-gradient(circle at 70% 30%, rgba(99, 102, 241, 0.18), transparent 60%)',
-      fontColor: '#f8fafc',
-    },
-    tool: {
-      colors: ['#22c55e', '#0ea5e9'],
-      shape:
-        'linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(14, 165, 233, 0.22))',
-      backgroundImage:
-        'radial-gradient(circle at 30% 40%, rgba(34, 197, 94, 0.2), transparent 60%), radial-gradient(circle at 80% 60%, rgba(14, 165, 233, 0.18), transparent 60%)',
-      fontColor: '#f8fafc',
-    },
-    service: {
-      colors: ['#f59e0b', '#6366f1'],
-      shape:
-        'linear-gradient(135deg, rgba(245, 158, 11, 0.24), rgba(99, 102, 241, 0.2))',
-      backgroundImage:
-        'radial-gradient(circle at 25% 30%, rgba(245, 158, 11, 0.18), transparent 60%), radial-gradient(circle at 75% 70%, rgba(99, 102, 241, 0.18), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
-    website: {
-      colors: ['#10b981', '#64748b'],
-      shape:
-        'linear-gradient(135deg, rgba(16, 185, 129, 0.24), rgba(100, 116, 139, 0.18))',
-      backgroundImage:
-        'radial-gradient(circle at 35% 20%, rgba(16, 185, 129, 0.18), transparent 60%), radial-gradient(circle at 65% 70%, rgba(100, 116, 139, 0.2), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
-    library: {
-      colors: ['#6366f1', '#14b8a6'],
-      shape:
-        'linear-gradient(135deg, rgba(99, 102, 241, 0.24), rgba(20, 184, 166, 0.22))',
-      backgroundImage:
-        'radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.18), transparent 60%), radial-gradient(circle at 70% 65%, rgba(20, 184, 166, 0.18), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
-    other: {
-      colors: ['#0ea5e9', '#6366f1'],
-      shape:
-        'linear-gradient(135deg, rgba(14, 165, 233, 0.24), rgba(99, 102, 241, 0.22))',
-      backgroundImage:
-        'radial-gradient(circle at 20% 30%, rgba(14, 165, 233, 0.18), transparent 60%), radial-gradient(circle at 75% 50%, rgba(99, 102, 241, 0.2), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
-    app: {
-      colors: ['#22c55e', '#f97316'],
-      shape:
-        'linear-gradient(135deg, rgba(34, 197, 94, 0.24), rgba(249, 115, 22, 0.22))',
-      backgroundImage:
-        'radial-gradient(circle at 25% 25%, rgba(34, 197, 94, 0.2), transparent 60%), radial-gradient(circle at 70% 65%, rgba(249, 115, 22, 0.18), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
-    apis: {
-      colors: ['#38bdf8', '#22c55e'],
-      shape:
-        'linear-gradient(135deg, rgba(56, 189, 248, 0.24), rgba(34, 197, 94, 0.22))',
-      backgroundImage:
-        'radial-gradient(circle at 30% 30%, rgba(56, 189, 248, 0.2), transparent 60%), radial-gradient(circle at 70% 60%, rgba(34, 197, 94, 0.18), transparent 65%)',
-      fontColor: '#f8fafc',
-    },
+  theme.overrides = {
+    ...theme.overrides,
+    ...(createOverrides(theme, config.mode) as any),
   };
 
-  return pageThemes[themeId] || pageThemes.other;
+  theme.zIndex.drawer = 1200;
+
+  theme.defaultPageTheme = 'home';
+  theme.getPageTheme = ({ themeId }: { themeId: string }) =>
+    (pageThemes as Record<string, any>)[themeId] || pageThemes.other;
+
+  return theme;
 };
 
-export const aegisTheme = {
-  id: 'aegis-dark',
-  title: 'ÆGIS Flux',
-  variant: 'dark' as const,
-  Provider: ({ children }: PropsWithChildren<{}>) => (
-    <ThemeProvider theme={baseTheme}>
+const createThemeProvider = (
+  config: ThemeConfig,
+): { Provider: React.ComponentType<PropsWithChildren<{}>>; theme: BackstageTheme } => {
+  const theme = buildTheme(config);
+
+  const Provider = ({ children }: PropsWithChildren<{}>) => (
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       {children}
     </ThemeProvider>
-  ),
-  theme: baseTheme,
+  );
+
+  return { Provider, theme };
 };
 
-export default aegisTheme;
+const darkConfig: ThemeConfig = {
+  id: 'aegis-dark',
+  title: 'ÆGIS Nightfall',
+  mode: 'dark',
+  description: 'Primary dark theme tuned for control plane work.',
+};
+
+const lightConfig: ThemeConfig = {
+  id: 'aegis-light',
+  title: 'ÆGIS Dawn',
+  mode: 'light',
+  description: 'Bright theme for daylight and accessibility needs.',
+};
+
+const dark = createThemeProvider(darkConfig);
+const light = createThemeProvider(lightConfig);
+
+export const aegisDarkTheme = {
+  id: darkConfig.id,
+  title: darkConfig.title,
+  variant: 'dark' as const,
+  Provider: dark.Provider,
+  theme: dark.theme,
+};
+
+export const aegisLightTheme = {
+  id: lightConfig.id,
+  title: lightConfig.title,
+  variant: 'light' as const,
+  Provider: light.Provider,
+  theme: light.theme,
+};
+
+export const aegisThemes = [aegisDarkTheme, aegisLightTheme];
+
+export default aegisDarkTheme;

@@ -72,3 +72,16 @@ make dev-backstage
 ```bash
 make dev-backstage-cloud
 ```
+
+## Design System & Themes
+
+- The Frontend theme lives in `packages/app/src/theme/aegisTheme.tsx`. Update this file when adding new palette tokens, typography, or component overrides so the ÆGIS Nightfall/Dawn themes stay in sync.
+- Dark mode (`ÆGIS Nightfall`) loads by default. Use the floating sun/moon control in the upper-right corner of the app chrome to flip themes instantly, or open **Settings → Theme & Appearance** for a richer chooser and “follow system” option.
+- Theme selections persist to `localStorage` and respect the browser’s `prefers-color-scheme` hint on the first visit.
+
+## Workspace Wizard
+
+- The card-based wizard is implemented under `plugins/aegis/src/wizard`. Add new workspace templates by extending the `templates` array inside `WorkspaceWizard.tsx`, providing defaults for image, queue, ports, and any environment variables.
+- Reuse `TemplateCard` for new selectable cards, and update `types.ts` when introducing new template or flavor identifiers.
+- Unit coverage: `ThemeToggleButton.test.tsx` covers the global toggle, and `WorkspaceWizard.test.tsx` verifies template selection plus validation. Run `yarn test` from the repository root to execute them.
+- End-to-end: `packages/app/e2e-tests/workspace-wizard.spec.ts` exercises Templates → Configure → Review → Launch with a stubbed SubmitWorkload response. Start Backstage (`yarn dev`), then run `yarn test:e2e` to drive the flow with Playwright.

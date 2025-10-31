@@ -48,7 +48,7 @@ import { StepIconProps } from '@material-ui/core/StepIcon';
 import CheckRoundedIcon from '@material-ui/icons/CheckRounded';
 import CodeIcon from '@material-ui/icons/Code';
 import DescriptionIcon from '@material-ui/icons/Description';
-import TerminalIcon from '@material-ui/icons/Terminal';
+import DeveloperModeIcon from '@material-ui/icons/DeveloperMode';
 import StorageIcon from '@material-ui/icons/Storage';
 import MemoryIcon from '@material-ui/icons/Memory';
 import TimelineIcon from '@material-ui/icons/Timeline';
@@ -224,7 +224,7 @@ const steps = ['Workspace basics', 'Resources & options', 'Review & launch'];
 const workspaceTypeIcons: Record<WorkspaceTypeId, ComponentType<any>> = {
   vscode: CodeIcon,
   jupyter: DescriptionIcon,
-  cli: TerminalIcon,
+  cli: DeveloperModeIcon,
 };
 
 const useStyles = makeStyles((theme: Theme) => {

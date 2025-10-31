@@ -34,7 +34,11 @@ const LogoFull = () => {
         src="/branding/aegis-logo-full.svg"
         alt="ÆGIS emblem"
         className={classes.image}
-        style={!isDark ? { filter: 'invert(1) brightness(1.1)' } : undefined}
+        style={
+          isDark
+            ? { filter: 'brightness(0) invert(1)' }
+            : undefined
+        }
       />
       <Typography component="span" className={classes.wordmark}>
         ÆGIS

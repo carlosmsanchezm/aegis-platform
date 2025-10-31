@@ -157,3 +157,93 @@ Platform API E2E suite against the public DNS endpoints. The flow is:
 If any of the steps above fail (e.g. Keycloak pods crash, PVC cannot bind, the
 token endpoint returns 4xx), the workflow stops and surfaces the failure so we
 can debug before merging.
+
+### Manual validation against a running preview
+
+When a preview environment such as `preview-29` is already deployed you can
+replicate the workflow end-to-end:
+
+1. **Point kubectl at the preview cluster**
+
+   ```bash
+   cd terraform
+   eval "$(terraform output -raw kubectl_config_command)"
+   export KUBE_CONTEXT=$(kubectl config current-context)
+   echo "Using kube context: ${KUBE_CONTEXT}"
+   ```
+
+2. **Verify Keycloak health and storage**
+
+   ```bash
+   PREVIEW_NS=preview-29
+
+   kubectl -n "${PREVIEW_NS}" get pods -l app=keycloak
+   kubectl -n "${PREVIEW_NS}" get pvc -l app.kubernetes.io/component=keycloak-postgres -o wide
+   # View service endpoints and TLS
+   kubectl -n "${PREVIEW_NS}" get svc | grep -i keycloak
+   ```
+
+   You should see the Keycloak pod `Ready` and the PVC bound to the `gp2`
+   storage class.
+
+3. **Mint a bearer token manually**
+
+   ```bash
+   KEYCLOAK_NAMESPACE=${PREVIEW_NS} \
+   KEYCLOAK_SERVICE_NAME=${PREVIEW_NS}-keycloak-service \
+   KEYCLOAK_PORT_FORWARD=1 \
+   KEYCLOAK_USERNAME=cloud@test.com \
+   KEYCLOAK_PASSWORD=password \
+   KEYCLOAK_CLIENT_ID=backstage \
+   KEYCLOAK_CLIENT_SECRET=$(kubectl -n "${PREVIEW_NS}" get secret ${PREVIEW_NS}-keycloak-backstage-client-secret -o jsonpath='{.data.clientSecret}' | base64 --decode) \
+   scripts/keycloak-token.sh > /tmp/keycloak-token
+   TOKEN=$(cat /tmp/keycloak-token)
+   ```
+
+   The helper logs should show `http_status=200` and an `access_token` in the
+   response body.
+
+4. **Exercise the Platform API using the token**
+
+   ```bash
+   GRPC_HOST=platform-api-grpc.aegist.dev
+   GRPC_PORT=443
+   CA_CERT=/path/to/aegis-platform-api-ca.crt   # download from workflow artifact
+
+   grpcurl \
+     -d '{"project_id":"p-e2e-manual","queue":"default","cluster_id":"aws-us-east-1-prod","workspace":{"flavor":"a10-mig-1g","image":"alpine:3.19","command":["sh","-c","echo hello"],"env":{"USER_NAME":"aegis","USER_PASSWORD":"aegis123"}}}' \
+     -H "authorization: Bearer ${TOKEN}" \
+     -cacert "${CA_CERT}" \
+     ${GRPC_HOST}:${GRPC_PORT} \
+     aegis.platform.v1alpha.WorkloadsService/SubmitWorkload
+   ```
+
+   Capture the returned `workload_id`, then poll `GetWorkload` and call
+   `AckWorkload` using the same bearer token to mirror what the CI job does.
+
+5. **Connect from VS Code / CLI**
+
+   Add or override the Aegis extension settings to target the preview:
+
+   ```jsonc
+   {
+     "aegis.remote": {
+       "platform": {
+         "grpcEndpoint": "platform-api-grpc.aegist.dev:443",
+         "projectId": "p-e2e-manual",
+         "namespace": "aegis-workloads",
+         "authScope": "aegis-platform",
+         "rejectUnauthorized": true,
+         "mtlsSource": "platform",
+         "caCertPath": "/path/to/aegis-platform-api-ca.crt"
+       }
+     }
+   }
+   ```
+
+   Launch VS Code with these settings (or re-run `scripts/test-workspace-connection.sh` \
+   with the same `GRPC_*` environment variables). You should reach the workspace
+   pod deployed to the preview cluster using the Keycloak-issued token.
+
+This process mirrors each stage of the CI workflow and confirms you can obtain
+bearer tokens, issue workloads, and connect to compute from a local environment.

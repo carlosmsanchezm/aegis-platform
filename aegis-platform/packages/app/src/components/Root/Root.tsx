@@ -9,20 +9,18 @@ import ExtensionIcon from '@material-ui/icons/Extension';
 import HomeIcon from '@material-ui/icons/Home';
 import LaptopMacIcon from '@material-ui/icons/LaptopMac';
 import LockIcon from '@material-ui/icons/Lock';
-import SearchIcon from '@material-ui/icons/Search';
 import SecurityIcon from '@material-ui/icons/Security';
 import SettingsIcon from '@material-ui/icons/Settings';
 import TimelineIcon from '@material-ui/icons/Timeline';
+import GroupIcon from '@material-ui/icons/Group';
 import LogoFull from './LogoFull';
 import LogoIcon from './LogoIcon';
 import {
   Settings as SidebarSettings,
   UserSettingsSignInAvatar,
 } from '@backstage/plugin-user-settings';
-import { SidebarSearchModal } from '@backstage/plugin-search';
 import {
   Sidebar,
-  sidebarConfig,
   SidebarDivider,
   SidebarGroup,
   SidebarItem,
@@ -35,20 +33,29 @@ import {
 import { MyGroupsSidebarItem } from '@backstage/plugin-org';
 import { NotificationsSidebarItem } from '@backstage/plugin-notifications';
 
-const useSidebarLogoStyles = makeStyles({
+const useSidebarLogoStyles = makeStyles(theme => ({
   root: {
-    width: sidebarConfig.drawerWidthClosed,
-    height: 3 * sidebarConfig.logoHeight,
+    width: '100%',
+    minHeight: theme.spacing(13),
     display: 'flex',
-    flexFlow: 'row nowrap',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: -14,
   },
   link: {
-    width: sidebarConfig.drawerWidthClosed,
-    marginLeft: 24,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing(2),
+    width: '100%',
+    paddingLeft: theme.spacing(3),
+    paddingRight: theme.spacing(2),
   },
-});
+  linkCollapsed: {
+    justifyContent: 'center',
+    paddingLeft: 0,
+    paddingRight: 0,
+  },
+}));
 
 const useNavSectionStyles = makeStyles(theme => ({
   section: {
@@ -69,9 +76,6 @@ const useNavSectionStyles = makeStyles(theme => ({
     gap: theme.spacing(0.5),
     padding: theme.spacing(0, 1),
   },
-  searchTrigger: {
-    margin: theme.spacing(1, 2, 3),
-  },
 }));
 
 const SidebarLogo = () => {
@@ -80,7 +84,12 @@ const SidebarLogo = () => {
 
   return (
     <div className={classes.root}>
-      <Link to="/" underline="none" className={classes.link} aria-label="Home">
+      <Link
+        to="/"
+        underline="none"
+        className={`${classes.link} ${!isOpen ? classes.linkCollapsed : ''}`.trim()}
+        aria-label="Home"
+      >
         {isOpen ? <LogoFull /> : <LogoIcon />}
       </Link>
     </div>
@@ -107,19 +116,10 @@ const NavSection = ({ label, icon, children }: NavSectionProps) => {
 };
 
 export const Root = ({ children }: PropsWithChildren<{}>) => {
-  const navClasses = useNavSectionStyles();
-
   return (
     <SidebarPage>
       <Sidebar>
         <SidebarLogo />
-
-        <SidebarGroup label="Search" icon={<SearchIcon />} to="/search">
-          <div className={navClasses.searchTrigger}>
-            <SidebarSearchModal />
-          </div>
-        </SidebarGroup>
-
         <SidebarDivider />
 
         <NavSection label="Create" icon={<AddCircleOutlineIcon />}>
@@ -139,7 +139,11 @@ export const Root = ({ children }: PropsWithChildren<{}>) => {
             <SidebarItem icon={CloudQueueIcon} to="aegis/clusters" text="Clusters" />
             <SidebarItem icon={TimelineIcon} to="aegis/telemetry" text="Telemetry" />
             <SidebarItem icon={SecurityIcon} to="aegis/posture" text="Live Posture" />
-            <MyGroupsSidebarItem singularTitle="My Group" pluralTitle="My Groups" />
+            <MyGroupsSidebarItem
+              singularTitle="My Group"
+              pluralTitle="My Groups"
+              icon={GroupIcon}
+            />
           </NavSection>
 
           <SidebarDivider />

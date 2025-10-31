@@ -32,7 +32,7 @@ const LogoFull = () => {
   return (
     <span className={classes.root} aria-label="ÆGIS logo">
       <img
-        src="/branding/aegis-logo-full.png"
+        src="/branding/aegis-logo-full.svg"
         alt="ÆGIS emblem"
         className={classes.image}
         style={isDark ? { filter: 'invert(1) brightness(1.1)' } : undefined}

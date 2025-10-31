@@ -38,7 +38,7 @@ import { alpha } from '@material-ui/core/styles/colorManipulator';
 import clsx from 'clsx';
 import LaptopMacIcon from '@material-ui/icons/LaptopMac';
 import ScatterPlotIcon from '@material-ui/icons/ScatterPlot';
-import TerminalIcon from '@material-ui/icons/Terminal';
+import DeveloperModeIcon from '@material-ui/icons/DeveloperMode';
 import CodeIcon from '@material-ui/icons/Code';
 import StorageIcon from '@material-ui/icons/Storage';
 import FunctionsIcon from '@material-ui/icons/Functions';
@@ -396,7 +396,7 @@ const flavorCatalog: FlavorOption[] = [
 const workspaceTypeIconMap: Record<WorkspaceTypeId, SvgIconComponent> = {
   vscode: LaptopMacIcon,
   jupyter: ScatterPlotIcon,
-  cli: TerminalIcon,
+  cli: DeveloperModeIcon,
 };
 
 const templateIconMap: Record<string, SvgIconComponent> = {

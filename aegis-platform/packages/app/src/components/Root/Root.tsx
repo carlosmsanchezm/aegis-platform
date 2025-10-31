@@ -34,13 +34,12 @@ import {
   SidebarPage,
   SidebarScrollWrapper,
   SidebarSpace,
-  SidebarSubheader,
   useSidebarOpenState,
   Link,
 } from '@backstage/core-components';
-import { useAppTheme } from '@backstage/core-plugin-api';
 import { MyGroupsSidebarItem } from '@backstage/plugin-org';
 import { NotificationsSidebarItem } from '@backstage/plugin-notifications';
+import { useApi, appThemeApiRef } from '@backstage/core-plugin-api';
 
 const useSidebarLogoStyles = makeStyles(theme => ({
   root: {
@@ -84,18 +83,25 @@ const SidebarLogo = () => {
 };
 
 const ThemeToggleItem = () => {
-  const { activeThemeId, setActiveThemeId } = useAppTheme();
-  const isDark = activeThemeId !== 'aegis-light';
-  const icon = isDark ? Brightness7Icon : Brightness4Icon;
-  const label = isDark ? 'Light mode' : 'Dark mode';
+  const appThemeApi = useApi(appThemeApiRef);
+  const installedThemes = appThemeApi.getInstalledThemes();
+  const activeThemeId = appThemeApi.getActiveThemeId();
+  const activeTheme = installedThemes.find(theme => theme.id === activeThemeId);
+  const isDark = activeTheme?.variant === 'dark';
+  const Icon = isDark ? Brightness7Icon : Brightness4Icon;
+  const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
 
-  return (
-    <SidebarItem
-      icon={icon}
-      text={label}
-      onClick={() => setActiveThemeId(isDark ? 'aegis-light' : 'aegis-dark')}
-    />
-  );
+  const nextTheme = isDark
+    ? installedThemes.find(theme => theme.variant === 'light')
+    : installedThemes.find(theme => theme.variant === 'dark');
+
+  const handleToggle = () => {
+    if (nextTheme) {
+      appThemeApi.setActiveThemeId(nextTheme.id);
+    }
+  };
+
+  return <SidebarItem icon={Icon} text={label} onClick={handleToggle} />;
 };
 
 export const Root = ({ children }: PropsWithChildren<{}>) => (
@@ -106,14 +112,12 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
         <SidebarSearchModal />
       </SidebarGroup>
       <SidebarDivider />
-      <SidebarGroup label="ÆGIS Console" icon={<DashboardIcon />}>
-        <SidebarSubheader>Overview</SidebarSubheader>
+      <SidebarGroup label="ÆGIS Control Center" icon={<DashboardIcon />}>
         <SidebarItem
           icon={DashboardIcon}
           to="aegis/dashboard"
           text="Control Center"
         />
-        <SidebarSubheader>Manage</SidebarSubheader>
         <SidebarItem
           icon={TimelineIcon}
           to="aegis/telemetry"
@@ -130,7 +134,6 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
           to="aegis/workloads"
           text="Workspaces"
         />
-        <SidebarSubheader>Create</SidebarSubheader>
         <SidebarItem
           icon={LaptopMacIcon}
           to="aegis/workspaces/create"
@@ -145,7 +148,6 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
       </SidebarGroup>
       <SidebarDivider />
       <SidebarGroup label="Platform" icon={<MenuIcon />}>
-        <SidebarSubheader>Admin</SidebarSubheader>
         <SidebarItem icon={HomeIcon} to="catalog" text="Catalog" />
         <MyGroupsSidebarItem
           singularTitle="My Group"

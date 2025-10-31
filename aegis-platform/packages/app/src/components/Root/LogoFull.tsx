@@ -1,70 +1,46 @@
-import { makeStyles, Typography, useTheme } from '@material-ui/core';
+import { makeStyles, Typography } from '@material-ui/core';
+import { useTheme } from '@material-ui/core/styles';
 
 const useStyles = makeStyles(theme => ({
   root: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing(1.5),
-    color: theme.palette.text.primary,
+    gap: theme.spacing(1.75),
+    padding: theme.spacing(1, 0),
+    minHeight: theme.spacing(7),
   },
-  glyph: {
-    width: 34,
-    height: 34,
+  image: {
+    height: 48,
+    width: 'auto',
+    display: 'block',
   },
   wordmark: {
     fontWeight: 700,
-    fontSize: 20,
-    letterSpacing: '0.24em',
+    fontSize: '1.35rem',
+    letterSpacing: '0.18em',
     textTransform: 'uppercase',
-  },
-  accent: {
-    color:
-      theme.palette.type === 'dark'
-        ? '#F4F4F3'
-        : theme.palette.primary.dark || theme.palette.primary.main,
+    color: theme.palette.text.primary,
   },
 }));
 
-const Glyph = ({ className }: { className?: string }) => {
-  const theme = useTheme();
-  const stroke = theme.palette.type === 'dark' ? '#F4F4F3' : '#050505';
-  const fill = theme.palette.type === 'dark' ? '#F4F4F3' : '#050505';
-
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 40 40"
-      role="presentation"
-      aria-hidden
-      focusable="false"
-    >
-      <path
-        d="M20 5.5l12.5 21.65H7.5L20 5.5z"
-        fill="none"
-        stroke={stroke}
-        strokeWidth={2.4}
-        strokeLinejoin="round"
-      />
-      <circle cx={20} cy={16.2} r={2.6} fill={fill} />
-      <circle cx={11.2} cy={29.8} r={2.8} fill="none" stroke={stroke} strokeWidth={2.4} />
-      <circle cx={28.8} cy={29.8} r={2.8} fill="none" stroke={stroke} strokeWidth={2.4} />
-    </svg>
-  );
-};
-
 const LogoFull = () => {
   const classes = useStyles();
+  const theme = useTheme();
+  const paletteMode = (theme.palette as any)?.mode ?? theme.palette.type;
+  const isDark = paletteMode === 'dark';
 
   return (
-    <div className={classes.root} aria-label="ÆGIS home">
-      <Glyph className={classes.glyph} />
-      <Typography
-        component="span"
-        className={`${classes.wordmark} ${classes.accent}`}
-      >
+    <span className={classes.root} aria-label="ÆGIS logo">
+      <img
+        src="/branding/aegis-logo-full.png"
+        alt="ÆGIS emblem"
+        className={classes.image}
+        style={isDark ? { filter: 'invert(1) brightness(1.1)' } : undefined}
+      />
+      <Typography component="span" className={classes.wordmark}>
         ÆGIS
       </Typography>
-    </div>
+    </span>
   );
 };
 

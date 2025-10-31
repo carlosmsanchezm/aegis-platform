@@ -474,6 +474,7 @@ detect_with_kubectl
 if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
   ns_hint="${KEYCLOAK_NAMESPACE:-}"
   svc_hint="${KEYCLOAK_SERVICE_NAME:-}"
+  host_hint=""
   if [[ -z "${ns_hint}" ]]; then
     if [[ -n "${PREVIEW_NAMESPACE:-}" ]]; then
       ns_hint="${PREVIEW_NAMESPACE}"
@@ -483,10 +484,13 @@ if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
   fi
   if [[ -z "${svc_hint}" ]]; then
     if [[ -n "${PREVIEW_RELEASE:-}" ]]; then
-      svc_hint="${PREVIEW_RELEASE}-keycloak"
+      svc_hint="${PREVIEW_RELEASE}-keycloak-service"
+      host_hint="${PREVIEW_RELEASE}-keycloak"
     elif [[ -n "${KEYCLOAK_SERVICE_BASENAME:-}" ]]; then
       svc_hint="${KEYCLOAK_SERVICE_BASENAME}"
     fi
+  elif [[ -n "${PREVIEW_RELEASE:-}" && "${svc_hint}" == "${PREVIEW_RELEASE}-keycloak" ]]; then
+    host_hint="${PREVIEW_RELEASE}-keycloak"
   fi
   if [[ -n "${svc_hint}" ]]; then
     KEYCLOAK_SERVICE_NAME="${svc_hint}"
@@ -494,9 +498,14 @@ if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
   if [[ -n "${ns_hint}" ]]; then
     KEYCLOAK_NAMESPACE="${ns_hint}"
   fi
-  if [[ -n "${KEYCLOAK_SERVICE_NAME:-}" && -n "${KEYCLOAK_NAMESPACE:-}" ]]; then
+  if [[ -z "${host_hint}" && -n "${KEYCLOAK_SERVICE_NAME:-}" && -n "${KEYCLOAK_NAMESPACE:-}" ]]; then
+    host_hint="${KEYCLOAK_SERVICE_NAME}.${KEYCLOAK_NAMESPACE}.svc.cluster.local"
+  elif [[ -n "${host_hint}" && -n "${KEYCLOAK_NAMESPACE:-}" ]]; then
+    host_hint="${host_hint}.${KEYCLOAK_NAMESPACE}.svc.cluster.local"
+  fi
+  if [[ -z "${KEYCLOAK_BASE_URL:-}" && -n "${host_hint}" ]]; then
     port_hint="${KEYCLOAK_INTERNAL_PORT:-${KEYCLOAK_PORT:-8443}}"
-    KEYCLOAK_BASE_URL="https://${KEYCLOAK_SERVICE_NAME}.${KEYCLOAK_NAMESPACE}.svc.cluster.local:${port_hint}"
+    KEYCLOAK_BASE_URL="https://${host_hint}:${port_hint}"
   fi
 fi
 
@@ -529,6 +538,7 @@ fi
 declare -a CURL_ARGS=("-sS" "--fail" "--request" "POST" "${TOKEN_URL}")
 if [[ -n "${port_forward_port}" && -n "${port_forward_host}" ]]; then
   CURL_ARGS+=(--resolve "${port_forward_host}:${port_forward_port}:127.0.0.1")
+  CURL_ARGS+=(--connect-to "${port_forward_host}:${port_forward_port}:127.0.0.1:${port_forward_port}")
 fi
 if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
   CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_CERT}")
@@ -573,6 +583,11 @@ for entry in "${FORM_DATA[@]}"; do
 done
 
 TMP_BODY=$(mktemp)
+if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+  printf 'keycloak-token: curl args -> ' >&2
+  printf '%q ' "${CURL_ARGS[@]}" >&2
+  printf '\n' >&2
+fi
 trap 'rm -f "${TMP_BODY}"' EXIT
 
 HTTP_STATUS=$(curl "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)

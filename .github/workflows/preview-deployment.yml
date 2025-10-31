@@ -910,6 +910,14 @@ jobs:
               export AEGIS_PLATFORM_NAMESPACE="${PREVIEW_NAMESPACE}"
               export AEGIS_PLATFORM_SERVICE="${PREVIEW_RELEASE}-platform-api"
               export AEGIS_PLATFORM_DEPLOYMENT="${PREVIEW_RELEASE}-platform-api"
+              export KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-${PREVIEW_NAMESPACE}}"
+              export KEYCLOAK_SERVICE_NAME="${KEYCLOAK_SERVICE_NAME:-${PREVIEW_RELEASE}-keycloak}"
+              export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-https://${PREVIEW_RELEASE}-keycloak.${PREVIEW_NAMESPACE}.svc.cluster.local:8443}"
+              export KEYCLOAK_REALM="${KEYCLOAK_REALM:-aegis}"
+              export KEYCLOAK_CLIENT_ID="${KEYCLOAK_CLIENT_ID:-backstage}"
+              export KEYCLOAK_USERNAME="${KEYCLOAK_USERNAME:-cloud@test.com}"
+              export KEYCLOAK_PASSWORD="${KEYCLOAK_PASSWORD:-password}"
+              export KEYCLOAK_PORT_FORWARD="${KEYCLOAK_PORT_FORWARD:-1}"
               bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
               ;;
             workspace)

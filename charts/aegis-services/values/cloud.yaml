@@ -281,6 +281,9 @@ keycloak:
     secret:
       name: keycloak-db-secret
       create: false
+  postgres:
+    storage:
+      className: gp2
   realm:
     client:
       secret:

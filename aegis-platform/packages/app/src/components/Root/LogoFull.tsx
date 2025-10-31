@@ -16,8 +16,8 @@ const useStyles = makeStyles(theme => ({
   },
   wordmark: {
     fontWeight: 700,
-    fontSize: '2rem',
-    letterSpacing: '0.24em',
+    fontSize: '2.2rem',
+    letterSpacing: '0.18em',
     textTransform: 'uppercase',
     color: theme.palette.text.primary,
   },

@@ -119,7 +119,7 @@ spec:
     {{- end }}
   {{- end }}
   ingress:
-    enabled: {{ default true $ingress.enabled }}
+    enabled: {{ ternary $ingress.enabled true (hasKey $ingress "enabled") }}
     className: {{ $ingress.className | default "ingress-nginx" }}
     {{- with $ingress.annotations }}
     annotations:

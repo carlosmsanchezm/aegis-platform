@@ -50,6 +50,7 @@ port_forward_host=""
 keycloak_host_header=""
 keycloak_remote_port=""
 keycloak_port_forward_log=""
+keycloak_effective_scheme="https"
 
 cleanup() {
   local status=$?
@@ -359,6 +360,95 @@ detect_with_kubectl() {
 
 }
 
+wait_for_keycloak_ready() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    return
+  fi
+  local ns="${KEYCLOAK_NAMESPACE:-keycloak}"
+  kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=keycloak -n "${ns}" --timeout=300s >/dev/null 2>&1 || true
+}
+
+detect_service_port_and_scheme() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    return
+  fi
+  local ns="${1:-${KEYCLOAK_NAMESPACE:-keycloak}}"
+  local svc="${2:-${KEYCLOAK_SERVICE_NAME:-}}"
+  if [[ -z "${svc}" ]]; then
+    return
+  fi
+
+  local desired_port="${KEYCLOAK_INTERNAL_PORT:-${KEYCLOAK_PORT:-8443}}"
+  local desired_scheme="https"
+
+  local svc_json
+  svc_json=$(kubectl get svc "${svc}" -n "${ns}" -o json 2>/dev/null || true)
+  if [[ -n "${svc_json}" && "${svc_json}" != "null" ]]; then
+    local ports
+    ports=$(echo "${svc_json}" | jq -r '.spec.ports[]?.port' 2>/dev/null | tr '\n' ' ')
+    if [[ -n "${ports}" ]]; then
+      if [[ "${ports}" != *"8443"* && "${ports}" == *"8080"* ]]; then
+        desired_port="8080"
+        desired_scheme="http"
+      elif [[ "${ports}" != *"8443"* && "${ports}" == *"80"* ]]; then
+        desired_port="80"
+        desired_scheme="http"
+      fi
+    fi
+  fi
+
+  echo "${desired_scheme}:${desired_port}"
+}
+
+terminate_port_forward() {
+  if [[ -n "${port_forward_pid}" ]]; then
+    kill "${port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${port_forward_pid}" >/dev/null 2>&1 || true
+    port_forward_pid=""
+  fi
+  if [[ -n "${port_forward_log}" ]]; then
+    rm -f "${port_forward_log}" >/dev/null 2>&1 || true
+    port_forward_log=""
+  fi
+}
+
+probe_openid() {
+  local url="${KEYCLOAK_BASE_URL%/}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration"
+  local -a args=("-sS" "-o" "/dev/null" "-w" "%{http_code}")
+
+  if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
+    args+=("--cacert" "${KEYCLOAK_CA_CERT}")
+  elif [[ -n "${KEYCLOAK_CA_BUNDLE:-}" && -f "${KEYCLOAK_CA_BUNDLE}" ]]; then
+    args+=("--cacert" "${KEYCLOAK_CA_BUNDLE}")
+  fi
+
+  if [[ "${KEYCLOAK_SKIP_TLS_VERIFY:-0}" == "1" ]]; then
+    args+=("--insecure")
+  fi
+
+  if [[ -n "${port_forward_host}" && -n "${keycloak_host_header}" && -n "${keycloak_remote_port}" ]]; then
+    args+=("--resolve" "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}")
+    args+=("--connect-to" "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}:${keycloak_remote_port}")
+    if [[ "${keycloak_effective_scheme:-https}" == "https" ]]; then
+      args+=("--tlsv1.2")
+    fi
+  fi
+
+  args+=("${url}")
+
+  local http="000"
+  local attempt=0
+  while [[ ${attempt} -lt 20 ]]; do
+    http=$(curl "${args[@]}" || true)
+    if [[ "${http}" == "200" ]]; then
+      return 0
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
 maybe_port_forward() {
   if [[ -n "${port_forward_pid}" ]]; then
     return
@@ -370,6 +460,12 @@ maybe_port_forward() {
     printf 'keycloak-token: base_raw=%q\n' "${KEYCLOAK_BASE_URL}" >&2
   fi
   if ! command -v python3 >/dev/null 2>&1; then
+    return
+  fi
+  if [[ "${KEYCLOAK_PORT_FORWARD:-0}" != "1" ]]; then
+    return
+  fi
+  if ! command -v kubectl >/dev/null 2>&1; then
     return
   fi
   if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
@@ -436,10 +532,7 @@ PY
     fi
     return
   fi
-  if [[ "${KEYCLOAK_PORT_FORWARD:-0}" != "1" && "${host}" != *".svc."* && "${host}" != *".cluster.local" ]]; then
-    return
-  fi
-  if ! command -v kubectl >/dev/null 2>&1; then
+  if [[ "${host}" != *".svc."* && "${host}" != *".cluster.local" ]]; then
     return
   fi
 
@@ -470,35 +563,51 @@ PY
     return
   fi
 
-  local remote="${remote_port:-8443}"
-  local local_port="${KEYCLOAK_PORT_FORWARD_PORT:-}"
-  if [[ -z "${local_port}" || "${local_port}" == "0" ]]; then
-    local_port="${remote}"
+  wait_for_keycloak_ready
+
+  local detection
+  detection=$(detect_service_port_and_scheme "${ns}" "${svc}" 2>/dev/null || true)
+  if [[ -n "${detection}" ]]; then
+    local detected_scheme="${detection%%:*}"
+    local detected_port="${detection##*:}"
+    if [[ -n "${detected_scheme}" ]]; then
+      scheme="${detected_scheme}"
+    fi
+    if [[ "${detected_port}" =~ ^[0-9]+$ ]]; then
+      remote_port="${detected_port}"
+    fi
   fi
 
-  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-    echo "keycloak-token: port-forward target ns=${ns} svc=${svc} remote=${remote} local=${local_port}" >&2
+  keycloak_effective_scheme="${scheme:-https}"
+  KEYCLOAK_BASE_URL="${scheme}://${host}:${remote_port}"
+
+  if [[ "${keycloak_effective_scheme}" == "http" ]]; then
+    KEYCLOAK_SKIP_TLS_VERIFY=0
+  else
+    KEYCLOAK_SKIP_TLS_VERIFY="${KEYCLOAK_SKIP_TLS_VERIFY:-1}"
   fi
 
-  port_forward_log=$(mktemp)
-  keycloak_port_forward_log="${port_forward_log}"
-  kubectl -n "${ns}" port-forward "svc/${svc}" "${local_port}:${remote}" --address 127.0.0.1 >"${port_forward_log}" 2>&1 &
-  port_forward_pid=$!
-  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-    echo "keycloak-token: port-forwarding svc/${svc} in ${ns} on ${local_port}:${remote}" >&2
-  fi
-  for _ in {1..50}; do
-    if command -v nc >/dev/null 2>&1; then
-      if nc -z 127.0.0.1 "${local_port}" >/dev/null 2>&1; then
-        port_forward_port="${local_port}"
-        port_forward_host="127.0.0.1"
-        if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-          echo "keycloak-token: port-forward ready host=${port_forward_host} port=${port_forward_port}" >&2
+  local attempt=0
+  local max_attempts=3
+  while (( attempt < max_attempts )); do
+    port_forward_port=""
+    port_forward_log=$(mktemp)
+    keycloak_port_forward_log="${port_forward_log}"
+    kubectl -n "${ns}" port-forward "svc/${svc}" "${remote_port}:${remote_port}" --address 127.0.0.1 >"${port_forward_log}" 2>&1 &
+    port_forward_pid=$!
+    if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+      echo "keycloak-token: port-forwarding svc/${svc} in ${ns} on ${remote_port}:${remote_port}" >&2
+    fi
+
+    local ready=0
+    for _ in {1..50}; do
+      if command -v nc >/dev/null 2>&1; then
+        if nc -z 127.0.0.1 "${remote_port}" >/dev/null 2>&1; then
+          ready=1
+          break
         fi
-        break
-      fi
-    else
-      if python3 - "${local_port}" <<'PY'
+      else
+        if python3 - "${remote_port}" <<'PY'
 import socket
 import sys
 port = int(sys.argv[1])
@@ -509,34 +618,51 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     except OSError:
         sys.exit(1)
 PY
-      then
-        port_forward_port="${local_port}"
-        port_forward_host="127.0.0.1"
-        if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-          echo "keycloak-token: port-forward ready host=${port_forward_host} port=${port_forward_port}" >&2
+        then
+          ready=1
+          break
         fi
+      fi
+      if ! kill -0 "${port_forward_pid}" >/dev/null 2>&1; then
         break
       fi
+      sleep 0.2
+    done
+
+    if [[ "${ready}" -ne 1 ]]; then
+      [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]] && cat "${port_forward_log}" >&2 || true
+      terminate_port_forward
+      attempt=$((attempt + 1))
+      sleep $((2 * attempt))
+      continue
     fi
-    if ! kill -0 "${port_forward_pid}" >/dev/null 2>&1; then
-      cat "${port_forward_log}" >&2 || true
-      port_forward_pid=""
+
+    port_forward_port="${remote_port}"
+    port_forward_host="127.0.0.1"
+    if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+      echo "keycloak-token: port-forward ready host=${port_forward_host} port=${port_forward_port}" >&2
+    fi
+
+    keycloak_host_header="${host}"
+    keycloak_remote_port="${remote_port}"
+
+    if probe_openid; then
       return
     fi
-    sleep 0.2
-  done
-  if [[ -z "${port_forward_port}" ]]; then
+
+    keycloak_host_header=""
+    keycloak_remote_port=""
+
     if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-      echo "keycloak-token: port-forward failed; details:" >&2
+      echo "keycloak-token: openid probe failed on attempt $((attempt + 1))" >&2
       cat "${port_forward_log}" >&2 || true
     fi
-    echo "✖ Failed to establish port-forward to Keycloak" >&2
-    return
-  fi
+    terminate_port_forward
+    attempt=$((attempt + 1))
+    sleep $((2 * attempt))
+  done
 
-  keycloak_host_header="${host}"
-  keycloak_remote_port="${remote}"
-  KEYCLOAK_SKIP_TLS_VERIFY="${KEYCLOAK_SKIP_TLS_VERIFY:-1}"
+  echo "✖ Failed to establish Keycloak port-forward after multiple attempts" >&2
 }
 
 detect_with_kubectl
@@ -609,23 +735,23 @@ if [[ -z "${GRANT_TYPE}" ]]; then
   fi
 fi
 
-declare -a CURL_ARGS=("-sS" "--fail" "--request" "POST" "${TOKEN_URL}")
+declare -a CURL_TRANSPORT_ARGS=("-sS" "--fail")
 if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
-  CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_CERT}")
+  CURL_TRANSPORT_ARGS+=("--cacert" "${KEYCLOAK_CA_CERT}")
 elif [[ -n "${KEYCLOAK_CA_BUNDLE:-}" && -f "${KEYCLOAK_CA_BUNDLE}" ]]; then
-  CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_BUNDLE}")
+  CURL_TRANSPORT_ARGS+=("--cacert" "${KEYCLOAK_CA_BUNDLE}")
 fi
 if [[ "${KEYCLOAK_SKIP_TLS_VERIFY:-0}" == "1" ]]; then
-  CURL_ARGS+=("--insecure")
+  CURL_TRANSPORT_ARGS+=("--insecure")
 fi
 if [[ -n "${port_forward_host}" && -n "${keycloak_host_header}" && -n "${keycloak_remote_port}" ]]; then
-  CURL_ARGS+=(--resolve "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}")
-  CURL_ARGS+=(--connect-to "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}:${keycloak_remote_port}")
-  CURL_ARGS+=("--tlsv1.2")
+  CURL_TRANSPORT_ARGS+=(--resolve "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}")
+  CURL_TRANSPORT_ARGS+=(--connect-to "${keycloak_host_header}:${keycloak_remote_port}:${port_forward_host}:${keycloak_remote_port}")
+  if [[ "${keycloak_effective_scheme:-https}" == "https" ]]; then
+    CURL_TRANSPORT_ARGS+=("--tlsv1.2")
+  fi
 fi
-if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-  CURL_ARGS+=("-v")
-fi
+
 declare -a FORM_DATA
 
 case "${GRANT_TYPE}" in
@@ -656,43 +782,77 @@ if [[ -n "${SCOPE}" ]]; then
   FORM_DATA+=("scope=${SCOPE}")
 fi
 
+declare -a CURL_ARGS=("${CURL_TRANSPORT_ARGS[@]}" "--request" "POST" "${TOKEN_URL}")
+if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+  CURL_ARGS+=("-v")
+fi
+
 for entry in "${FORM_DATA[@]}"; do
   CURL_ARGS+=("--data" "${entry}")
 done
 
 TMP_BODY=$(mktemp)
+cleanup_files+=("${TMP_BODY}")
 if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
   printf 'keycloak-token: curl args -> ' >&2
   printf '%q ' "${CURL_ARGS[@]}" >&2
   printf '\n' >&2
 fi
-trap 'rm -f "${TMP_BODY}"' EXIT
 
-HTTP_STATUS=$(curl "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)
-if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
-  echo "keycloak-token: http_status=${HTTP_STATUS}" >&2
-  echo "keycloak-token: response_body=$(cat "${TMP_BODY}")" >&2
-  if [[ -n "${keycloak_port_forward_log}" && -f "${keycloak_port_forward_log}" ]]; then
-    echo "keycloak-token: port-forward log:" >&2
-    cat "${keycloak_port_forward_log}" >&2
+ATTEMPTS=${KEYCLOAK_TOKEN_ATTEMPTS:-10}
+BACKOFF=${KEYCLOAK_TOKEN_BACKOFF_SECS:-3}
+sleep_seconds=${BACKOFF}
+attempt=1
+token=""
+HTTP_STATUS="000"
+
+while (( attempt <= ATTEMPTS )); do
+  HTTP_STATUS=$(curl "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)
+  token=$(jq -r '.access_token // empty' "${TMP_BODY}" 2>/dev/null || true)
+
+  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+    echo "keycloak-token: attempt ${attempt}/${ATTEMPTS} http_status=${HTTP_STATUS}" >&2
+    echo "keycloak-token: response_body=$(cat "${TMP_BODY}")" >&2
+    if [[ -n "${keycloak_port_forward_log}" && -f "${keycloak_port_forward_log}" ]]; then
+      echo "keycloak-token: port-forward log:" >&2
+      cat "${keycloak_port_forward_log}" >&2
+    fi
   fi
-fi
+
+  if [[ ${HTTP_STATUS} =~ ^2..$ && -n "${token}" ]]; then
+    break
+  fi
+
+  if (( attempt == ATTEMPTS )); then
+    break
+  fi
+
+  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+    echo "keycloak-token: retrying token fetch after ${sleep_seconds}s" >&2
+  fi
+  sleep "${sleep_seconds}"
+  if (( sleep_seconds < 10 )); then
+    sleep_seconds=$((sleep_seconds * 2))
+    if (( sleep_seconds > 10 )); then
+      sleep_seconds=10
+    fi
+  fi
+  attempt=$((attempt + 1))
+done
+
 if [[ ! ${HTTP_STATUS} =~ ^[0-9]{3}$ ]]; then
   echo "✖ Failed to reach Keycloak token endpoint" >&2
   cat "${TMP_BODY}" >&2 || true
   exit 1
 fi
 
-if [[ "${HTTP_STATUS}" -ge 400 ]]; then
-  echo "✖ Keycloak token request failed (HTTP ${HTTP_STATUS})" >&2
+if [[ ${HTTP_STATUS} -ge 400 || -z "${token}" ]]; then
+  if [[ ${HTTP_STATUS} -ge 400 ]]; then
+    echo "✖ Keycloak token request failed (HTTP ${HTTP_STATUS})" >&2
+  else
+    echo "✖ Response did not contain an access_token" >&2
+  fi
   cat "${TMP_BODY}" >&2 || true
-  exit 1
-fi
-
-token=$(jq -r '.access_token // empty' "${TMP_BODY}")
-if [[ -z "${token}" ]]; then
-  echo "✖ Response did not contain an access_token" >&2
-  cat "${TMP_BODY}" >&2
   exit 1
 fi
 

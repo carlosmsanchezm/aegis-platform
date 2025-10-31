@@ -362,6 +362,9 @@ maybe_port_forward() {
   if ! command -v python3 >/dev/null 2>&1; then
     return
   fi
+  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+    echo "keycloak-token: maybe_port_forward base=${KEYCLOAK_BASE_URL}" >&2
+  fi
 
   local parsed scheme host port remote_port
   if ! parsed=$(python3 - "$KEYCLOAK_BASE_URL" <<'PY'
@@ -421,19 +424,31 @@ PY
   fi
 
   local remote="${remote_port:-8443}"
-  local local_port="${KEYCLOAK_PORT_FORWARD_PORT:-${remote}}"
+  local local_port="${KEYCLOAK_PORT_FORWARD_PORT:-}"
   if [[ -z "${local_port}" || "${local_port}" == "0" ]]; then
-    local_port="${remote}"
+    local_port=$(python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+) || local_port="${remote}"
   fi
 
   port_forward_log=$(mktemp)
   kubectl -n "${ns}" port-forward "svc/${svc}" "${local_port}:${remote}" --address 127.0.0.1 >"${port_forward_log}" 2>&1 &
   port_forward_pid=$!
+  if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+    echo "keycloak-token: port-forwarding svc/${svc} in ${ns} on ${local_port}:${remote}" >&2
+  fi
   for _ in {1..50}; do
     if command -v nc >/dev/null 2>&1; then
       if nc -z 127.0.0.1 "${local_port}" >/dev/null 2>&1; then
         port_forward_port="${local_port}"
         port_forward_host="${host}"
+        if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+          echo "keycloak-token: port-forward ready host=${port_forward_host} port=${port_forward_port}" >&2
+        fi
         break
       fi
     else
@@ -451,6 +466,9 @@ PY
       then
         port_forward_port="${local_port}"
         port_forward_host="${host}"
+        if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+          echo "keycloak-token: port-forward ready host=${port_forward_host} port=${port_forward_port}" >&2
+        fi
         break
       fi
     fi
@@ -462,6 +480,10 @@ PY
     sleep 0.2
   done
   if [[ -z "${port_forward_port}" ]]; then
+    if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+      echo "keycloak-token: port-forward failed; details:" >&2
+      cat "${port_forward_log}" >&2 || true
+    fi
     echo "✖ Failed to establish port-forward to Keycloak" >&2
     return
   fi
@@ -524,6 +546,10 @@ fi
 
 if [[ -z "${CLIENT_ID}" ]]; then
   CLIENT_ID="backstage"
+fi
+
+if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+  echo "keycloak-token: resolved host=${port_forward_host:-} port=${port_forward_port:-} base=${KEYCLOAK_BASE_URL}" >&2
 fi
 
 

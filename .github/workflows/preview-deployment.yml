@@ -918,6 +918,7 @@ jobs:
               export KEYCLOAK_USERNAME="${KEYCLOAK_USERNAME:-cloud@test.com}"
               export KEYCLOAK_PASSWORD="${KEYCLOAK_PASSWORD:-password}"
               export KEYCLOAK_PORT_FORWARD="${KEYCLOAK_PORT_FORWARD:-1}"
+              export KEYCLOAK_DEBUG="${KEYCLOAK_DEBUG:-1}"
               bash "${GITHUB_WORKSPACE}/scripts/e2e-platform-api.sh"
               ;;
             workspace)

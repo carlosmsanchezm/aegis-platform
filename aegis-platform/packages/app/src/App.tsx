@@ -24,6 +24,7 @@ import { apis } from './apis';
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
 import { Root } from './components/Root';
+import { aegisTheme } from './theme/aegisTheme';
 
 import {
   AlertDisplay,
@@ -54,6 +55,7 @@ export const keycloakSignInProvider = {
 
 const app = createApp({
   apis,
+  themes: [aegisTheme],
   bindRoutes({ bind }) {
     bind(catalogPlugin.externalRoutes, {
       createComponent: scaffolderPlugin.routes.root,

@@ -6,14 +6,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import {
-  Page,
-  Header,
-  Content,
-  ContentHeader,
-  Progress,
-  WarningPanel,
-} from '@backstage/core-components';
+import { Page, Content, ContentHeader, Progress, WarningPanel } from '@backstage/core-components';
 import {
   alertApiRef,
   discoveryApiRef,
@@ -733,9 +726,8 @@ export const LaunchWorkspacePage: FC = () => {
 
   return (
     <Page themeId="tool">
-      <Header title="Launch Interactive Workspace" />
       <Content>
-        <ContentHeader title="Workspace Wizard">
+        <ContentHeader title="Launch Interactive Workspace">
           <Typography variant="body1" className={classes.hero}>
             Compose DoD/IC-grade workspaces with the same minimal flow your
             operators expect from modern tooling. Choose a template, tune

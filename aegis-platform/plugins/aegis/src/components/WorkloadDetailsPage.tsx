@@ -2,7 +2,6 @@ import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Page,
-  Header,
   Content,
   ContentHeader,
   Progress,
@@ -317,8 +316,12 @@ export const WorkloadDetailsPage: FC = () => {
 
   return (
     <Page themeId="tool">
-      <Header title="Workload Details" subtitle={id} />
       <Content>
+        <ContentHeader title="Workload Details">
+          <Typography variant="body1" color="textSecondary">
+            {id ?? '—'}
+          </Typography>
+        </ContentHeader>
         <ContentHeader title="Overview">
           <Button
             variant="outlined"

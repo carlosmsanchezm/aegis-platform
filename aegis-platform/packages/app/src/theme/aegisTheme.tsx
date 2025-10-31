@@ -193,6 +193,15 @@ const createGlobalStyles = (theme: BackstageTheme, mode: Mode) => {
       letterSpacing: '-0.01em',
       minHeight: '100vh',
     },
+    '.BackstageHeader-header': {
+      background: 'transparent',
+      boxShadow: 'none',
+      padding: theme.spacing(3, 4, 2),
+      minHeight: 'initial',
+    },
+    '.BackstageHeader-title, .BackstageHeader-label, .BackstageHeader-subtitle': {
+      color: theme.palette.text.primary,
+    },
     a: {
       color: theme.palette.link,
     },

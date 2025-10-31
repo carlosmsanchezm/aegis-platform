@@ -471,6 +471,35 @@ PY
 
 detect_with_kubectl
 
+if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+  ns_hint="${KEYCLOAK_NAMESPACE:-}"
+  svc_hint="${KEYCLOAK_SERVICE_NAME:-}"
+  if [[ -z "${ns_hint}" ]]; then
+    if [[ -n "${PREVIEW_NAMESPACE:-}" ]]; then
+      ns_hint="${PREVIEW_NAMESPACE}"
+    elif [[ -n "${AEGIS_PLATFORM_NAMESPACE:-}" ]]; then
+      ns_hint="${AEGIS_PLATFORM_NAMESPACE}"
+    fi
+  fi
+  if [[ -z "${svc_hint}" ]]; then
+    if [[ -n "${PREVIEW_RELEASE:-}" ]]; then
+      svc_hint="${PREVIEW_RELEASE}-keycloak"
+    elif [[ -n "${KEYCLOAK_SERVICE_BASENAME:-}" ]]; then
+      svc_hint="${KEYCLOAK_SERVICE_BASENAME}"
+    fi
+  fi
+  if [[ -n "${svc_hint}" ]]; then
+    KEYCLOAK_SERVICE_NAME="${svc_hint}"
+  fi
+  if [[ -n "${ns_hint}" ]]; then
+    KEYCLOAK_NAMESPACE="${ns_hint}"
+  fi
+  if [[ -n "${KEYCLOAK_SERVICE_NAME:-}" && -n "${KEYCLOAK_NAMESPACE:-}" ]]; then
+    port_hint="${KEYCLOAK_INTERNAL_PORT:-${KEYCLOAK_PORT:-8443}}"
+    KEYCLOAK_BASE_URL="https://${KEYCLOAK_SERVICE_NAME}.${KEYCLOAK_NAMESPACE}.svc.cluster.local:${port_hint}"
+  fi
+fi
+
 maybe_port_forward
 
 ensure_automation_user "${KEYCLOAK_NAMESPACE:-keycloak}" || true

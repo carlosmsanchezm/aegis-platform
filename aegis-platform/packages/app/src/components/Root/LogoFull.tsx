@@ -20,6 +20,7 @@ const useStyles = makeStyles(theme => ({
     letterSpacing: '0.18em',
     textTransform: 'uppercase',
     color: theme.palette.text.primary,
+    whiteSpace: 'nowrap',
   },
 }));
 

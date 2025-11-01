@@ -86,6 +86,15 @@
         "clientRole": false,
         "containerId": "d0a0fff1-7121-4616-a976-c319a3633308",
         "attributes": {}
+      },
+      {
+        "id": "workspace-admin-role",
+        "name": "workspace-admin",
+        "description": "Workspace administrator",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "d0a0fff1-7121-4616-a976-c319a3633308",
+        "attributes": {}
       }
     ],
     "client": {
@@ -485,7 +494,8 @@
       "requiredActions": [],
       "realmRoles": [
         "offline_access",
-        "default-roles-aegis"
+        "default-roles-aegis",
+        "workspace-admin"
       ],
       "notBefore": 0,
       "groups": []
@@ -514,7 +524,8 @@
       "requiredActions": [],
       "realmRoles": [
         "offline_access",
-        "default-roles-aegis"
+        "default-roles-aegis",
+        "workspace-admin"
       ],
       "notBefore": 0,
       "groups": []
@@ -552,6 +563,33 @@
       "realmRoles": [
         "offline_access",
         "default-roles-aegis"
+      ],
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "automation-user-id",
+      "username": "automation@test.com",
+      "firstName": "automation",
+      "lastName": "user",
+      "email": "automation@test.com",
+      "emailVerified": true,
+      "createdTimestamp": 0,
+      "enabled": true,
+      "totp": false,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Automation123!",
+          "temporary": false
+        }
+      ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "offline_access",
+        "default-roles-aegis",
+        "workspace-admin"
       ],
       "notBefore": 0,
       "groups": []
@@ -596,7 +634,7 @@
       "consentRequired": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": true,
       "frontchannelLogout": false,
@@ -643,7 +681,7 @@
       "consentRequired": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": true,
       "frontchannelLogout": false,
@@ -748,7 +786,7 @@
       "consentRequired": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": false,
       "frontchannelLogout": false,

@@ -24,6 +24,13 @@ import { apis } from './apis';
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
 import { Root } from './components/Root';
+import {
+  AegisClustersPage,
+  AegisDashboardPage,
+  AegisPosturePage,
+  AegisTelemetryPage,
+} from './components/aegis';
+import { aegisDarkTheme, aegisLightTheme } from './theme';
 
 import {
   AlertDisplay,
@@ -54,6 +61,7 @@ export const keycloakSignInProvider = {
 
 const app = createApp({
   apis,
+  themes: [aegisDarkTheme, aegisLightTheme],
   bindRoutes({ bind }) {
     bind(catalogPlugin.externalRoutes, {
       createComponent: scaffolderPlugin.routes.root,
@@ -115,6 +123,10 @@ const routes = (
     <Route path="/catalog-graph" element={<CatalogGraphPage />} />
     <Route path="/notifications" element={<NotificationsPage />} />
     <Route path="/aegis" element={<AegisPage />} />
+    <Route path="/aegis/dashboard" element={<AegisDashboardPage />} />
+    <Route path="/aegis/telemetry" element={<AegisTelemetryPage />} />
+    <Route path="/aegis/posture" element={<AegisPosturePage />} />
+    <Route path="/aegis/clusters" element={<AegisClustersPage />} />
     <Route path="/aegis/workloads" element={<AegisWorkloadListPage />} />
     <Route path="/aegis/workloads/:id" element={<AegisWorkloadDetailsPage />} />
     <Route

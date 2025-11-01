@@ -211,7 +211,9 @@ grpcurl -plaintext localhost:8081 list
 
 ```bash
 # Create test workspace
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+TOKEN=$(./scripts/keycloak-token.sh)
+
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"project_id":"p-demo","workspace":{"flavor":"nano","image":"ubuntu:22.04","interactive":true}}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateWorkload
 
@@ -220,7 +222,7 @@ NEW_NLB=$(kubectl get svc -n aegis-services aegis-services-aegis-services-proxy 
 echo "New NLB: $NEW_NLB"
 
 # Create connection session
-grpcurl -plaintext -H "x-aegis-user: testuser@test.com" \
+grpcurl -plaintext -H "authorization: Bearer ${TOKEN}" \
   -d '{"workload_id":"<WORKSPACE_ID>","client":"vscode"}' \
   localhost:8081 aegis.v1.AegisPlatform/CreateConnectionSession
 

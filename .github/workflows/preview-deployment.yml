@@ -168,6 +168,12 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+      KEYCLOAK_BASE_URL: ${{ secrets.KEYCLOAK_BASE_URL }}
+      KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.KEYCLOAK_CLIENT_ID }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.KEYCLOAK_PASSWORD }}
       VSCODE_COMMIT: 3a6ee6c4e95174c64ca96ca0a0ffcd4bd71bd8e5
     steps:
       - name: Skip for non-all subsets
@@ -332,14 +338,19 @@ jobs:
     needs:
       - resolve-settings
       - build-and-push
-    if: ${{ contains('all,deploy,deploy-no-teardown', needs.resolve-settings.outputs.run_subset) }}
+    if: ${{ contains('all,deploy,deploy-no-teardown,tests-only', needs.resolve-settings.outputs.run_subset) }}
     outputs:
       platform_api_image: ${{ steps.collect.outputs.platform_api_image }}
       proxy_image:        ${{ steps.collect.outputs.proxy_image }}
       k8s_agent_image:    ${{ steps.collect.outputs.k8s_agent_image }}
       workspace_image:    ${{ steps.collect.outputs.workspace_image }}
+    env:
+      RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
+      MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
+      ECR_REGISTRY: 567751785679.dkr.ecr.us-east-1.amazonaws.com
     steps:
       - name: Download image artifacts
+        if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
         uses: actions/download-artifact@v4
         with:
           pattern: image-*
@@ -354,10 +365,15 @@ jobs:
             local file="images/image-${name}/image.txt"
             if [[ -f "$file" ]]; then
               tr -d '\n' < "$file"
-            else
-              echo "Missing artifact for ${name}" >&2
-              exit 1
+              return 0
             fi
+            if [[ "${RUN_SUBSET}" == "tests-only" ]]; then
+              local tag="${MANUAL_IMAGE_TAG:-${DEFAULT_E2E_IMAGE_TAG}}"
+              echo "${ECR_REGISTRY}/aegis/${name}:${tag}"
+              return 0
+            fi
+            echo "Missing artifact for ${name}" >&2
+            exit 1
           }
 
           platform=$(read_image "platform-api")
@@ -778,6 +794,12 @@ jobs:
       KEEP_ON_FAILURE: ${{ needs.resolve-settings.outputs.keep_on_failure }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
       E2E_SUITES: ${{ needs.resolve-settings.outputs.e2e_suites }}
+      KEYCLOAK_BASE_URL: ${{ secrets.KEYCLOAK_BASE_URL }}
+      KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.KEYCLOAK_CLIENT_ID }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.KEYCLOAK_PASSWORD }}
     concurrency:
       group: tests-${{ needs.resolve-settings.outputs.preview_id }}-${{ matrix.suite || 'all' }}
       cancel-in-progress: false
@@ -824,6 +846,30 @@ jobs:
           printf '%s' "${GRPC_CA_B64}" | base64 --decode > "${CA_PATH}"
           chmod 600 "${CA_PATH}"
           echo "GRPC_CA_PATH=${CA_PATH}" >> "$GITHUB_ENV"
+
+      - name: Debug Keycloak resources
+        if: ${{ matrix.suite == 'platform-api' }}
+        run: |
+          set -euo pipefail
+          echo "Ingresses:" >&2
+          kubectl get ingress -A -o wide >&2 || true
+          echo "\nServices:" >&2
+          kubectl get svc -A -o wide >&2 || true
+          echo "\nPods:" >&2
+          kubectl get pods -A -o wide >&2 || true
+          echo "\nKeycloak CRs:" >&2
+          kubectl get keycloak -A >&2 || true
+
+      - name: Debug Keycloak resources
+        if: ${{ matrix.suite == 'platform-api' }}
+        run: |
+          set -euo pipefail
+          echo "Ingresses:" >&2
+          kubectl get ingress -A >&2 || true
+          echo "\nServices:" >&2
+          kubectl get svc -A | grep -i keycloak >&2 || true
+          echo "\nKeycloak CRs:" >&2
+          kubectl get keycloak -A >&2 || true
 
       - name: Install test tooling (grpcurl + jq)
         run: |

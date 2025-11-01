@@ -107,7 +107,23 @@ platformApi:
     AUTHZ_ROLE_BINDINGS_JSON: authz-role-bindings.json
   secrets:
     authz-role-bindings.json: |
-      []
+      [
+        {
+          "clients": [
+            "backstage",
+            "vscode-extension"
+          ],
+          "roles": [
+            "workspace-admin"
+          ],
+          "projects": [
+            "*"
+          ],
+          "queues": [
+            "*"
+          ]
+        }
+      ]
 
 # Proxy Configuration
 proxy:

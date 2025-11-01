@@ -445,9 +445,9 @@ keycloak:
   forceRender: false
   operator:
     install: true
-    image: "registry.redhat.io/rhbk/keycloak-rhel9-operator:26.2-11"
-    keycloakImage: "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11"
-    imagePullPolicy: Always
+    image: "quay.io/keycloak/keycloak-operator:26.1"
+    keycloakImage: "quay.io/keycloak/keycloak:26.1"
+    imagePullPolicy: IfNotPresent
     annotations: {}
     imagePullSecrets: []
     resources:
@@ -457,7 +457,7 @@ keycloak:
       requests:
         cpu: 300m
         memory: 450Mi
-  image: "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11"
+  image: "quay.io/keycloak/keycloak:26.1"
   imagePullSecrets: []
   admin:
     secret:

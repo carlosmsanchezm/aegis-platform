@@ -178,7 +178,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	if overlay == nil {
 		overlay = placement.NewPolicyOverlay()
 	}
-	policy, err := authz.LoadPolicyFromEnv()
+	policy, err := authz.LoadPolicyFromEnv(config.DefaultRoleBindingsJSON())
 	if err != nil {
 		if log != nil {
 			log.Fatal("failed to load authorization policy", zap.Error(err))

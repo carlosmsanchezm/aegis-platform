@@ -53,12 +53,8 @@ proxy:
       allowedHeaders:
         - authorization
         - Authorization
-        - x-aegis-user
-        - X-Aegis-User
         - grpc-metadata-authorization
         - Grpc-Metadata-Authorization
-        - grpc-metadata-x-aegis-user
-        - Grpc-Metadata-X-Aegis-User
 
 # Reference documentation http://backstage.io/docs/features/techdocs/configuration
 # Note: After experimenting with basic setup, use CI/CD to generate docs

@@ -2,7 +2,6 @@ import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Page,
-  Header,
   Content,
   ContentHeader,
   Progress,
@@ -246,11 +245,12 @@ export const WorkloadListPage: FC = () => {
 
   return (
     <Page themeId="tool">
-      <Header
-        title="Aegis — Workload Status"
-        subtitle="Monitor submitted workloads"
-      />
       <Content>
+        <ContentHeader title="Workload Status">
+          <Typography variant="body1" color="textSecondary">
+            Monitor submitted workspaces and investigate their runtime posture.
+          </Typography>
+        </ContentHeader>
         <ContentHeader title="Filters">
           <Box display="flex" gridGap={8}>
             <Button

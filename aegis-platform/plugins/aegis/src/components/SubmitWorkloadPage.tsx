@@ -9,7 +9,6 @@ import {
 import {
   Page,
   Content,
-  Header,
   ContentHeader,
   Progress,
   WarningPanel,
@@ -257,11 +256,12 @@ export const SubmitWorkloadPage: FC = () => {
 
   return (
     <Page themeId="tool">
-      <Header
-        title="Aegis — Launch Workspace"
-        subtitle="Create an interactive workspace that supports connection sessions"
-      />
       <Content>
+        <ContentHeader title="Launch Workspace">
+          <Typography variant="body1" color="textSecondary">
+            Create an interactive workspace that supports connection sessions.
+          </Typography>
+        </ContentHeader>
         <ContentHeader title="Workspace Form" />
 
         <Box marginBottom={2}>

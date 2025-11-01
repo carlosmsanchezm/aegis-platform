@@ -208,11 +208,7 @@ keycloak:
   enabled: true
   forceRender: true
   createNamespace: false
-  operator:
-    imagePullSecrets:
-      - name: redhat-pull-secret
-  imagePullSecrets:
-    - name: redhat-pull-secret
+  operator: {}
   http:
     httpEnabled: false
   admin:

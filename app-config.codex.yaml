@@ -1,0 +1,55 @@
+app:
+  title: Aegis Platform
+  baseUrl: http://localhost:3000
+
+organization:
+  name: Aegis
+
+backend:
+  baseUrl: http://localhost:7008
+  listen:
+    port: 7008
+    host: 0.0.0.0
+  csp:
+    connect-src: ["'self'", 'http:', 'https:']
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+  database:
+    client: better-sqlite3
+    connection: ':memory:'
+
+# Disable authentication for Codex demo environment
+auth:
+  environment: development
+  providers: {}
+
+catalog:
+  import:
+    entityFilename: catalog-info.yaml
+  rules:
+    - allow: [Component, System, API, Resource, Location, User, Group]
+  locations:
+    - type: file
+      target: ./catalog-info.yaml
+
+# Simplified proxy configuration without external dependencies
+proxy:
+  '/aegis':
+    target: http://localhost:8080
+    changeOrigin: true
+    pathRewrite:
+      '^/api/proxy/aegis/?': '/'
+
+techdocs:
+  builder: 'local'
+  generator:
+    runIn: 'local'
+  publisher:
+    type: 'local'
+
+scaffolder:
+  defaultAuthor:
+    name: Aegis Platform
+    email: noreply@aegis.dev

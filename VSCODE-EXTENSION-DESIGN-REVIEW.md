@@ -122,7 +122,10 @@ async function getConnectionSession(wid: string): Promise<ConnectionSession> {
   // Call platform-api via gRPC or REST
   const response = await fetch('http://localhost:8081/api/sessions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-aegis-user': 'user@email.com' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${await getAccessToken()}`,
+    },
     body: JSON.stringify({ workload_id: wid, client: 'vscode' })
   });
   return response.json();

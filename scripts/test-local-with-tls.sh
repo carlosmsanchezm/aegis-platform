@@ -13,6 +13,116 @@ log() {
   printf '\n[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$1"
 }
 
+keycloak_admin_token() {
+  if [[ -n "${_KEYCLOAK_ADMIN_TOKEN:-}" ]]; then
+    printf '%s' "$_KEYCLOAK_ADMIN_TOKEN"
+    return
+  fi
+  local token
+  token=$(
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -X POST "https://keycloak.localtest.me/realms/master/protocol/openid-connect/token" \
+      -d "grant_type=password" \
+      -d "client_id=admin-cli" \
+      -d "username=admin" \
+      -d "password=REDACTED_KEYCLOAK_ADMIN_PASSWORD" \
+      | jq -r '.access_token' 2>/dev/null || true
+  )
+  if [[ -n "$token" && "$token" != "null" ]]; then
+    _KEYCLOAK_ADMIN_TOKEN="$token"
+    printf '%s' "$token"
+  fi
+}
+
+ensure_backstage_direct_access() {
+  local admin_token client_uuid
+  admin_token=$(keycloak_admin_token)
+  if [[ -z "$admin_token" || "$admin_token" == "null" ]]; then
+    log "Skipped Backstage direct access update (admin token unavailable)"
+    return
+  fi
+  client_uuid=$(
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      "https://keycloak.localtest.me/admin/realms/aegis/clients?clientId=backstage" \
+      | jq -r '.[0].id' 2>/dev/null || true
+  )
+  if [[ -z "$client_uuid" || "$client_uuid" == "null" ]]; then
+    log "Skipped Backstage direct access update (client id not found)"
+    return
+  fi
+  curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+    -H "Authorization: Bearer $admin_token" \
+    -H "Content-Type: application/json" \
+    -X PUT "https://keycloak.localtest.me/admin/realms/aegis/clients/${client_uuid}" \
+    -d '{"directAccessGrantsEnabled":true}' >/dev/null 2>&1 || true
+}
+
+ensure_automation_user() {
+  local admin_token user_json user_id role_json
+  admin_token=$(keycloak_admin_token)
+  if [[ -z "$admin_token" || "$admin_token" == "null" ]]; then
+    log "Skipped automation user sync (admin token unavailable)"
+    return
+  fi
+  local encoded_username="automation%40test.com"
+  local desired_username="automation@test.com"
+  user_json=$(
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      "https://keycloak.localtest.me/admin/realms/aegis/users?search=${encoded_username}&exact=true" \
+      2>/dev/null || true
+  )
+  user_id=$(echo "$user_json" | jq -r --arg username "$desired_username" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
+  if [[ -z "$user_id" || "$user_id" == "null" ]]; then
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      -H "Content-Type: application/json" \
+      -X POST "https://keycloak.localtest.me/admin/realms/aegis/users" \
+      -d '{
+        "username": "automation@test.com",
+        "email": "automation@test.com",
+        "firstName": "automation",
+        "lastName": "user",
+        "enabled": true,
+        "emailVerified": true,
+        "credentials": [
+          {"type":"password","value":"Automation123!","temporary": false}
+        ]
+      }' >/dev/null 2>&1 || true
+    user_json=$(
+      curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+        -H "Authorization: Bearer $admin_token" \
+        "https://keycloak.localtest.me/admin/realms/aegis/users?search=${encoded_username}&exact=true" \
+        2>/dev/null || true
+    )
+    user_id=$(echo "$user_json" | jq -r --arg username "$desired_username" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
+  else
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      -H "Content-Type: application/json" \
+      -X PUT "https://keycloak.localtest.me/admin/realms/aegis/users/${user_id}/reset-password" \
+      -d '{"type":"password","value":"Automation123!","temporary":false}' >/dev/null 2>&1 || true
+  fi
+  if [[ -z "$user_id" || "$user_id" == "null" ]]; then
+    log "Failed to reconcile automation user in Keycloak"
+    return
+  fi
+  role_json=$(
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      "https://keycloak.localtest.me/admin/realms/aegis/roles/workspace-admin" \
+      2>/dev/null || true
+  )
+  if [[ -n "$role_json" ]]; then
+    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+      -H "Authorization: Bearer $admin_token" \
+      -H "Content-Type: application/json" \
+      -X POST "https://keycloak.localtest.me/admin/realms/aegis/users/${user_id}/role-mappings/realm" \
+      -d "[${role_json}]" >/dev/null 2>&1 || true
+  fi
+}
+
 wait_for_helm_release() {
   local release="$1"
   local namespace="$2"
@@ -68,7 +178,14 @@ TLS_AGENT_IMAGE="${K8S_AGENT_IMAGE:-carlosmsanchez/aegis-k8s-agent:dev}"
 log "Deploying local stack with TLS"
 wait_for_helm_release "aegis-services" "aegis-system" || exit 1
 wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
+# Reset Keycloak realm import so Helm applies updated realm configuration
+kubectl delete keycloakrealmimports.k8s.keycloak.org/aegis-services-keycloak-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete secret/aegis-services-keycloak-aegis-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete job.batch/aegis-services-keycloak-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
 make deploy-local-tls
+
+ensure_automation_user
+ensure_backstage_direct_access
 
 if [[ ! -s "$TLS_CA_FILE" ]]; then
   printf 'TLS CA bundle not found at %s\n' "$TLS_CA_FILE" >&2
@@ -87,6 +204,13 @@ if (( ${#TLS_ARGS[@]} )); then
       K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \
       RUN_E2E_OPERATOR="$TLS_RUN_E2E_OPERATOR" \
+      KEYCLOAK_BASE_URL="https://keycloak.localtest.me" \
+      KEYCLOAK_REALM="aegis" \
+      KEYCLOAK_CLIENT_ID="backstage" \
+      KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
+      KEYCLOAK_USERNAME="automation@test.com" \
+      KEYCLOAK_PASSWORD="Automation123!" \
+      KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
       ./scripts/test-all-local.sh "${TLS_ARGS[@]}"
 else
   run_test_all_local "tls" \
@@ -100,6 +224,13 @@ else
       K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \
       RUN_E2E_OPERATOR="$TLS_RUN_E2E_OPERATOR" \
+      KEYCLOAK_BASE_URL="https://keycloak.localtest.me" \
+      KEYCLOAK_REALM="aegis" \
+      KEYCLOAK_CLIENT_ID="backstage" \
+      KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
+      KEYCLOAK_USERNAME="automation@test.com" \
+      KEYCLOAK_PASSWORD="Automation123!" \
+      KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
       ./scripts/test-all-local.sh
 fi
 

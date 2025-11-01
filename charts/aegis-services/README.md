@@ -40,8 +40,10 @@ This configuration deploys the ingress controller and exposes the services via h
 Example verification commands (requires [`grpcurl`](https://github.com/fullstorydev/grpcurl)):
 
 ```bash
+TOKEN=$(./scripts/keycloak-token.sh)
+
 grpcurl -plaintext \
-  -H "x-aegis-user: dev-user@example.com" \
+  -H "authorization: Bearer ${TOKEN}" \
   -H "x-aegis-namespace: aegis-workloads-local" \
   -d '{"project_id":"p-dev"}' \
   platform-api-grpc.localtest.me:80 aegis.v1.AegisPlatform/ListWorkloads

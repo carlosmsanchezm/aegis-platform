@@ -204,23 +204,6 @@ const postJson = async <TReq extends object, TRes>(
     }
   }
 
-  let subject = userEntityRef;
-
-  if (!subject && identityToken) {
-    try {
-      const [, payload] = identityToken.split('.');
-      if (payload) {
-        const json = JSON.parse(base64UrlDecode(payload));
-        subject = json.sub || json.email || json.preferred_username;
-      }
-    } catch (err) {
-      if (process.env.NODE_ENV === 'development') {
-        // eslint-disable-next-line no-console
-        console.warn('Aegis: failed to parse identity token', err);
-      }
-    }
-  }
-
   if (identityToken) {
     headers.Authorization = `Bearer ${identityToken}`;
     headers['Grpc-Metadata-Authorization'] = `Bearer ${identityToken}`;
@@ -229,21 +212,6 @@ const postJson = async <TReq extends object, TRes>(
     throw new Error(
       'Authentication is required to mint a connection session. Refresh the page and sign in.',
     );
-  }
-
-  if (!subject) {
-    if (options?.requireAuth) {
-      throw new Error(
-        'Authentication did not yield a subject. Refresh and sign in with Keycloak.',
-      );
-    }
-    subject = 'user:default/guest';
-  }
-
-  if (subject) {
-    headers['x-aegis-user'] = subject;
-    headers['Grpc-Metadata-X-Aegis-User'] = subject;
-    headers['grpc-metadata-x-aegis-user'] = subject;
   }
 
   const response = await fetchApi.fetch(url, {

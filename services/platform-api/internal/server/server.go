@@ -1678,6 +1678,10 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
 	root := http.NewServeMux()
+	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "OK")
+	}))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}
@@ -1987,6 +1991,50 @@ func (s *Server) activeWorkloadStats(projectID string) (map[string]int, map[stri
 		}
 	}
 	return flavorCounts, clusterLoads
+}
+
+func (s *Server) CreateWorkspace(ctx context.Context, req *aegis.CreateWorkspaceRequest) (*aegis.CreateWorkspaceResponse, error) {
+	if req == nil || req.Workspace == nil {
+		return nil, status.Error(codes.InvalidArgument, "workspace payload required")
+	}
+
+	w := &aegis.Workload{
+		Id:        req.WorkspaceId,
+		ProjectId: req.ProjectId,
+		Queue:     req.Queue,
+		Kind: &aegis.Workload_Workspace{
+			Workspace: req.Workspace,
+		},
+	}
+
+	submittedWorkload, err := s.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{Workload: w})
+	if err != nil {
+		return nil, err
+	}
+
+	return &aegis.CreateWorkspaceResponse{Workload: submittedWorkload}, nil
+}
+
+func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequest) (*aegis.CreateClusterResponse, error) {
+	// TODO: Implement async job logic
+	return &aegis.CreateClusterResponse{
+		Job: &aegis.Job{
+			Id:       "job-123",
+			Status:   "PENDING",
+			Progress: 0,
+		},
+	}, nil
+}
+
+func (s *Server) GetClusterJobStatus(ctx context.Context, req *aegis.GetClusterJobStatusRequest) (*aegis.GetClusterJobStatusResponse, error) {
+	// TODO: Implement async job logic
+	return &aegis.GetClusterJobStatusResponse{
+		Job: &aegis.Job{
+			Id:       req.JobId,
+			Status:   "COMPLETED",
+			Progress: 100,
+		},
+	}, nil
 }
 
 func isWorkloadActive(status string) bool {

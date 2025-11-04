@@ -24,6 +24,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      hostAliases:
+      - ip: "10.96.146.219"
+        hostnames:
+        - "keycloak.localtest.me"
       {{- $serveGrpc := true }}
       {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
       {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}

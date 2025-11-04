@@ -3,6 +3,8 @@ package mw
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -103,6 +106,14 @@ func NewAuthenticator(cfg *config.AuthConfig, logger *zap.Logger) (*Authenticato
 	allowed := make(map[string]struct{}, len(cfg.AllowedPhishingResistantAMR))
 	for _, v := range cfg.AllowedPhishingResistantAMR {
 		allowed[v] = struct{}{}
+	}
+	if logger != nil {
+		logger.Info("OIDC auth configuration loaded",
+			zap.String("issuer", cfg.IssuerURL),
+			zap.String("jwks_url", cfg.JWKSURL),
+			zap.String("ca_bundle", cfg.CABundlePath),
+			zap.Bool("skip_tls_verify", cfg.SkipTLSVerify),
+		)
 	}
 	return &Authenticator{
 		cfg:        cfg,
@@ -485,10 +496,18 @@ type jwksCache struct {
 }
 
 func newJWKSCache(cfg *config.AuthConfig, logger *zap.Logger) *jwksCache {
+	client := &http.Client{Timeout: 10 * time.Second}
+	if customClient, err := buildJWKSHTTPClient(cfg, logger); err != nil {
+		if logger != nil {
+			logger.Warn("failed to build jwks http client, falling back to default", zap.Error(err))
+		}
+	} else if customClient != nil {
+		client = customClient
+	}
 	return &jwksCache{
 		cfg:    cfg,
 		logger: logger,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: client,
 		keys:   map[string]*rsa.PublicKey{},
 	}
 }
@@ -608,4 +627,51 @@ func (j jwkEntry) toPublicKey() (*rsa.PublicKey, error) {
 	}
 	modulus := new(big.Int).SetBytes(nBytes)
 	return &rsa.PublicKey{N: modulus, E: exponent}, nil
+}
+
+func buildJWKSHTTPClient(cfg *config.AuthConfig, logger *zap.Logger) (*http.Client, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("auth config required")
+	}
+
+	skipVerify := cfg.SkipTLSVerify
+	caPath := strings.TrimSpace(cfg.CABundlePath)
+	if !skipVerify && caPath == "" {
+		return nil, nil
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tlsConfig := transport.TLSClientConfig
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	}
+
+	if skipVerify {
+		if logger != nil {
+			logger.Warn("OIDC_SKIP_TLS_VERIFY enabled; JWKS TLS verification disabled")
+		}
+		tlsConfig.InsecureSkipVerify = true
+	}
+
+	if caPath != "" {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		data, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read oidc ca bundle %q: %w", caPath, err)
+		}
+		if !pool.AppendCertsFromPEM(data) {
+			return nil, fmt.Errorf("no certificates found in oidc ca bundle %q", caPath)
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	transport.TLSClientConfig = tlsConfig
+
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}, nil
 }

@@ -1,44 +1,52 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
-set -x
-source .env
 
-usage() {
-  cat <<'EOF'
-Usage: keycloak-token.sh
+# ---
+# Variables
+# ---
 
-Fetches an access token from the configured Keycloak realm and prints it to stdout.
+KEYCLOAK_USERNAME="cms553@cornell.edu"
+KEYCLOAK_PASSWORD="password"
 
-Environment variables:
-  KEYCLOAK_TOKEN_URL        Full token endpoint URL. If unset, derived from
-                            KEYCLOAK_BASE_URL and KEYCLOAK_REALM.
-  KEYCLOAK_BASE_URL         Base URL such as https://keycloak.localtest.me
-  KEYCLOAK_REALM            Realm name (default: aegis) when deriving URL.
-  KEYCLOAK_CLIENT_ID        OAuth client identifier (required).
-  KEYCLOAK_CLIENT_SECRET    Client secret for confidential clients.
-  KEYCLOAK_USERNAME         Username for Resource Owner Password flow.
-  KEYCLOAK_PASSWORD         Password for Resource Owner Password flow.
-  KEYCLOAK_SCOPE            Optional space-delimited scopes to request.
-  KEYCLOAK_GRANT_TYPE       Override grant type (password or client_credentials).
-  KEYCLOAK_CA_CERT          Path to CA bundle when Keycloak uses a custom certificate.
-  KEYCLOAK_SKIP_TLS_VERIFY  Set to 1 to disable TLS verification (not recommended).
+# ---
+# Main
+# ---
 
-The script attempts the Resource Owner Password grant when username/password
-values are supplied. Otherwise it falls back to the Client Credentials grant
-when a client secret is available.
-EOF
-}
+# This script is used to get a token from keycloak. It can be used to get a token for a user or a client.
+#
+# To get a token for a user, you need to set the following environment variables:
+# - KEYCLOAK_TOKEN_URL: The url to the token endpoint
+# - KEYCLOAK_CLIENT_ID: The client id
+# - KEYCLOAK_USERNAME: The username
+# - KEYCLOAK_PASSWORD: The password
+# - KEYCLOAK_GRANT_TYPE: The grant type (password)
+#
+# To get a token for a client, you need to set the following environment variables:
+# - KEYCLOAK_TOKEN_URL: The url to the token endpoint
+# - KEYCLOAK_CLIENT_ID: The client id
+# - KEYCLOAK_CLIENT_SECRET: The client secret
+# - KEYCLOAK_GRANT_TYPE: The grant type (client_credentials)
 
-if [[ "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
+if [[ "" == "--help" ]]; then
+    echo "Usage: bash"
+    echo "Description: This script is used to get a token from keycloak."
+    echo "Environment variables:"
+    echo "  - KEYCLOAK_TOKEN_URL: The url to the token endpoint"
+    echo "  - KEYCLOAK_CLIENT_ID: The client id"
+    echo "  - KEYCLOAK_CLIENT_SECRET: The client secret"
+    echo "  - KEYCLOAK_USERNAME: The username"
+    echo "  - KEYCLOAK_PASSWORD: The password"
+    echo "  - KEYCLOAK_GRANT_TYPE: The grant type (password or client_credentials)"
+    echo "  - KEYCLOAK_AUDIENCE: The audience"
+    exit 0
 fi
 
 need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "✖ Required dependency missing: $1" >&2
-    exit 1
-  fi
+    if ! command -v "" &> /dev/null; then
+        echo "✖ command not found: "
+        exit 1
+    fi
 }
 
 need curl
@@ -46,362 +54,326 @@ need jq
 
 cleanup_files=()
 cleanup() {
-  local status=$?
-  if [[ ${#cleanup_files[@]} -gt 0 ]]; then
-    rm -f "${cleanup_files[@]}" 2>/dev/null || true
-  fi
-  exit $status
+    for file in ""; do
+        rm -f ""
+    done
 }
-
 trap cleanup EXIT
 
-KEYCLOAK_REALM=${KEYCLOAK_REALM:-aegis}
-TOKEN_URL=${KEYCLOAK_TOKEN_URL:-}
-CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
-CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
-USERNAME=${KEYCLOAK_USERNAME:-}
-PASSWORD=${KEYCLOAK_PASSWORD:-}
-SCOPE=${KEYCLOAK_SCOPE:-}
-GRANT_TYPE=${KEYCLOAK_GRANT_TYPE:-}
-
-ensure_automation_user() {
-  local ns="$1"
-  local auto_username="${USERNAME:-automation@test.com}"
-  local auto_password="${PASSWORD:-Automation123!}"
-  local admin_secret="${KEYCLOAK_ADMIN_SECRET_NAME:-keycloak-admin-secret}"
-  local admin_user_key="${KEYCLOAK_ADMIN_USERNAME_KEY:-username}"
-  local admin_pass_key="${KEYCLOAK_ADMIN_PASSWORD_KEY:-password}"
-
-  if [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]]; then
-    return
-  fi
-
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]] || ! command -v kubectl >/dev/null 2>&1; then
-    USERNAME=${USERNAME:-$auto_username}
-    PASSWORD=${PASSWORD:-$auto_password}
-    return
-  fi
-
-  local admin_username admin_password
-  admin_username=$(kubectl get secret "${admin_secret}" -n "${ns}" -o "jsonpath={.data.${admin_user_key}}" 2>/dev/null | base64 --decode 2>/dev/null || true)
-  admin_password=$(kubectl get secret "${admin_secret}" -n "${ns}" -o "jsonpath={.data.${admin_pass_key}}" 2>/dev/null | base64 --decode 2>/dev/null || true)
-  if [[ -z "${admin_username}" || -z "${admin_password}" ]]; then
-    USERNAME=${USERNAME:-$auto_username}
-    PASSWORD=${PASSWORD:-$auto_password}
-    return
-  fi
-
-  local admin_token
-  admin_token=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-    -X POST "${KEYCLOAK_BASE_URL}/realms/master/protocol/openid-connect/token" \
-    -d "grant_type=password" \
-    -d "client_id=admin-cli" \
-    -d "username=${admin_username}" \
-    -d "password=${admin_password}" \
-    | jq -r '.access_token' 2>/dev/null || true)
-
-  if [[ -z "${admin_token}" || "${admin_token}" == "null" ]]; then
-    USERNAME=${USERNAME:-$auto_username}
-    PASSWORD=${PASSWORD:-$auto_password}
-    return
-  fi
-
-  local encoded_username
-  encoded_username=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${auto_username}" 2>/dev/null || true)
-  if [[ -z "${encoded_username}" ]]; then
-    encoded_username="${auto_username}"
-  fi
-
-  local user_json user_id
-  user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-    -H "Authorization: Bearer ${admin_token}" \
-    "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
-    2>/dev/null || true)
-  user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
-
-  if [[ -z "${user_id}" || "${user_id}" == "null" ]]; then
-    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-      -H "Authorization: Bearer ${admin_token}" \
-      -H "Content-Type: application/json" \
-      -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users" \
-      -d "{\"username\":\"${auto_username}\",\"email\":\"${auto_username}\",\"firstName\":\"automation\",\"lastName\":\"user\",\"enabled\":true,\"emailVerified\":true,\"credentials\":[{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}]}" >/dev/null 2>&1 || true
-    user_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-      -H "Authorization: Bearer ${admin_token}" \
-      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users?search=${encoded_username}&exact=true" \
-      2>/dev/null || true)
-    user_id=$(echo "${user_json}" | jq -r --arg username "${auto_username}" 'map(select(.username==$username)) | .[0].id // empty' 2>/dev/null || true)
-  else
-    curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-      -H "Authorization: Bearer ${admin_token}" \
-      -H "Content-Type: application/json" \
-      -X PUT "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/reset-password" \
-      -d "{\"type\":\"password\",\"value\":\"${auto_password}\",\"temporary\":false}" >/dev/null 2>&1 || true
-  fi
-
-  if [[ -n "${user_id}" && "${user_id}" != "null" ]]; then
-    local role_json
-    role_json=$(curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-      -H "Authorization: Bearer ${admin_token}" \
-      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/roles/workspace-admin" \
-      2>/dev/null || true)
-    if [[ -n "${role_json}" && "${role_json}" != "null" ]]; then
-      curl -sS --fail ${KEYCLOAK_CA_CERT:+--cacert "${KEYCLOAK_CA_CERT}"} \
-        -H "Authorization: Bearer ${admin_token}" \
-        -H "Content-Type: application/json" \
-        -X POST "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/role-mappings/realm" \
-        -d "[${role_json}]" >/dev/null 2>&1 || true
-    fi
-  fi
-
-  USERNAME=${USERNAME:-$auto_username}
-  PASSWORD=${PASSWORD:-$auto_password}
-}
+KEYCLOAK_REALM="aegis"
+TOKEN_URL="https://keycloak.localtest.me/realms//protocol/openid-connect/token"
+CLIENT_ID=""
+CLIENT_SECRET=""
+USERNAME=""
+PASSWORD=""
+SCOPE=""
+GRANT_TYPE="password"
+AUDIENCE=""
 
 detect_with_kubectl() {
-  if ! command -v kubectl >/dev/null 2>&1; then
-    ensure_automation_user "" || true
-    return
-  fi
-
-  local kc_json
-  kc_json=$(kubectl get keycloak -A -o json 2>/dev/null || true)
-  if [[ -z "${kc_json}" || "${kc_json}" == "{}" ]]; then
-    ensure_automation_user "" || true
-    return
-  fi
-
-  local detected_ns detected_host tls_secret
-  detected_ns=$(echo "${kc_json}" | jq -r '.items[0].metadata.namespace // empty' 2>/dev/null || true)
-  detected_host=$(echo "${kc_json}" | jq -r '.items[0].spec.hostname.hostname // empty' 2>/dev/null || true)
-  tls_secret=$(echo "${kc_json}" | jq -r '.items[0].spec.http.tlsSecret // empty' 2>/dev/null || true)
-
-  if [[ -n "${detected_ns}" ]]; then
-    KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-${detected_ns}}"
-  fi
-  local ns="${KEYCLOAK_NAMESPACE:-keycloak}"
-
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" && -n "${detected_host}" ]]; then
-    if [[ "${detected_host}" =~ ^https?:// ]]; then
-      KEYCLOAK_BASE_URL="${detected_host}"
-    else
-      KEYCLOAK_BASE_URL="https://${detected_host}"
+    if ! command -v kubectl &> /dev/null; then
+        return
     fi
-  elif [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-    local host
-    host=$(kubectl get keycloak -n "${ns}" -o jsonpath='{.items[0].spec.hostname.hostname}' 2>/dev/null || true)
-    if [[ -n "${host}" ]]; then
-      if [[ "${host}" =~ ^https?:// ]]; then
-        KEYCLOAK_BASE_URL="${host}"
-      else
-        KEYCLOAK_BASE_URL="https://${host}"
-      fi
+
+    local kc_json
+    kc_json="{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "k8s.keycloak.org/v2alpha1",
+            "kind": "Keycloak",
+            "metadata": {
+                "annotations": {
+                    "meta.helm.sh/release-name": "aegis-services",
+                    "meta.helm.sh/release-namespace": "aegis-system"
+                },
+                "creationTimestamp": "2025-11-04T04:15:16Z",
+                "generation": 1,
+                "labels": {
+                    "app.kubernetes.io/component": "keycloak",
+                    "app.kubernetes.io/instance": "aegis-services",
+                    "app.kubernetes.io/managed-by": "Helm",
+                    "app.kubernetes.io/name": "aegis-services",
+                    "app.kubernetes.io/version": "latest",
+                    "helm.sh/chart": "aegis-services-0.1.0"
+                },
+                "name": "aegis-services-keycloak",
+                "namespace": "keycloak",
+                "resourceVersion": "19953592",
+                "uid": "7eb5d90d-b569-448e-9be2-94c7ec52c897"
+            },
+            "spec": {
+                "additionalOptions": [
+                    {
+                        "name": "hostname-admin",
+                        "value": "https://keycloak.localtest.me"
+                    },
+                    {
+                        "name": "hostname-admin-url",
+                        "value": "https://keycloak.localtest.me/"
+                    }
+                ],
+                "bootstrapAdmin": {
+                    "user": {
+                        "secret": "keycloak-admin-secret"
+                    }
+                },
+                "db": {
+                    "database": "keycloak",
+                    "host": "aegis-services-keycloak-db.keycloak.svc.cluster.local",
+                    "passwordSecret": {
+                        "key": "password",
+                        "name": "keycloak-db-secret"
+                    },
+                    "port": 5432,
+                    "usernameSecret": {
+                        "key": "username",
+                        "name": "keycloak-db-secret"
+                    },
+                    "vendor": "postgres"
+                },
+                "features": {
+                    "enabled": [
+                        "token-exchange"
+                    ]
+                },
+                "hostname": {
+                    "hostname": "https://keycloak.localtest.me",
+                    "strict": false
+                },
+                "http": {
+                    "httpEnabled": false,
+                    "httpsPort": 8443,
+                    "tlsSecret": "keycloak-tls"
+                },
+                "image": "registry.redhat.io/rhbk/keycloak-rhel9:26.2-11",
+                "imagePullSecrets": [
+                    {
+                        "name": "redhat-pull-secret"
+                    }
+                ],
+                "ingress": {
+                    "annotations": {
+                        "nginx.ingress.kubernetes.io/backend-protocol": "HTTPS",
+                        "nginx.ingress.kubernetes.io/ssl-redirect": "true"
+                    },
+                    "className": "ingress-nginx",
+                    "enabled": false
+                },
+                "instances": 1,
+                "networkPolicy": {
+                    "enabled": true,
+                    "http": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": "ingress-nginx"
+                                }
+                            }
+                        },
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": "aegis-system"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "resources": {
+                    "limits": {
+                        "cpu": "1000m",
+                        "memory": "2Gi"
+                    },
+                    "requests": {
+                        "cpu": "250m",
+                        "memory": "1Gi"
+                    }
+                },
+                "startOptimized": false
+            },
+            "status": {
+                "conditions": [
+                    {
+                        "lastTransitionTime": "2025-11-04T04:16:59.734320548Z",
+                        "message": "",
+                        "observedGeneration": 1,
+                        "status": "True",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastTransitionTime": "2025-11-04T04:15:22.183518711Z",
+                        "message": "warning: You need to specify these fields as the first-class citizen of the CR: hostname-admin-url,hostname-admin",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "HasErrors"
+                    },
+                    {
+                        "lastTransitionTime": "2025-11-04T04:16:59.734320548Z",
+                        "message": "",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "RollingUpdate"
+                    },
+                    {
+                        "lastTransitionTime": "2025-11-04T04:15:21.882363544Z",
+                        "observedGeneration": 1,
+                        "status": "Unknown",
+                        "type": "RecreateUpdateUsed"
+                    }
+                ],
+                "instances": 1,
+                "observedGeneration": 1,
+                "selector": "app=keycloak,app.kubernetes.io/managed-by=keycloak-operator,app.kubernetes.io/instance=aegis-services-keycloak"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}"
+    if [[ -z "" || "" == "{}" ]]; then
+        return
     fi
-  fi
 
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-    local ingress_json ingress_host ingress_ns ingress_tls
-    ingress_json=$(kubectl get ingress -A -o json 2>/dev/null || true)
-    if [[ -n "${ingress_json}" ]]; then
-      ingress_host=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.labels["app.kubernetes.io/component"] // "") == "keycloak" or (.metadata.labels["app.kubernetes.io/name"] // "") == "keycloak" or ((.metadata.name // "")|test("keycloak";"i"))) | .spec.rules[]?.host | select(. != null and . != "")' 2>/dev/null | head -n1 || true)
-      if [[ -n "${ingress_host}" ]]; then
-        ingress_ns=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.labels["app.kubernetes.io/component"] // "") == "keycloak" or (.metadata.labels["app.kubernetes.io/name"] // "") == "keycloak" or ((.metadata.name // "")|test("keycloak";"i"))) | .metadata.namespace' 2>/dev/null | head -n1 || true)
-        ingress_tls=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.labels["app.kubernetes.io/component"] // "") == "keycloak" or (.metadata.labels["app.kubernetes.io/name"] // "") == "keycloak" or ((.metadata.name // "")|test("keycloak";"i"))) | .spec.tls[0].secretName // empty' 2>/dev/null | head -n1 || true)
-        if [[ -n "${ingress_ns}" ]]; then
-          KEYCLOAK_NAMESPACE="${ingress_ns}"
-          ns="${ingress_ns}"
-        fi
-        if [[ -n "${ingress_host}" ]]; then
-          if [[ "${ingress_host}" =~ ^https?:// ]]; then
-            KEYCLOAK_BASE_URL="${ingress_host}"
-          else
-            KEYCLOAK_BASE_URL="https://${ingress_host}"
-          fi
-        fi
-        if [[ -n "${ingress_tls}" && -z "${KEYCLOAK_TLS_SECRET_NAME:-}" ]]; then
-          KEYCLOAK_TLS_SECRET_NAME="${ingress_tls}"
-        fi
-      fi
+    local detected_ns detected_host tls_secret
+    detected_ns=""
+    detected_host=""
+    tls_secret=""
+
+    if [[ -n "" ]]; then
+        KEYCLOAK_NAMESPACE=""
+        local ns=""
     fi
-  fi
 
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-    local svc_json svc_host svc_ns
-    svc_json=$(kubectl get svc -A -o json 2>/dev/null || true)
-    if [[ -n "${svc_json}" ]]; then
-      svc_host=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.labels["app.kubernetes.io/component"] // "") == "keycloak" or (.metadata.labels["app.kubernetes.io/name"] // "") == "keycloak" or ((.metadata.name // "")|test("keycloak";"i"))) | .status.loadBalancer.ingress[0].hostname // .status.loadBalancer.ingress[0].ip // empty' 2>/dev/null | head -n1 || true)
-      if [[ -n "${svc_host}" ]]; then
-        svc_ns=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.labels["app.kubernetes.io/component"] // "") == "keycloak" or (.metadata.labels["app.kubernetes.io/name"] // "") == "keycloak" or ((.metadata.name // "")|test("keycloak";"i"))) | .metadata.namespace' 2>/dev/null | head -n1 || true)
-        if [[ -n "${svc_ns}" ]]; then
-          KEYCLOAK_NAMESPACE="${svc_ns}"
-          ns="${svc_ns}"
-        fi
-        if [[ "${svc_host}" =~ ^https?:// ]]; then
-          KEYCLOAK_BASE_URL="${svc_host}"
-        else
-          KEYCLOAK_BASE_URL="https://${svc_host}"
-        fi
-      fi
+    if [[ -z "" && -n "" ]]; then
+        KEYCLOAK_URL=""
     fi
-  fi
-
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-    local ingress_json ingress_host ingress_ns ingress_tls
-    ingress_json=$(kubectl get ingress -A -o json 2>/dev/null || true)
-    if [[ -n "${ingress_json}" ]]; then
-      ingress_host=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .spec.rules[]?.host | select(. != null and . != "")' 2>/dev/null | head -n1 || true)
-      if [[ -n "${ingress_host}" ]]; then
-        ingress_ns=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .metadata.namespace' 2>/dev/null | head -n1 || true)
-        ingress_tls=$(echo "${ingress_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .spec.tls[0].secretName // empty' 2>/dev/null | head -n1 || true)
-        if [[ -n "${ingress_ns}" ]]; then
-          KEYCLOAK_NAMESPACE="${ingress_ns}"
-          ns="${ingress_ns}"
-        fi
-        if [[ -n "${ingress_host}" ]]; then
-          if [[ "${ingress_host}" =~ ^https?:// ]]; then
-            KEYCLOAK_BASE_URL="${ingress_host}"
-          else
-            KEYCLOAK_BASE_URL="https://${ingress_host}"
-          fi
-        fi
-        if [[ -n "${ingress_tls}" && -z "${KEYCLOAK_TLS_SECRET_NAME:-}" ]]; then
-          KEYCLOAK_TLS_SECRET_NAME="${ingress_tls}"
-        fi
-      fi
+    if [[ -z "" && -n "" ]]; then
+        KEYCLOAK_INTERNAL_URL=""
     fi
-  fi
-
-  if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-    local svc_json svc_host svc_ns
-    svc_json=$(kubectl get svc -A -o json 2>/dev/null || true)
-    if [[ -n "${svc_json}" ]]; then
-      svc_host=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .status.loadBalancer.ingress[0].hostname // .status.loadBalancer.ingress[0].ip // empty' 2>/dev/null | head -n1 || true)
-      if [[ -n "${svc_host}" ]]; then
-        svc_ns=$(echo "${svc_json}" | jq -r '.items[] | select((.metadata.name // "")|test("keycloak";"i")) | .metadata.namespace' 2>/dev/null | head -n1 || true)
-        if [[ -n "${svc_ns}" ]]; then
-          KEYCLOAK_NAMESPACE="${svc_ns}"
-          ns="${svc_ns}"
-        fi
-        if [[ "${svc_host}" =~ ^https?:// ]]; then
-          KEYCLOAK_BASE_URL="${svc_host}"
-        else
-          KEYCLOAK_BASE_URL="https://${svc_host}"
-        fi
-      fi
+    if [[ -z "" && -n "" ]]; then
+        KEYCLOAK_TOKEN_URL="/realms//protocol/openid-connect/token"
     fi
-  fi
-
-  if [[ -n "${tls_secret}" ]]; then
-    KEYCLOAK_TLS_SECRET_NAME="${KEYCLOAK_TLS_SECRET_NAME:-${tls_secret}}"
-  fi
-
-  if [[ -z "${KEYCLOAK_CA_CERT:-}" ]]; then
-    local secret_name="${KEYCLOAK_TLS_SECRET_NAME:-keycloak-tls}"
-    local ca_tmp
-    ca_tmp=$(mktemp) || true
-    if [[ -n "${ca_tmp}" ]] && kubectl get secret "${secret_name}" -n "${ns}" -o 'jsonpath={.data.tls\.crt}' 2>/dev/null | base64 --decode >"${ca_tmp}" 2>/dev/null; then
-      KEYCLOAK_CA_CERT="${ca_tmp}"
-      cleanup_files+=("${ca_tmp}")
-    else
-      [[ -n "${ca_tmp}" ]] && rm -f "${ca_tmp}" 2>/dev/null || true
+    if [[ -z "" && -n "" ]]; then
+        KEYCLOAK_ISSUER_URL="/realms/"
     fi
-  fi
+    if [[ -z "" && -n "" ]]; then
+        KEYCLOAK_JWKS_URL="/realms//protocol/openid-connect/certs"
+    fi
 
-  if [[ -z "${CLIENT_SECRET}" ]]; then
-    local client_secret_name="${KEYCLOAK_CLIENT_SECRET_NAME:-keycloak-backstage-client-secret}"
-    CLIENT_SECRET=$(kubectl get secret "${client_secret_name}" -n "${ns}" -o 'jsonpath={.data.clientSecret}' 2>/dev/null | base64 --decode 2>/dev/null || true)
-  fi
+    if [[ -n "" ]]; then
+        KEYCLOAK_TLS_SECRET_NAME=""
+    fi
 
-  ensure_automation_user "${ns}" || true
+    if [[ -z "" ]]; then
+        local secret_name=""
+        local ca_tmp
+        ca_tmp="/var/folders/t8/051bb_8n2_b3b8klpc171kww0000gn/T/tmp.BjVANiC6u0"
+        if [[ -n "" ]]; then
+            kubectl get secret "" -n "" -o 'jsonpath={.data.tls\.crt}' | base64 --decode > ""
+            KEYCLOAK_CA_CERT=""
+            cleanup_files+=("")
+        fi
+    fi
 }
 
-detect_with_kubectl
+if [[ -z "" ]]; then
+    detect_with_kubectl
+fi
 
-if [[ -z "${TOKEN_URL}" ]]; then
-  if [[ -n "${KEYCLOAK_BASE_URL:-}" ]]; then
-    TOKEN_URL="${KEYCLOAK_BASE_URL%/}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token"
-  else
-    echo "✖ KEYCLOAK_TOKEN_URL or KEYCLOAK_BASE_URL must be set" >&2
+ensure_automation_user() {
+    local ns=""
+    local auto_username=""
+    local auto_password=""
+    local admin_secret="keycloak-admin-secret"
+    local admin_user_key="username"
+    local admin_pass_key="password"
+
+    if [[ -n "" && -n "" ]]; then
+        return
+    fi
+}
+
+if [[ -z "" ]]; then
+    echo "✖ KEYCLOAK_TOKEN_URL is not set"
     exit 1
-  fi
 fi
 
-if [[ -z "${CLIENT_ID}" ]]; then
-  CLIENT_ID="backstage"
+if [[ -z "" ]]; then
+    echo "✖ KEYCLOAK_CLIENT_ID is not set"
+    exit 1
 fi
 
-
-if [[ -z "${GRANT_TYPE}" ]]; then
-  if [[ -n "${USERNAME}" || -n "${PASSWORD}" ]]; then
-    GRANT_TYPE=password
-  else
-    GRANT_TYPE=client_credentials
-  fi
+if [[ -z "" ]]; then
+    echo "✖ KEYCLOAK_GRANT_TYPE is not set"
+    exit 1
 fi
 
-declare -a CURL_ARGS=("-sS" "--fail" "--request" "POST" "${TOKEN_URL}")
-if [[ -n "${KEYCLOAK_CA_CERT:-}" && -f "${KEYCLOAK_CA_CERT}" ]]; then
-  CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_CERT}")
-elif [[ -n "${KEYCLOAK_CA_BUNDLE:-}" && -f "${KEYCLOAK_CA_BUNDLE}" ]]; then
-  CURL_ARGS+=("--cacert" "${KEYCLOAK_CA_BUNDLE}")
+CURL_ARGS=("-sS" "--fail" "--request" "POST" "")
+declare -a CURL_ARGS
+
+if [[ -n "" && -f "" ]]; then
+    CURL_ARGS+=("--cacert" "")
 fi
-if [[ "${KEYCLOAK_SKIP_TLS_VERIFY:-0}" == "1" ]]; then
-  CURL_ARGS+=("--insecure")
+
+if [[ "0" == "1" ]]; then
+    CURL_ARGS+=("--insecure")
 fi
+
 declare -a FORM_DATA
-
-case "${GRANT_TYPE}" in
-  password)
-    if [[ -z "${USERNAME}" || -z "${PASSWORD}" ]]; then
-      echo "✖ KEYCLOAK_USERNAME and KEYCLOAK_PASSWORD are required for password grant" >&2
-      exit 1
-    fi
-    FORM_DATA+=("grant_type=password" "username=${USERNAME}" "password=${PASSWORD}" "client_id=${CLIENT_ID}")
-    if [[ -n "${CLIENT_SECRET}" ]]; then
-      FORM_DATA+=("client_secret=${CLIENT_SECRET}")
-    fi
-    ;;
-  client_credentials)
-    if [[ -z "${CLIENT_SECRET}" ]]; then
-      echo "✖ KEYCLOAK_CLIENT_SECRET is required for client_credentials grant" >&2
-      exit 1
-    fi
-    FORM_DATA+=("grant_type=client_credentials" "client_id=${CLIENT_ID}" "client_secret=${CLIENT_SECRET}")
-    ;; 
-  *)
-    echo "✖ Unsupported KEYCLOAK_GRANT_TYPE: ${GRANT_TYPE}" >&2
-    exit 1
-    ;; 
+case "" in
+    "password")
+        FORM_DATA+=("grant_type=password" "client_id=" "username=" "password=")
+        ;;
+    "client_credentials")
+        if [[ -z "" ]]; then
+            echo "✖ KEYCLOAK_CLIENT_SECRET is not set for client_credentials grant type"
+            exit 1
+        fi
+        FORM_DATA+=("grant_type=client_credentials" "client_id=" "client_secret=")
+        ;;
+    *)
+        echo "✖ Invalid grant type: "
+        exit 1
+        ;;
 esac
 
-if [[ -n "${SCOPE}" ]]; then
-  FORM_DATA+=("scope=${SCOPE}")
+if [[ -n "" ]]; then
+    FORM_DATA+=("scope=")
 fi
 
-for entry in "${FORM_DATA[@]}"; do
-  CURL_ARGS+=("--data" "${entry}")
+if [[ -n "" ]]; then
+    FORM_DATA+=("audience=")
+fi
+
+for entry in ""; do
+    CURL_ARGS+=("--data" "")
 done
 
-TMP_BODY=$(mktemp)
-trap 'rm -f "${TMP_BODY}"' EXIT
+TMP_BODY="/var/folders/t8/051bb_8n2_b3b8klpc171kww0000gn/T/tmp.AEY5rdYMmI"
+trap 'rm -f ""' EXIT
 
-HTTP_STATUS=$(curl -k --cacert "$HOME/aegis-local-trust.pem" "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)
-if [[ ! ${HTTP_STATUS} =~ ^[0-9]{3}$ ]]; then
-  echo "✖ Failed to reach Keycloak token endpoint" >&2
-  cat "${TMP_BODY}" >&2 || true
-  exit 1
+HTTP_STATUS=""
+
+if [[ ! "" =~ ^[0-9]{3}$ ]]; then
+    echo "✖ Keycloak token request failed (no HTTP status)"
+    cat ""
+    exit 1
 fi
 
-if [[ "${HTTP_STATUS}" -ge 400 ]]; then
-  echo "✖ Keycloak token request failed (HTTP ${HTTP_STATUS})" >&2
-  cat "${TMP_BODY}" >&2 || true
-  exit 1
+if [[ "" -ge 400 ]]; then
+    echo "✖ Keycloak token request failed (HTTP )"
+    cat ""
+    exit 1
 fi
 
-token=$(jq -r '.access_token // empty' "${TMP_BODY}")
-if [[ -z "${token}" ]]; then
-  echo "✖ Response did not contain an access_token" >&2
-  cat "${TMP_BODY}" >&2
-  exit 1
+token=""
+if [[ -z "" ]]; then
+    echo "✖ Could not get access token from Keycloak"
+    exit 1
 fi
 
-echo "${token}"
+echo ""
+rm -f ""

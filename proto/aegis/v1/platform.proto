@@ -2,6 +2,7 @@ syntax = "proto3";
 package aegis.v1;
 option go_package = "github.com/yourorg/aegis/proto/aegis/v1;aegisv1";
 
+import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 
 // ---- Core resource messages ----
@@ -165,28 +166,171 @@ message BudgetWithUsage { Budget budget = 1; BudgetUsage usage = 2; }
 message ListBudgetsResponse { repeated BudgetWithUsage items = 1; }
 
 // Service
+message CreateWorkspaceRequest {
+  string project_id = 1;
+  string workspace_id = 2;
+  string queue = 3;
+  WorkspaceSpec workspace = 4;
+}
+
+message CreateWorkspaceResponse {
+  Workload workload = 1;
+}
+
+message CreateClusterRequest {
+  string project_id = 1;
+  string cluster_id = 2;
+  string provider = 3;
+  string region = 4;
+}
+
+message CreateClusterResponse {
+  Job job = 1;
+}
+
+message GetClusterJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetClusterJobStatusResponse {
+  Job job = 1;
+}
+
+message Job {
+  string id = 1;
+  string status = 2;
+  int32 progress = 3;
+  string error = 4;
+}
+
+// Service
 service AegisPlatform {
-  rpc CreateProject(CreateProjectRequest) returns (Project);
-  rpc UpsertBudget(UpsertBudgetRequest) returns (Budget);
-  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse);
-  rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse);
-  rpc UpsertFlavor(UpsertFlavorRequest) returns (Flavor);
-  rpc UpsertQueue(UpsertQueueRequest) returns (Queue);
+  rpc CreateProject(CreateProjectRequest) returns (Project) {
+    option (google.api.http) = {
+      post: "/api/v1/projects"
+      body: "*"
+    };
+  }
+  rpc UpsertBudget(UpsertBudgetRequest) returns (Budget) {
+    option (google.api.http) = {
+      put: "/api/v1/projects/{budget.project_id}/budgets"
+      body: "*"
+    };
+  }
+  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/budgets"
+    };
+  }
+  rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/budgets/list"
+    };
+  }
+  rpc UpsertFlavor(UpsertFlavorRequest) returns (Flavor) {
+    option (google.api.http) = {
+      put: "/api/v1/flavors"
+      body: "*"
+    };
+  }
+  rpc UpsertQueue(UpsertQueueRequest) returns (Queue) {
+    option (google.api.http) = {
+      put: "/api/v1/queues"
+      body: "*"
+    };
+  }
 
-  rpc SubmitWorkload(SubmitWorkloadRequest) returns (Workload);
-  rpc GetWorkload(GetWorkloadRequest) returns (Workload);
-  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
+  rpc SubmitWorkload(SubmitWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads"
+      body: "*"
+    };
+  }
+  rpc GetWorkload(GetWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      get: "/api/v1/workloads/{id}"
+    };
+  }
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/workloads"
+    };
+  }
 
-  rpc GetWorkspaceConnectionDetails(GetWorkspaceConnectionDetailsRequest) returns (GetWorkspaceConnectionDetailsResponse);
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workspaces"
+      body: "*"
+    };
+  }
 
-  rpc CreateConnectionSession(CreateConnectionSessionRequest) returns (ConnectionSession);
-  rpc RenewConnectionSession(RenewConnectionSessionRequest) returns (ConnectionSession);
-  rpc RevokeConnectionSession(RevokeConnectionSessionRequest) returns (google.protobuf.Empty);
+  rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters"
+      body: "*"
+    };
+  }
 
-  rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse);
-  rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse);
-  rpc AckWorkload(AckWorkloadRequest) returns (AckWorkloadResponse);
+  rpc GetClusterJobStatus(GetClusterJobStatusRequest) returns (GetClusterJobStatusResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/jobs/{job_id}/status"
+    };
+  }
 
-  rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse);
-  rpc Heartbeat(ClusterHeartbeat) returns (ClusterHeartbeatAck);
+  rpc GetWorkspaceConnectionDetails(GetWorkspaceConnectionDetailsRequest) returns (GetWorkspaceConnectionDetailsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/workloads/{id}/connection_details"
+    };
+  }
+
+  rpc CreateConnectionSession(CreateConnectionSessionRequest) returns (ConnectionSession) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions"
+      body: "*"
+    };
+  }
+  rpc RenewConnectionSession(RenewConnectionSessionRequest) returns (ConnectionSession) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions/{session_id}/renew"
+      body: "*"
+    };
+  }
+  rpc RevokeConnectionSession(RevokeConnectionSessionRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions/{session_id}/revoke"
+      body: "*"
+    };
+  }
+
+  rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/lease"
+      body: "*"
+    };
+  }
+  rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/start"
+      body: "*"
+    };
+  }
+  rpc AckWorkload(AckWorkloadRequest) returns (AckWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/ack"
+      body: "*"
+    };
+  }
+
+  rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/register"
+      body: "*"
+    };
+  }
+  rpc Heartbeat(ClusterHeartbeat) returns (ClusterHeartbeatAck) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/heartbeat"
+      body: "*"
+    };
+  }
 }

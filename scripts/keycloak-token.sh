@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -x
+source .env
 
 usage() {
   cat <<'EOF'
@@ -364,12 +366,12 @@ case "${GRANT_TYPE}" in
       exit 1
     fi
     FORM_DATA+=("grant_type=client_credentials" "client_id=${CLIENT_ID}" "client_secret=${CLIENT_SECRET}")
-    ;;
+    ;; 
   *)
     echo "✖ Unsupported KEYCLOAK_GRANT_TYPE: ${GRANT_TYPE}" >&2
     exit 1
-    ;;
- esac
+    ;; 
+esac
 
 if [[ -n "${SCOPE}" ]]; then
   FORM_DATA+=("scope=${SCOPE}")
@@ -382,7 +384,7 @@ done
 TMP_BODY=$(mktemp)
 trap 'rm -f "${TMP_BODY}"' EXIT
 
-HTTP_STATUS=$(curl "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)
+HTTP_STATUS=$(curl -k --cacert "$HOME/aegis-local-trust.pem" "${CURL_ARGS[@]}" -w '%{http_code}' -o "${TMP_BODY}" || true)
 if [[ ! ${HTTP_STATUS} =~ ^[0-9]{3}$ ]]; then
   echo "✖ Failed to reach Keycloak token endpoint" >&2
   cat "${TMP_BODY}" >&2 || true

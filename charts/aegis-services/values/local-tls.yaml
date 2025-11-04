@@ -9,6 +9,7 @@
 #     --namespace aegis-system --create-namespace
 
 ingress-nginx:
+  enabled: false
   controller:
     admissionWebhooks:
       timeoutSeconds: 30
@@ -259,6 +260,8 @@ proxy:
       -----END PRIVATE KEY-----
 
 keycloak:
+  ingress:
+    enabled: false
   enabled: true
   forceRender: true
   createNamespace: false

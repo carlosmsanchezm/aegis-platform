@@ -6,12 +6,26 @@ ARG TARGETARCH=amd64
 
 WORKDIR /app
 
-# Copy the entire project structure since we have local dependencies
+# Copy go.mod and go.sum first for better layer caching
+COPY go.work* ./
+COPY proto/aegis/go.* ./proto/aegis/
+COPY services/platform-api/go.* ./services/platform-api/
+COPY services/proxy/go.* ./services/proxy/
+COPY agents/k8s-agent/go.* ./agents/k8s-agent/
+COPY pkg/workspace/go.* ./pkg/workspace/
+
+# Download dependencies (cached layer)
+WORKDIR /app/services/platform-api
+RUN go mod download
+
+# Copy the entire project structure
+WORKDIR /app
 COPY . .
 
-# Build the platform-api service binary
+# Build the platform-api service binary with optimized flags
 WORKDIR /app/services/platform-api
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -o platform-api .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -o platform-api .
 
 # Final stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5

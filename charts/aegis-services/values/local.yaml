@@ -25,7 +25,7 @@ ingress-nginx:
 # Backstage Configuration - Local
 #################################################################
 backstage:
-  enabled: true
+  enabled: false
   replicaCount: 1
   image:
     repository: backstage
@@ -53,6 +53,10 @@ platformApi:
   enabled: true
   replicaCount: 1
   serviceAccountName: aegis-platform-api
+  hostAliases:
+  - ip: "10.96.146.219"
+    hostnames:
+    - "keycloak.localtest.me"
 
   image:
     repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
@@ -84,6 +88,8 @@ platformApi:
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AEGIS_STORE_BACKEND: "memory"
     OIDC_ISSUER_URL: "https://keycloak.localtest.me/realms/aegis"
+    OIDC_JWKS_URL: "https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs"
+    OIDC_SKIP_TLS_VERIFY: "true"
     OIDC_AUDIENCE: "backstage"
     REQUIRE_PHISHING_RESISTANT_MFA: "true"
     ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"

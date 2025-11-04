@@ -43,6 +43,14 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- $platformEnv := .Values.platformApi.env | default dict }}
+      {{- $oidcAuth := .Values.platformApi.auth | default dict }}
+      {{- $oidc := $oidcAuth.oidc | default dict }}
+      {{- $oidcCASecret := include "aegis-services.platformApi.oidcCASecretName" . }}
+      {{- $hasOIDCCA := gt (len (trim $oidcCASecret)) 0 }}
+      {{- $oidcCAMountPath := include "aegis-services.platformApi.oidcCAMountPath" . }}
+      {{- $oidcCAFileName := include "aegis-services.platformApi.oidcCAFileName" . }}
+      {{- $oidcCAKey := include "aegis-services.platformApi.oidcCAKey" . }}
       containers:
         - name: platform-api
           image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
@@ -68,7 +76,7 @@ spec:
             - name: AEGIS_PROXY_BASE_URL
               value: "http://{{ include "aegis-services.proxy.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.proxy.service.port }}"
             {{- end }}
-            {{- range $key, $value := .Values.platformApi.env }}
+            {{- range $key, $value := $platformEnv }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -78,6 +86,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
+            {{- end }}
+            {{- if and $hasOIDCCA (not (hasKey $platformEnv "OIDC_CA_BUNDLE")) }}
+            - name: OIDC_CA_BUNDLE
+              value: {{ printf "%s/%s" $oidcCAMountPath $oidcCAFileName | quote }}
+            {{- end }}
+            {{- if and $oidc.skipTlsVerify (not (hasKey $platformEnv "OIDC_SKIP_TLS_VERIFY")) }}
+            - name: OIDC_SKIP_TLS_VERIFY
+              value: "true"
             {{- end }}
             {{- if .Values.proxy.enabled }}
             # Reference the same JWT secret that the proxy uses
@@ -97,11 +113,16 @@ spec:
               value: "/etc/aegis-platform-api/tls/ca.crt"
             {{- end }}
             {{- end }}
-          {{- if or .Values.platformApi.volumeMounts (and .Values.platformApi.tls.enabled $serveGrpc) }}
+          {{- if or .Values.platformApi.volumeMounts (and .Values.platformApi.tls.enabled $serveGrpc) $hasOIDCCA }}
           volumeMounts:
             {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: platform-api-tls
               mountPath: /etc/aegis-platform-api/tls
+              readOnly: true
+            {{- end }}
+            {{- if $hasOIDCCA }}
+            - name: platform-api-oidc-ca
+              mountPath: {{ $oidcCAMountPath }}
               readOnly: true
             {{- end }}
             {{- with .Values.platformApi.volumeMounts }}
@@ -124,12 +145,20 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.platformApi.volumes (and .Values.platformApi.tls.enabled $serveGrpc) }}
+      {{- if or .Values.platformApi.volumes (and .Values.platformApi.tls.enabled $serveGrpc) $hasOIDCCA }}
       volumes:
         {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
         - name: platform-api-tls
           secret:
             secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}
+        {{- end }}
+        {{- if $hasOIDCCA }}
+        - name: platform-api-oidc-ca
+          secret:
+            secretName: {{ $oidcCASecret }}
+            items:
+              - key: {{ $oidcCAKey }}
+                path: {{ $oidcCAFileName }}
         {{- end }}
         {{- with .Values.platformApi.volumes }}
         {{- toYaml . | nindent 8 }}

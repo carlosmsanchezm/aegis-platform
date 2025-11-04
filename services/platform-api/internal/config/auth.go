@@ -31,6 +31,8 @@ type AuthConfig struct {
 	RequirePhishingResistantMFA bool
 	AllowedPhishingResistantAMR []string
 	DefaultRoleBindingsJSON     string
+	CABundlePath                string
+	SkipTLSVerify               bool
 }
 
 type rawAuthConfig struct {
@@ -41,6 +43,8 @@ type rawAuthConfig struct {
 	JWKSRefreshInterval         string   `json:"jwksRefreshInterval"`
 	RequirePhishingResistantMFA *bool    `json:"requirePhishingResistantMfa"`
 	AllowedPhishingResistantAMR []string `json:"allowedPhishingResistantAmr"`
+	CABundlePath                string   `json:"caBundlePath"`
+	SkipTLSVerify               *bool    `json:"skipTlsVerify"`
 }
 
 // LoadAuthConfig returns the effective authentication configuration derived from
@@ -125,6 +129,12 @@ func applyRawConfig(cfg *AuthConfig, raw *rawAuthConfig) {
 	if len(raw.AllowedPhishingResistantAMR) > 0 {
 		cfg.AllowedPhishingResistantAMR = normalizeStrings(raw.AllowedPhishingResistantAMR)
 	}
+	if raw.CABundlePath != "" {
+		cfg.CABundlePath = raw.CABundlePath
+	}
+	if raw.SkipTLSVerify != nil {
+		cfg.SkipTLSVerify = *raw.SkipTLSVerify
+	}
 }
 
 func overlayFromEnv(cfg *AuthConfig) {
@@ -155,6 +165,16 @@ func overlayFromEnv(cfg *AuthConfig) {
 	if v := strings.TrimSpace(os.Getenv("ALLOWED_PHISHING_RESISTANT_AMR")); v != "" {
 		parts := strings.Split(v, ",")
 		cfg.AllowedPhishingResistantAMR = normalizeStrings(parts)
+	}
+	if v := strings.TrimSpace(os.Getenv("OIDC_CA_BUNDLE")); v != "" {
+		cfg.CABundlePath = v
+	} else if v := strings.TrimSpace(os.Getenv("OIDC_CA_CERT")); v != "" {
+		cfg.CABundlePath = v
+	}
+	if v := strings.TrimSpace(os.Getenv("OIDC_SKIP_TLS_VERIFY")); v != "" {
+		if parsed, err := parseBool(v); err == nil {
+			cfg.SkipTLSVerify = parsed
+		}
 	}
 }
 

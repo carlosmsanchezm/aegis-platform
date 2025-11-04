@@ -1,0 +1,21 @@
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- if and $platform.enabled $ca.create -}}
+{{- $secretName := include "aegis-services.platformApi.oidcCASecretName" . -}}
+{{- $bundle := trim $ca.data -}}
+{{- if and $secretName $bundle -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+type: Opaque
+data:
+  {{ include "aegis-services.platformApi.oidcCAKey" . }}: {{ $bundle | b64enc }}
+{{- end }}
+{{- end }}

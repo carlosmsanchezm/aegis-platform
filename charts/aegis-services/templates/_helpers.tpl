@@ -44,6 +44,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-platform-api-tls" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "aegis-services.platformApi.oidcCASecretName" -}}
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- if $ca.secretName -}}
+{{- $ca.secretName | trunc 63 | trimSuffix "-" -}}
+{{- else if $ca.create -}}
+{{- printf "%s-oidc-ca" (include "aegis-services.platformApi.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "aegis-services.platformApi.oidcCAMountPath" -}}
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- default "/etc/aegis-platform-api/oidc" $ca.mountPath -}}
+{{- end -}}
+
+{{- define "aegis-services.platformApi.oidcCAFileName" -}}
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- default "ca.crt" $ca.fileName -}}
+{{- end -}}
+
+{{- define "aegis-services.platformApi.oidcCAKey" -}}
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- default "ca.crt" $ca.key -}}
+{{- end -}}
+
 {{/* Proxy component names */}}
 {{- define "aegis-services.proxy.fullname" -}}
 {{- printf "%s-proxy" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}

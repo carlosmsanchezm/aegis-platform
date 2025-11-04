@@ -9,7 +9,6 @@
 #     --namespace aegis-system --create-namespace
 
 ingress-nginx:
-  enabled: false
   controller:
     admissionWebhooks:
       timeoutSeconds: 30
@@ -43,6 +42,22 @@ platformApi:
   tls:
     enabled: true
     serveGrpc: true
+    # Local testing certificate chain: leaf served to clients followed by the embedded root CA.
+    # To rotate, create a root CA and sign a new leaf, e.g.:
+    #   openssl req -x509 -nodes -newkey rsa:4096 -days 3650 \
+    #     -keyout /tmp/aegis-root.key -out /tmp/aegis-root.pem \
+    #     -subj "/O=Aegis Dev/CN=Aegis Local Root CA" \
+    #     -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+    #     -addext "keyUsage=critical,keyCertSign,cRLSign"
+    #   openssl req -new -nodes -newkey rsa:2048 \
+    #     -keyout /tmp/platform-api.key -out /tmp/platform-api.csr \
+    #     -subj "/O=Aegis Dev/CN=platform-api.localtest.me" \
+    #     -addext "subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me" \
+    #     -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+    #     -addext "extendedKeyUsage=serverAuth"
+    #   openssl x509 -req -in /tmp/platform-api.csr -CA /tmp/aegis-root.pem -CAkey /tmp/aegis-root.key -CAcreateserial \
+    #     -out /tmp/platform-api.pem -days 825 -sha256 \
+    #     -extfile <(printf \"subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me\\nkeyUsage=critical,digitalSignature,keyEncipherment\\nextendedKeyUsage=serverAuth\")
     cert: |
       -----BEGIN CERTIFICATE-----
       MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
@@ -102,38 +117,10 @@ platformApi:
       -----END CERTIFICATE-----
     key: |
       -----REDACTED-PRIVATE-KEY-----
-
-  auth:
-    oidc:
-      skipTlsVerify: false
-      caBundle:
-        create: true
-        secretName: aegis-platform-api-oidc-ca
-        key: ca.crt
-        fileName: ca.crt
-        mountPath: /etc/aegis-platform-api/oidc
-        data: |
-          -----BEGIN CERTIFICATE-----
-          MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
-          BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTEwWhcNMzAxMDI2
-          MjI1NTEwWjAeMRwwGgYDVQQDDBNBZWdpcyBMb2NhbCBSb290IENBMIIBIjANBgkq
-          hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrYo0p4zwNNZQd7OFeRKZGGtDePhAleu
-          AUBaxstOyy9eJyCOge38xdHnL730+0Imm69sXubek/Np+L3M8wpoQK3NrJU9XL+3
-          A51Pt5gJrZqjzCVU8+bvEj7nHAJwoLDMXcaVtzVR0spc9fp61tbQLiszzoQ6egXJ
-          cculV2njeIN8iaoAgr3Fxzmjra9aaR4IFVq8UwEGztW3mqNvkSVOx6G2nzBBX7eT
-          deJcK3mcvGd6xp3AW0VthF9t1QjvX2BNIrFZraegT9K2sfR+l9bW9LZ1wCjQFuJR
-          CmAS/geYS7hCKHisa/YXFGL0kNSzcpAjHrfZzrgwOeFsrZVLPAudoQIDAQABo2Mw
-          YTAdBgNVHQ4EFgQUTs43RzMxzkN3MLSdEdo3l7xITx8wHwYDVR0jBBgwFoAUTs43
-          RzMxzkN3MLSdEdo3l7xITx8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
-          AYYwDQYJKoZIhvcNAQELBQADggEBAHo96vpGI7os8pYqe/lM7uBSFc40a9SbjFj8
-          M20Zgm1/UL6w3lJsfnQzDmDDtdO7J4kQR8TVuEkbMw039D1yu7Z5P4u7tefxZHwf
-          AkEUFZI0lc8D+iApYQen+VppI9GZcAStVu2MqhAhNyVZK37CHDSlgGxwwL6NsV9g
-          DE+t1TnpH6wbqXU1+FpSVHzKPWgyjq+XMF8EDTSmh5+qBETfHSaX5EGOk1c+6SdR
-          qvbpoMnc963JWRVjqqelLbsU8562E8FE3YJrUJnEBmSl1POv19c/Ev1rPX6HmBzt
-          M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
-          -----END CERTIFICATE-----
   env:
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
+  env:
+    OIDC_ISSUER_URL: "https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443/realms/aegis"
   httpIngress:
     enabled: true
     className: "ingress-nginx"
@@ -219,120 +206,104 @@ proxy:
     key: |
       -----REDACTED-PRIVATE-KEY-----
 
-keycloak:
-  ingress:
-    enabled: false
-  enabled: true
-  forceRender: true
-  createNamespace: false
-  operator:
-    imagePullSecrets:
-      - name: redhat-pull-secret
-  imagePullSecrets:
-    - name: redhat-pull-secret
-  http:
-    httpEnabled: false
-  admin:
-    secret:
-      create: true
-      name: keycloak-admin-secret
-      username: admin
-      password: REDACTED_KEYCLOAK_ADMIN_PASSWORD
-  database:
-    secret:
-      create: true
-      name: keycloak-db-secret
-      username: keycloak
-      password: REDACTED_KEYCLOAK_DB_PASSWORD
-  realm:
-    enabled: true
-    name: aegis
-    displayName: Aegis
-    client:
-      id: backstage
-      name: Backstage
-      redirectUris:
-        - http://localhost:7008/*
-        - https://backstage.localtest.me/*
-      webOrigins:
-        - http://localhost:3000
-        - https://backstage.localtest.me
-      secret:
-        create: true
-        name: keycloak-backstage-client-secret
-        value: local-backstage-client-secret
-        placeholder: BACKSTAGE_CLIENT_SECRET
-    requiredActions:
-      - alias: CONFIGURE_TOTP
-        name: Configure OTP
-        providerId: CONFIGURE_TOTP
-        defaultAction: true
-        enabled: true
-  tls:
-    secret:
-      create: true
-      name: keycloak-tls
-      cert: |
-        -----BEGIN CERTIFICATE-----
-        MIIDTjCCAjagAwIBAgIJAO7PYN9VNKhEMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
-        BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTE1WhcNMjgwMTMw
-        MjI1NTE1WjAgMR4wHAYDVQQDDBVrZXljbG9hay5sb2NhbHRlc3QubWUwggEiMA0G
-        CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDH5BruSvmyhcF1VMe+IlYok1UqgQER
-        OXhKJZ3K65OslhKsGbfsGc6aL8vEZmkkf4G1Zu/Eb1NJ44tYNY+eFePLXkbvB5Wz
-        R/sfhxKeTOQ0QMIS4LkSYsoCf0sougKQ1g99j5oaU09K7USkSMVC5H1/5wB4kjKJ
-        Vx9SzqHUCSKtHT4IB3ed+pFA1VKM7BA6gWuk355SoY7Si09h7mZrQPS4+PnDFCvB
-        GwiziZnef7bqeWzjKEI52Gi/gnQCz5ghTrTvslrlT7Qj81ZnrqtRuwfmgfcqk1FO
-        Ec/gPI25KbjPbSZXTD4GPWO/FP+87Ie6B1b2jp7uMbiZCwwUfvxGCP2PAgMBAAGj
-        gYwwgYkwVAYDVR0RBE0wS4IVa2V5Y2xvYWsubG9jYWx0ZXN0Lm1lgjJhZWdpcy1z
-        ZXJ2aWNlcy1rZXljbG9hay5rZXljbG9hay5zdmMuY2x1c3Rlci5sb2NhbDAOBgNV
-        HQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAN
-        BgkqhkiG9w0BAQsFAAOCAQEAipOLIMIRqwnBXTeSZLGf1rpX5nQZ89ErdESdsQZu
-        WvE3TCpmwp/r6olW1+WHhj6pZJurIWxUQR6sxmvD8gHYd1pbV82czEwdXPe3JzwC
-        Knfd/mfiG7zJ27K25xdWy4gwvG9Vj3VGgXtNVCF6sPxBReX0sb5AYSU4z1aLGF+2
-        vgKGLDrRKWGGjAGp1ITmU6DQnTdU5M/GJiqIgeb06QUFZf2MOMcmglqaUcW+gi2a
-        /pPzVr214M81vRvfjKESBFGLTW5OglEAOGFvnfby0uaPyUv7+jlSTYblFg/i62Nx
-        rbvGzZfvh6CDjYLYO9F9vM9aB4HQwiWs0sEsBljJ0sWclw==
-        -----END CERTIFICATE-----
-        -----BEGIN CERTIFICATE-----
-        MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
-        BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTEwWhcNMzAxMDI2
-        MjI1NTEwWjAeMRwwGgYDVQQDDBNBZWdpcyBMb2NhbCBSb290IENBMIIBIjANBgkq
-        hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrYo0p4zwNNZQd7OFeRKZGGtDePhAleu
-        AUBaxstOyy9eJyCOge38xdHnL730+0Imm69sXubek/Np+L3M8wpoQK3NrJU9XL+3
-        A51Pt5gJrZqjzCVU8+bvEj7nHAJwoLDMXcaVtzVR0spc9fp61tbQLiszzoQ6egXJ
-        cculV2njeIN8iaoAgr3Fxzmjra9aaR4IFVq8UwEGztW3mqNvkSVOx6G2nzBBX7eT
-        deJcK3mcvGd6xp3AW0VthF9t1QjvX2BNIrFZraegT9K2sfR+l9bW9LZ1wCjQFuJR
-        CmAS/geYS7hCKHisa/YXFGL0kNSzcpAjHrfZzrgwOeFsrZVLPAudoQIDAQABo2Mw
-        YTAdBgNVHQ4EFgQUTs43RzMxzkN3MLSdEdo3l7xITx8wHwYDVR0jBBgwFoAUTs43
-        RzMxzkN3MLSdEdo3l7xITx8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
-        AYYwDQYJKoZIhvcNAQELBQADggEBAHo96vpGI7os8pYqe/lM7uBSFc40a9SbjFj8
-        M20Zgm1/UL6w3lJsfnQzDmDDtdO7J4kQR8TVuEkbMw039D1yu7Z5P4u7tefxZHwf
-        AkEUFZI0lc8D+iApYQen+VppI9GZcAStVu2MqhAhNyVZK37CHDSlgGxwwL6NsV9g
-        DE+t1TnpH6wbqXU1+FpSVHzKPWgyjq+XMF8EDTSmh5+qBETfHSaX5EGOk1c+6SdR
-        qvbpoMnc963JWRVjqqelLbsU8562E8FE3YJrUJnEBmSl1POv19c/Ev1rPX6HmBzt
-        M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
-        -----END CERTIFICATE-----
-      key: |
-        -----REDACTED-PRIVATE-KEY-----
-  hostname:
-    hostname: https://keycloak.localtest.me
-    admin: ""
-    adminUrl: https://keycloak.localtest.me
-    strict: false
-  additionalOptions:
-    - name: hostname-admin
-      value: https://keycloak.localtest.me
-    - name: hostname-admin-url
-      value: https://keycloak.localtest.me/
-  ingress:
-    enabled: false
-    className: ingress-nginx
-    annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
-  customIngress:
-    enabled: true
-    className: ingress-nginx
-    annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+     1 keycloak:
+     2   enabled: true
+     3   forceRender: true
+     4   createNamespace: false
+     5   operator:
+     6     imagePullSecrets:
+     7       - name: redhat-pull-secret
+     8   imagePullSecrets:
+     9     - name: redhat-pull-secret
+    10   http:
+    11     httpEnabled: false
+    12   admin:
+    13     secret:
+    14       create: true
+    15       name: keycloak-admin-secret
+    16       username: admin
+    17       password: REDACTED_KEYCLOAK_ADMIN_PASSWORD
+    18   database:
+    19     secret:
+    20       create: true
+    21       name: keycloak-db-secret
+    22       username: keycloak
+    23       password: REDACTED_KEYCLOAK_DB_PASSWORD
+    24   realm:
+    25     enabled: true
+    26     name: aegis
+    27     displayName: Aegis
+    28     client:
+    29       id: backstage
+    30       name: Backstage
+    31       redirectUris:
+    32         - http://localhost:7008/*
+    33         - https://backstage.localtest.me/*
+    34       webOrigins:
+    35         - http://localhost:3000
+    36         - https://backstage.localtest.me
+    37       secret:
+    38         create: true
+    39         name: keycloak-backstage-client-secret
+    40         value: local-backstage-client-secret
+    41         placeholder: BACKSTAGE_CLIENT_SECRET
+    42     requiredActions:
+    43       - alias: CONFIGURE_TOTP
+    44         name: Configure OTP
+    45         providerId: CONFIGURE_TOTP
+    46         defaultAction: true
+    47         enabled: true
+    48   tls:
+    49     secret:
+    50       create: true
+    51       name: keycloak-tls
+    52       cert: |
+    53         -----BEGIN CERTIFICATE-----
+    54         MIIEAjCCAuqgAwIBAgIUO1WzpGe8Wk5Ee+67Cb5Lug2Y+ywwDQYJKoZIhvcNAQEL
+    55         BQAwRTFDMEEGA1UEAww6YWVnaXMtc2VydmljZXMta2V5Y2xvYWstc2VydmljZS5r
+    56         ZXljbG9hay5zdmMuY2x1c3Rlci5sb2NhbDAeFw0yNTExMDMxNzM0MDhaFw0yNjEx
+    57         MDMxNzM0MDhaMEUxQzBBBgNVBAMMOmFlZ2lzLXNlcnZpY2VzLWtleWNsb2FrLXNl
+    58         cnZpY2Uua2V5Y2xvYWsuc3ZjLmNsdXN0ZXIubG9jYWwwggEiMA0GCSqGSIb3DQEB
+    59         AQUAA4IBDwAwggEKAoIBAQDdi+3i4mFHFrY3V1rm5YwmepRvoBLTOPaiWmXG77fn
+    60         gHI1u1US08IqshWeYA/hnHf9j0RfNIZRiZwCsao1JrSzanI1/wU2qrdmogVp8F7B
+    61         nwKzpSO6qKi8usyerKXjEnpn3t7ljuq1lDazfC/2W6LNCtfqA419oy+EUBm30rlI
+    62         Hc+FD71XMtCzNW/XIX8a5xaymieueFPxouWVt//wJDR1CxTXhRrlrntfxeXWsk2a
+    63         d9GI0KwZM5dDWLhc+1RsGeFEuAReIR56OyS4bOgTOR5Mbcr0OpnKOTnL4Lw/ar0/
+    64         VYTHbyGHGIXmeY3ZcwiAh49VmEMYbjzybUdT+zNjguLNAgMBAAGjgekwgeYwHQYD
+    65         VR0OBBYEFDIm2KgPNo8UxBSZ0H0XeoibBn70MB8GA1UdIwQYMBaAFDIm2KgPNo8U
+    66         xBSZ0H0XeoibBn70MA8GA1UdEwEB/wQFMAMBAf8wgZIGA1UdEQSBijCBh4I6YWVn
+    67 
+    68         aXMtc2VydmljZXMta2V5Y2xvYWstc2VydmljZS5rZXljbG9hay5zdmMuY2x1c3Rl
+    69         ci5sb2NhbIIyYWVnaXMtc2VydmljZXMta2V5Y2xvYWsua2V5Y2xvYWsuc3ZjLmNs
+    70         dXN0ZXIubG9jYWyCFWtleWNsb2FrLmxvY2FsdGVzdC5tZTANBgkqhkiG9w0BAQsF
+    71         AAOCAQEAuBLpc0SL5G3EhOIxNb7rY7MFsfvO/6AwobXkMJWqbxLNy6Tq60sMJ+Ew
+    72         6vNT9E5NAKR7ATv/UQmRf9y/WAVlGUpSoC0HPqwUiJc9iD3qxdRHSO7utLI3ESY6
+    73         F1nxtYFqjNzIHjSOs6FwdnzLHtfOY3cDEBB5Sg0eHftRxKIjrD5GJ3QoVsu2BE9i
+    74         lOatUZaLbsbqC/QT2srYykXLWdqG6dGwvK/QkvDbwEAyprmxS4Whi703Qu/QDwrU
+    75         st8Z5D6phTldNj9bBNIlyjWnVQK7N/LAGTRZoM2atj6/QS/blel8uZC3++1at51O
+    76         /KVLoXptcz3qAD+6K33FAu7FNlSCxg==
+    77         -----END CERTIFICATE-----
+    78       key: |
+    79         -----REDACTED-PRIVATE-KEY-----
+   109   hostname:
+   110     hostname: https://keycloak.localtest.me
+   111     admin: ""
+   112     adminUrl: https://keycloak.localtest.me
+   113     strict: false
+   114   additionalOptions:
+   115     - name: hostname-admin
+   116       value: https://keycloak.localtest.me
+   117     - name: hostname-admin-url
+   118       value: https://keycloak.localtest.me/
+   119   ingress:
+   120     enabled: false
+   121     className: ingress-nginx
+   122     annotations:
+   123       nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+   124       nginx.ingress.kubernetes.io/ssl-redirect: "true"
+   125   customIngress:
+   126     enabled: true
+   127     className: ingress-nginx
+   128     annotations:
+   129       nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+   130       nginx.ingress.kubernetes.io/ssl-redirect: "true"

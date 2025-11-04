@@ -666,7 +666,7 @@
       "enabled": true,
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
-      "secret": "${BACKSTAGE_CLIENT_SECRET}",
+      "secret": "**********",
       "redirectUris": [
         "http://localhost:7008/*",
         "https://backstage.localtest.me/*"

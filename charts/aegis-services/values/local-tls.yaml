@@ -134,6 +134,7 @@ platformApi:
           -----END CERTIFICATE-----
   env:
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
   httpIngress:
     enabled: true
     className: "ingress-nginx"

@@ -69,6 +69,7 @@ type TokenClaims struct {
 	jwt.RegisteredClaims
 	Scope             string   `json:"scope"`
 	ClientID          string   `json:"client_id"`
+	AuthorizedParty   string   `json:"azp"`
 	Email             string   `json:"email"`
 	PreferredUsername string   `json:"preferred_username"`
 	AMR               []string `json:"amr"`
@@ -353,6 +354,10 @@ func buildIdentity(claims *TokenClaims) *Identity {
 	if claims == nil {
 		return &Identity{}
 	}
+	clientID := strings.TrimSpace(claims.ClientID)
+	if clientID == "" {
+		clientID = strings.TrimSpace(claims.AuthorizedParty)
+	}
 	aud := make([]string, len(claims.Audience))
 	copy(aud, claims.Audience)
 	rawScope := strings.Fields(strings.TrimSpace(claims.Scope))
@@ -364,7 +369,7 @@ func buildIdentity(claims *TokenClaims) *Identity {
 		Subject:           strings.TrimSpace(claims.Subject),
 		Email:             strings.TrimSpace(claims.Email),
 		PreferredUsername: strings.TrimSpace(claims.PreferredUsername),
-		ClientID:          strings.TrimSpace(claims.ClientID),
+		ClientID:          clientID,
 		Issuer:            strings.TrimSpace(claims.Issuer),
 		Audience:          aud,
 		Scope:             rawScope,

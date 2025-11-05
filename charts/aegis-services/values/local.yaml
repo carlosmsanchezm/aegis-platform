@@ -92,6 +92,7 @@ platformApi:
     OIDC_AUDIENCE: "backstage"
     REQUIRE_PHISHING_RESISTANT_MFA: "false"
     ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [
         {

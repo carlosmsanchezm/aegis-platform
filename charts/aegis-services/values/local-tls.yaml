@@ -15,6 +15,7 @@ ingress-nginx:
       timeoutSeconds: 30
 
 backstage:
+  enabled: false
   caBundle:
     create: true
 
@@ -160,8 +161,11 @@ platformApi:
           M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
           -----END CERTIFICATE-----
   env:
+    AEGIS_PLATFORM_API_ENDPOINT: "platform-api-grpc.localtest.me:443"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    AWS_ACCESS_KEY_ID: "AKIAYIMFEXTHUPYYYHF5"
+    AWS_SECRET_ACCESS_KEY: "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"
   httpIngress:
     enabled: true
     className: "ingress-nginx"

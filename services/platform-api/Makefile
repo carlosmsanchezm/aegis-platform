@@ -38,6 +38,7 @@ docker-build docker-buildx:
 		--platform $(PLATFORMS) \
 		--tag $(IMG) \
 		--push \
+		$(BUILD_ARGS) \
 		-f $(CURDIR)/Dockerfile \
 		$(ROOT)
 

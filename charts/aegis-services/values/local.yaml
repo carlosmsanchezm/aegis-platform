@@ -93,6 +93,13 @@ platformApi:
     REQUIRE_PHISHING_RESISTANT_MFA: "false"
     ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    AEGIS_INFRA_CONTROLLER: "true"
+    AEGIS_INFRA_NAMESPACE: "aegis-system"
+    AEGIS_KUBECONFIG_SECRET_NAME: "aegis-kubeconfigs"
+    AEGIS_KUBECONFIG_SECRET_NAMESPACE: "aegis-system"
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-services-platform-api.aegis-system.svc.cluster.local:8081"
+    AEGIS_PLATFORM_API_CA_FILE: "/etc/aegis-platform-api/tls/tls.crt"
+    AEGIS_PLATFORM_API_GRPC_INSECURE: "false"
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [
         {

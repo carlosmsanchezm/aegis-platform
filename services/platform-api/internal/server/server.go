@@ -251,13 +251,30 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	if err := s.authorize(ctx, p.GetId(), "", "createProject"); err != nil {
 		return nil, err
 	}
+	awsCreds := sanitizeProjectAws(p.GetAws())
+	if awsCreds != nil {
+		if err := validateProjectAwsCredentials(awsCreds); err != nil {
+			errStatus := status.Error(codes.InvalidArgument, err.Error())
+			s.log.Warn("create project rejected; invalid aws credentials",
+				zap.String("project_id", p.GetId()),
+				zap.Error(errStatus),
+			)
+			return nil, errStatus
+		}
+	}
+	p.Aws = awsCreds
+	p.Annotations = mergeProjectAnnotations(p.GetAnnotations(), awsCreds)
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
+	populateProjectAwsFromAnnotations(p)
 	return p, nil
 }
 
 func (s *Server) ListProjects(ctx context.Context, _ *aegis.ListProjectsRequest) (*aegis.ListProjectsResponse, error) {
 	projects := s.store.ListProjects()
+	for _, project := range projects {
+		populateProjectAwsFromAnnotations(project)
+	}
 	return &aegis.ListProjectsResponse{Items: projects}, nil
 }
 
@@ -2065,7 +2082,16 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "profile %q not registered", profileReq.GetId())
 	}
-	infra, err := s.buildProjectInfra(req, tmpl)
+	project := s.store.GetProject(projectID)
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
+	}
+	populateProjectAwsFromAnnotations(project)
+	creds := resolveProjectCredentials(project)
+	if err := creds.validate(); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "project %q missing AWS credentials: %v", projectID, err)
+	}
+	infra, err := s.buildProjectInfra(req, tmpl, project, creds)
 	if err != nil {
 		return nil, err
 	}

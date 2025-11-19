@@ -9,8 +9,28 @@
 
 k8sAgent:
   env:
-    # Connect to platform-api with TLS (self-signed, skip verification)
+    # Connect to platform-api with TLS (self-signed chain, trust provided CA)
     AEGIS_CP_GRPC_INSECURE: "false"
-    AEGIS_CP_GRPC_SKIP_VERIFY: "true"
+    AEGIS_CP_GRPC_SKIP_VERIFY: "false"
+    AEGIS_PLATFORM_CA_PEM: |-
+      -----BEGIN CERTIFICATE-----
+      MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
+      BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTEwWhcNMzAxMDI2
+      MjI1NTEwWjAeMRwwGgYDVQQDDBNBZWdpcyBMb2NhbCBSb290IENBMIIBIjANBgkq
+      hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrYo0p4zwNNZQd7OFeRKZGGtDePhAleu
+      AUBaxstOyy9eJyCOge38xdHnL730+0Imm69sXubek/Np+L3M8wpoQK3NrJU9XL+3
+      A51Pt5gJrZqjzCVU8+bvEj7nHAJwoLDMXcaVtzVR0spc9fp61tbQLiszzoQ6egXJ
+      cculV2njeIN8iaoAgr3Fxzmjra9aaR4IFVq8UwEGztW3mqNvkSVOx6G2nzBBX7eT
+      deJcK3mcvGd6xp3AW0VthF9t1QjvX2BNIrFZraegT9K2sfR+l9bW9LZ1wCjQFuJR
+      CmAS/geYS7hCKHisa/YXFGL0kNSzcpAjHrfZzrgwOeFsrZVLPAudoQIDAQABo2Mw
+      YTAdBgNVHQ4EFgQUTs43RzMxzkN3MLSdEdo3l7xITx8wHwYDVR0jBBgwFoAUTs43
+      RzMxzkN3MLSdEdo3l7xITx8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+      AYYwDQYJKoZIhvcNAQELBQADggEBAHo96vpGI7os8pYqe/lM7uBSFc40a9SbjFj8
+      M20Zgm1/UL6w3lJsfnQzDmDDtdO7J4kQR8TVuEkbMw039D1yu7Z5P4u7tefxZHwf
+      AkEUFZI0lc8D+iApYQen+VppI9GZcAStVu2MqhAhNyVZK37CHDSlgGxwwL6NsV9g
+      DE+t1TnpH6wbqXU1+FpSVHzKPWgyjq+XMF8EDTSmh5+qBETfHSaX5EGOk1c+6SdR
+      qvbpoMnc963JWRVjqqelLbsU8562E8FE3YJrUJnEBmSl1POv19c/Ev1rPX6HmBzt
+      M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
+      -----END CERTIFICATE-----
     AEGIS_PROXY_INGRESS_HOST: "proxy.localtest.me"
     AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"

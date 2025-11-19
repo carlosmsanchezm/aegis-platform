@@ -3,9 +3,13 @@ package cpclient
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,16 +27,14 @@ type Client struct {
 func New(endpoint string) (*Client, error) {
 	var opts []grpc.DialOption
 
-	// Check if TLS should be used (default: insecure for backward compatibility)
-	if os.Getenv("AEGIS_CP_GRPC_INSECURE") != "false" {
-		// Use insecure connection (default for in-cluster communication)
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		// Use TLS with system cert pool and skip verification for self-signed certs
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true, // For self-signed certificates
+	if enableTLS() {
+		creds, err := buildTLSCredentials(endpoint)
+		if err != nil {
+			return nil, err
 		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+		opts = append(opts, grpc.WithTransportCredentials(creds))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
 	conn, err := grpc.Dial(endpoint, opts...)
@@ -40,6 +42,82 @@ func New(endpoint string) (*Client, error) {
 		return nil, err
 	}
 	return &Client{api: aegis.NewAegisPlatformClient(conn)}, nil
+}
+
+func enableTLS() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("AEGIS_CP_GRPC_INSECURE")), "false")
+}
+
+func buildTLSCredentials(endpoint string) (credentials.TransportCredentials, error) {
+	tlsConfig := &tls.Config{}
+
+	if skip := parseEnvBool("AEGIS_CP_GRPC_SKIP_VERIFY", false); skip {
+		tlsConfig.InsecureSkipVerify = true
+	} else {
+		caPool, err := loadCustomCAPool()
+		if err != nil {
+			return nil, fmt.Errorf("load control-plane CA: %w", err)
+		}
+		if caPool != nil {
+			tlsConfig.RootCAs = caPool
+		}
+	}
+
+	if serverName := strings.TrimSpace(os.Getenv("AEGIS_CP_GRPC_SERVER_NAME")); serverName != "" {
+		tlsConfig.ServerName = serverName
+	} else if host, _, err := net.SplitHostPort(endpoint); err == nil && host != "" {
+		tlsConfig.ServerName = host
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
+}
+
+func loadCustomCAPool() (*x509.CertPool, error) {
+	pemData, err := resolveCAPEM()
+	if err != nil {
+		return nil, err
+	}
+	if len(pemData) == 0 {
+		return nil, nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemData) {
+		return nil, fmt.Errorf("unable to parse CA PEM data")
+	}
+	return pool, nil
+}
+
+func resolveCAPEM() ([]byte, error) {
+	if b64 := strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_B64")); b64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("decode AEGIS_PLATFORM_CA_B64: %w", err)
+		}
+		return decoded, nil
+	}
+	if pem := strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_PEM")); pem != "" {
+		return []byte(pem), nil
+	}
+	if path := strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_FILE")); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read AEGIS_PLATFORM_CA_FILE: %w", err)
+		}
+		return data, nil
+	}
+	return nil, nil
+}
+
+func parseEnvBool(key string, def bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	val, err := strconv.ParseBool(raw)
+	if err != nil {
+		return def
+	}
+	return val
 }
 
 func (c *Client) Register(ctx context.Context, req *aegis.ClusterRegisterRequest) error {

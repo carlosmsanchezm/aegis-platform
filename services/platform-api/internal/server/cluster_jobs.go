@@ -22,7 +22,7 @@ const (
 	maxObjectNameLength   = 63
 )
 
-func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *clusterProfileTemplate) (*infraapi.ProjectInfra, error) {
+func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *clusterProfileTemplate, project *aegis.Project, creds projectAWSCredentials) (*infraapi.ProjectInfra, error) {
 	profileReq := req.GetProfile()
 	if profileReq == nil {
 		return nil, status.Error(codes.InvalidArgument, "cluster profile required")
@@ -32,6 +32,9 @@ func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *cluste
 		return nil, status.Error(codes.Internal, "profile template missing aws spec")
 	}
 	projectID := strings.TrimSpace(req.GetProjectId())
+	if project != nil && strings.TrimSpace(project.GetId()) != "" {
+		projectID = strings.TrimSpace(project.GetId())
+	}
 	region := strings.TrimSpace(req.GetRegion())
 	infraName := buildInfraObjectName(projectID, req.GetClusterId())
 	labels := map[string]string{
@@ -51,7 +54,13 @@ func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *cluste
 			annotations["aegis.yourorg.dev/profileParameters"] = string(payload)
 		}
 	}
+	if creds.AccountID != "" {
+		annotations[annotationAWSAccountID] = creds.AccountID
+	}
 	awsSpec.ClusterName = sanitizeClusterName(req.GetClusterId())
+	awsSpec.AccountID = creds.AccountID
+	awsSpec.RoleARN = creds.RoleARN
+	awsSpec.ExternalID = creds.ExternalID
 	infra := &infraapi.ProjectInfra{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: infraapi.GroupVersion.String(),

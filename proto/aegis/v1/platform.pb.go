@@ -30,6 +30,7 @@ type Project struct {
 	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	OwnerGroup    string                 `protobuf:"bytes,3,opt,name=owner_group,json=ownerGroup,proto3" json:"owner_group,omitempty"`
 	Policy        *PolicyDomain          `protobuf:"bytes,4,opt,name=policy,proto3" json:"policy,omitempty"`
+	Annotations   map[string]string      `protobuf:"bytes,5,rep,name=annotations,proto3" json:"annotations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -88,6 +89,13 @@ func (x *Project) GetOwnerGroup() string {
 func (x *Project) GetPolicy() *PolicyDomain {
 	if x != nil {
 		return x.Policy
+	}
+	return nil
+}
+
+func (x *Project) GetAnnotations() map[string]string {
+	if x != nil {
+		return x.Annotations
 	}
 	return nil
 }
@@ -2530,19 +2538,80 @@ func (x *CreateWorkspaceResponse) GetWorkload() *Workload {
 	return nil
 }
 
-type CreateClusterRequest struct {
+type ClusterProfileReference struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	ClusterId     string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Region        string                 `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Parameters    map[string]string      `protobuf:"bytes,3,rep,name=parameters,proto3" json:"parameters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClusterProfileReference) Reset() {
+	*x = ClusterProfileReference{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClusterProfileReference) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClusterProfileReference) ProtoMessage() {}
+
+func (x *ClusterProfileReference) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClusterProfileReference.ProtoReflect.Descriptor instead.
+func (*ClusterProfileReference) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ClusterProfileReference) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ClusterProfileReference) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ClusterProfileReference) GetParameters() map[string]string {
+	if x != nil {
+		return x.Parameters
+	}
+	return nil
+}
+
+type CreateClusterRequest struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	ProjectId     string                   `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ClusterId     string                   `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Provider      string                   `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Region        string                   `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	Profile       *ClusterProfileReference `protobuf:"bytes,5,opt,name=profile,proto3" json:"profile,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateClusterRequest) Reset() {
 	*x = CreateClusterRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	mi := &file_aegis_v1_platform_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2554,7 +2623,7 @@ func (x *CreateClusterRequest) String() string {
 func (*CreateClusterRequest) ProtoMessage() {}
 
 func (x *CreateClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	mi := &file_aegis_v1_platform_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2567,7 +2636,7 @@ func (x *CreateClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateClusterRequest.ProtoReflect.Descriptor instead.
 func (*CreateClusterRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{41}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CreateClusterRequest) GetProjectId() string {
@@ -2598,6 +2667,13 @@ func (x *CreateClusterRequest) GetRegion() string {
 	return ""
 }
 
+func (x *CreateClusterRequest) GetProfile() *ClusterProfileReference {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
 type CreateClusterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Job           *Job                   `protobuf:"bytes,1,opt,name=job,proto3" json:"job,omitempty"`
@@ -2607,7 +2683,7 @@ type CreateClusterResponse struct {
 
 func (x *CreateClusterResponse) Reset() {
 	*x = CreateClusterResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[42]
+	mi := &file_aegis_v1_platform_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2619,7 +2695,7 @@ func (x *CreateClusterResponse) String() string {
 func (*CreateClusterResponse) ProtoMessage() {}
 
 func (x *CreateClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[42]
+	mi := &file_aegis_v1_platform_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2632,7 +2708,7 @@ func (x *CreateClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateClusterResponse.ProtoReflect.Descriptor instead.
 func (*CreateClusterResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{42}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CreateClusterResponse) GetJob() *Job {
@@ -2651,7 +2727,7 @@ type GetClusterJobStatusRequest struct {
 
 func (x *GetClusterJobStatusRequest) Reset() {
 	*x = GetClusterJobStatusRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[43]
+	mi := &file_aegis_v1_platform_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2663,7 +2739,7 @@ func (x *GetClusterJobStatusRequest) String() string {
 func (*GetClusterJobStatusRequest) ProtoMessage() {}
 
 func (x *GetClusterJobStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[43]
+	mi := &file_aegis_v1_platform_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2676,7 +2752,7 @@ func (x *GetClusterJobStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterJobStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterJobStatusRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{43}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetClusterJobStatusRequest) GetJobId() string {
@@ -2695,7 +2771,7 @@ type GetClusterJobStatusResponse struct {
 
 func (x *GetClusterJobStatusResponse) Reset() {
 	*x = GetClusterJobStatusResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[44]
+	mi := &file_aegis_v1_platform_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2707,7 +2783,7 @@ func (x *GetClusterJobStatusResponse) String() string {
 func (*GetClusterJobStatusResponse) ProtoMessage() {}
 
 func (x *GetClusterJobStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[44]
+	mi := &file_aegis_v1_platform_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2720,7 +2796,7 @@ func (x *GetClusterJobStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterJobStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterJobStatusResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{44}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetClusterJobStatusResponse) GetJob() *Job {
@@ -2742,7 +2818,7 @@ type Job struct {
 
 func (x *Job) Reset() {
 	*x = Job{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[45]
+	mi := &file_aegis_v1_platform_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2754,7 +2830,7 @@ func (x *Job) String() string {
 func (*Job) ProtoMessage() {}
 
 func (x *Job) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[45]
+	mi := &file_aegis_v1_platform_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2767,7 +2843,7 @@ func (x *Job) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Job.ProtoReflect.Descriptor instead.
 func (*Job) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{45}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *Job) GetId() string {
@@ -2798,17 +2874,101 @@ func (x *Job) GetError() string {
 	return ""
 }
 
+type ListProjectsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProjectsRequest) Reset() {
+	*x = ListProjectsRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProjectsRequest) ProtoMessage() {}
+
+func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProjectsRequest.ProtoReflect.Descriptor instead.
+func (*ListProjectsRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{47}
+}
+
+type ListProjectsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*Project             `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProjectsResponse) Reset() {
+	*x = ListProjectsResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProjectsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProjectsResponse) ProtoMessage() {}
+
+func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProjectsResponse.ProtoReflect.Descriptor instead.
+func (*ListProjectsResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ListProjectsResponse) GetItems() []*Project {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 var File_aegis_v1_platform_proto protoreflect.FileDescriptor
 
 const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\n" +
-	"\x17aegis/v1/platform.proto\x12\baegis.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\"\x8d\x01\n" +
+	"\x17aegis/v1/platform.proto\x12\baegis.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\"\x93\x02\n" +
 	"\aProject\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x1f\n" +
 	"\vowner_group\x18\x03 \x01(\tR\n" +
 	"ownerGroup\x12.\n" +
-	"\x06policy\x18\x04 \x01(\v2\x16.aegis.v1.PolicyDomainR\x06policy\"|\n" +
+	"\x06policy\x18\x04 \x01(\v2\x16.aegis.v1.PolicyDomainR\x06policy\x12D\n" +
+	"\vannotations\x18\x05 \x03(\v2\".aegis.v1.Project.AnnotationsEntryR\vannotations\x1a>\n" +
+	"\x10AnnotationsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"|\n" +
 	"\fPolicyDomain\x12\x18\n" +
 	"\aregions\x18\x01 \x03(\tR\aregions\x12\x1d\n" +
 	"\n" +
@@ -3000,14 +3160,24 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05queue\x18\x03 \x01(\tR\x05queue\x125\n" +
 	"\tworkspace\x18\x04 \x01(\v2\x17.aegis.v1.WorkspaceSpecR\tworkspace\"I\n" +
 	"\x17CreateWorkspaceResponse\x12.\n" +
-	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload\"\x88\x01\n" +
+	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload\"\xd5\x01\n" +
+	"\x17ClusterProfileReference\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12Q\n" +
+	"\n" +
+	"parameters\x18\x03 \x03(\v21.aegis.v1.ClusterProfileReference.ParametersEntryR\n" +
+	"parameters\x1a=\n" +
+	"\x0fParametersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc5\x01\n" +
 	"\x14CreateClusterRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tR\tclusterId\x12\x1a\n" +
 	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x16\n" +
-	"\x06region\x18\x04 \x01(\tR\x06region\"8\n" +
+	"\x06region\x18\x04 \x01(\tR\x06region\x12;\n" +
+	"\aprofile\x18\x05 \x01(\v2!.aegis.v1.ClusterProfileReferenceR\aprofile\"8\n" +
 	"\x15CreateClusterResponse\x12\x1f\n" +
 	"\x03job\x18\x01 \x01(\v2\r.aegis.v1.JobR\x03job\"3\n" +
 	"\x1aGetClusterJobStatusRequest\x12\x15\n" +
@@ -3018,9 +3188,13 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1a\n" +
 	"\bprogress\x18\x03 \x01(\x05R\bprogress\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error2\xa1\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x15\n" +
+	"\x13ListProjectsRequest\"?\n" +
+	"\x14ListProjectsResponse\x12'\n" +
+	"\x05items\x18\x01 \x03(\v2\x11.aegis.v1.ProjectR\x05items2\x8a\x15\n" +
 	"\rAegisPlatform\x12_\n" +
-	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/api/v1/projects\x12x\n" +
+	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/api/v1/projects\x12g\n" +
+	"\fListProjects\x12\x1d.aegis.v1.ListProjectsRequest\x1a\x1e.aegis.v1.ListProjectsResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/projects\x12x\n" +
 	"\fUpsertBudget\x12\x1d.aegis.v1.UpsertBudgetRequest\x1a\x10.aegis.v1.Budget\"7\x82\xd3\xe4\x93\x021:\x01*\x1a,/api/v1/projects/{budget.project_id}/budgets\x12s\n" +
 	"\tGetBudget\x12\x1a.aegis.v1.GetBudgetRequest\x1a\x1b.aegis.v1.GetBudgetResponse\"-\x82\xd3\xe4\x93\x02'\x12%/api/v1/projects/{project_id}/budgets\x12~\n" +
 	"\vListBudgets\x12\x1c.aegis.v1.ListBudgetsRequest\x1a\x1d.aegis.v1.ListBudgetsResponse\"2\x82\xd3\xe4\x93\x02,\x12*/api/v1/projects/{project_id}/budgets/list\x12[\n" +
@@ -3055,7 +3229,7 @@ func file_aegis_v1_platform_proto_rawDescGZIP() []byte {
 	return file_aegis_v1_platform_proto_rawDescData
 }
 
-var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Project)(nil),       // 0: aegis.v1.Project
 	(*PolicyDomain)(nil),  // 1: aegis.v1.PolicyDomain
@@ -3098,88 +3272,99 @@ var file_aegis_v1_platform_proto_goTypes = []any{
 	(*ListBudgetsResponse)(nil),                   // 38: aegis.v1.ListBudgetsResponse
 	(*CreateWorkspaceRequest)(nil),                // 39: aegis.v1.CreateWorkspaceRequest
 	(*CreateWorkspaceResponse)(nil),               // 40: aegis.v1.CreateWorkspaceResponse
-	(*CreateClusterRequest)(nil),                  // 41: aegis.v1.CreateClusterRequest
-	(*CreateClusterResponse)(nil),                 // 42: aegis.v1.CreateClusterResponse
-	(*GetClusterJobStatusRequest)(nil),            // 43: aegis.v1.GetClusterJobStatusRequest
-	(*GetClusterJobStatusResponse)(nil),           // 44: aegis.v1.GetClusterJobStatusResponse
-	(*Job)(nil),                                   // 45: aegis.v1.Job
-	nil,                                           // 46: aegis.v1.WorkspaceSpec.EnvEntry
-	nil,                                           // 47: aegis.v1.ClusterRegisterRequest.LabelsEntry
-	(*emptypb.Empty)(nil),                         // 48: google.protobuf.Empty
+	(*ClusterProfileReference)(nil),               // 41: aegis.v1.ClusterProfileReference
+	(*CreateClusterRequest)(nil),                  // 42: aegis.v1.CreateClusterRequest
+	(*CreateClusterResponse)(nil),                 // 43: aegis.v1.CreateClusterResponse
+	(*GetClusterJobStatusRequest)(nil),            // 44: aegis.v1.GetClusterJobStatusRequest
+	(*GetClusterJobStatusResponse)(nil),           // 45: aegis.v1.GetClusterJobStatusResponse
+	(*Job)(nil),                                   // 46: aegis.v1.Job
+	(*ListProjectsRequest)(nil),                   // 47: aegis.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil),                  // 48: aegis.v1.ListProjectsResponse
+	nil,                                           // 49: aegis.v1.Project.AnnotationsEntry
+	nil,                                           // 50: aegis.v1.WorkspaceSpec.EnvEntry
+	nil,                                           // 51: aegis.v1.ClusterRegisterRequest.LabelsEntry
+	nil,                                           // 52: aegis.v1.ClusterProfileReference.ParametersEntry
+	(*emptypb.Empty)(nil),                         // 53: google.protobuf.Empty
 }
 var file_aegis_v1_platform_proto_depIdxs = []int32{
 	1,  // 0: aegis.v1.Project.policy:type_name -> aegis.v1.PolicyDomain
-	46, // 1: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
-	5,  // 2: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
-	6,  // 3: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
-	7,  // 4: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
-	47, // 5: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
-	3,  // 6: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
-	0,  // 7: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
-	2,  // 8: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
-	3,  // 9: aegis.v1.UpsertFlavorRequest.flavor:type_name -> aegis.v1.Flavor
-	4,  // 10: aegis.v1.UpsertQueueRequest.queue:type_name -> aegis.v1.Queue
-	8,  // 11: aegis.v1.SubmitWorkloadRequest.workload:type_name -> aegis.v1.Workload
-	8,  // 12: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
-	8,  // 13: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
-	8,  // 14: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
-	8,  // 15: aegis.v1.StartWorkloadResponse.workload:type_name -> aegis.v1.Workload
-	2,  // 16: aegis.v1.GetBudgetResponse.budget:type_name -> aegis.v1.Budget
-	34, // 17: aegis.v1.GetBudgetResponse.usage:type_name -> aegis.v1.BudgetUsage
-	2,  // 18: aegis.v1.BudgetWithUsage.budget:type_name -> aegis.v1.Budget
-	34, // 19: aegis.v1.BudgetWithUsage.usage:type_name -> aegis.v1.BudgetUsage
-	37, // 20: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
-	5,  // 21: aegis.v1.CreateWorkspaceRequest.workspace:type_name -> aegis.v1.WorkspaceSpec
-	8,  // 22: aegis.v1.CreateWorkspaceResponse.workload:type_name -> aegis.v1.Workload
-	45, // 23: aegis.v1.CreateClusterResponse.job:type_name -> aegis.v1.Job
-	45, // 24: aegis.v1.GetClusterJobStatusResponse.job:type_name -> aegis.v1.Job
-	19, // 25: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
-	20, // 26: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
-	33, // 27: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
-	36, // 28: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
-	21, // 29: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
-	22, // 30: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
-	23, // 31: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
-	24, // 32: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
-	25, // 33: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
-	39, // 34: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
-	41, // 35: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
-	43, // 36: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
-	9,  // 37: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
-	11, // 38: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
-	13, // 39: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
-	14, // 40: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
-	27, // 41: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
-	31, // 42: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
-	29, // 43: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
-	15, // 44: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
-	17, // 45: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
-	0,  // 46: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
-	2,  // 47: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
-	35, // 48: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
-	38, // 49: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
-	3,  // 50: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
-	4,  // 51: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
-	8,  // 52: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
-	8,  // 53: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
-	26, // 54: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
-	40, // 55: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
-	42, // 56: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
-	44, // 57: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
-	10, // 58: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
-	12, // 59: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
-	12, // 60: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
-	48, // 61: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
-	28, // 62: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
-	32, // 63: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
-	30, // 64: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
-	16, // 65: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
-	18, // 66: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
-	46, // [46:67] is the sub-list for method output_type
-	25, // [25:46] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	49, // 1: aegis.v1.Project.annotations:type_name -> aegis.v1.Project.AnnotationsEntry
+	50, // 2: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
+	5,  // 3: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
+	6,  // 4: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
+	7,  // 5: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
+	51, // 6: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
+	3,  // 7: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
+	0,  // 8: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
+	2,  // 9: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
+	3,  // 10: aegis.v1.UpsertFlavorRequest.flavor:type_name -> aegis.v1.Flavor
+	4,  // 11: aegis.v1.UpsertQueueRequest.queue:type_name -> aegis.v1.Queue
+	8,  // 12: aegis.v1.SubmitWorkloadRequest.workload:type_name -> aegis.v1.Workload
+	8,  // 13: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
+	8,  // 14: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
+	8,  // 15: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	8,  // 16: aegis.v1.StartWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	2,  // 17: aegis.v1.GetBudgetResponse.budget:type_name -> aegis.v1.Budget
+	34, // 18: aegis.v1.GetBudgetResponse.usage:type_name -> aegis.v1.BudgetUsage
+	2,  // 19: aegis.v1.BudgetWithUsage.budget:type_name -> aegis.v1.Budget
+	34, // 20: aegis.v1.BudgetWithUsage.usage:type_name -> aegis.v1.BudgetUsage
+	37, // 21: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
+	5,  // 22: aegis.v1.CreateWorkspaceRequest.workspace:type_name -> aegis.v1.WorkspaceSpec
+	8,  // 23: aegis.v1.CreateWorkspaceResponse.workload:type_name -> aegis.v1.Workload
+	52, // 24: aegis.v1.ClusterProfileReference.parameters:type_name -> aegis.v1.ClusterProfileReference.ParametersEntry
+	41, // 25: aegis.v1.CreateClusterRequest.profile:type_name -> aegis.v1.ClusterProfileReference
+	46, // 26: aegis.v1.CreateClusterResponse.job:type_name -> aegis.v1.Job
+	46, // 27: aegis.v1.GetClusterJobStatusResponse.job:type_name -> aegis.v1.Job
+	0,  // 28: aegis.v1.ListProjectsResponse.items:type_name -> aegis.v1.Project
+	19, // 29: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
+	47, // 30: aegis.v1.AegisPlatform.ListProjects:input_type -> aegis.v1.ListProjectsRequest
+	20, // 31: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
+	33, // 32: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
+	36, // 33: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
+	21, // 34: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
+	22, // 35: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
+	23, // 36: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
+	24, // 37: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
+	25, // 38: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
+	39, // 39: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
+	42, // 40: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
+	44, // 41: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
+	9,  // 42: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
+	11, // 43: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
+	13, // 44: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
+	14, // 45: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
+	27, // 46: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
+	31, // 47: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
+	29, // 48: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
+	15, // 49: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
+	17, // 50: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
+	0,  // 51: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
+	48, // 52: aegis.v1.AegisPlatform.ListProjects:output_type -> aegis.v1.ListProjectsResponse
+	2,  // 53: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
+	35, // 54: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
+	38, // 55: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
+	3,  // 56: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
+	4,  // 57: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
+	8,  // 58: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
+	8,  // 59: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
+	26, // 60: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
+	40, // 61: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
+	43, // 62: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
+	45, // 63: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
+	10, // 64: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
+	12, // 65: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
+	12, // 66: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
+	53, // 67: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
+	28, // 68: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
+	32, // 69: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
+	30, // 70: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
+	16, // 71: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
+	18, // 72: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
+	51, // [51:73] is the sub-list for method output_type
+	29, // [29:51] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_aegis_v1_platform_proto_init() }
@@ -3197,7 +3382,7 @@ func file_aegis_v1_platform_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aegis_v1_platform_proto_rawDesc), len(file_aegis_v1_platform_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   48,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

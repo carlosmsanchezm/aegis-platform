@@ -6,7 +6,13 @@ import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 
 // ---- Core resource messages ----
-message Project { string id = 1; string display_name = 2; string owner_group = 3; PolicyDomain policy = 4; }
+message Project {
+  string id = 1;
+  string display_name = 2;
+  string owner_group = 3;
+  PolicyDomain policy = 4;
+  map<string, string> annotations = 5;
+}
 message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
 
 message Budget {
@@ -177,11 +183,18 @@ message CreateWorkspaceResponse {
   Workload workload = 1;
 }
 
+message ClusterProfileReference {
+  string id = 1;
+  string version = 2;
+  map<string, string> parameters = 3;
+}
+
 message CreateClusterRequest {
   string project_id = 1;
   string cluster_id = 2;
   string provider = 3;
   string region = 4;
+  ClusterProfileReference profile = 5;
 }
 
 message CreateClusterResponse {
@@ -203,12 +216,23 @@ message Job {
   string error = 4;
 }
 
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project items = 1;
+}
+
 // Service
 service AegisPlatform {
   rpc CreateProject(CreateProjectRequest) returns (Project) {
     option (google.api.http) = {
       post: "/api/v1/projects"
       body: "*"
+    };
+  }
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects"
     };
   }
   rpc UpsertBudget(UpsertBudgetRequest) returns (Budget) {

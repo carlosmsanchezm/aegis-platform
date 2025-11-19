@@ -60,8 +60,8 @@ platformApi:
 
   image:
     repository: carlosmsanchez/aegis-platform-api
-    tag: "8afb9e0-vscode-dynamic"
-    pullPolicy: IfNotPresent  # Always pull to get latest :dev tag
+    tag: "dev"
+    pullPolicy: Always  # Always pull to get latest :dev tag
 
   service:
     type: ClusterIP

@@ -186,8 +186,17 @@ ifeq ($(PUSH_LATEST),1)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
 endif
 
+.PHONY: clean-webhook
+clean-webhook:
+	@echo "Checking ingress-nginx admission webhook health..."
+	@if kubectl get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then \
+		echo "Cleaning up potentially stale webhook configuration..."; \
+		kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found >/dev/null 2>&1 || true; \
+		sleep 2; \
+	fi
+
 .PHONY: deploy-local
-deploy-local: setup-local
+deploy-local: setup-local clean-webhook
 	@ \
 	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
 	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
@@ -230,7 +239,7 @@ deploy-local: setup-local
 		echo "   Proxy: http://proxy.localtest.me"
 
 .PHONY: deploy-local-tls
-deploy-local-tls: setup-local
+deploy-local-tls: setup-local clean-webhook
 	@ \
 	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
 	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
@@ -356,14 +365,23 @@ sync-certs:
 
 port-forward:
 	@echo "Stopping any existing port-forwards..."
-	@while pgrep -f "kubectl port-forward .*aegis-system" >/dev/null; do \
-		pkill -f "kubectl port-forward .*aegis-system" || true; \
+	@while pgrep -f "kubectl port-forward .*(aegis-system|keycloak)" >/dev/null; do \
+		pkill -f "kubectl port-forward .*(aegis-system|keycloak)" || true; \
 		sleep 1; \
 	done
 	@echo "Setting up port-forwarding..."
 	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 &
 	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 &
-	@echo "Port-forwarding started. Platform API on $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT), proxy on $(PF_PROXY_HTTP_PORT). Use 'pkill -f \"kubectl port-forward\"' to stop."
+	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 443:8443 &
+	@echo "Port-forwarding started:"
+	@echo "  Platform API: $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT)"
+	@echo "  Proxy: $(PF_PROXY_HTTP_PORT)"
+	@echo "  Keycloak: 443 (HTTPS)"
+	@echo ""
+	@echo "Note: Port 443 requires sudo. If permission denied, run manually:"
+	@echo "  sudo kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 443:8443"
+	@echo ""
+	@echo "Use 'pkill -f \"kubectl port-forward\"' to stop all port-forwards."
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
@@ -389,5 +407,7 @@ clean-local:
 			echo "Skipping $$release (not installed)"; \
 		fi; \
 	done
+	@echo "Cleaning up ingress-nginx admission webhook..."
+	@kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl delete namespace keycloak --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true

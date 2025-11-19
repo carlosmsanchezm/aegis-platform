@@ -29,7 +29,7 @@ func newTestServer(t *testing.T) *Server {
 	logger := zap.NewNop()
 	st := store.NewMemStore()
 
-	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay())
+	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay(), nil, "")
 	return srv
 }
 

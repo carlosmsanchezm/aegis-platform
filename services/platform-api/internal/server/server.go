@@ -60,6 +60,9 @@ type Server struct {
 	workspaceEnvDefaults map[string]string
 	autoBootstrap        bool
 	authzPolicy          *authz.Policy
+	infraClient          client.Client
+	infraNamespace       string
+	clusterProfiles      map[string]*clusterProfileTemplate
 }
 
 type proxyClaims struct {
@@ -139,7 +142,7 @@ var (
 	)
 )
 
-func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay) *Server {
+func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay, infraClient client.Client, infraNamespace string) *Server {
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -185,6 +188,13 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		}
 		panic(fmt.Errorf("failed to load authorization policy: %w", err))
 	}
+	if strings.TrimSpace(infraNamespace) == "" {
+		infraNamespace = defaultInfraNamespace
+	}
+	profiles := defaultClusterProfiles()
+	if profiles == nil {
+		profiles = map[string]*clusterProfileTemplate{}
+	}
 	return &Server{
 		log:                  log,
 		store:                st,
@@ -198,6 +208,9 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		workspaceEnvDefaults: defaults,
 		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
 		authzPolicy:          policy,
+		infraClient:          infraClient,
+		infraNamespace:       infraNamespace,
+		clusterProfiles:      profiles,
 	}
 }
 
@@ -241,6 +254,11 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
 	return p, nil
+}
+
+func (s *Server) ListProjects(ctx context.Context, _ *aegis.ListProjectsRequest) (*aegis.ListProjectsResponse, error) {
+	projects := s.store.ListProjects()
+	return &aegis.ListProjectsResponse{Items: projects}, nil
 }
 
 func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetRequest) (*aegis.Budget, error) {
@@ -2016,25 +2034,71 @@ func (s *Server) CreateWorkspace(ctx context.Context, req *aegis.CreateWorkspace
 }
 
 func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequest) (*aegis.CreateClusterResponse, error) {
-	// TODO: Implement async job logic
-	return &aegis.CreateClusterResponse{
-		Job: &aegis.Job{
-			Id:       "job-123",
-			Status:   "PENDING",
-			Progress: 0,
-		},
-	}, nil
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	if s.infraClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster provisioning is not configured")
+	}
+	projectID := strings.TrimSpace(req.GetProjectId())
+	clusterID := strings.TrimSpace(req.GetClusterId())
+	region := strings.TrimSpace(req.GetRegion())
+	provider := canonicalProvider(req.GetProvider())
+	if projectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id is required")
+	}
+	if clusterID == "" {
+		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
+	}
+	if region == "" {
+		return nil, status.Error(codes.InvalidArgument, "region is required")
+	}
+	if provider != "aws" {
+		return nil, status.Errorf(codes.InvalidArgument, "provider %q not supported", provider)
+	}
+	profileReq := req.GetProfile()
+	if profileReq == nil || strings.TrimSpace(profileReq.GetId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "profile.id is required")
+	}
+	profileID := strings.ToLower(strings.TrimSpace(profileReq.GetId()))
+	tmpl, ok := s.clusterProfiles[profileID]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "profile %q not registered", profileReq.GetId())
+	}
+	infra, err := s.buildProjectInfra(req, tmpl)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.infraClient.Create(ctx, infra); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+		}
+		return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
+	}
+	s.log.Info("cluster provisioning job created",
+		zap.String("project", projectID),
+		zap.String("cluster", clusterID),
+		zap.String("profile", tmpl.ID),
+		zap.String("job", infra.Name),
+	)
+	return &aegis.CreateClusterResponse{Job: jobFromInfra(infra, infra.Name)}, nil
 }
 
 func (s *Server) GetClusterJobStatus(ctx context.Context, req *aegis.GetClusterJobStatusRequest) (*aegis.GetClusterJobStatusResponse, error) {
-	// TODO: Implement async job logic
-	return &aegis.GetClusterJobStatusResponse{
-		Job: &aegis.Job{
-			Id:       req.JobId,
-			Status:   "COMPLETED",
-			Progress: 100,
-		},
-	}, nil
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	if s.infraClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster provisioning is not configured")
+	}
+	infra, err := s.fetchInfra(ctx, strings.TrimSpace(req.GetJobId()))
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, status.Errorf(codes.NotFound, "cluster job %q not found", req.GetJobId())
+		}
+		return nil, status.Errorf(codes.Internal, "get job status: %v", err)
+	}
+	return &aegis.GetClusterJobStatusResponse{Job: jobFromInfra(infra, req.GetJobId())}, nil
 }
 
 func isWorkloadActive(status string) bool {

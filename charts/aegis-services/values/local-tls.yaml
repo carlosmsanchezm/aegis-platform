@@ -233,6 +233,9 @@ keycloak:
     - name: redhat-pull-secret
   http:
     httpEnabled: false
+  networkPolicy:
+    enabled: false
+    http: []
   admin:
     secret:
       create: true

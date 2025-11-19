@@ -79,6 +79,50 @@ FROM projects WHERE id=$1
 	return project
 }
 
+func (s *PostgresStore) ListProjects() []*aegis.Project {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	rows, err := s.pool.Query(ctx, `
+SELECT id, COALESCE(display_name, ''), owner_group, policy_regions, COALESCE(policy_data_level, ''), policy_deny_egress_by_default
+FROM projects
+ORDER BY id
+`)
+	if err != nil {
+		s.logExecError("list_projects", err)
+		return nil
+	}
+	defer rows.Close()
+	var items []*aegis.Project
+	for rows.Next() {
+		var (
+			projID     string
+			display    string
+			owner      string
+			regions    []string
+			dataLevel  string
+			denyEgress bool
+		)
+		if err := rows.Scan(&projID, &display, &owner, &regions, &dataLevel, &denyEgress); err != nil {
+			s.logExecError("scan_project", err)
+			continue
+		}
+		project := &aegis.Project{
+			Id:          projID,
+			DisplayName: display,
+			OwnerGroup:  owner,
+		}
+		if len(regions) > 0 || dataLevel != "" || denyEgress {
+			project.Policy = &aegis.PolicyDomain{
+				Regions:             append([]string{}, regions...),
+				DataLevel:           dataLevel,
+				DenyEgressByDefault: denyEgress,
+			}
+		}
+		items = append(items, project)
+	}
+	return items
+}
+
 func (s *PostgresStore) PutBudget(b *aegis.Budget) {
 	if b == nil || strings.TrimSpace(b.GetProjectId()) == "" {
 		return

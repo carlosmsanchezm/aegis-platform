@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AegisPlatform_CreateProject_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateProject"
+	AegisPlatform_ListProjects_FullMethodName                  = "/aegis.v1.AegisPlatform/ListProjects"
 	AegisPlatform_UpsertBudget_FullMethodName                  = "/aegis.v1.AegisPlatform/UpsertBudget"
 	AegisPlatform_GetBudget_FullMethodName                     = "/aegis.v1.AegisPlatform/GetBudget"
 	AegisPlatform_ListBudgets_FullMethodName                   = "/aegis.v1.AegisPlatform/ListBudgets"
@@ -50,6 +51,7 @@ const (
 // Service
 type AegisPlatformClient interface {
 	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*Project, error)
+	ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error)
 	UpsertBudget(ctx context.Context, in *UpsertBudgetRequest, opts ...grpc.CallOption) (*Budget, error)
 	GetBudget(ctx context.Context, in *GetBudgetRequest, opts ...grpc.CallOption) (*GetBudgetResponse, error)
 	ListBudgets(ctx context.Context, in *ListBudgetsRequest, opts ...grpc.CallOption) (*ListBudgetsResponse, error)
@@ -84,6 +86,16 @@ func (c *aegisPlatformClient) CreateProject(ctx context.Context, in *CreateProje
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Project)
 	err := c.cc.Invoke(ctx, AegisPlatform_CreateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProjectsResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_ListProjects_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -297,6 +309,7 @@ func (c *aegisPlatformClient) Heartbeat(ctx context.Context, in *ClusterHeartbea
 // Service
 type AegisPlatformServer interface {
 	CreateProject(context.Context, *CreateProjectRequest) (*Project, error)
+	ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error)
 	UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error)
 	GetBudget(context.Context, *GetBudgetRequest) (*GetBudgetResponse, error)
 	ListBudgets(context.Context, *ListBudgetsRequest) (*ListBudgetsResponse, error)
@@ -329,6 +342,9 @@ type UnimplementedAegisPlatformServer struct{}
 
 func (UnimplementedAegisPlatformServer) CreateProject(context.Context, *CreateProjectRequest) (*Project, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateProject not implemented")
+}
+func (UnimplementedAegisPlatformServer) ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListProjects not implemented")
 }
 func (UnimplementedAegisPlatformServer) UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpsertBudget not implemented")
@@ -425,6 +441,24 @@ func _AegisPlatform_CreateProject_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AegisPlatformServer).CreateProject(ctx, req.(*CreateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_ListProjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ListProjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ListProjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ListProjects(ctx, req.(*ListProjectsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -799,6 +833,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateProject",
 			Handler:    _AegisPlatform_CreateProject_Handler,
+		},
+		{
+			MethodName: "ListProjects",
+			Handler:    _AegisPlatform_ListProjects_Handler,
 		},
 		{
 			MethodName: "UpsertBudget",

@@ -12,6 +12,13 @@ message Project {
   string owner_group = 3;
   PolicyDomain policy = 4;
   map<string, string> annotations = 5;
+  ProjectAwsCredentials aws = 6;
+}
+
+message ProjectAwsCredentials {
+  string account_id = 1;
+  string role_arn = 2;
+  string external_id = 3;
 }
 message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
 

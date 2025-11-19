@@ -3,6 +3,7 @@ FROM golang:1.24-alpine AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG PULUMI_VERSION=3.131.0
 
 WORKDIR /app
 
@@ -27,6 +28,19 @@ WORKDIR /app/services/platform-api
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o platform-api .
 
+WORKDIR /tmp
+RUN apk add --no-cache curl tar && \
+    ARCH="${TARGETARCH:-amd64}" && \
+    case "$ARCH" in \
+      amd64) PULUMI_ARCH="x64" ;; \
+      *) PULUMI_ARCH="$ARCH" ;; \
+    esac && \
+    curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v${PULUMI_VERSION}-linux-${PULUMI_ARCH}.tar.gz" -o pulumi.tar.gz && \
+    tar -xzf pulumi.tar.gz && \
+    mv pulumi/pulumi /tmp/pulumi-cli && \
+    chmod +x /tmp/pulumi-cli && \
+    rm -rf pulumi pulumi.tar.gz
+
 # Final stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
@@ -50,6 +64,9 @@ COPY --from=builder --chown=1000:1000 /app/services/platform-api/platform-api ./
 
 # Copy migrations if they exist
 COPY --from=builder /app/services/platform-api/migrations ./migrations
+
+# Copy pulumi CLI
+COPY --from=builder /tmp/pulumi-cli /usr/local/bin/pulumi
 
 # Expose ports
 EXPOSE 8080 8081

@@ -42,6 +42,8 @@ const (
 	envAegisSpokeValuesFile    = "AEGIS_SPOKE_VALUES_FILE"
 	envAegisPlatformEndpoint   = "AEGIS_PLATFORM_API_ENDPOINT"
 	envAegisPlatformCABase64   = "AEGIS_PLATFORM_API_CA_B64"
+	envAegisPlatformCAFile     = "AEGIS_PLATFORM_API_CA_FILE"
+	envAegisPlatformInsecure   = "AEGIS_PLATFORM_API_GRPC_INSECURE"
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
 	envAegisPulumiSkipRefresh  = "AEGIS_PULUMI_SKIP_REFRESH"
@@ -255,6 +257,7 @@ type platformConfig struct {
 	CABundleBase64 string
 	ImageRepo      string
 	ImageTag       string
+	InsecureGRPC   bool
 }
 
 type helmConfig struct {
@@ -458,20 +461,31 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, cl
 
 	envValues := pulumi.Map{
 		"AEGIS_CLUSTER_ID": pulumi.String(clusterID),
+		"AEGIS_REGION":     pulumi.String(input.Region),
+		"AEGIS_PROVIDER":   pulumi.String("aws"),
 	}
 	if input.Platform.Endpoint != "" {
 		envValues["AEGIS_PLATFORM_API_ENDPOINT"] = pulumi.String(input.Platform.Endpoint)
+		if endpoint := grpcEndpointHostPort(input.Platform.Endpoint); endpoint != "" {
+			envValues["AEGIS_CP_GRPC"] = pulumi.String(endpoint)
+			if !input.Platform.InsecureGRPC {
+				envValues["AEGIS_CP_GRPC_INSECURE"] = pulumi.String("false")
+			}
+		}
 	}
 	if input.Platform.CABundleBase64 != "" {
 		envValues["AEGIS_PLATFORM_CA_B64"] = pulumi.String(input.Platform.CABundleBase64)
 	}
-	values := pulumi.Map{"env": envValues}
+	k8sAgentValues := pulumi.Map{
+		"env": envValues,
+	}
 	if input.Platform.ImageRepo != "" {
-		values["image"] = pulumi.Map{
+		k8sAgentValues["image"] = pulumi.Map{
 			"repository": pulumi.String(input.Platform.ImageRepo),
 			"tag":        pulumi.String(input.Platform.ImageTag),
 		}
 	}
+	values := pulumi.Map{"k8sAgent": k8sAgentValues}
 
 	helmCfg := input.SpokeHelm
 	if helmCfg.Namespace == "" {
@@ -634,7 +648,19 @@ func (r *Runner) resolvePlatformConfig() platformConfig {
 		ImageRepo:      strings.TrimSpace(os.Getenv(envAegisSpokeImageRepo)),
 		ImageTag:       strings.TrimSpace(os.Getenv(envAegisSpokeImageTag)),
 	}
+	if insecure := strings.TrimSpace(os.Getenv(envAegisPlatformInsecure)); insecure != "" {
+		if parsed, err := strconv.ParseBool(insecure); err == nil {
+			cfg.InsecureGRPC = parsed
+		}
+	}
 
+	if cfg.CABundleBase64 == "" {
+		if caPath := strings.TrimSpace(os.Getenv(envAegisPlatformCAFile)); caPath != "" {
+			if raw, err := os.ReadFile(caPath); err == nil {
+				cfg.CABundleBase64 = base64.StdEncoding.EncodeToString(raw)
+			}
+		}
+	}
 	if cfg.CABundleBase64 == "" {
 		if raw, err := os.ReadFile("/etc/aegis/platform-ca.crt"); err == nil {
 			cfg.CABundleBase64 = base64.StdEncoding.EncodeToString(raw)
@@ -748,6 +774,23 @@ func formatTaintEffect(effect string) string {
 
 // ----------------------------------------------------------------------------- //
 // Legacy helpers retained from initial stub
+
+func grpcEndpointHostPort(endpoint string) string {
+	trimmed := strings.TrimSpace(endpoint)
+	if trimmed == "" {
+		return ""
+	}
+	for _, prefix := range []string{"grpcs://", "grpc://", "https://", "http://"} {
+		if strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(prefix)) {
+			trimmed = trimmed[len(prefix):]
+			break
+		}
+	}
+	if slash := strings.IndexRune(trimmed, '/'); slash >= 0 {
+		trimmed = trimmed[:slash]
+	}
+	return strings.TrimSuffix(trimmed, "/")
+}
 
 func buildClusterID(projectID, region, name string) string {
 	parts := []string{}

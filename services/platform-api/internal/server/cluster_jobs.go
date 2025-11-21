@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -104,6 +107,50 @@ func (s *Server) fetchInfra(ctx context.Context, jobID string) (*infraapi.Projec
 		return nil, err
 	}
 	return &infra, nil
+}
+
+func (s *Server) resetFailedInfraJob(ctx context.Context, jobName, projectID, clusterID string) (bool, error) {
+	if strings.TrimSpace(jobName) == "" || s.infraClient == nil {
+		return false, nil
+	}
+	key := types.NamespacedName{Name: jobName, Namespace: s.infraNamespace}
+	var current infraapi.ProjectInfra
+	if err := s.infraClient.Get(ctx, key, &current); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, status.Errorf(codes.Internal, "lookup existing cluster job %q: %v", jobName, err)
+	}
+	if !strings.EqualFold(current.Status.Phase, "Error") {
+		return false, nil
+	}
+	s.log.Info("cleaning up failed cluster job", zap.String("job", jobName), zap.String("project", projectID), zap.String("cluster", clusterID))
+	if err := s.infraClient.Delete(ctx, &current); err != nil && !apierrors.IsNotFound(err) {
+		return false, status.Errorf(codes.Internal, "delete failed cluster job %q: %v", jobName, err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var probe infraapi.ProjectInfra
+		err := s.infraClient.Get(waitCtx, key, &probe)
+		if apierrors.IsNotFound(err) {
+			s.log.Info("failed cluster job removed", zap.String("job", jobName), zap.String("project", projectID), zap.String("cluster", clusterID))
+			return true, nil
+		}
+		if err != nil {
+			if waitCtx.Err() != nil {
+				return false, status.FromContextError(waitCtx.Err()).Err()
+			}
+			return false, status.Errorf(codes.Internal, "poll cluster job %q deletion: %v", jobName, err)
+		}
+		select {
+		case <-waitCtx.Done():
+			return false, status.FromContextError(waitCtx.Err()).Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func jobFromInfra(infra *infraapi.ProjectInfra, defaultID string) *aegis.Job {

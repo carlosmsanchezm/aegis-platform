@@ -44,6 +44,10 @@ RUN apk add --no-cache curl tar && \
 # Final stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
+ARG TARGETARCH
+ARG AWSCLI_VERSION=2.17.10
+ARG KUBECTL_VERSION=1.30.4
+
 RUN if command -v microdnf >/dev/null 2>&1; then \
       PKG_CMD="microdnf"; \
     elif command -v dnf >/dev/null 2>&1; then \
@@ -53,11 +57,27 @@ RUN if command -v microdnf >/dev/null 2>&1; then \
       exit 1; \
     fi; \
     "$PKG_CMD" update -y && \
-    "$PKG_CMD" install -y ca-certificates tzdata crypto-policies && \
+    "$PKG_CMD" install -y ca-certificates tzdata crypto-policies unzip && \
     "$PKG_CMD" clean all && \
     if command -v update-crypto-policies >/dev/null 2>&1; then update-crypto-policies --set FIPS; fi
 
+RUN set -euo pipefail; \
+    ARCH="${TARGETARCH:-$(uname -m)}"; \
+    case "$ARCH" in \
+      amd64|x86_64) AWS_ARCH="x86_64"; KUBE_ARCH="amd64" ;; \
+      arm64|aarch64) AWS_ARCH="aarch64"; KUBE_ARCH="arm64" ;; \
+      *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}-${AWSCLI_VERSION}.zip" -o /tmp/awscliv2.zip && \
+    unzip -q /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli && \
+    rm -rf /tmp/aws /tmp/awscliv2.zip && \
+    curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${KUBE_ARCH}/kubectl" && \
+    chmod +x /usr/local/bin/kubectl
+
 WORKDIR /root/
+
+RUN mkdir -p /tmp/pulumi-backend && chmod 0777 /tmp/pulumi-backend
 
 # Copy the binary from builder stage
 COPY --from=builder --chown=1000:1000 /app/services/platform-api/platform-api ./platform-api

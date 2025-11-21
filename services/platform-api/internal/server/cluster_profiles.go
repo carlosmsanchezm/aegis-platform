@@ -162,6 +162,20 @@ func applyClusterParameters(spec *infraapi.AWSInfraSpec, params map[string]strin
 	if version := strings.TrimSpace(params["k8s.version"]); version != "" {
 		spec.Version = version
 	}
+	if vpc := strings.TrimSpace(params["network.vpcId"]); vpc != "" {
+		spec.VpcID = vpc
+	}
+	if rawSubnets := strings.TrimSpace(params["network.subnetIds"]); rawSubnets != "" {
+		parts := strings.Split(rawSubnets, ",")
+		subnets := make([]string, 0, len(parts))
+		for _, part := range parts {
+			val := strings.TrimSpace(part)
+			if val != "" {
+				subnets = append(subnets, val)
+			}
+		}
+		spec.SubnetIDs = subnets
+	}
 	if count := strings.TrimSpace(params["gpu.count"]); count != "" {
 		if n, err := strconv.Atoi(count); err == nil {
 			adjustGpuPoolSize(spec, n)

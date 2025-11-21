@@ -66,6 +66,13 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
+	// the ProjectInfra to retry, so keep the object idle in error state.
+	if strings.EqualFold(infra.Status.Phase, "Error") {
+		log.Info("skipping reconcile; infrastructure is in error state")
+		return ctrl.Result{}, nil
+	}
+
 	if infra.Spec.Aws != nil {
 		if strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeImport)) {
 			return r.handleAWSImport(ctx, log, infra)
@@ -222,7 +229,8 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	if err != nil {
 		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
-		return ctrl.Result{}, err
+		// Do not requeue automatically on failure; require an explicit relaunch.
+		return ctrl.Result{}, nil
 	}
 
 	kubeconfigData := map[string][]byte{}

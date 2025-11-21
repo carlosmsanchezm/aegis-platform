@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -12,6 +13,10 @@ const (
 	annotationAWSAccountID  = "aegis.yourorg.dev/awsAccountId"
 	annotationAWSRoleARN    = "aegis.yourorg.dev/awsRoleArn"
 	annotationAWSExternalID = "aegis.yourorg.dev/awsExternalId"
+
+	envDefaultAWSAccountID  = "AEGIS_DEFAULT_AWS_ACCOUNT_ID"
+	envDefaultAWSRoleARN    = "AEGIS_DEFAULT_AWS_ROLE_ARN"
+	envDefaultAWSExternalID = "AEGIS_DEFAULT_AWS_EXTERNAL_ID"
 )
 
 var awsAccountIDPattern = regexp.MustCompile(`^\d{12}$`)
@@ -41,6 +46,37 @@ func (c projectAWSCredentials) isComplete() bool {
 
 func (c projectAWSCredentials) validate() error {
 	return validateProjectAwsCredentials(c.toProto())
+}
+
+// mergeProjectAwsDefaults fills any missing AWS fields from environment defaults.
+func mergeProjectAwsDefaults(creds *aegis.ProjectAwsCredentials) *aegis.ProjectAwsCredentials {
+	envAccount := strings.TrimSpace(os.Getenv(envDefaultAWSAccountID))
+	envRole := strings.TrimSpace(os.Getenv(envDefaultAWSRoleARN))
+	envExternal := strings.TrimSpace(os.Getenv(envDefaultAWSExternalID))
+
+	if creds == nil {
+		// Only create a creds object if any defaults are set.
+		if envAccount == "" && envRole == "" && envExternal == "" {
+			return nil
+		}
+		return &aegis.ProjectAwsCredentials{
+			AccountId:  envAccount,
+			RoleArn:    envRole,
+			ExternalId: envExternal,
+		}
+	}
+
+	// Fill missing fields from defaults.
+	if strings.TrimSpace(creds.GetAccountId()) == "" && envAccount != "" {
+		creds.AccountId = envAccount
+	}
+	if strings.TrimSpace(creds.GetRoleArn()) == "" && envRole != "" {
+		creds.RoleArn = envRole
+	}
+	if strings.TrimSpace(creds.GetExternalId()) == "" && envExternal != "" {
+		creds.ExternalId = envExternal
+	}
+	return creds
 }
 
 func sanitizeProjectAws(creds *aegis.ProjectAwsCredentials) *aegis.ProjectAwsCredentials {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
+	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
 	"github.com/pulumi/pulumi-eks/sdk/go/eks"
 	kubernetes "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
@@ -51,6 +52,13 @@ const (
 	envAegisPulumiWorkdir      = "AEGIS_PULUMI_WORKDIR"
 	defaultSpokeReleaseTimeout = 15 * time.Minute
 )
+
+// Certain AZs are not eligible for EKS control planes even though they may exist in EC2.
+var unsupportedControlPlaneAZs = map[string]map[string]bool{
+	"us-east-1": {
+		"us-east-1e": true,
+	},
+}
 
 // Runner provisions AWS infrastructure via Pulumi Automation.
 type Runner struct {
@@ -200,6 +208,7 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		ProjectID:           projectID,
 		Region:              region,
 		VpcID:               strings.TrimSpace(spec.VpcID),
+		SubnetIDs:           sanitizeStrings(spec.SubnetIDs),
 		RoleARN:             strings.TrimSpace(spec.RoleARN),
 		ExternalID:          strings.TrimSpace(spec.ExternalID),
 		Clusters:            clusterDefs,
@@ -233,6 +242,7 @@ type programInput struct {
 	ProjectID           string
 	Region              string
 	VpcID               string
+	SubnetIDs           []string
 	RoleARN             string
 	ExternalID          string
 	Clusters            []clusterDefinition
@@ -339,6 +349,24 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		}
 		providerOpt := pulumi.Provider(awsProvider)
 
+		resolvedVpcID := strings.TrimSpace(input.VpcID)
+		resolvedSubnets := sanitizeStrings(input.SubnetIDs)
+		if resolvedVpcID == "" || len(resolvedSubnets) == 0 {
+			vpcID, subnets, err := r.resolveDefaultSubnets(ctx, awsProvider, input.Region)
+			if err != nil {
+				return err
+			}
+			if resolvedVpcID == "" {
+				resolvedVpcID = vpcID
+			}
+			if len(resolvedSubnets) == 0 {
+				resolvedSubnets = subnets
+			}
+		}
+		if len(resolvedSubnets) == 0 {
+			return fmt.Errorf("no subnets available for region %s; specify VPC/subnet IDs in the cluster profile", input.Region)
+		}
+
 		clusterMap := pulumi.Map{}
 		kubeconfigMap := pulumi.Map{}
 
@@ -364,8 +392,11 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			if version := strings.TrimSpace(clusterDef.Version); version != "" {
 				clusterArgs.Version = pulumi.StringPtr(version)
 			}
-			if input.VpcID != "" {
-				clusterArgs.VpcId = pulumi.StringPtr(input.VpcID)
+			if resolvedVpcID != "" {
+				clusterArgs.VpcId = pulumi.StringPtr(resolvedVpcID)
+			}
+			if len(resolvedSubnets) > 0 {
+				clusterArgs.SubnetIds = pulumi.ToStringArray(resolvedSubnets)
 			}
 
 			cluster, err := eks.NewCluster(ctx, resourceName, clusterArgs, providerOpt)
@@ -401,6 +432,72 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		ctx.Export("kubeconfigs", kubeconfigMap)
 		return nil
 	}
+}
+
+func (r *Runner) resolveDefaultSubnets(ctx *pulumi.Context, provider *aws.Provider, region string) (string, []string, error) {
+	azs, err := aws.GetAvailabilityZones(ctx, &aws.GetAvailabilityZonesArgs{}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover availability zones: %w", err)
+	}
+	eligibleAZs := map[string]bool{}
+	for _, name := range azs.Names {
+		eligibleAZs[strings.TrimSpace(name)] = true
+	}
+	if u := unsupportedControlPlaneAZs[strings.TrimSpace(region)]; len(u) > 0 {
+		for az := range u {
+			delete(eligibleAZs, az)
+		}
+	}
+
+	vpcs, err := awsec2.GetVpcs(ctx, &awsec2.GetVpcsArgs{
+		Filters: []awsec2.GetVpcsFilter{
+			{
+				Name:   "is-default",
+				Values: []string{"true"},
+			},
+		},
+	}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover default vpc: %w", err)
+	}
+	if len(vpcs.Ids) == 0 {
+		return "", nil, fmt.Errorf("no default VPC found in region %s; set VPC/subnet IDs in the profile", region)
+	}
+	vpcID := vpcs.Ids[0]
+	subnets, err := awsec2.GetSubnets(ctx, &awsec2.GetSubnetsArgs{
+		Filters: []awsec2.GetSubnetsFilter{
+			{
+				Name:   "vpc-id",
+				Values: []string{vpcID},
+			},
+		},
+	}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover subnets for vpc %s: %w", vpcID, err)
+	}
+	filtered := []string{}
+	azSet := map[string]bool{}
+	for _, subnetID := range subnets.Ids {
+		subnet, err := awsec2.LookupSubnet(ctx, &awsec2.LookupSubnetArgs{Id: pulumi.StringRef(subnetID)}, pulumi.Provider(provider))
+		if err != nil {
+			return "", nil, fmt.Errorf("inspect subnet %s: %w", subnetID, err)
+		}
+		az := strings.TrimSpace(subnet.AvailabilityZone)
+		if !eligibleAZs[az] {
+			continue
+		}
+		filtered = append(filtered, subnetID)
+		azSet[az] = true
+	}
+
+	if len(azSet) < 2 {
+		return "", nil, fmt.Errorf("default VPC %s has %d supported AZs for region %s; specify VPC/subnet IDs in the cluster profile (e.g., subnets in %v)", vpcID, len(azSet), region, azs.Names)
+	}
+	if len(filtered) == 0 {
+		return "", nil, fmt.Errorf("no eligible subnets discovered in default VPC %s for region %s", vpcID, region)
+	}
+	ctx.Log.Info(fmt.Sprintf("using filtered default VPC subnets for VPC %s (subnets=%d, azs=%d)", vpcID, len(filtered), len(azSet)), &pulumi.LogArgs{})
+	return vpcID, filtered, nil
 }
 
 func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clusterDefinition, cluster *eks.Cluster, provider *aws.Provider) error {
@@ -836,6 +933,18 @@ func pulumiResourceName(base string, max int) string {
 		return suffix
 	}
 	return fmt.Sprintf("%s-%s", trimmed, suffix)
+}
+
+func sanitizeStrings(values []string) []string {
+	out := []string{}
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func estimateCost(spec *infraapi.AWSInfraSpec) float64 {

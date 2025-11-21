@@ -59,6 +59,7 @@ type AWSInfraSpec struct {
 	Mode               AWSProvisionMode `json:"mode,omitempty"`
 	RoleARN            string           `json:"roleArn,omitempty"`
 	ExternalID         string           `json:"externalId,omitempty"`
+	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	VpcID              string           `json:"vpcId,omitempty"`
 	ClusterName        string           `json:"clusterName,omitempty"`
 	Version            string           `json:"version,omitempty"`
@@ -182,6 +183,10 @@ func (in *ProjectInfraSpec) DeepCopy() *ProjectInfraSpec {
 
 func (in *AWSInfraSpec) DeepCopyInto(out *AWSInfraSpec) {
 	*out = *in
+	if in.SubnetIDs != nil {
+		out.SubnetIDs = make([]string, len(in.SubnetIDs))
+		copy(out.SubnetIDs, in.SubnetIDs)
+	}
 	if in.NodePools != nil {
 		out.NodePools = make([]NodePool, len(in.NodePools))
 		for i := range in.NodePools {

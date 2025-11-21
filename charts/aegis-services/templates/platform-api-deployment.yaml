@@ -113,7 +113,6 @@ spec:
               value: "/etc/aegis-platform-api/tls/ca.crt"
             {{- end }}
             {{- end }}
-          {{- if or .Values.platformApi.volumeMounts (and .Values.platformApi.tls.enabled $serveGrpc) $hasOIDCCA }}
           volumeMounts:
             {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: platform-api-tls
@@ -125,10 +124,11 @@ spec:
               mountPath: {{ $oidcCAMountPath }}
               readOnly: true
             {{- end }}
+            - name: platform-api-pulumi-backend
+              mountPath: /tmp/pulumi-backend
             {{- with .Values.platformApi.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           {{- with .Values.platformApi.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -145,7 +145,6 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.platformApi.volumes (and .Values.platformApi.tls.enabled $serveGrpc) $hasOIDCCA }}
       volumes:
         {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
         - name: platform-api-tls
@@ -160,10 +159,11 @@ spec:
               - key: {{ $oidcCAKey }}
                 path: {{ $oidcCAFileName }}
         {{- end }}
+        - name: platform-api-pulumi-backend
+          emptyDir: {}
         {{- with .Values.platformApi.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- end }}
       {{- with .Values.platformApi.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

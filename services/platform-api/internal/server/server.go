@@ -251,7 +251,7 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	if err := s.authorize(ctx, p.GetId(), "", "createProject"); err != nil {
 		return nil, err
 	}
-	awsCreds := sanitizeProjectAws(p.GetAws())
+	awsCreds := mergeProjectAwsDefaults(sanitizeProjectAws(p.GetAws()))
 	if awsCreds != nil {
 		if err := validateProjectAwsCredentials(awsCreds); err != nil {
 			errStatus := status.Error(codes.InvalidArgument, err.Error())
@@ -2097,9 +2097,22 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 	}
 	if err := s.infraClient.Create(ctx, infra); err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+			reset, resetErr := s.resetFailedInfraJob(ctx, infra.Name, projectID, clusterID)
+			if resetErr != nil {
+				return nil, resetErr
+			}
+			if !reset {
+				return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+			}
+			if err := s.infraClient.Create(ctx, infra); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+				}
+				return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
 	}
 	s.log.Info("cluster provisioning job created",
 		zap.String("project", projectID),

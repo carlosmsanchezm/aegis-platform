@@ -26,7 +26,7 @@ PF_PROXY_HTTP_PORT ?= 10085
 .PHONY: all proto tidy build test verify run-api run-operator stop \
 	setup-local deploy-local deploy-local-tls port-forward \
 	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local \
-	rerun-preview-failures
+	rerun-preview-failures roll-platform-api
 
 all: proto tidy build
 
@@ -150,6 +150,12 @@ test-workspace:
 setup-local:
 	@echo "Switching to docker-desktop context..."
 	@kubectl config use-context docker-desktop
+
+roll-platform-api:
+	@echo "Rolling platform-api deployment to $(PLATFORM_API_IMAGE)"
+	@kubectl set image deployment/aegis-services-platform-api platform-api=$(PLATFORM_API_IMAGE) -n aegis-system
+	@echo "Waiting for rollout to complete..."
+	@kubectl rollout status deployment/aegis-services-platform-api -n aegis-system
 
 K8S_AGENT_IMAGE ?= carlosmsanchez/aegis-k8s-agent:dev
 PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev

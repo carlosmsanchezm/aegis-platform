@@ -61,6 +61,7 @@ type AWSInfraSpec struct {
 	ExternalID         string           `json:"externalId,omitempty"`
 	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	VpcID              string           `json:"vpcId,omitempty"`
+	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	ClusterName        string           `json:"clusterName,omitempty"`
 	Version            string           `json:"version,omitempty"`
 	NodePools          []NodePool       `json:"nodePools,omitempty"`
@@ -198,6 +199,10 @@ func (in *AWSInfraSpec) DeepCopyInto(out *AWSInfraSpec) {
 		for i := range in.AdditionalClusters {
 			in.AdditionalClusters[i].DeepCopyInto(&out.AdditionalClusters[i])
 		}
+	}
+	if in.SubnetIDs != nil {
+		out.SubnetIDs = make([]string, len(in.SubnetIDs))
+		copy(out.SubnetIDs, in.SubnetIDs)
 	}
 	if in.Imports != nil {
 		out.Imports = make([]AWSImportSpec, len(in.Imports))

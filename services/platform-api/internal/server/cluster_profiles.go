@@ -25,22 +25,22 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 			AWS: &infraapi.AWSInfraSpec{
 				Mode:        infraapi.AWSProvisionModeProvision,
 				ClusterName: "",
-				Version:     "1.28",
+				Version:     "1.34",
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "system",
-						InstanceType: "m6i.4xlarge",
-						MinSize:      3,
-						MaxSize:      6,
+						InstanceType: "m6i.large",
+						MinSize:      1,
+						MaxSize:      2,
 						Labels: map[string]string{
 							"aegis.dev/purpose": "system",
 						},
 					},
 					{
 						Name:         "gpu",
-						InstanceType: "p5.48xlarge",
+						InstanceType: "g5.2xlarge",
 						MinSize:      0,
-						MaxSize:      4,
+						MaxSize:      1,
 						Labels: map[string]string{
 							"aegis.dev/purpose": "training",
 						},
@@ -216,12 +216,15 @@ func adjustGpuInstanceType(spec *infraapi.AWSInfraSpec, gpuType string) {
 		return
 	}
 	switch strings.ToUpper(gpuType) {
+	case "G5", "SMALL":
+		spec.NodePools[idx].InstanceType = "g5.2xlarge"
 	case "H100":
-		spec.NodePools[idx].InstanceType = "p5.48xlarge"
+		// Request the smallest available GPU-capable family by default to avoid vCPU quota exhaustion.
+		spec.NodePools[idx].InstanceType = "g5.2xlarge"
 	case "A100":
 		spec.NodePools[idx].InstanceType = "p4d.24xlarge"
 	case "A10G":
-		spec.NodePools[idx].InstanceType = "g5.12xlarge"
+		spec.NodePools[idx].InstanceType = "g5.2xlarge"
 	case "NONE":
 		spec.NodePools[idx].InstanceType = "m6i.4xlarge"
 	}

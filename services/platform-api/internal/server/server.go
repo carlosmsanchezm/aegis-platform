@@ -2095,6 +2095,9 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureUniqueInfraName(ctx, infra); err != nil {
+		return nil, err
+	}
 	if err := s.infraClient.Create(ctx, infra); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			reset, resetErr := s.resetFailedInfraJob(ctx, infra.Name, projectID, clusterID)

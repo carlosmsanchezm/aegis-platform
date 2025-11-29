@@ -18,20 +18,24 @@ keycloak_admin_token() {
     printf '%s' "$_KEYCLOAK_ADMIN_TOKEN"
     return
   fi
-  local token
-  token=$(
-    curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
-      -X POST "https://keycloak.localtest.me/realms/master/protocol/openid-connect/token" \
-      -d "grant_type=password" \
-      -d "client_id=admin-cli" \
-      -d "username=admin" \
-      -d "password=REDACTED_KEYCLOAK_ADMIN_PASSWORD" \
-      | jq -r '.access_token' 2>/dev/null || true
-  )
-  if [[ -n "$token" && "$token" != "null" ]]; then
-    _KEYCLOAK_ADMIN_TOKEN="$token"
-    printf '%s' "$token"
-  fi
+  local token attempt
+  for attempt in {1..12}; do
+    token=$(
+      curl -sS --fail --cacert "$HOME/keycloak.localtest.me.crt" \
+        -X POST "https://keycloak.localtest.me/realms/master/protocol/openid-connect/token" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" \
+        -d "username=admin" \
+        -d "password=REDACTED_KEYCLOAK_ADMIN_PASSWORD" \
+        | jq -r '.access_token' 2>/dev/null || true
+    )
+    if [[ -n "$token" && "$token" != "null" ]]; then
+      _KEYCLOAK_ADMIN_TOKEN="$token"
+      printf '%s' "$token"
+      return
+    fi
+    sleep 5
+  done
 }
 
 ensure_backstage_direct_access() {

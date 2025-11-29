@@ -288,17 +288,34 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 
 func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	clusterIDs := collectClusterIDs(infra)
+	log.Info("reconciling project infrastructure deletion",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+		zap.String("project", infra.Spec.ProjectID),
+		zap.String("region", infra.Spec.Region),
+		zap.Strings("cluster_ids", clusterIDs),
+	)
 	if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+		log.Error("failed to remove kubeconfigs", zap.Error(err))
 		return ctrl.Result{}, err
 	}
 	if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+		log.Error("failed to delete aegis clusters", zap.Error(err))
 		return ctrl.Result{}, err
 	}
 	if infra.Spec.Aws != nil && r.Provisioner != nil {
+		log.Info("triggering aws destroy via pulumi",
+			zap.String("project", infra.Spec.ProjectID),
+			zap.String("region", infra.Spec.Region),
+			zap.Strings("cluster_ids", clusterIDs),
+		)
 		if err := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); err != nil {
+			log.Error("aws destroy failed", zap.Error(err))
 			return ctrl.Result{}, err
 		}
 		log.Info("aws infrastructure destroy triggered", zap.Int("clusters", len(clusterIDs)))
+	} else if infra.Spec.Aws != nil && r.Provisioner == nil {
+		log.Warn("aws destroy skipped; provisioner not configured")
 	}
 
 	patched := infra.DeepCopy()
@@ -306,6 +323,10 @@ func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.L
 	if err := r.Patch(ctx, patched, client.MergeFrom(infra)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
+	log.Info("project infrastructure deletion finalized",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+	)
 	return ctrl.Result{}, nil
 }
 

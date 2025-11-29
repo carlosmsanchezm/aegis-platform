@@ -164,17 +164,19 @@ platformApi:
     AEGIS_PLATFORM_API_ENDPOINT: "platform-api-grpc.localtest.me:443"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
-    PULUMI_BACKEND_URL: "file:///tmp/pulumi-backend"
-    PULUMI_CONFIG_PASSPHRASE: "dev-pulumi-passphrase"
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
+    PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
     AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AWS_REGION: "us-east-1"
+    AWS_DEFAULT_REGION: "us-east-1"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
   secrets:
-    aws-access-key-id: "AKIAYIMFEXTHZKTNHZ4N"
-    aws-secret-access-key: "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"
+    aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
+    aws-secret-access-key: "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"
   httpIngress:
     enabled: true
     className: "ingress-nginx"

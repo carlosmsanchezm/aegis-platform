@@ -61,7 +61,6 @@ type AWSInfraSpec struct {
 	ExternalID         string           `json:"externalId,omitempty"`
 	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	VpcID              string           `json:"vpcId,omitempty"`
-	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	ClusterName        string           `json:"clusterName,omitempty"`
 	Version            string           `json:"version,omitempty"`
 	NodePools          []NodePool       `json:"nodePools,omitempty"`

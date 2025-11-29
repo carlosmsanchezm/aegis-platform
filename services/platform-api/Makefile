@@ -2,6 +2,7 @@
 
 IMG ?= carlosmsanchez/aegis-platform-api:dev
 PLATFORMS ?= linux/amd64,linux/arm64
+BUILDX_OUTPUT ?= --push
 GO_FLAGS ?=
 ROOT := $(abspath $(CURDIR)/../..)
 
@@ -37,7 +38,7 @@ docker-build docker-buildx:
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--tag $(IMG) \
-		--push \
+		$(BUILDX_OUTPUT) \
 		$(BUILD_ARGS) \
 		-f $(CURDIR)/Dockerfile \
 		$(ROOT)

@@ -51,6 +51,8 @@ spec:
       {{- $oidcCAMountPath := include "aegis-services.platformApi.oidcCAMountPath" . }}
       {{- $oidcCAFileName := include "aegis-services.platformApi.oidcCAFileName" . }}
       {{- $oidcCAKey := include "aegis-services.platformApi.oidcCAKey" . }}
+      {{- $pulumi := .Values.platformApi.pulumi | default dict }}
+      {{- $pulumiGh := $pulumi.githubTokenSecret | default dict }}
       containers:
         - name: platform-api
           image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
@@ -71,6 +73,25 @@ spec:
               value: {{ .Values.platformApi.kubeConfigsDir | quote }}
             - name: AEGIS_NAMESPACE
               value: {{ .Values.platformApi.targetNamespace | quote }}
+            {{- with $pulumi.backendUrl }}
+            - name: PULUMI_BACKEND_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $pulumi.secretsProvider }}
+            - name: PULUMI_SECRETS_PROVIDER
+              value: {{ $pulumi.secretsProvider | quote }}
+            {{- end }}
+            {{- if $pulumi.configPassphrase }}
+            - name: PULUMI_CONFIG_PASSPHRASE
+              value: {{ $pulumi.configPassphrase | quote }}
+            {{- end }}
+            {{- if and $pulumiGh.name $pulumiGh.key }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pulumiGh.name }}
+                  key: {{ $pulumiGh.key }}
+            {{- end }}
             {{- if and .Values.proxy.enabled (not (hasKey .Values.platformApi.env "AEGIS_PROXY_BASE_URL")) }}
             # Automatically set proxy base URL to internal service DNS
             - name: AEGIS_PROXY_BASE_URL

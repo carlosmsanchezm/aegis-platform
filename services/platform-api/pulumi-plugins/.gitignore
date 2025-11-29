@@ -1,0 +1,10 @@
+# Ignore the plugin bundle (large file, regenerated from script)
+pulumi-plugins-bundle.tar.gz
+
+# Ignore individual plugin tarballs
+*.tar.gz
+*.tgz
+
+# Ignore temp directories
+.pulumi-temp/
+.pulumi-verify/

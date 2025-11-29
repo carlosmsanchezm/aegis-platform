@@ -22,6 +22,7 @@ AEGIS_FLAVORS ?=
 PF_PLATFORM_HTTP_PORT ?= 10080
 PF_PLATFORM_GRPC_PORT ?= 10081
 PF_PROXY_HTTP_PORT ?= 10085
+PF_KEYCLOAK_HTTPS_PORT ?= 10443
 
 .PHONY: all proto tidy build test verify run-api run-operator stop \
 	setup-local deploy-local deploy-local-tls port-forward \
@@ -371,23 +372,25 @@ sync-certs:
 
 port-forward:
 	@echo "Stopping any existing port-forwards..."
-	@while pgrep -f "kubectl port-forward .*(aegis-system|keycloak)" >/dev/null; do \
-		pkill -f "kubectl port-forward .*(aegis-system|keycloak)" || true; \
-		sleep 1; \
-	done
+	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
+	@sleep 2
 	@echo "Setting up port-forwarding..."
-	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 &
-	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 &
-	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 443:8443 &
+	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 >/dev/null 2>&1 &
+	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 >/dev/null 2>&1 &
+	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service $(PF_KEYCLOAK_HTTPS_PORT):8443 >/dev/null 2>&1 &
+	@sleep 1
 	@echo "Port-forwarding started:"
-	@echo "  Platform API: $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT)"
-	@echo "  Proxy: $(PF_PROXY_HTTP_PORT)"
-	@echo "  Keycloak: 443 (HTTPS)"
+	@echo "  Platform API: http://localhost:$(PF_PLATFORM_HTTP_PORT) (HTTP) / localhost:$(PF_PLATFORM_GRPC_PORT) (gRPC)"
+	@echo "  Proxy: http://localhost:$(PF_PROXY_HTTP_PORT)"
+	@echo "  Keycloak: https://localhost:$(PF_KEYCLOAK_HTTPS_PORT)"
 	@echo ""
-	@echo "Note: Port 443 requires sudo. If permission denied, run manually:"
-	@echo "  sudo kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 443:8443"
-	@echo ""
-	@echo "Use 'pkill -f \"kubectl port-forward\"' to stop all port-forwards."
+	@echo "Use 'make stop-port-forward' or 'pkill -f \"kubectl.*port-forward\"' to stop all port-forwards."
+
+.PHONY: stop-port-forward
+stop-port-forward:
+	@echo "Stopping all port-forwards..."
+	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
+	@echo "All port-forwards stopped."
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."

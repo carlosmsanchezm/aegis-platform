@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -46,6 +47,7 @@ func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *cluste
 	}
 	annotations := map[string]string{
 		"aegis.yourorg.dev/clusterId": strings.TrimSpace(req.GetClusterId()),
+		"aegis.yourorg.dev/jobBase":   infraName,
 	}
 	if version := strings.TrimSpace(profileReq.GetVersion()); version != "" {
 		annotations["aegis.yourorg.dev/profileVersion"] = version
@@ -86,6 +88,50 @@ func (s *Server) buildProjectInfra(req *aegis.CreateClusterRequest, tmpl *cluste
 		},
 	}
 	return infra, nil
+}
+
+// ensureUniqueInfraName allows repeated attempts by generating a unique infra name when an existing
+// failed or active job already uses the base name. It also cleans up failed jobs to make retries easier.
+func (s *Server) ensureUniqueInfraName(ctx context.Context, infra *infraapi.ProjectInfra) error {
+	if infra == nil {
+		return status.Error(codes.Internal, "infra object is nil")
+	}
+	var existing infraapi.ProjectInfra
+	key := types.NamespacedName{Name: infra.Name, Namespace: infra.Namespace}
+	err := s.infraClient.Get(ctx, key, &existing)
+	if err != nil {
+		// NotFound is fine; any other error is fatal.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return status.Errorf(codes.Internal, "lookup existing job %q: %v", infra.Name, err)
+	}
+
+	// If a previous job exists and failed, attempt cleanup to avoid clutter.
+	if strings.EqualFold(existing.Status.Phase, "Error") || existing.DeletionTimestamp != nil {
+		_ = s.infraClient.Delete(ctx, &existing)
+	}
+
+	// Always generate a unique name to allow retries/parallel attempts within the same project.
+	if infra.Annotations == nil {
+		infra.Annotations = map[string]string{}
+	}
+	infra.Name = uniqueInfraName(infra.Name)
+	infra.Annotations["aegis.yourorg.dev/jobBase"] = existing.Name
+	return nil
+}
+
+func uniqueInfraName(base string) string {
+	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
+	suffix := fmt.Sprintf("%04x", seed.Uint32()) // 4-hex suffix keeps names short
+	trim := maxObjectNameLength - len(suffix) - 1
+	if trim < 1 {
+		trim = maxObjectNameLength - len(suffix)
+	}
+	if trim > len(base) {
+		trim = len(base)
+	}
+	return fmt.Sprintf("%s-%s", base[:trim], suffix)
 }
 
 func canonicalProvider(raw string) string {

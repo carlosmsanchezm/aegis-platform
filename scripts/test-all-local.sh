@@ -159,6 +159,11 @@ run_go_unit_tests() {
 run_frontend_tests() {
   section "Running Frontend Tests"
 
+  if [[ ! -d "${REPO_ROOT}/aegis-platform" || ! -f "${REPO_ROOT}/aegis-platform/package.json" ]]; then
+    warning "Frontend sources not found; skipping frontend tests"
+    return
+  fi
+
   cd "${REPO_ROOT}/aegis-platform"
 
   log "Installing frontend dependencies (if needed)..."
@@ -179,6 +184,11 @@ run_frontend_tests() {
 
 run_frontend_lint() {
   section "Running Frontend Linting"
+
+  if [[ ! -d "${REPO_ROOT}/aegis-platform" || ! -f "${REPO_ROOT}/aegis-platform/package.json" ]]; then
+    warning "Frontend sources not found; skipping frontend lint"
+    return
+  fi
 
   cd "${REPO_ROOT}/aegis-platform"
 

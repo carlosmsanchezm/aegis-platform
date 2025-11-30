@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
 	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
@@ -90,11 +92,20 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 		return nil, err
 	}
 
+	// Best-effort unlock before any operations in case a previous run left a remote lock.
+	_ = stack.Cancel(ctx)
+	r.clearPulumiLock(programCfg.ProjectID, r.stackName(programCfg.ProjectID, programCfg.Region))
+
 	progressWriter := &logWriter{log: r.log}
 
 	if skip := strings.EqualFold(os.Getenv(envAegisPulumiSkipRefresh), "true"); !skip {
 		if _, err := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter)); err != nil {
-			return nil, fmt.Errorf("pulumi refresh: %w", err)
+			if !isLockError(err) || !r.retryAfterCancel(ctx, stack, func() error {
+				_, retryErr := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter))
+				return retryErr
+			}) {
+				return nil, fmt.Errorf("pulumi refresh: %w", err)
+			}
 		}
 	}
 
@@ -162,7 +173,15 @@ func (r *Runner) Destroy(ctx context.Context, infra *infraapi.ProjectInfra, spec
 	}
 
 	progressWriter := &logWriter{log: r.log}
+	_ = stack.Cancel(ctx) // best-effort unlock before destroy
 	destroyRes, err := stack.Destroy(ctx, optdestroy.ProgressStreams(progressWriter))
+	if err != nil && isLockError(err) && r.retryAfterCancel(ctx, stack, func() error {
+		var destroyErr error
+		destroyRes, destroyErr = stack.Destroy(ctx, optdestroy.ProgressStreams(progressWriter))
+		return destroyErr
+	}) {
+		err = nil
+	}
 	if err != nil {
 		return fmt.Errorf("pulumi destroy: %w", err)
 	}
@@ -371,6 +390,9 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		kubeconfigMap := pulumi.Map{}
 
 		for idx, clusterDef := range input.Clusters {
+			if len(clusterDef.NodePools) == 0 {
+				return fmt.Errorf("cluster %q has no node pools configured", clusterDef.ClusterID)
+			}
 			clusterName := fmt.Sprintf("%s-%d", sanitize(clusterDef.Name), idx)
 			resourceName := pulumiResourceName(clusterName, 30)
 			if clusterDef.ClusterID != "" {
@@ -384,6 +406,7 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			}
 			clusterArgs := &eks.ClusterArgs{
 				SkipDefaultNodeGroup: &skipDefault,
+				UseDefaultVpcCni:     pulumi.BoolPtr(true),
 				Tags: pulumi.StringMap{
 					"Project": pulumi.String(input.ProjectID),
 					"Cluster": pulumi.String(clusterIDLabel),
@@ -419,7 +442,8 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				key = clusterName
 			}
 			kubeconfigKey := fmt.Sprintf("%s.kubeconfig", key)
-			kubeconfigMap[key] = cluster.KubeconfigJson
+			kcfg := r.buildKubeconfigWithExternalID(ctx, cluster, input.Region, input.RoleARN, input.ExternalID)
+			kubeconfigMap[key] = kcfg
 			clusterMap[key] = pulumi.Map{
 				"clusterId":           pulumi.String(key),
 				"name":                pulumi.String(clusterDef.Name),
@@ -817,6 +841,46 @@ func (r *Runner) projectName(projectID string) string {
 	return fmt.Sprintf("%s-%s", projectNamePrefix, sanitize(projectID))
 }
 
+// clearPulumiLock removes stale file-backend locks; for remote backends, stack.Cancel is preferred.
+func (r *Runner) clearPulumiLock(projectID, stackName string) {
+	backend := strings.TrimSpace(os.Getenv(envPulumiBackendURL))
+	basePath := "/tmp/pulumi-backend"
+	if backend != "" && strings.HasPrefix(backend, "file://") {
+		basePath = strings.TrimPrefix(backend, "file://")
+	}
+	lockDir := filepath.Join(basePath, ".pulumi", "locks", "organization", r.projectName(projectID), stackName)
+	if err := os.RemoveAll(lockDir); err != nil {
+		r.log.Warn("failed to clear pulumi lock", zap.String("lock_dir", lockDir), zap.Error(err))
+	} else {
+		r.log.Info("cleared pulumi locks", zap.String("lock_dir", lockDir))
+	}
+}
+
+func isLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lockSnippets := []string{
+		"stack is currently locked",
+		"currently locked by",
+		"lock(s)",
+	}
+	return slices.ContainsFunc(lockSnippets, func(sub string) bool {
+		return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(sub))
+	})
+}
+
+// retryAfterCancel tries to clear a pulumi backend lock via stack.Cancel then executes fn once.
+func (r *Runner) retryAfterCancel(ctx context.Context, stack auto.Stack, fn func() error) bool {
+	if err := stack.Cancel(ctx); err != nil {
+		r.log.Warn("pulumi cancel failed while clearing lock", zap.Error(err))
+	}
+	if err := fn(); err != nil {
+		return false
+	}
+	return true
+}
+
 // ----------------------------------------------------------------------------- //
 // Utility helpers
 
@@ -961,4 +1025,54 @@ func estimateCost(spec *infraapi.AWSInfraSpec) float64 {
 		}
 	}
 	return cost
+}
+
+// buildKubeconfigWithExternalID renders a kubeconfig that uses a helper script to assume-role with ExternalId.
+func (r *Runner) buildKubeconfigWithExternalID(ctx *pulumi.Context, cluster *eks.Cluster, region, roleARN, externalID string) pulumi.StringOutput {
+	if cluster == nil {
+		return pulumi.Sprintf("")
+	}
+	// Fall back to the default kubeconfig if no role ARN or external ID is provided.
+	if strings.TrimSpace(roleARN) == "" || strings.TrimSpace(externalID) == "" {
+		return cluster.KubeconfigJson
+	}
+
+	// Extract details needed for kubeconfig.
+	endpoint := cluster.EksCluster.Endpoint()
+	caData := cluster.EksCluster.CertificateAuthority().Data().Elem()
+	clusterName := cluster.EksCluster.Name()
+
+	return pulumi.Sprintf(`apiVersion: v1
+clusters:
+- cluster:
+    server: %s
+    certificate-authority-data: %s
+  name: %s
+contexts:
+- context:
+    cluster: %s
+    user: %s
+  name: %s
+current-context: %s
+kind: Config
+preferences: {}
+users:
+- name: %s
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: /usr/local/bin/aegis-eks-token
+      env:
+      - name: AEGIS_EKS_CLUSTER_NAME
+        value: %s
+      - name: AEGIS_EKS_REGION
+        value: %s
+      - name: AEGIS_EKS_ROLE_ARN
+        value: %s
+      - name: AEGIS_EKS_EXTERNAL_ID
+        value: %s
+      interactiveMode: IfAvailable
+`, endpoint, caData, clusterName,
+		clusterName, clusterName, clusterName, clusterName, clusterName,
+		clusterName, pulumi.String(region), pulumi.String(roleARN), pulumi.String(externalID))
 }

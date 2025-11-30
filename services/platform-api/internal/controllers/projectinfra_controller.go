@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
@@ -36,12 +41,16 @@ type ProjectInfraReconciler struct {
 	Store                     store.Store
 	KubeconfigSecretName      string
 	KubeconfigSecretNamespace string
+	LocalLocks                map[string]*sync.Mutex
+	LocalLocksMu              sync.Mutex
+	HolderIdentity            string
 }
 
 // SetupWithManager registers the reconciler with the manager.
-func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infraapi.ProjectInfra{}).
+		WithOptions(opts).
 		Complete(r)
 }
 
@@ -52,6 +61,21 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var infra infraapi.ProjectInfra
 	if err := r.Get(ctx, req.NamespacedName, &infra); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	releaseLock, res, err := r.acquireStackLock(ctx, &infra)
+	if err != nil {
+		return res, err
+	}
+	// If we failed to acquire the lease, requeue instead of proceeding without coordination.
+	if res.Requeue || res.RequeueAfter > 0 {
+		if releaseLock != nil {
+			releaseLock()
+		}
+		return res, nil
+	}
+	if releaseLock != nil {
+		defer releaseLock()
 	}
 
 	if !infra.DeletionTimestamp.IsZero() {
@@ -631,4 +655,152 @@ func (r *ProjectInfraReconciler) logger() *zap.Logger {
 		return r.Log
 	}
 	return zap.NewNop()
+}
+
+// ----------------------------------------------------------------------------- //
+// Stack-level locking to avoid concurrent Pulumi runs for the same stack.
+
+func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *infraapi.ProjectInfra) (func(), ctrl.Result, error) {
+	stackKey := stackLockKey(infra)
+	unlockLocal := r.lockLocal(stackKey)
+	holder := r.holderIdentity()
+
+	leaseName := leaseNameForInfra(infra)
+	leaseNS := infra.Namespace
+
+	lease := &coordinationv1.Lease{}
+	err := r.Get(ctx, types.NamespacedName{Name: leaseName, Namespace: leaseNS}, lease)
+	now := metav1.NowMicro()
+	leaseDuration := int32(60)
+
+	release := func() {
+		// Best-effort delete only if we hold the lease.
+		r.releaseLease(ctx, leaseName, leaseNS, holder)
+		unlockLocal()
+	}
+
+	if apierrors.IsNotFound(err) {
+		newLease := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      leaseName,
+				Namespace: leaseNS,
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity:       ptr.To(holder),
+				LeaseDurationSeconds: ptr.To(leaseDuration),
+				AcquireTime:          &now,
+				RenewTime:            &now,
+			},
+		}
+		if createErr := r.Create(ctx, newLease); createErr != nil {
+			unlockLocal()
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, client.IgnoreNotFound(createErr)
+		}
+		return release, ctrl.Result{}, nil
+	} else if err != nil {
+		unlockLocal()
+		return nil, ctrl.Result{}, err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+	expired := false
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	} else {
+		expired = true
+	}
+
+	if existingHolder != "" && existingHolder != holder && !expired {
+		unlockLocal()
+		return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Take over or renew the lease.
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.RenewTime = &now
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if err := r.Update(ctx, lease); err != nil {
+		unlockLocal()
+		if apierrors.IsConflict(err) {
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		return nil, ctrl.Result{}, err
+	}
+
+	return release, ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) releaseLease(ctx context.Context, name, namespace, holder string) {
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		return
+	}
+	if lease.Spec.HolderIdentity != nil && strings.TrimSpace(*lease.Spec.HolderIdentity) != holder {
+		return
+	}
+	_ = r.Delete(ctx, lease)
+}
+
+func (r *ProjectInfraReconciler) lockLocal(key string) func() {
+	if r.LocalLocks == nil {
+		r.LocalLocks = map[string]*sync.Mutex{}
+	}
+	r.LocalLocksMu.Lock()
+	m, ok := r.LocalLocks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		r.LocalLocks[key] = m
+	}
+	r.LocalLocksMu.Unlock()
+	m.Lock()
+	return func() {
+		m.Unlock()
+	}
+}
+
+func stackLockKey(infra *infraapi.ProjectInfra) string {
+	return fmt.Sprintf("%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+}
+
+func leaseNameForInfra(infra *infraapi.ProjectInfra) string {
+	base := fmt.Sprintf("pi-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	return sanitizeName(base, 63)
+}
+
+func sanitizeName(in string, maxLen int) string {
+	out := make([]rune, 0, len(in))
+	for _, r := range strings.ToLower(in) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			out = append(out, r)
+		} else {
+			out = append(out, '-')
+		}
+	}
+	name := strings.Trim(outStr(out), "-")
+	if len(name) > maxLen {
+		name = name[:maxLen]
+	}
+	if name == "" {
+		name = "pi-stack"
+	}
+	return name
+}
+
+func outStr(r []rune) string {
+	return string(r)
+}
+
+func (r *ProjectInfraReconciler) holderIdentity() string {
+	if s := strings.TrimSpace(r.HolderIdentity); s != "" {
+		return s
+	}
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "aegis-platform-api"
 }

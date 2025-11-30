@@ -225,11 +225,11 @@ platformApi:
   # Resource constraints for local development
   resources:
     limits:
-      cpu: "500m"
-      memory: "512Mi"
+      cpu: "2000m"
+      memory: "2Gi"
     requests:
-      cpu: "100m"
-      memory: "128Mi"
+      cpu: "200m"
+      memory: "512Mi"
 
   # Disable health probes for local development (endpoints not implemented yet)
   livenessProbe: null

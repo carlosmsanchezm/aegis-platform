@@ -81,7 +81,9 @@ RUN set -euo pipefail; \
     /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli && \
     rm -rf /tmp/aws /tmp/awscliv2.zip && \
     curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${KUBE_ARCH}/kubectl" && \
-    chmod +x /usr/local/bin/kubectl
+    chmod +x /usr/local/bin/kubectl && \
+    curl -fsSLo /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7/jq-linux-${KUBE_ARCH} && \
+    chmod +x /usr/local/bin/jq
 
 WORKDIR /root/
 
@@ -100,6 +102,35 @@ COPY --from=builder /app/charts ./charts
 COPY --from=builder /tmp/pulumi-cli /usr/local/bin/pulumi
 # Copy pulumi plugins to avoid runtime downloads/rate limits
 COPY --from=builder /root/.pulumi /root/.pulumi
+
+# Helper to assume role with external ID and fetch EKS exec credential
+RUN cat > /usr/local/bin/aegis-eks-token <<'EOF' && chmod +x /usr/local/bin/aegis-eks-token
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AEGIS_EKS_CLUSTER_NAME:?cluster name required}"
+: "${AEGIS_EKS_REGION:?region required}"
+: "${AEGIS_EKS_ROLE_ARN:?role arn required}"
+: "${AEGIS_EKS_EXTERNAL_ID:?external id required}"
+
+assumed=$(aws sts assume-role \
+  --role-arn "${AEGIS_EKS_ROLE_ARN}" \
+  --role-session-name "aegis-eks-token" \
+  --external-id "${AEGIS_EKS_EXTERNAL_ID}")
+
+export AWS_ACCESS_KEY_ID
+export AWS_SECRET_ACCESS_KEY
+export AWS_SESSION_TOKEN
+
+AWS_ACCESS_KEY_ID=$(echo "${assumed}" | jq -r .Credentials.AccessKeyId)
+AWS_SECRET_ACCESS_KEY=$(echo "${assumed}" | jq -r .Credentials.SecretAccessKey)
+AWS_SESSION_TOKEN=$(echo "${assumed}" | jq -r .Credentials.SessionToken)
+
+aws eks get-token \
+  --cluster-name "${AEGIS_EKS_CLUSTER_NAME}" \
+  --region "${AEGIS_EKS_REGION}" \
+  --output json
+EOF
 
 # Expose ports
 EXPOSE 8080 8081

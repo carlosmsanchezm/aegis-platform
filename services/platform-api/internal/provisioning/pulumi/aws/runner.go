@@ -18,9 +18,11 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
 	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
-	"github.com/pulumi/pulumi-eks/sdk/go/eks"
+	awsiam "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
 	kubernetes "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
+	kubecorev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
+	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optrefresh"
@@ -327,7 +329,6 @@ func (r *Runner) ensurePlugins(ctx context.Context, stack auto.Stack) error {
 	required := []plugin{
 		{Name: "aws", Version: "5.43.0"},
 		{Name: "kubernetes", Version: "4.23.0"},
-		{Name: "eks", Version: "1.0.4"},
 	}
 	for _, p := range required {
 		if err := ws.InstallPlugin(ctx, p.Name, p.Version); err != nil {
@@ -399,40 +400,76 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				clusterName = sanitize(clusterDef.ClusterID)
 				resourceName = pulumiResourceName(clusterName, 30)
 			}
-			skipDefault := true
 			clusterIDLabel := clusterDef.ClusterID
 			if clusterIDLabel == "" {
 				clusterIDLabel = clusterName
 			}
-			clusterArgs := &eks.ClusterArgs{
-				SkipDefaultNodeGroup: &skipDefault,
-				UseDefaultVpcCni:     pulumi.BoolPtr(true),
-				Tags: pulumi.StringMap{
-					"Project": pulumi.String(input.ProjectID),
-					"Cluster": pulumi.String(clusterIDLabel),
+
+			tags := pulumi.StringMap{
+				"Project": pulumi.String(input.ProjectID),
+				"Cluster": pulumi.String(clusterIDLabel),
+			}
+
+			clusterRole, err := r.createClusterRole(ctx, fmt.Sprintf("%s-cluster-role", resourceName), tags, providerOpt)
+			if err != nil {
+				return err
+			}
+			nodeRole, err := r.createNodeRole(ctx, fmt.Sprintf("%s-node-role", resourceName), tags, providerOpt)
+			if err != nil {
+				return err
+			}
+			clusterSG, nodeSG, err := r.createSecurityGroups(ctx, resourceName, resolvedVpcID, tags, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			lt, ltVersion, err := r.buildNodeLaunchTemplate(ctx, resourceName, clusterSG, nodeSG, tags, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			clusterArgs := &awseks.ClusterArgs{
+				Name:    pulumi.StringPtr(clusterName),
+				RoleArn: clusterRole.Arn,
+				Tags:    tags,
+				VpcConfig: &awseks.ClusterVpcConfigArgs{
+					SecurityGroupIds: pulumi.StringArray{
+						clusterSG.ID().ToStringOutput(),
+					},
+					SubnetIds: pulumi.ToStringArray(resolvedSubnets),
 				},
 			}
 			if version := strings.TrimSpace(clusterDef.Version); version != "" {
 				clusterArgs.Version = pulumi.StringPtr(version)
 			}
-			if resolvedVpcID != "" {
-				clusterArgs.VpcId = pulumi.StringPtr(resolvedVpcID)
-			}
-			if len(resolvedSubnets) > 0 {
-				clusterArgs.SubnetIds = pulumi.ToStringArray(resolvedSubnets)
-			}
 
-			cluster, err := eks.NewCluster(ctx, resourceName, clusterArgs, providerOpt)
+			cluster, err := awseks.NewCluster(ctx, resourceName, clusterArgs, providerOpt, pulumi.DependsOn([]pulumi.Resource{clusterRole, clusterSG}))
 			if err != nil {
 				return fmt.Errorf("create eks cluster %q: %w", clusterDef.ClusterID, err)
 			}
 
-			if err := r.configureManagedNodeGroups(ctx, clusterDef, cluster, awsProvider); err != nil {
+			kubeconfig := r.buildKubeconfigWithExternalID(cluster, input.Region, input.RoleARN, input.ExternalID)
+
+			kubeProvider, err := kubernetes.NewProvider(ctx, fmt.Sprintf("%s-k8s", sanitize(clusterName)), &kubernetes.ProviderArgs{
+				Kubeconfig: kubeconfig,
+			}, pulumi.DependsOn([]pulumi.Resource{cluster}))
+			if err != nil {
+				return fmt.Errorf("create kubernetes provider: %w", err)
+			}
+
+			awsAuth, err := r.applyAWSAuthConfig(ctx, kubeProvider, nodeRole.Arn, input.RoleARN, clusterName, []pulumi.Resource{cluster})
+			if err != nil {
+				return err
+			}
+
+			nodeGroupDeps := []pulumi.Resource{cluster, awsAuth, lt}
+			nodeGroups, err := r.configureManagedNodeGroups(ctx, clusterDef, cluster, nodeRole, lt, ltVersion, resolvedSubnets, awsProvider, nodeGroupDeps, tags)
+			if err != nil {
 				return err
 			}
 
 			if !input.SkipHelm {
-				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, cluster, input); err != nil {
+				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
 					return err
 				}
 			}
@@ -442,8 +479,7 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				key = clusterName
 			}
 			kubeconfigKey := fmt.Sprintf("%s.kubeconfig", key)
-			kcfg := r.buildKubeconfigWithExternalID(ctx, cluster, input.Region, input.RoleARN, input.ExternalID)
-			kubeconfigMap[key] = kcfg
+			kubeconfigMap[key] = kubeconfig
 			clusterMap[key] = pulumi.Map{
 				"clusterId":           pulumi.String(key),
 				"name":                pulumi.String(clusterDef.Name),
@@ -458,79 +494,167 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 	}
 }
 
-func (r *Runner) resolveDefaultSubnets(ctx *pulumi.Context, provider *aws.Provider, region string) (string, []string, error) {
-	azs, err := aws.GetAvailabilityZones(ctx, &aws.GetAvailabilityZonesArgs{}, pulumi.Provider(provider))
+// ----------------------------------------------------------------------------- //
+// AWS resource helpers
+
+func (r *Runner) createClusterRole(ctx *pulumi.Context, name string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsiam.Role, error) {
+	assume := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["eks.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}`
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(assume),
+		Tags:             tags,
+	}, opts)
 	if err != nil {
-		return "", nil, fmt.Errorf("discover availability zones: %w", err)
-	}
-	eligibleAZs := map[string]bool{}
-	for _, name := range azs.Names {
-		eligibleAZs[strings.TrimSpace(name)] = true
-	}
-	if u := unsupportedControlPlaneAZs[strings.TrimSpace(region)]; len(u) > 0 {
-		for az := range u {
-			delete(eligibleAZs, az)
-		}
+		return nil, fmt.Errorf("create eks service role: %w", err)
 	}
 
-	vpcs, err := awsec2.GetVpcs(ctx, &awsec2.GetVpcsArgs{
-		Filters: []awsec2.GetVpcsFilter{
-			{
-				Name:   "is-default",
-				Values: []string{"true"},
-			},
-		},
-	}, pulumi.Provider(provider))
-	if err != nil {
-		return "", nil, fmt.Errorf("discover default vpc: %w", err)
+	policies := []string{
+		"arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+		"arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
+		"arn:aws:iam::aws:policy/AmazonEKSVPCResourceController",
 	}
-	if len(vpcs.Ids) == 0 {
-		return "", nil, fmt.Errorf("no default VPC found in region %s; set VPC/subnet IDs in the profile", region)
-	}
-	vpcID := vpcs.Ids[0]
-	subnets, err := awsec2.GetSubnets(ctx, &awsec2.GetSubnetsArgs{
-		Filters: []awsec2.GetSubnetsFilter{
-			{
-				Name:   "vpc-id",
-				Values: []string{vpcID},
-			},
-		},
-	}, pulumi.Provider(provider))
-	if err != nil {
-		return "", nil, fmt.Errorf("discover subnets for vpc %s: %w", vpcID, err)
-	}
-	filtered := []string{}
-	azSet := map[string]bool{}
-	for _, subnetID := range subnets.Ids {
-		subnet, err := awsec2.LookupSubnet(ctx, &awsec2.LookupSubnetArgs{Id: pulumi.StringRef(subnetID)}, pulumi.Provider(provider))
-		if err != nil {
-			return "", nil, fmt.Errorf("inspect subnet %s: %w", subnetID, err)
+	for i, policy := range policies {
+		if _, err := awsiam.NewRolePolicyAttachment(ctx, fmt.Sprintf("%s-attach-%d", name, i), &awsiam.RolePolicyAttachmentArgs{
+			PolicyArn: pulumi.String(policy),
+			Role:      role.Name,
+		}, opts); err != nil {
+			return nil, fmt.Errorf("attach policy %s: %w", policy, err)
 		}
-		az := strings.TrimSpace(subnet.AvailabilityZone)
-		if !eligibleAZs[az] {
-			continue
-		}
-		filtered = append(filtered, subnetID)
-		azSet[az] = true
 	}
-
-	if len(azSet) < 2 {
-		return "", nil, fmt.Errorf("default VPC %s has %d supported AZs for region %s; specify VPC/subnet IDs in the cluster profile (e.g., subnets in %v)", vpcID, len(azSet), region, azs.Names)
-	}
-	if len(filtered) == 0 {
-		return "", nil, fmt.Errorf("no eligible subnets discovered in default VPC %s for region %s", vpcID, region)
-	}
-	ctx.Log.Info(fmt.Sprintf("using filtered default VPC subnets for VPC %s (subnets=%d, azs=%d)", vpcID, len(filtered), len(azSet)), &pulumi.LogArgs{})
-	return vpcID, filtered, nil
+	return role, nil
 }
 
-func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clusterDefinition, cluster *eks.Cluster, provider *aws.Provider) error {
-	if len(clusterDef.NodePools) == 0 {
-		return nil
+func (r *Runner) createNodeRole(ctx *pulumi.Context, name string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsiam.Role, error) {
+	assume := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}`
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(assume),
+		Tags:             tags,
+	}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("create eks node role: %w", err)
 	}
-	instanceRoles := cluster.Core.InstanceRoles()
-	role := instanceRoles.Index(pulumi.Int(0))
 
+	policies := []string{
+		"arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+		"arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+		"arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+		"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+	}
+	for i, policy := range policies {
+		if _, err := awsiam.NewRolePolicyAttachment(ctx, fmt.Sprintf("%s-attach-%d", name, i), &awsiam.RolePolicyAttachmentArgs{
+			PolicyArn: pulumi.String(policy),
+			Role:      role.Name,
+		}, opts); err != nil {
+			return nil, fmt.Errorf("attach policy %s: %w", policy, err)
+		}
+	}
+	return role, nil
+}
+
+func (r *Runner) createSecurityGroups(ctx *pulumi.Context, baseName, vpcID string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsec2.SecurityGroup, *awsec2.SecurityGroup, error) {
+	clusterSG, err := awsec2.NewSecurityGroup(ctx, fmt.Sprintf("%s-cluster-sg", baseName), &awsec2.SecurityGroupArgs{
+		VpcId:       pulumi.String(vpcID),
+		Description: pulumi.String("EKS control plane security group"),
+		Tags:        tags,
+		Egress: awsec2.SecurityGroupEgressArray{
+			&awsec2.SecurityGroupEgressArgs{
+				Protocol:   pulumi.String("-1"),
+				FromPort:   pulumi.Int(0),
+				ToPort:     pulumi.Int(0),
+				CidrBlocks: pulumi.StringArray{pulumi.String("0.0.0.0/0")},
+			},
+		},
+	}, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create cluster security group: %w", err)
+	}
+
+	nodeSG, err := awsec2.NewSecurityGroup(ctx, fmt.Sprintf("%s-node-sg", baseName), &awsec2.SecurityGroupArgs{
+		VpcId:       pulumi.String(vpcID),
+		Description: pulumi.String("EKS managed node group security group"),
+		Tags:        tags,
+		Egress: awsec2.SecurityGroupEgressArray{
+			&awsec2.SecurityGroupEgressArgs{
+				Protocol:   pulumi.String("-1"),
+				FromPort:   pulumi.Int(0),
+				ToPort:     pulumi.Int(0),
+				CidrBlocks: pulumi.StringArray{pulumi.String("0.0.0.0/0")},
+			},
+		},
+	}, opts, pulumi.DependsOn([]pulumi.Resource{clusterSG}))
+	if err != nil {
+		return nil, nil, fmt.Errorf("create node security group: %w", err)
+	}
+
+	// Allow nodes to reach the control plane and vice versa; allow node-to-node traffic.
+	if _, err := awsec2.NewSecurityGroupRule(ctx, fmt.Sprintf("%s-cluster-from-nodes", baseName), &awsec2.SecurityGroupRuleArgs{
+		Type:                  pulumi.String("ingress"),
+		Protocol:              pulumi.String("-1"),
+		FromPort:              pulumi.Int(0),
+		ToPort:                pulumi.Int(0),
+		SecurityGroupId:       clusterSG.ID(),
+		SourceSecurityGroupId: nodeSG.ID(),
+		Description:           pulumi.String("allow node groups to reach control plane"),
+	}, opts); err != nil {
+		return nil, nil, fmt.Errorf("authorize nodes to control plane: %w", err)
+	}
+
+	if _, err := awsec2.NewSecurityGroupRule(ctx, fmt.Sprintf("%s-nodes-from-cluster", baseName), &awsec2.SecurityGroupRuleArgs{
+		Type:                  pulumi.String("ingress"),
+		Protocol:              pulumi.String("-1"),
+		FromPort:              pulumi.Int(0),
+		ToPort:                pulumi.Int(0),
+		SecurityGroupId:       nodeSG.ID(),
+		SourceSecurityGroupId: clusterSG.ID(),
+		Description:           pulumi.String("allow control plane to reach nodes"),
+	}, opts); err != nil {
+		return nil, nil, fmt.Errorf("authorize control plane to nodes: %w", err)
+	}
+
+	if _, err := awsec2.NewSecurityGroupRule(ctx, fmt.Sprintf("%s-nodes-self", baseName), &awsec2.SecurityGroupRuleArgs{
+		Type:                  pulumi.String("ingress"),
+		Protocol:              pulumi.String("-1"),
+		FromPort:              pulumi.Int(0),
+		ToPort:                pulumi.Int(0),
+		SecurityGroupId:       nodeSG.ID(),
+		SourceSecurityGroupId: nodeSG.ID(),
+		Description:           pulumi.String("allow node-to-node communication"),
+	}, opts); err != nil {
+		return nil, nil, fmt.Errorf("authorize node self traffic: %w", err)
+	}
+
+	return clusterSG, nodeSG, nil
+}
+
+func (r *Runner) buildNodeLaunchTemplate(ctx *pulumi.Context, baseName string, clusterSG, nodeSG *awsec2.SecurityGroup, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsec2.LaunchTemplate, pulumi.StringOutput, error) {
+	lt, err := awsec2.NewLaunchTemplate(ctx, fmt.Sprintf("%s-lt", baseName), &awsec2.LaunchTemplateArgs{
+		NamePrefix: pulumi.StringPtr(fmt.Sprintf("%s-", baseName)),
+		Tags:       tags,
+		VpcSecurityGroupIds: pulumi.StringArray{
+			clusterSG.ID().ToStringOutput(),
+			nodeSG.ID().ToStringOutput(),
+		},
+		TagSpecifications: awsec2.LaunchTemplateTagSpecificationArray{
+			&awsec2.LaunchTemplateTagSpecificationArgs{
+				ResourceType: pulumi.String("instance"),
+				Tags:         tags,
+			},
+		},
+	}, opts, pulumi.DependsOn([]pulumi.Resource{clusterSG, nodeSG}))
+	if err != nil {
+		return nil, pulumi.StringOutput{}, fmt.Errorf("create launch template: %w", err)
+	}
+	version := lt.LatestVersion.ApplyT(func(v int) string {
+		return fmt.Sprintf("%d", v)
+	}).(pulumi.StringOutput)
+	return lt, version, nil
+}
+
+func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clusterDefinition, cluster *awseks.Cluster, nodeRole *awsiam.Role, lt *awsec2.LaunchTemplate, ltVersion pulumi.StringOutput, subnets []string, provider *aws.Provider, depends []pulumi.Resource, tags pulumi.StringMap) ([]pulumi.Resource, error) {
+	if len(clusterDef.NodePools) == 0 {
+		return nil, nil
+	}
+
+	nodeGroups := []pulumi.Resource{}
 	for _, pool := range clusterDef.NodePools {
 		name := strings.TrimSpace(pool.Name)
 		if name == "" {
@@ -541,45 +665,81 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 		if instanceType == "" {
 			instanceType = "m6i.large"
 		}
-		scaling := awseks.NodeGroupScalingConfigArgs{
+		scaling := &awseks.NodeGroupScalingConfigArgs{
 			DesiredSize: pulumi.Int(int(pool.MinSize)),
 			MinSize:     pulumi.Int(int(pool.MinSize)),
 			MaxSize:     pulumi.Int(int(pool.MaxSize)),
 		}
-		mp := &eks.ManagedNodeGroupArgs{
-			Cluster:       cluster,
-			ClusterName:   cluster.EksCluster.Name().ToStringPtrOutput(),
+
+		ngArgs := &awseks.NodeGroupArgs{
+			ClusterName:   pulumi.StringInput(cluster.Name),
+			NodeRoleArn:   nodeRole.Arn,
 			NodeGroupName: pulumi.StringPtr(name),
-			NodeRole:      role,
+			SubnetIds:     pulumi.ToStringArray(subnets),
 			InstanceTypes: pulumi.StringArray{
 				pulumi.String(instanceType),
 			},
-			ScalingConfig: scaling.ToNodeGroupScalingConfigPtrOutput(),
+			ScalingConfig: scaling,
 			Taints:        convertTaints(pool.Taints),
+			Tags:          tags,
+			LaunchTemplate: &awseks.NodeGroupLaunchTemplateArgs{
+				Id:      lt.ID().ToStringPtrOutput(),
+				Version: ltVersion,
+			},
 		}
+
 		if len(pool.Labels) > 0 {
 			labels := pulumi.StringMap{}
 			for k, v := range pool.Labels {
 				labels[k] = pulumi.String(v)
 			}
-			mp.Labels = labels
+			ngArgs.Labels = labels
 		}
 
-		if _, err := eks.NewManagedNodeGroup(ctx, fmt.Sprintf("%s-nodegroup", name), mp, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{cluster})); err != nil {
-			return fmt.Errorf("create managed node group %q: %w", name, err)
+		opts := []pulumi.ResourceOption{pulumi.Provider(provider), pulumi.DependsOn(depends)}
+		ng, err := awseks.NewNodeGroup(ctx, fmt.Sprintf("%s-nodegroup", name), ngArgs, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("create managed node group %q: %w", name, err)
 		}
+		nodeGroups = append(nodeGroups, ng)
 	}
-	return nil
+	return nodeGroups, nil
 }
 
-func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, cluster *eks.Cluster, input *programInput) error {
-	kubeProvider, err := kubernetes.NewProvider(ctx, fmt.Sprintf("%s-k8s", sanitize(clusterID)), &kubernetes.ProviderArgs{
-		Kubeconfig: cluster.KubeconfigJson,
-	}, pulumi.DependsOn([]pulumi.Resource{cluster}))
-	if err != nil {
-		return fmt.Errorf("create kubernetes provider: %w", err)
+func (r *Runner) applyAWSAuthConfig(ctx *pulumi.Context, kubeProvider *kubernetes.Provider, nodeRoleArn pulumi.StringInput, adminRoleArn string, clusterName string, depends []pulumi.Resource) (pulumi.Resource, error) {
+	mapRoles := pulumi.Sprintf(`- rolearn: %s
+  username: system:node:{{EC2PrivateDNSName}}
+  groups:
+    - system:bootstrappers
+    - system:nodes
+`, nodeRoleArn)
+
+	adminRole := strings.TrimSpace(adminRoleArn)
+	if adminRole != "" {
+		mapRoles = pulumi.Sprintf(`%s
+- rolearn: %s
+  username: admin:{{SessionName}}
+  groups:
+    - system:masters
+`, mapRoles, pulumi.String(adminRole))
 	}
 
+	cm, err := kubecorev1.NewConfigMap(ctx, fmt.Sprintf("%s-aws-auth", sanitize(clusterName)), &kubecorev1.ConfigMapArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name:      pulumi.String("aws-auth"),
+			Namespace: pulumi.String("kube-system"),
+		},
+		Data: pulumi.StringMap{
+			"mapRoles": mapRoles,
+		},
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return nil, fmt.Errorf("create aws-auth configmap: %w", err)
+	}
+	return cm, nil
+}
+
+func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, kubeconfig pulumi.StringOutput, input *programInput, depends []pulumi.Resource) error {
 	envValues := pulumi.Map{
 		"AEGIS_CLUSTER_ID": pulumi.String(clusterID),
 		"AEGIS_REGION":     pulumi.String(input.Region),
@@ -646,10 +806,154 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, cl
 		releaseArgs.DependencyUpdate = pulumi.BoolPtr(true)
 	}
 
-	if _, err := helm.NewRelease(ctx, fmt.Sprintf("%s-release", sanitize(clusterID)), releaseArgs, pulumi.Provider(kubeProvider)); err != nil {
+	if _, err := helm.NewRelease(ctx, fmt.Sprintf("%s-release", sanitize(clusterID)), releaseArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends)); err != nil {
 		return fmt.Errorf("install aegis-spoke for cluster %q: %w", clusterID, err)
 	}
 	return nil
+}
+
+func (r *Runner) buildKubeconfigWithExternalID(cluster *awseks.Cluster, region, roleARN, externalID string) pulumi.StringOutput {
+	if cluster == nil {
+		return pulumi.Sprintf("")
+	}
+
+	hasExternal := strings.TrimSpace(roleARN) != "" && strings.TrimSpace(externalID) != ""
+	if hasExternal {
+		return pulumi.Sprintf(`apiVersion: v1
+clusters:
+- cluster:
+    server: %s
+    certificate-authority-data: %s
+  name: %s
+contexts:
+- context:
+    cluster: %s
+    user: %s
+  name: %s
+current-context: %s
+kind: Config
+preferences: {}
+users:
+- name: %s
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: /usr/local/bin/aegis-eks-token
+      env:
+      - name: AEGIS_EKS_CLUSTER_NAME
+        value: %s
+      - name: AEGIS_EKS_REGION
+        value: %s
+      - name: AEGIS_EKS_ROLE_ARN
+        value: %s
+      - name: AEGIS_EKS_EXTERNAL_ID
+        value: %s
+      interactiveMode: IfAvailable
+`, cluster.Endpoint, cluster.CertificateAuthority.Data().Elem(), cluster.Name,
+			cluster.Name, cluster.Name, cluster.Name, cluster.Name, cluster.Name,
+			cluster.Name, pulumi.String(region), pulumi.String(roleARN), pulumi.String(externalID))
+	}
+
+	return pulumi.Sprintf(`apiVersion: v1
+clusters:
+- cluster:
+    server: %s
+    certificate-authority-data: %s
+  name: %s
+contexts:
+- context:
+    cluster: %s
+    user: %s
+  name: %s
+current-context: %s
+kind: Config
+preferences: {}
+users:
+- name: %s
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: aws
+      args:
+      - eks
+      - get-token
+      - --cluster-name
+      - %s
+      - --region
+      - %s
+      interactiveMode: IfAvailable
+`, cluster.Endpoint, cluster.CertificateAuthority.Data().Elem(), cluster.Name,
+		cluster.Name, cluster.Name, cluster.Name, cluster.Name, cluster.Name,
+		cluster.Name, cluster.Name, pulumi.String(region))
+}
+
+// ----------------------------------------------------------------------------- //
+// VPC helpers
+
+func (r *Runner) resolveDefaultSubnets(ctx *pulumi.Context, provider *aws.Provider, region string) (string, []string, error) {
+	azs, err := aws.GetAvailabilityZones(ctx, &aws.GetAvailabilityZonesArgs{}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover availability zones: %w", err)
+	}
+	eligibleAZs := map[string]bool{}
+	for _, name := range azs.Names {
+		eligibleAZs[strings.TrimSpace(name)] = true
+	}
+	if u := unsupportedControlPlaneAZs[strings.TrimSpace(region)]; len(u) > 0 {
+		for az := range u {
+			delete(eligibleAZs, az)
+		}
+	}
+
+	vpcs, err := awsec2.GetVpcs(ctx, &awsec2.GetVpcsArgs{
+		Filters: []awsec2.GetVpcsFilter{
+			{
+				Name:   "is-default",
+				Values: []string{"true"},
+			},
+		},
+	}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover default vpc: %w", err)
+	}
+	if len(vpcs.Ids) == 0 {
+		return "", nil, fmt.Errorf("no default VPC found in region %s; set VPC/subnet IDs in the profile", region)
+	}
+	vpcID := vpcs.Ids[0]
+	subnets, err := awsec2.GetSubnets(ctx, &awsec2.GetSubnetsArgs{
+		Filters: []awsec2.GetSubnetsFilter{
+			{
+				Name:   "vpc-id",
+				Values: []string{vpcID},
+			},
+		},
+	}, pulumi.Provider(provider))
+	if err != nil {
+		return "", nil, fmt.Errorf("discover subnets for vpc %s: %w", vpcID, err)
+	}
+	filtered := []string{}
+	azSet := map[string]bool{}
+	for _, subnetID := range subnets.Ids {
+		subnet, err := awsec2.LookupSubnet(ctx, &awsec2.LookupSubnetArgs{Id: pulumi.StringRef(subnetID)}, pulumi.Provider(provider))
+		if err != nil {
+			return "", nil, fmt.Errorf("inspect subnet %s: %w", subnetID, err)
+		}
+		az := strings.TrimSpace(subnet.AvailabilityZone)
+		if !eligibleAZs[az] {
+			continue
+		}
+		filtered = append(filtered, subnetID)
+		azSet[az] = true
+	}
+
+	if len(azSet) < 2 {
+		return "", nil, fmt.Errorf("default VPC %s has %d supported AZs for region %s; specify VPC/subnet IDs in the cluster profile (e.g., subnets in %v)", vpcID, len(azSet), region, azs.Names)
+	}
+	if len(filtered) == 0 {
+		return "", nil, fmt.Errorf("no eligible subnets discovered in default VPC %s for region %s", vpcID, region)
+	}
+	ctx.Log.Info(fmt.Sprintf("using filtered default VPC subnets for VPC %s (subnets=%d, azs=%d)", vpcID, len(filtered), len(azSet)), &pulumi.LogArgs{})
+	return vpcID, filtered, nil
 }
 
 // ----------------------------------------------------------------------------- //
@@ -833,6 +1137,9 @@ func (r *Runner) findRepoRoot() string {
 	return "."
 }
 
+// ----------------------------------------------------------------------------- //
+// Pulumi stack helpers
+
 func (r *Runner) stackName(projectID, region string) string {
 	return fmt.Sprintf("%s-%s-%s", defaultStackPrefix, sanitize(projectID), sanitize(region))
 }
@@ -933,9 +1240,6 @@ func formatTaintEffect(effect string) string {
 	}
 }
 
-// ----------------------------------------------------------------------------- //
-// Legacy helpers retained from initial stub
-
 func grpcEndpointHostPort(endpoint string) string {
 	trimmed := strings.TrimSpace(endpoint)
 	if trimmed == "" {
@@ -1025,54 +1329,4 @@ func estimateCost(spec *infraapi.AWSInfraSpec) float64 {
 		}
 	}
 	return cost
-}
-
-// buildKubeconfigWithExternalID renders a kubeconfig that uses a helper script to assume-role with ExternalId.
-func (r *Runner) buildKubeconfigWithExternalID(ctx *pulumi.Context, cluster *eks.Cluster, region, roleARN, externalID string) pulumi.StringOutput {
-	if cluster == nil {
-		return pulumi.Sprintf("")
-	}
-	// Fall back to the default kubeconfig if no role ARN or external ID is provided.
-	if strings.TrimSpace(roleARN) == "" || strings.TrimSpace(externalID) == "" {
-		return cluster.KubeconfigJson
-	}
-
-	// Extract details needed for kubeconfig.
-	endpoint := cluster.EksCluster.Endpoint()
-	caData := cluster.EksCluster.CertificateAuthority().Data().Elem()
-	clusterName := cluster.EksCluster.Name()
-
-	return pulumi.Sprintf(`apiVersion: v1
-clusters:
-- cluster:
-    server: %s
-    certificate-authority-data: %s
-  name: %s
-contexts:
-- context:
-    cluster: %s
-    user: %s
-  name: %s
-current-context: %s
-kind: Config
-preferences: {}
-users:
-- name: %s
-  user:
-    exec:
-      apiVersion: client.authentication.k8s.io/v1beta1
-      command: /usr/local/bin/aegis-eks-token
-      env:
-      - name: AEGIS_EKS_CLUSTER_NAME
-        value: %s
-      - name: AEGIS_EKS_REGION
-        value: %s
-      - name: AEGIS_EKS_ROLE_ARN
-        value: %s
-      - name: AEGIS_EKS_EXTERNAL_ID
-        value: %s
-      interactiveMode: IfAvailable
-`, endpoint, caData, clusterName,
-		clusterName, clusterName, clusterName, clusterName, clusterName,
-		clusterName, pulumi.String(region), pulumi.String(roleARN), pulumi.String(externalID))
 }

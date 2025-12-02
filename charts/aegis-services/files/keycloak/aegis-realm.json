@@ -2,6 +2,7 @@
   "id": "d0a0fff1-7121-4616-a976-c319a3633308",
   "realm": "aegis",
   "displayName": "Aegis",
+  "displayNameHtml": "",
   "notBefore": 0,
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
@@ -313,6 +314,7 @@
       "security-admin-console": [],
       "admin-cli": [],
       "backstage": [],
+      "spoke-agent": [],
       "vscode-extension": [],
       "account-console": [],
       "broker": [
@@ -516,6 +518,25 @@
       ],
       "notBefore": 0,
       "groups": []
+    },
+    {
+      "id": "3188966f-81e1-450f-b186-4a0da216e3cd",
+      "username": "service-account-spoke-agent",
+      "emailVerified": false,
+      "createdTimestamp": 1764703630785,
+      "enabled": true,
+      "totp": false,
+      "serviceAccountClientId": "spoke-agent",
+      "disableableCredentialTypes": [],
+      "requiredActions": [
+        "CONFIGURE_TOTP"
+      ],
+      "realmRoles": [
+        "workspace-admin",
+        "default-roles-aegis"
+      ],
+      "notBefore": 0,
+      "groups": []
     }
   ],
   "scopeMappings": [
@@ -697,8 +718,8 @@
       "clientAuthenticatorType": "client-secret",
       "secret": "${BACKSTAGE_CLIENT_SECRET}",
       "redirectUris": [
-        "http://localhost:7008/*",
         "http://localhost:3000/*",
+        "http://localhost:7008/*",
         "https://backstage.localtest.me/*"
       ],
       "webOrigins": [
@@ -739,8 +760,9 @@
             "included.client.audience": "backstage",
             "id.token.claim": "false",
             "lightweight.claim": "false",
+            "introspection.token.claim": "true",
             "access.token.claim": "true",
-            "introspection.token.claim": "true"
+            "userinfo.token.claim": "false"
           }
         }
       ],
@@ -915,6 +937,67 @@
         "offline_access",
         "organization",
         "microprofile-jwt"
+      ]
+    },
+    {
+      "id": "7dfadec8-65a1-4428-8162-cf7bd3517469",
+      "clientId": "spoke-agent",
+      "name": "spoke-agent",
+      "description": "",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB",
+      "redirectUris": [
+        "/*"
+      ],
+      "webOrigins": [
+        "/*"
+      ],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "client.secret.creation.time": "1764703630",
+        "backchannel.logout.session.required": "true",
+        "standard.token.exchange.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "service_account",
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "aegis-platform",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "aegis-platform",
+        "organization",
+        "microprofile-jwt",
+        "platform"
       ]
     },
     {
@@ -1441,6 +1524,21 @@
             "access.token.claim": "true",
             "introspection.token.claim": "false"
           }
+        },
+        {
+          "id": "a03dfd19-fc5b-4d6d-a18c-d48985625c6c",
+          "name": "aegis-platform",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "false",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "false",
+            "access.token.claim": "true",
+            "included.custom.audience": "aegis-platform",
+            "userinfo.token.claim": "false"
+          }
         }
       ]
     },
@@ -1788,14 +1886,14 @@
         "subComponents": {},
         "config": {
           "allowed-protocol-mapper-types": [
-            "oidc-full-name-mapper",
-            "saml-user-attribute-mapper",
-            "saml-role-list-mapper",
-            "oidc-sha256-pairwise-sub-mapper",
-            "oidc-address-mapper",
             "oidc-usermodel-attribute-mapper",
             "oidc-usermodel-property-mapper",
-            "saml-user-property-mapper"
+            "saml-user-property-mapper",
+            "oidc-full-name-mapper",
+            "oidc-sha256-pairwise-sub-mapper",
+            "saml-user-attribute-mapper",
+            "saml-role-list-mapper",
+            "oidc-address-mapper"
           ]
         }
       },
@@ -1854,14 +1952,14 @@
         "subComponents": {},
         "config": {
           "allowed-protocol-mapper-types": [
-            "oidc-usermodel-attribute-mapper",
-            "saml-user-property-mapper",
-            "oidc-usermodel-property-mapper",
-            "oidc-sha256-pairwise-sub-mapper",
             "saml-user-attribute-mapper",
             "oidc-full-name-mapper",
+            "oidc-usermodel-property-mapper",
+            "oidc-usermodel-attribute-mapper",
             "oidc-address-mapper",
-            "saml-role-list-mapper"
+            "saml-role-list-mapper",
+            "oidc-sha256-pairwise-sub-mapper",
+            "saml-user-property-mapper"
           ]
         }
       }
@@ -2572,17 +2670,20 @@
   "firstBrokerLoginFlow": "first broker login",
   "attributes": {
     "cibaBackchannelTokenDeliveryMode": "poll",
-    "cibaExpiresIn": "120",
     "cibaAuthRequestedUserHint": "login_hint",
-    "oauth2DeviceCodeLifespan": "600",
     "clientOfflineSessionMaxLifespan": "0",
     "oauth2DevicePollingInterval": "5",
     "clientSessionIdleTimeout": "0",
-    "parRequestUriLifespan": "60",
-    "clientSessionMaxLifespan": "0",
     "clientOfflineSessionIdleTimeout": "0",
     "cibaInterval": "5",
-    "realmReusableOtpCode": "false"
+    "realmReusableOtpCode": "false",
+    "cibaExpiresIn": "120",
+    "oauth2DeviceCodeLifespan": "600",
+    "saml.signature.algorithm": "",
+    "parRequestUriLifespan": "60",
+    "clientSessionMaxLifespan": "0",
+    "frontendUrl": "https://keycloak.aegis-platform.tech/",
+    "acr.loa.map": "{}"
   },
   "keycloakVersion": "26.2.10.redhat-00002",
   "userManagedAccessAllowed": false,

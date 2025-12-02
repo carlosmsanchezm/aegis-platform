@@ -25,7 +25,7 @@ spec:
         {{- end }}
     spec:
       hostAliases:
-      - ip: "10.96.212.39"
+      - ip: "10.96.91.6"
         hostnames:
         - "keycloak.aegis-platform.tech"
       {{- $serveGrpc := true }}

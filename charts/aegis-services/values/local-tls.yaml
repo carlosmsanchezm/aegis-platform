@@ -161,7 +161,7 @@ platformApi:
           M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
           -----END CERTIFICATE-----
   env:
-    AEGIS_PLATFORM_API_ENDPOINT: "platform-api-grpc.localtest.me:443"
+    AEGIS_PLATFORM_API_ENDPOINT: "remote.aegis-platform.tech:443"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"

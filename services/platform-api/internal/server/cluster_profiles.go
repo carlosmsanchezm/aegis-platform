@@ -38,7 +38,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 					},
 					{
 						Name:         "gpu",
-						InstanceType: "g5.2xlarge",
+						InstanceType: "g4dn.xlarge",
 						MinSize:      0,
 						MaxSize:      1,
 						Labels: map[string]string{
@@ -64,7 +64,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "general",
-						InstanceType: "m6i.2xlarge",
+						InstanceType: "m6i.large",
 						MinSize:      2,
 						MaxSize:      10,
 						Labels: map[string]string{
@@ -73,7 +73,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 					},
 					{
 						Name:         "analytics",
-						InstanceType: "r6i.2xlarge",
+						InstanceType: "r6i.large",
 						MinSize:      1,
 						MaxSize:      5,
 						Labels: map[string]string{
@@ -94,7 +94,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "control",
-						InstanceType: "m6i.4xlarge",
+						InstanceType: "m6i.large",
 						MinSize:      3,
 						MaxSize:      6,
 						Labels: map[string]string{
@@ -103,7 +103,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 					},
 					{
 						Name:         "gpu",
-						InstanceType: "p4d.24xlarge",
+						InstanceType: "g4dn.xlarge",
 						MinSize:      1,
 						MaxSize:      3,
 						Labels: map[string]string{
@@ -217,16 +217,16 @@ func adjustGpuInstanceType(spec *infraapi.AWSInfraSpec, gpuType string) {
 	}
 	switch strings.ToUpper(gpuType) {
 	case "G5", "SMALL":
-		spec.NodePools[idx].InstanceType = "g5.2xlarge"
+		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
 	case "H100":
 		// Request the smallest available GPU-capable family by default to avoid vCPU quota exhaustion.
-		spec.NodePools[idx].InstanceType = "g5.2xlarge"
+		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
 	case "A100":
 		spec.NodePools[idx].InstanceType = "p4d.24xlarge"
 	case "A10G":
-		spec.NodePools[idx].InstanceType = "g5.2xlarge"
+		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
 	case "NONE":
-		spec.NodePools[idx].InstanceType = "m6i.4xlarge"
+		spec.NodePools[idx].InstanceType = "m6i.large"
 	}
 }
 

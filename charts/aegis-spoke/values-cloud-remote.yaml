@@ -1,0 +1,24 @@
+# Remote cloud overlay for spoke agent using OIDC client credentials over TLS.
+# Apply on top of values.yaml (and any region-specific values) when pointing
+# the spoke at the remote platform-api and Keycloak endpoints.
+
+k8sAgent:
+  image:
+    pullPolicy: Always
+    tag: "dev"
+  env:
+    # gRPC to platform-api over TLS via Cloudflare Tunnel
+    AEGIS_CP_GRPC: "remote.aegis-platform.tech:443"
+    AEGIS_CP_GRPC_INSECURE: "false"
+    AEGIS_CP_GRPC_SKIP_VERIFY: "true"
+    AEGIS_CP_GRPC_SERVER_NAME: "remote.aegis-platform.tech"
+
+    # OIDC client credentials (Keycloak via Cloudflare Tunnel)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
+    AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+    AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"
+    # CA bundles omitted because skip-verify is enabled for the tunnel path
+    AEGIS_PLATFORM_CA_B64: ""
+    AEGIS_CP_OIDC_CA_B64: ""

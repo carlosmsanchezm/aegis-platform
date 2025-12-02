@@ -103,6 +103,14 @@ k8sAgent:
     # TLS settings (for secure connection to hub)
     AEGIS_CP_GRPC_INSECURE: "true"  # Set to "false" for TLS
     AEGIS_CP_GRPC_SKIP_VERIFY: "false"  # Set to "true" for self-signed certs
+
+    # OIDC client credentials (recommended for production)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.example.com/realms/aegis/protocol/openid-connect/token"
+    AEGIS_CP_OIDC_CLIENT_ID: "aegis-spoke"
+    AEGIS_CP_OIDC_CLIENT_SECRET: "change-me"
+    AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
+    AEGIS_CP_OIDC_CA_B64: ""              # base64-encoded CA bundle for the issuer (optional)
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "false"  # Only set to true for debugging
 ```
 
 ### Geographic and Capacity Metadata

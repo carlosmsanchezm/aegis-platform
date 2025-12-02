@@ -257,6 +257,25 @@ NODE_EXTRA_CA_CERTS=~/aegis-local-trust.pem yarn dev
 2. Ensure `domain: localhost` is set in Backstage config
 3. Try regular browser window (not incognito)
 4. Clear all browser data and restart
+5. Restart Backstage
+
+### Tunnel issuer mismatch (Cloudflare) / 401 Illegal token
+
+**Symptoms:**
+- Keycloak login URL contains duplicate `/realms/aegis/realms/aegis` and 404s.
+- Backstage proxy calls return 401 `Illegal token` after switching to the tunnel host.
+
+**Fixes:**
+1. Set realm `frontendUrl` to host-only (no `/realms/...`): `https://keycloak.aegis-platform.tech`
+2. Backstage Keycloak provider (`app-config.local*.yaml`):
+   - `issuer`: `https://keycloak.aegis-platform.tech/realms/aegis`
+   - `metadataUrl`: `https://keycloak.aegis-platform.tech/realms/aegis/.well-known/openid-configuration`
+3. Backstage backend JWKS (`backend.auth.externalAccess`):
+   - `url`: `https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/certs`
+   - `issuer`: `https://keycloak.aegis-platform.tech/realms/aegis`
+   - `audience`: `backstage`
+   - `subjectPrefix`: `keycloak:`
+4. Restart Backstage (`NODE_EXTRA_CA_CERTS=~/aegis-local-trust.pem yarn dev`) and clear cookies for `localhost:3000/7008`.
 
 ### Path Duplication in OIDC URLs
 

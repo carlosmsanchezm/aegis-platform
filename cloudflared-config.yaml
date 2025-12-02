@@ -27,6 +27,12 @@ data:
           httpHostHeader: platform-api-grpc.localtest.me
           originServerName: platform-api-grpc.localtest.me
           http2Origin: true
+      - hostname: keycloak.aegis-platform.tech
+        service: https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443
+        originRequest:
+          noTLSVerify: true
+          httpHostHeader: keycloak.aegis-platform.tech
+          originServerName: keycloak.aegis-platform.tech
       - service: http_status:404
 ---
 apiVersion: apps/v1

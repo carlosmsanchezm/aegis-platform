@@ -189,6 +189,22 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 	}
 
 	claims := &TokenClaims{}
+	aud := splitAudiences(a.cfg.Audience)
+	if len(aud) == 0 && strings.TrimSpace(a.cfg.Audience) != "" {
+		aud = []string{strings.TrimSpace(a.cfg.Audience)}
+	}
+
+	parserOpts := []jwt.ParserOption{
+		jwt.WithIssuer(a.cfg.IssuerURL),
+		jwt.WithLeeway(30 * time.Second),
+		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
+	}
+	if len(aud) > 0 {
+		for _, a := range aud {
+			parserOpts = append(parserOpts, jwt.WithAudience(a))
+		}
+	}
+
 	t, err := jwt.ParseWithClaims(token, claims, func(tok *jwt.Token) (interface{}, error) {
 		kid, _ := tok.Header["kid"].(string)
 		key, keyErr := a.keys.getKey(ctx, kid)
@@ -197,10 +213,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		}
 		return key, nil
 	},
-		jwt.WithAudience(a.cfg.Audience),
-		jwt.WithIssuer(a.cfg.IssuerURL),
-		jwt.WithLeeway(30*time.Second),
-		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
+		parserOpts...,
 	)
 	if err != nil {
 		a.logFailure(meta, "token_parse", err)
@@ -339,6 +352,21 @@ func IdentityFromContext(ctx context.Context) *Identity {
 		}
 	}
 	return nil
+}
+
+func splitAudiences(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' '
+	}) {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 type authenticatedServerStream struct {

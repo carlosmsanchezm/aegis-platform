@@ -12,6 +12,14 @@ k8sAgent:
   env:
     AEGIS_CLUSTER_ID: "dev-1"
     AEGIS_CP_GRPC: "host.docker.internal:8081"
+    # OIDC client credentials for platform-api authentication (optional; recommended for production)
+    AEGIS_CP_OIDC_TOKEN_URL: ""
+    AEGIS_CP_OIDC_CLIENT_ID: ""
+    AEGIS_CP_OIDC_CLIENT_SECRET: ""
+    AEGIS_CP_OIDC_AUDIENCE: ""
+    AEGIS_CP_OIDC_CA_B64: ""
+    AEGIS_CP_OIDC_CA_FILE: ""
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: ""
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
     AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"
 

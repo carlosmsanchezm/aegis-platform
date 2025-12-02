@@ -25,9 +25,9 @@ spec:
         {{- end }}
     spec:
       hostAliases:
-      - ip: "10.96.146.219"
+      - ip: "10.96.91.6"
         hostnames:
-        - "keycloak.localtest.me"
+        - "keycloak.aegis-platform.tech"
       {{- $serveGrpc := true }}
       {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
       {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}
@@ -102,11 +102,13 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             {{- range $key, $value := .Values.platformApi.envFromSecret }}
+            {{- if not (hasKey $platformEnv $key) }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
+            {{- end }}
             {{- end }}
             {{- if and $hasOIDCCA (not (hasKey $platformEnv "OIDC_CA_BUNDLE")) }}
             - name: OIDC_CA_BUNDLE

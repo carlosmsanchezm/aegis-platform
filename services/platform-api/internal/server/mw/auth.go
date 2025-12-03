@@ -200,9 +200,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
 	}
 	if len(aud) > 0 {
-		for _, a := range aud {
-			parserOpts = append(parserOpts, jwt.WithAudience(a))
-		}
+		parserOpts = append(parserOpts, jwt.WithAudience(aud...))
 	}
 
 	t, err := jwt.ParseWithClaims(token, claims, func(tok *jwt.Token) (interface{}, error) {

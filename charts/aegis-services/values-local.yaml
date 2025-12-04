@@ -36,7 +36,6 @@ platformApi:
   # Local development environment variables
   env:
     LOG_LEVEL: "debug"
-    AEGIS_PROXY_JWT_SECRET: "a-very-secret-key-for-local-dev-must-be-32-chars"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AUTH_STATIC_TOKEN: "supersecret"

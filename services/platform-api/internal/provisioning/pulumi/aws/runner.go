@@ -898,6 +898,10 @@ func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string
 		values["nodeSelector"] = ns
 	}
 
+	if mig := gpuMigStrategy(nodePools); mig != "" {
+		values["args"] = pulumi.Array{pulumi.String(fmt.Sprintf("--mig-strategy=%s", mig))}
+	}
+
 	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
 		Name:      pulumi.StringPtr(name),
 		Namespace: pulumi.StringPtr("kube-system"),
@@ -1330,6 +1334,31 @@ func gpuFlavors(pools []infraapi.NodePool) []string {
 		}
 	}
 	return out
+}
+
+// gpuMigStrategy returns the desired MIG strategy for the NVIDIA device plugin.
+// If any GPU pool is tagged for MIG, return "mixed" so MIG resources are advertised.
+func gpuMigStrategy(pools []infraapi.NodePool) string {
+	flavors := gpuFlavors(pools)
+	for _, f := range flavors {
+		if strings.Contains(strings.ToLower(f), "mig") {
+			return "mixed"
+		}
+	}
+	for _, p := range pools {
+		if !isGpuNodePool(p) {
+			continue
+		}
+		if hasMigTaint(p.Taints) {
+			return "mixed"
+		}
+		for _, v := range p.Labels {
+			if strings.Contains(strings.ToLower(strings.TrimSpace(v)), "mig") {
+				return "mixed"
+			}
+		}
+	}
+	return ""
 }
 
 func gpuAmiType(clusterVersion string) string {

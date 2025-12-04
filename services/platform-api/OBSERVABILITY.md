@@ -71,3 +71,8 @@ When you add fields to `ProjectInfra` or its status (e.g., observability outputs
 - Apply the updated CRD to your cluster (even for dev/test) so status updates are not rejected.
 - Verify the controller writes the new fields and handles nil/empty values.
 - Optional: add a quick diff/lint to catch drift between Go types and the checked-in CRD.
+
+## Enabling observability in provisioning
+- Runtime flag: set `AEGIS_OBSERVABILITY_ENABLED=true` in the platform-api environment to allow installs (default is off).
+- ProjectInfra addon: set `spec.addons["observability"]=true` on the ProjectInfra request. Both the env flag **and** the addon must be true for the AWS runner to install the stack.
+- Values files: packaged under `/services/platform-api/config/observability` in the image; override via `AEGIS_OBSERVABILITY_VALUES_FILE` and `AEGIS_METRICS_SERVER_VALUES_FILE` if needed.

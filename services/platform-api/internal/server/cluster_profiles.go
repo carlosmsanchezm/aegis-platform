@@ -42,7 +42,8 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 						MinSize:      0,
 						MaxSize:      1,
 						Labels: map[string]string{
-							"aegis.dev/purpose": "training",
+							"aegis.dev/purpose":   "training",
+							"aegis.io/gpu-flavor": "nvidia-tesla-t4",
 						},
 						Taints: []corev1.Taint{{
 							Key:    "nvidia.com/gpu",
@@ -107,7 +108,8 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 						MinSize:      1,
 						MaxSize:      3,
 						Labels: map[string]string{
-							"aegis.dev/purpose": "secure-gpu",
+							"aegis.dev/purpose":   "secure-gpu",
+							"aegis.io/gpu-flavor": "nvidia-tesla-t4",
 						},
 						Taints: []corev1.Taint{{
 							Key:    "nvidia.com/gpu",

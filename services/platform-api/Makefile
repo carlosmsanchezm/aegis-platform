@@ -1,8 +1,10 @@
 # Convenience tooling for Aegis platform-api service builds.
 
 IMG ?= carlosmsanchez/aegis-platform-api:dev
-PLATFORMS ?= linux/amd64,linux/arm64
-BUILDX_OUTPUT ?= --push
+# Default to the host platform for faster local builds; override to linux/amd64,linux/arm64 when needed.
+PLATFORMS ?= $(shell docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || echo linux/arm64)
+# Default to loading locally; override to --push when you need to publish.
+BUILDX_OUTPUT ?= --load
 GO_FLAGS ?=
 ROOT := $(abspath $(CURDIR)/../..)
 
@@ -32,9 +34,9 @@ pulumi-preview:
 	GO111MODULE=on go run $(GO_FLAGS) ./cmd/pulumi-preview -- $(PULUMI_PREVIEW_ARGS)
 
 .PHONY: docker-build docker-buildx
-# Multi-arch build that pushes to the registry defined by IMG.
+# Build the image (defaults to host arch + local load; override PLATFORMS/BUILDX_OUTPUT for multi-arch + push).
 docker-build docker-buildx:
-	@echo "Building $(IMG) for $(PLATFORMS)"
+	@echo "Building $(IMG) for $(PLATFORMS) with output $(BUILDX_OUTPUT)"
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--tag $(IMG) \

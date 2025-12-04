@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Build stage
 FROM golang:1.24-alpine AS builder
 
@@ -17,18 +18,11 @@ COPY pkg/workspace/go.* ./pkg/workspace/
 
 # Download dependencies (cached layer)
 WORKDIR /app/services/platform-api
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    GOMODCACHE=/go/pkg/mod \
+    go mod download
 
-# Copy the entire project structure
-WORKDIR /app
-COPY . .
-
-# Build the platform-api service binary with optimized flags
-WORKDIR /app/services/platform-api
-RUN GOMAXPROCS=1 CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o platform-api .
-
-# Download and install Pulumi CLI
+# Download and install Pulumi CLI early so it stays cached across code changes
 WORKDIR /tmp
 RUN apk add --no-cache curl tar && \
     ARCH="${TARGETARCH:-amd64}" && \
@@ -48,6 +42,18 @@ COPY services/platform-api/pulumi-plugins/pulumi-plugins-bundle.tar.gz /tmp/
 RUN mkdir -p /root/.pulumi && \
     tar -xzf /tmp/pulumi-plugins-bundle.tar.gz -C /root/.pulumi && \
     rm /tmp/pulumi-plugins-bundle.tar.gz
+
+# Copy the entire project structure
+WORKDIR /app
+COPY --link . .
+
+# Build the platform-api service binary with optimized flags
+WORKDIR /app/services/platform-api
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    GOMODCACHE=/go/pkg/mod \
+    GOCACHE=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -o platform-api .
 
 # Final stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
@@ -97,6 +103,9 @@ COPY --from=builder /app/services/platform-api/migrations ./migrations
 
 # Copy Helm charts needed by Pulumi (local chart installs)
 COPY --from=builder /app/charts ./charts
+
+# Copy observability values used by the Pulumi installer
+COPY --from=builder /app/services/platform-api/config/observability ./services/platform-api/config/observability
 
 # Copy pulumi CLI
 COPY --from=builder /tmp/pulumi-cli /usr/local/bin/pulumi

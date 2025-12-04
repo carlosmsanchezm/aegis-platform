@@ -21,7 +21,7 @@ k8sAgent:
     AEGIS_CP_OIDC_CA_FILE: ""
     AEGIS_CP_OIDC_SKIP_TLS_VERIFY: ""
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
-    AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"
+    AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
     # Geographic metadata for workload placement
     AEGIS_REGION: "us-east-1"  # AWS region where this cluster is deployed (us-east-1, us-west-2, eu-west-1, etc.)
@@ -31,7 +31,8 @@ k8sAgent:
     # Comma-separated list of flavor names this cluster advertises
     # Platform API uses these for workload placement decisions
     # Examples: "cpu-small,cpu-large,gpu-a100,gpu-h100"
-    AEGIS_FLAVORS: "cpu-small" # Default to cpu-small for development clusters
+    # Default to CPU-only; GPU flavors should be injected dynamically based on actual node pools/policy.
+    AEGIS_FLAVORS: "cpu-small"
 
 proxy:
   replicaCount: 1

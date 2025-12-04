@@ -2194,13 +2194,26 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			MemoryRequest:      "16Gi",
 			PriceUsdPerGpuHour: 0,
 		}
-	case "a10-1gpu", "a10g-1gpu", "a10g-mig-1g", "a10-mig-1g":
+	case "a10-1gpu", "a10g-1gpu":
 		return &aegis.Flavor{
-			Name:               name,
-			Chip:               "nvidia-a10g",
+			Name: name,
+			Chip: "nvidia-a10g",
+			// Full A10G GPU uses the standard NVIDIA device plugin resource name.
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "a10g-mig-1g", "a10-mig-1g":
+		return &aegis.Flavor{
+			Name: name,
+			Chip: "nvidia-a10g",
+			// MIG 1g.10gb profile as reported by the NVIDIA device plugin.
+			ResourceName:       "nvidia.com/mig-1g.10gb",
+			GpuCount:           1,
+			MemoryGib:          10,
 			CpuCoresRequest:    "8",
 			MemoryRequest:      "32Gi",
 			PriceUsdPerGpuHour: 0,

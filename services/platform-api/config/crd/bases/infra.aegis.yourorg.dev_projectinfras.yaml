@@ -249,6 +249,7 @@ spec:
                           metricsServerPort:
                             type: integer
                             format: int32
+<<<<<<< HEAD
                           lokiNamespace:
                             type: string
                           lokiService:
@@ -258,6 +259,8 @@ spec:
                             format: int32
                           lokiAuthSecret:
                             type: string
+=======
+>>>>>>> origin/integration/wire-frontend-backend-2025-11-03
                           otelEndpoint:
                             type: string
                           metricsUrl:

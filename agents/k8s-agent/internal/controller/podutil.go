@@ -43,7 +43,15 @@ func ApplyResourceHints(pod *corev1.PodSpec, hints *aegisv1alpha1.ResourceHints)
 		pod.NodeSelector = map[string]string{}
 	}
 	flavorLabel := "nvidia-tesla-t4"
-	if strings.Contains(resourceName, "mig-1g.10gb") || strings.Contains(resourceName, "a10") {
+	cpuHint := ""
+	if hints.CpuCoresRequest != nil {
+		cpuHint = strings.TrimSpace(*hints.CpuCoresRequest)
+	}
+	memHint := ""
+	if hints.MemoryRequest != nil {
+		memHint = strings.ToLower(strings.TrimSpace(*hints.MemoryRequest))
+	}
+	if strings.Contains(resourceName, "mig-1g.10gb") || strings.Contains(resourceName, "a10") || cpuHint == "8" || strings.HasPrefix(memHint, "32g") {
 		flavorLabel = "nvidia-a10g-mig"
 	}
 	pod.NodeSelector["aegis.io/gpu-flavor"] = flavorLabel

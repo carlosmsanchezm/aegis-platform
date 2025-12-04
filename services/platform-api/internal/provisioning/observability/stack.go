@@ -15,6 +15,7 @@ import (
 )
 
 const (
+<<<<<<< HEAD
 	envObservabilityChart          = "AEGIS_OBSERVABILITY_CHART"
 	envObservabilityChartVersion   = "AEGIS_OBSERVABILITY_CHART_VERSION"
 	envObservabilityRepo           = "AEGIS_OBSERVABILITY_REPO"
@@ -46,6 +47,25 @@ const (
 	maxObservabilityNameLength     = 40
 	maxLoggingNameLength           = 40
 	defaultHelmTimeout             = 15 * time.Minute
+=======
+	envObservabilityChart         = "AEGIS_OBSERVABILITY_CHART"
+	envObservabilityChartVersion  = "AEGIS_OBSERVABILITY_CHART_VERSION"
+	envObservabilityRepo          = "AEGIS_OBSERVABILITY_REPO"
+	envObservabilityValuesFile    = "AEGIS_OBSERVABILITY_VALUES_FILE"
+	envObservabilityEnabled       = "AEGIS_OBSERVABILITY_ENABLED"
+	envMetricsServerChart         = "AEGIS_METRICS_SERVER_CHART"
+	envMetricsServerVersion       = "AEGIS_METRICS_SERVER_CHART_VERSION"
+	envMetricsServerRepo          = "AEGIS_METRICS_SERVER_REPO"
+	envMetricsServerValuesFile    = "AEGIS_METRICS_SERVER_VALUES_FILE"
+	defaultObservabilityNamespace = "aegis-observability"
+	defaultObservabilityRelease   = "aegis-obsv"
+	defaultObservabilityBaseName  = "aegis-obsv"
+	defaultMetricsRelease         = "aegis-metrics"
+	defaultPrometheusPort         = 9090
+	defaultAlertmanagerPort       = 9093
+	maxObservabilityNameLength    = 40
+	defaultHelmTimeout            = 15 * time.Minute
+>>>>>>> origin/integration/wire-frontend-backend-2025-11-03
 )
 
 // HelmConfig describes a helm release configuration.
@@ -101,6 +121,8 @@ func ResolveFromEnv(repoRoot string) Config {
 		repoRoot = findRepoRoot()
 	}
 
+	enabled := strings.EqualFold(strings.TrimSpace(os.Getenv(envObservabilityEnabled)), "true")
+
 	stackChart := strings.TrimSpace(os.Getenv(envObservabilityChart))
 	if stackChart == "" {
 		stackChart = "kube-prometheus-stack"
@@ -112,6 +134,9 @@ func ResolveFromEnv(repoRoot string) Config {
 	stackValues := strings.TrimSpace(os.Getenv(envObservabilityValuesFile))
 	if stackValues == "" {
 		stackValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "values-mvp.yaml")
+		if !fileExists(stackValues) {
+			stackValues = ""
+		}
 	}
 
 	msChart := strings.TrimSpace(os.Getenv(envMetricsServerChart))
@@ -125,6 +150,9 @@ func ResolveFromEnv(repoRoot string) Config {
 	msValues := strings.TrimSpace(os.Getenv(envMetricsServerValuesFile))
 	if msValues == "" {
 		msValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "metrics-server-values.yaml")
+		if !fileExists(msValues) {
+			msValues = ""
+		}
 	}
 
 	lokiChart := strings.TrimSpace(os.Getenv(envLoggingLokiChart))
@@ -159,7 +187,7 @@ func ResolveFromEnv(repoRoot string) Config {
 		BaseName:         defaultObservabilityBaseName,
 		PrometheusPort:   defaultPrometheusPort,
 		AlertmanagerPort: defaultAlertmanagerPort,
-		Enable:           true,
+		Enable:           enabled,
 		Stack: HelmConfig{
 			ChartPath:        stackChart,
 			Repository:       stackRepo,
@@ -212,6 +240,9 @@ func ResolveFromEnv(repoRoot string) Config {
 
 // Install installs the observability stack and returns the outputs map suitable for ClusterOutput.Observability.
 func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
+	if !cfg.Enable {
+		return nil, nil
+	}
 	namespace := strings.TrimSpace(cfg.Namespace)
 	if namespace == "" {
 		namespace = defaultObservabilityNamespace
@@ -673,4 +704,14 @@ func pulumiResourceName(base string, max int) string {
 		return suffix
 	}
 	return trimmed + "-" + suffix
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	return false
 }

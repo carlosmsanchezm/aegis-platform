@@ -450,7 +450,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	flavorObj := s.store.GetFlavor(reqFlavor)
-	if flavorObj == nil {
+	if flavorObj == nil && s.autoBootstrap {
 		s.ensureFlavorDefaults(reqFlavor)
 		flavorObj = s.store.GetFlavor(reqFlavor)
 	}

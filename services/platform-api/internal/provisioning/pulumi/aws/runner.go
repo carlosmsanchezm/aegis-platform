@@ -845,8 +845,33 @@ func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string
 		},
 	}
 
-	// Restrict scheduling to GPU nodegroups using labels from the GPU pool, if present.
-	if sel := gpuNodeSelector(nodePools); len(sel) > 0 {
+	// Restrict scheduling to GPU nodegroups. If there is exactly one GPU flavor, use a nodeSelector.
+	// If multiple GPU flavors exist, use affinity with an "In" matcher so the plugin lands on all GPU pools.
+	if flavors := gpuFlavors(nodePools); len(flavors) == 1 {
+		values["nodeSelector"] = pulumi.Map{"aegis.io/gpu-flavor": pulumi.String(flavors[0])}
+	} else if len(flavors) > 1 {
+		vals := pulumi.StringArray{}
+		for _, f := range flavors {
+			vals = append(vals, pulumi.String(f))
+		}
+		values["affinity"] = pulumi.Map{
+			"nodeAffinity": pulumi.Map{
+				"requiredDuringSchedulingIgnoredDuringExecution": pulumi.Map{
+					"nodeSelectorTerms": pulumi.Array{
+						pulumi.Map{
+							"matchExpressions": pulumi.Array{
+								pulumi.Map{
+									"key":      pulumi.String("aegis.io/gpu-flavor"),
+									"operator": pulumi.String("In"),
+									"values":   vals,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	} else if sel := gpuNodeSelector(nodePools); len(sel) > 0 {
 		ns := pulumi.Map{}
 		for k, v := range sel {
 			ns[k] = pulumi.String(v)
@@ -1206,12 +1231,13 @@ func hasGpuNodePool(pools []infraapi.NodePool) bool {
 // gpuNodeSelector derives a nodeSelector from GPU pool labels to target the device plugin to GPU nodes.
 // Prefer a specific GPU flavor label; fall back to a generic purpose label if present.
 func gpuNodeSelector(pools []infraapi.NodePool) map[string]string {
+	flavors := gpuFlavors(pools)
+	if len(flavors) == 1 {
+		return map[string]string{"aegis.io/gpu-flavor": flavors[0]}
+	}
 	for _, p := range pools {
 		if !isGpuNodePool(p) {
 			continue
-		}
-		if flavor, ok := p.Labels["aegis.io/gpu-flavor"]; ok && strings.TrimSpace(flavor) != "" {
-			return map[string]string{"aegis.io/gpu-flavor": strings.TrimSpace(flavor)}
 		}
 		if purpose, ok := p.Labels["aegis.dev/purpose"]; ok && strings.TrimSpace(purpose) != "" {
 			return map[string]string{"aegis.dev/purpose": strings.TrimSpace(purpose)}
@@ -1220,9 +1246,35 @@ func gpuNodeSelector(pools []infraapi.NodePool) map[string]string {
 	return nil
 }
 
+// gpuFlavors collects unique GPU flavor labels from GPU node pools.
+func gpuFlavors(pools []infraapi.NodePool) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, p := range pools {
+		if !isGpuNodePool(p) {
+			continue
+		}
+		if flavor, ok := p.Labels["aegis.io/gpu-flavor"]; ok {
+			trimmed := strings.TrimSpace(flavor)
+			if trimmed == "" {
+				continue
+			}
+			if _, exists := seen[trimmed]; !exists {
+				seen[trimmed] = struct{}{}
+				out = append(out, trimmed)
+			}
+		}
+	}
+	return out
+}
+
 func gpuAmiType(clusterVersion string) string {
 	// AL2 GPU AMIs are only supported up to K8s 1.32. Use AL2023 GPU for newer clusters.
 	major, minor := parseK8sVersion(clusterVersion)
+	if major == 0 && minor == 0 {
+		// Unknown/unspecified version defaults to current EKS default (>=1.33) -> use AL2023 GPU.
+		return "AL2023_x86_64_NVIDIA"
+	}
 	if major > 1 || (major == 1 && minor >= 33) {
 		return "AL2023_x86_64_NVIDIA"
 	}

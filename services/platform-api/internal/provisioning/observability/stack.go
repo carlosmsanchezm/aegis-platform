@@ -18,6 +18,7 @@ const (
 	envObservabilityChartVersion  = "AEGIS_OBSERVABILITY_CHART_VERSION"
 	envObservabilityRepo          = "AEGIS_OBSERVABILITY_REPO"
 	envObservabilityValuesFile    = "AEGIS_OBSERVABILITY_VALUES_FILE"
+	envObservabilityEnabled       = "AEGIS_OBSERVABILITY_ENABLED"
 	envMetricsServerChart         = "AEGIS_METRICS_SERVER_CHART"
 	envMetricsServerVersion       = "AEGIS_METRICS_SERVER_CHART_VERSION"
 	envMetricsServerRepo          = "AEGIS_METRICS_SERVER_REPO"
@@ -73,6 +74,8 @@ func ResolveFromEnv(repoRoot string) Config {
 		repoRoot = findRepoRoot()
 	}
 
+	enabled := strings.EqualFold(strings.TrimSpace(os.Getenv(envObservabilityEnabled)), "true")
+
 	stackChart := strings.TrimSpace(os.Getenv(envObservabilityChart))
 	if stackChart == "" {
 		stackChart = "kube-prometheus-stack"
@@ -84,6 +87,9 @@ func ResolveFromEnv(repoRoot string) Config {
 	stackValues := strings.TrimSpace(os.Getenv(envObservabilityValuesFile))
 	if stackValues == "" {
 		stackValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "values-mvp.yaml")
+		if !fileExists(stackValues) {
+			stackValues = ""
+		}
 	}
 
 	msChart := strings.TrimSpace(os.Getenv(envMetricsServerChart))
@@ -97,6 +103,9 @@ func ResolveFromEnv(repoRoot string) Config {
 	msValues := strings.TrimSpace(os.Getenv(envMetricsServerValuesFile))
 	if msValues == "" {
 		msValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "metrics-server-values.yaml")
+		if !fileExists(msValues) {
+			msValues = ""
+		}
 	}
 
 	timeout := defaultHelmTimeout
@@ -105,7 +114,7 @@ func ResolveFromEnv(repoRoot string) Config {
 		BaseName:         defaultObservabilityBaseName,
 		PrometheusPort:   defaultPrometheusPort,
 		AlertmanagerPort: defaultAlertmanagerPort,
-		Enable:           true,
+		Enable:           enabled,
 		Stack: HelmConfig{
 			ChartPath:        stackChart,
 			Repository:       stackRepo,
@@ -131,6 +140,9 @@ func ResolveFromEnv(repoRoot string) Config {
 
 // Install installs the observability stack and returns the outputs map suitable for ClusterOutput.Observability.
 func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
+	if !cfg.Enable {
+		return nil, nil
+	}
 	namespace := strings.TrimSpace(cfg.Namespace)
 	if namespace == "" {
 		namespace = defaultObservabilityNamespace
@@ -309,4 +321,14 @@ func pulumiResourceName(base string, max int) string {
 		return suffix
 	}
 	return trimmed + "-" + suffix
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	return false
 }

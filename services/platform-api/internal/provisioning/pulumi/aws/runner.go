@@ -1336,11 +1336,12 @@ func gpuAmiType(clusterVersion string) string {
 	// AL2 GPU AMIs are only supported up to K8s 1.32. Use AL2023 GPU for newer clusters.
 	major, minor := parseK8sVersion(clusterVersion)
 	if major == 0 && minor == 0 {
-		// Unknown/unspecified version defaults to current EKS default (>=1.33) -> use AL2023 standard.
-		return "AL2023_x86_64_STANDARD"
+		// Unknown/unspecified version defaults to current EKS default (>=1.33) -> use Bottlerocket NVIDIA for GPU.
+		return "BOTTLEROCKET_x86_64_NVIDIA"
 	}
 	if major > 1 || (major == 1 && minor >= 33) {
-		return "AL2023_x86_64_STANDARD"
+		// Managed nodegroups don’t expose an AL2023 GPU amiType; use Bottlerocket NVIDIA for 1.33+ GPU pools.
+		return "BOTTLEROCKET_x86_64_NVIDIA"
 	}
 	return "AL2_x86_64_GPU"
 }

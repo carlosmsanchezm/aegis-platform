@@ -256,7 +256,7 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		"alertmanagerService":      pulumi.String(stackFullname + "-alertmanager"),
 		"alertmanagerPort":         pulumi.Int(alertPort),
 		"alertmanagerConfigSecret": pulumi.String("alertmanager-" + stackFullname + "-alertmanager"),
-		"metricsServerService":     pulumi.String(metricsFullname + "-metrics-server"),
+		"metricsServerService":     pulumi.String(metricsFullname),
 		"metricsServerPort":        pulumi.Int(443),
 	}
 	return outputs, nil

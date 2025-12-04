@@ -132,4 +132,21 @@ These run alongside kube-prometheus defaults; heavy control-plane-only rules are
    - `kubectl get pods,svc -n aegis-logging`
    - Port-forward Loki and run a query as in the local section to confirm labels (`cluster`, `namespace`, `pod`, `event_reason`, `event_type`).
 
+<<<<<<< HEAD
 Outputs for backend/UI stay in `ProjectInfra.status.outputs[].observability` (see above) and map directly to in-cluster service URLs.
+=======
+Outputs for backend/UI remain the same (namespace + service names/ports + alertmanager secret) and are exported via Pulumi stack outputs and `ClusterOutput.Observability`.
+
+## CRD / schema sync checklist
+When you add fields to `ProjectInfra` or its status (e.g., observability outputs):
+- Update the Go types in `api/v1alpha1` (spec/status structs).
+- Regenerate or update the CRD schema in `config/crd/bases/...projectinfras.yaml` so the API server accepts the new fields.
+- Apply the updated CRD to your cluster (even for dev/test) so status updates are not rejected.
+- Verify the controller writes the new fields and handles nil/empty values.
+- Optional: add a quick diff/lint to catch drift between Go types and the checked-in CRD.
+
+## Enabling observability in provisioning
+- Runtime flag: set `AEGIS_OBSERVABILITY_ENABLED=true` in the platform-api environment to allow installs (default is off).
+- ProjectInfra addon: set `spec.addons["observability"]=true` on the ProjectInfra request. Both the env flag **and** the addon must be true for the AWS runner to install the stack.
+- Values files: packaged under `/services/platform-api/config/observability` in the image; override via `AEGIS_OBSERVABILITY_VALUES_FILE` and `AEGIS_METRICS_SERVER_VALUES_FILE` if needed.
+>>>>>>> origin/integration/wire-frontend-backend-2025-11-03

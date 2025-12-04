@@ -27,6 +27,46 @@ SCOPE="${KEYCLOAK_SCOPE:-openid profile email offline_access}"
 AUDIENCE="${KEYCLOAK_AUDIENCE:-}"
 CA_CERT="${KEYCLOAK_CA_CERT:-${HOME}/keycloak.localtest.me.crt}"
 INSECURE="${KEYCLOAK_INSECURE:-0}"
+WAIT_SECONDS="${KEYCLOAK_WAIT_SECONDS:-180}"
+WAIT_ENABLED="${KEYCLOAK_WAIT:-1}"
+
+wait_for_keycloak() {
+  [[ "${WAIT_ENABLED}" == "0" ]] && return
+  command -v kubectl >/dev/null 2>&1 || return
+  local ns label deadline pods_json not_ready
+  ns="${KEYCLOAK_NAMESPACE:-keycloak}"
+  label="${KEYCLOAK_POD_LABEL:-app.kubernetes.io/name=keycloak}"
+  if ! kubectl get ns "${ns}" >/dev/null 2>&1; then
+    echo "ℹ keycloak namespace ${ns} not found; skipping pod wait" >&2
+    return
+  fi
+  echo "⏳ Waiting for Keycloak pods in namespace ${ns}..." >&2
+  if kubectl -n "${ns}" get pods -l "${label}" --no-headers >/dev/null 2>&1; then
+    if kubectl -n "${ns}" wait pod -l "${label}" --for=condition=Ready --timeout="${WAIT_SECONDS}s" >/dev/null 2>&1; then
+      echo "✅ Keycloak pods ready (label ${label})" >&2
+      return
+    fi
+    echo "⚠ Keycloak pods not ready via label ${label}; falling back to all pods" >&2
+  fi
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while (( SECONDS < deadline )); do
+    pods_json="$(kubectl -n "${ns}" get pods -o json 2>/dev/null || true)"
+    if [[ -z "${pods_json}" ]]; then
+      echo "… unable to list pods in ${ns}; retrying" >&2
+      sleep 5
+      continue
+    fi
+    not_ready="$(printf '%s\n' "${pods_json}" | jq -r '.items[] | select(.status.phase!="Succeeded" and any(.status.containerStatuses[]?; .ready!=true)) | .metadata.name')"
+    if [[ -z "${not_ready}" ]]; then
+      echo "✅ Keycloak pods ready" >&2
+      return
+    fi
+    echo "… waiting on pods: ${not_ready}" >&2
+    sleep 5
+  done
+  echo "✖ Keycloak pods not ready after ${WAIT_SECONDS}s" >&2
+  exit 1
+}
 
 # If grant type not set, infer from presence of username/password.
 if [[ -z "${GRANT_TYPE}" ]]; then
@@ -63,6 +103,7 @@ if [[ "${GRANT_TYPE}" == "client_credentials" ]]; then
     exit 1
   fi
 fi
+wait_for_keycloak
 
 CURL_ARGS=(-sS --fail --request POST "${TOKEN_URL}")
 if [[ -n "${CA_CERT}" && -f "${CA_CERT}" ]]; then

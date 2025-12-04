@@ -230,6 +230,25 @@ spec:
                       observability:
                         type: object
                         properties:
+                          namespace:
+                            type: string
+                          prometheusService:
+                            type: string
+                          prometheusPort:
+                            type: integer
+                            format: int32
+                          alertmanagerService:
+                            type: string
+                          alertmanagerPort:
+                            type: integer
+                            format: int32
+                          alertmanagerConfigSecret:
+                            type: string
+                          metricsServerService:
+                            type: string
+                          metricsServerPort:
+                            type: integer
+                            format: int32
                           otelEndpoint:
                             type: string
                           metricsUrl:

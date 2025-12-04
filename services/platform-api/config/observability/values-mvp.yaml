@@ -1,0 +1,152 @@
+# Minimal footprint for kube-prometheus-stack
+# Keeps services cluster-internal and trims resources/retention for dev/test clusters.
+grafana:
+  enabled: false
+
+crds:
+  enabled: true
+
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+
+kubeApiServer:
+  enabled: true
+
+kubeProxy:
+  enabled: true
+
+kubeStateMetrics:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 30m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+alertmanager:
+  service:
+    type: ClusterIP
+    port: 9093
+  alertmanagerSpec:
+    replicas: 1
+    retention: 120h
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+prometheus:
+  service:
+    type: ClusterIP
+    port: 9090
+  prometheusSpec:
+    replicas: 1
+    retention: 24h
+    retentionSize: 10GiB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    enableAdminAPI: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+    limits:
+      cpu: 300m
+      memory: 400Mi
+  admissionWebhooks:
+    patch:
+      enabled: true
+  tls:
+    enabled: false
+
+# Focus alerts on baseline cluster health without exposing UI endpoints.
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false
+    alertmanager: true
+    general: true
+    k8s: true
+    kubeApiserver: true
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    node: true
+    prometheus: true
+    kubePrometheusKubeControllerManager: false
+    kubePrometheusKubeScheduler: false
+
+# Explicit baseline alerts required for MVP.
+additionalPrometheusRulesMap:
+  aegis-baseline:
+    groups:
+      - name: aegis-baseline.rules
+        rules:
+          - alert: NodeNotReady
+            expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: Node is not ready
+              description: Node {{ $labels.node }} has been marked NotReady for over 5 minutes.
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: Pod is crash looping
+              description: Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently.
+          - alert: PodUnschedulable
+            expr: max_over_time(kube_pod_status_unschedulable[5m]) > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: Pod cannot be scheduled
+              description: Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been unschedulable for over 10 minutes.
+          - alert: KubeAPILatencyHigh
+            expr: histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH|WATCHLIST"}[5m])) by (le)) > 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: API server latency is high
+              description: Kubernetes API server p99 latency is above 1s for 5 minutes.
+          - alert: KubeAPIErrorsHigh
+            expr: sum(rate(apiserver_request_total{code=~"5.."}[5m])) by (instance) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: API server is returning errors
+              description: Kubernetes API server is returning 5xx responses.

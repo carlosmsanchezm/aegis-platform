@@ -31,7 +31,8 @@ k8sAgent:
     # Comma-separated list of flavor names this cluster advertises
     # Platform API uses these for workload placement decisions
     # Examples: "cpu-small,cpu-large,gpu-a100,gpu-h100"
-    AEGIS_FLAVORS: "cpu-small,t4-1gpu" # Advertise T4-capable GPU flavor by default
+    # Default to CPU-only; GPU flavors should be injected dynamically based on actual node pools/policy.
+    AEGIS_FLAVORS: "cpu-small"
 
 proxy:
   replicaCount: 1

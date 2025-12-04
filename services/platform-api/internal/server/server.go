@@ -2196,9 +2196,11 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 		}
 	case "a10-1gpu", "a10g-1gpu", "a10g-mig-1g", "a10-mig-1g":
 		return &aegis.Flavor{
-			Name:               name,
-			Chip:               "nvidia-a10g",
-			ResourceName:       "nvidia.com/gpu",
+			Name: name,
+			Chip: "nvidia-a10g",
+			// Align with the GPU node label set for g5 pools (normalizeNodePools -> aegis.io/gpu-flavor=nvidia-a10g-mig)
+			// so scheduling lands on A10G nodes instead of T4.
+			ResourceName:       "nvidia-a10g-mig",
 			GpuCount:           1,
 			MemoryGib:          24,
 			CpuCoresRequest:    "8",

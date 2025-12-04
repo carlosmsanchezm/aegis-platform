@@ -33,6 +33,7 @@ import (
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/observability"
 )
 
 const (
@@ -235,6 +236,8 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		Clusters:            clusterDefs,
 		Platform:            r.resolvePlatformConfig(),
 		SpokeHelm:           r.resolveHelmConfig(),
+		Observability:       observability.ResolveFromEnv(r.findRepoRoot()),
+		EnableObservability: addonEnabled(infra.Spec.Addons, "observability", true),
 		SkipHelm:            strings.EqualFold(os.Getenv("AEGIS_SKIP_SPOKE_HELM"), "true"),
 		EnableCostEstimates: true,
 	}
@@ -269,6 +272,8 @@ type programInput struct {
 	Clusters            []clusterDefinition
 	Platform            platformConfig
 	SpokeHelm           helmConfig
+	Observability       observability.Config
+	EnableObservability bool
 	SkipHelm            bool
 	EnableCostEstimates bool
 }
@@ -346,6 +351,7 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		input = &programInput{}
 	}
 	return func(ctx *pulumi.Context) error {
+		installer := observability.NewInstaller()
 		if input.Region == "" {
 			return errors.New("region is required")
 		}
@@ -475,6 +481,15 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				}
 			}
 
+			var observabilityOutputs pulumi.Map
+			if input.EnableObservability && input.Observability.Enable {
+				obs, err := installer.Install(ctx, clusterDef.ClusterID, kubeProvider, input.Observability, append(nodeGroups, cluster))
+				if err != nil {
+					return err
+				}
+				observabilityOutputs = obs
+			}
+
 			if !input.SkipHelm {
 				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
 					return err
@@ -487,12 +502,16 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			}
 			kubeconfigKey := fmt.Sprintf("%s.kubeconfig", key)
 			kubeconfigMap[key] = kubeconfig
-			clusterMap[key] = pulumi.Map{
+			entry := pulumi.Map{
 				"clusterId":           pulumi.String(key),
 				"name":                pulumi.String(clusterDef.Name),
 				"region":              pulumi.String(input.Region),
 				"kubeconfigSecretKey": pulumi.String(kubeconfigKey),
 			}
+			if observabilityOutputs != nil {
+				entry["observability"] = observabilityOutputs
+			}
+			clusterMap[key] = entry
 		}
 
 		ctx.Export("clusters", clusterMap)
@@ -1074,12 +1093,14 @@ func (r *Runner) translateOutputs(outputs map[string]auto.OutputValue, region st
 		name := stringFromEntry(entry, "name", clusterID)
 		secretKey := stringFromEntry(entry, "kubeconfigSecretKey", fmt.Sprintf("%s.kubeconfig", clusterID))
 		regionOut := stringFromEntry(entry, "region", region)
+		observability := observabilityFromEntry(entry["observability"])
 
 		result.Outputs = append(result.Outputs, infraapi.ClusterOutput{
 			ClusterID:           clusterID,
 			Name:                name,
 			Region:              regionOut,
 			KubeconfigSecretKey: secretKey,
+			Observability:       observability,
 		})
 	}
 
@@ -1101,6 +1122,49 @@ func stringFromEntry(entry map[string]interface{}, key, defaultVal string) strin
 		}
 	}
 	return defaultVal
+}
+
+func intFromEntry(entry map[string]interface{}, key string, defaultVal int) int {
+	if raw, ok := entry[key]; ok {
+		switch v := raw.(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		case int32:
+			return int(v)
+		case int64:
+			return int(v)
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				return parsed
+			}
+		}
+	}
+	return defaultVal
+}
+
+func observabilityFromEntry(val interface{}) infraapi.ObservabilityOutput {
+	obs := infraapi.ObservabilityOutput{}
+	if val == nil {
+		return obs
+	}
+	raw, ok := val.(map[string]interface{})
+	if !ok {
+		return obs
+	}
+
+	obs.Namespace = stringFromEntry(raw, "namespace", "")
+	obs.PrometheusService = stringFromEntry(raw, "prometheusService", "")
+	obs.PrometheusPort = int32(intFromEntry(raw, "prometheusPort", 0))
+	obs.AlertmanagerService = stringFromEntry(raw, "alertmanagerService", "")
+	obs.AlertmanagerPort = int32(intFromEntry(raw, "alertmanagerPort", 0))
+	obs.AlertmanagerConfigSecret = stringFromEntry(raw, "alertmanagerConfigSecret", "")
+	obs.MetricsServerService = stringFromEntry(raw, "metricsServerService", "")
+	obs.MetricsServerPort = int32(intFromEntry(raw, "metricsServerPort", 0))
+	obs.OtelEndpoint = stringFromEntry(raw, "otelEndpoint", "")
+	obs.MetricsURL = stringFromEntry(raw, "metricsUrl", "")
+	return obs
 }
 
 // ----------------------------------------------------------------------------- //
@@ -1530,6 +1594,18 @@ func pulumiResourceName(base string, max int) string {
 		return suffix
 	}
 	return fmt.Sprintf("%s-%s", trimmed, suffix)
+}
+
+func addonEnabled(addons map[string]bool, key string, defaultVal bool) bool {
+	if len(addons) == 0 {
+		return defaultVal
+	}
+	for k, v := range addons {
+		if strings.EqualFold(strings.TrimSpace(k), strings.TrimSpace(key)) {
+			return v
+		}
+	}
+	return defaultVal
 }
 
 func sanitizeStrings(values []string) []string {

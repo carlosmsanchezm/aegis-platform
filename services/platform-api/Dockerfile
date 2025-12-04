@@ -104,6 +104,9 @@ COPY --from=builder /app/services/platform-api/migrations ./migrations
 # Copy Helm charts needed by Pulumi (local chart installs)
 COPY --from=builder /app/charts ./charts
 
+# Copy observability values used by the Pulumi installer
+COPY --from=builder /app/services/platform-api/config/observability ./services/platform-api/config/observability
+
 # Copy pulumi CLI
 COPY --from=builder /tmp/pulumi-cli /usr/local/bin/pulumi
 # Copy pulumi plugins to avoid runtime downloads/rate limits

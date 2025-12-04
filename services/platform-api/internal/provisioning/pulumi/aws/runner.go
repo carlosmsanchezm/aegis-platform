@@ -467,6 +467,13 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			if err != nil {
 				return err
 			}
+			if hasGpuNodePool(clusterDef.NodePools) {
+				deps := append([]pulumi.Resource{}, nodeGroups...)
+				deps = append(deps, cluster)
+				if err := r.installNvidiaDevicePlugin(ctx, clusterDef.ClusterID, kubeProvider, deps); err != nil {
+					return err
+				}
+			}
 
 			if !input.SkipHelm {
 				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
@@ -661,10 +668,11 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 			name = fmt.Sprintf("%s-nodepool", sanitize(clusterDef.ClusterID))
 		}
 		name = pulumiResourceName(sanitize(name), 30)
-		instanceType := strings.TrimSpace(pool.InstanceType)
+		instanceType := normalizeInstanceType(pool.InstanceType)
 		if instanceType == "" {
 			instanceType = "m6i.large"
 		}
+		gpuPool := isGpuNodePool(pool)
 		scaling := &awseks.NodeGroupScalingConfigArgs{
 			DesiredSize: pulumi.Int(int(pool.MinSize)),
 			MinSize:     pulumi.Int(int(pool.MinSize)),
@@ -686,6 +694,10 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 				Id:      lt.ID().ToStringPtrOutput(),
 				Version: ltVersion,
 			},
+		}
+
+		if gpuPool {
+			ngArgs.AmiType = pulumi.StringPtr(gpuAmiType(clusterDef.Version))
 		}
 
 		if len(pool.Labels) > 0 {
@@ -808,6 +820,43 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 
 	if _, err := helm.NewRelease(ctx, fmt.Sprintf("%s-release", sanitize(clusterID)), releaseArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends)); err != nil {
 		return fmt.Errorf("install aegis-spoke for cluster %q: %w", clusterID, err)
+	}
+	return nil
+}
+
+func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	// Helm release names must be <= 53 chars. Build the full name first and then constrain it.
+	name := pulumiResourceName(fmt.Sprintf("%s-nvidia-device-plugin", key), 53)
+	values := pulumi.Map{
+		"tolerations": pulumi.Array{
+			pulumi.Map{
+				"key":      pulumi.String("nvidia.com/gpu"),
+				"operator": pulumi.String("Exists"),
+				"effect":   pulumi.String("NoSchedule"),
+			},
+			pulumi.Map{
+				"key":      pulumi.String("CriticalAddonsOnly"),
+				"operator": pulumi.String("Exists"),
+			},
+		},
+	}
+
+	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
+		Name:      pulumi.StringPtr(name),
+		Namespace: pulumi.StringPtr("kube-system"),
+		Chart:     pulumi.String("nvidia-device-plugin"),
+		RepositoryOpts: &helm.RepositoryOptsArgs{
+			Repo: pulumi.StringPtr("https://nvidia.github.io/k8s-device-plugin"),
+		},
+		Version: pulumi.StringPtr("0.14.5"),
+		Values:  values,
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return fmt.Errorf("install nvidia device plugin: %w", err)
 	}
 	return nil
 }
@@ -1040,14 +1089,14 @@ func (r *Runner) buildClusterDefinitions(projectID, region string, spec *infraap
 	}
 
 	if primary := strings.TrimSpace(spec.ClusterName); primary != "" {
-		pools := spec.NodePools
+		pools := normalizeNodePools(spec.NodePools)
 		if len(pools) == 0 {
 			pools = defaultNodePools()
 		}
 		appendCluster(primary, spec.Version, pools)
 	}
 	for _, additional := range spec.AdditionalClusters {
-		pools := additional.NodePools
+		pools := normalizeNodePools(additional.NodePools)
 		if len(pools) == 0 {
 			pools = defaultNodePools()
 		}
@@ -1064,6 +1113,107 @@ func defaultNodePools() []infraapi.NodePool {
 		MinSize:      1,
 		MaxSize:      3,
 	}}
+}
+
+func normalizeNodePools(pools []infraapi.NodePool) []infraapi.NodePool {
+	if len(pools) == 0 {
+		return pools
+	}
+
+	normalized := make([]infraapi.NodePool, 0, len(pools))
+	for _, pool := range pools {
+		cloned := pool
+		rawInstance := strings.ToLower(strings.TrimSpace(pool.InstanceType))
+		cloned.InstanceType = normalizeInstanceType(pool.InstanceType)
+		if isGpuNodePool(cloned) {
+			if cloned.Labels == nil {
+				cloned.Labels = map[string]string{}
+			}
+			flavorLabel := "nvidia-tesla-t4"
+			if strings.Contains(rawInstance, "g5") || hasMigTaint(pool.Taints) {
+				flavorLabel = "nvidia-a10g-mig"
+			}
+			if val := strings.TrimSpace(cloned.Labels["aegis.io/gpu-flavor"]); val == "" {
+				cloned.Labels["aegis.io/gpu-flavor"] = flavorLabel
+			}
+		}
+		normalized = append(normalized, cloned)
+	}
+
+	return normalized
+}
+
+func normalizeInstanceType(instanceType string) string {
+	trimmed := strings.TrimSpace(instanceType)
+	if trimmed == "" {
+		return trimmed
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "g5") {
+		return "g4dn.xlarge"
+	}
+	return trimmed
+}
+
+func isGpuNodePool(pool infraapi.NodePool) bool {
+	inst := strings.ToLower(strings.TrimSpace(pool.InstanceType))
+	if strings.HasPrefix(inst, "g4") || strings.HasPrefix(inst, "g5") || strings.HasPrefix(inst, "p2") || strings.HasPrefix(inst, "p3") || strings.HasPrefix(inst, "p4") || strings.HasPrefix(inst, "p5") {
+		return true
+	}
+	for _, t := range pool.Taints {
+		key := strings.ToLower(strings.TrimSpace(t.Key))
+		if key == "" {
+			continue
+		}
+		if strings.Contains(key, "nvidia.com/gpu") || strings.Contains(key, "mig") {
+			return true
+		}
+	}
+	for k, v := range pool.Labels {
+		key := strings.ToLower(strings.TrimSpace(k))
+		val := strings.ToLower(strings.TrimSpace(v))
+		if strings.Contains(key, "gpu") || strings.Contains(val, "gpu") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMigTaint(taints []corev1.Taint) bool {
+	for _, t := range taints {
+		key := strings.ToLower(strings.TrimSpace(t.Key))
+		if strings.Contains(key, "mig") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasGpuNodePool(pools []infraapi.NodePool) bool {
+	return slices.ContainsFunc(pools, isGpuNodePool)
+}
+
+func gpuAmiType(clusterVersion string) string {
+	// AL2 GPU AMIs are only supported up to K8s 1.32. Use AL2023 GPU for newer clusters.
+	major, minor := parseK8sVersion(clusterVersion)
+	if major > 1 || (major == 1 && minor >= 33) {
+		return "AL2023_x86_64_NVIDIA"
+	}
+	return "AL2_x86_64_GPU"
+}
+
+func parseK8sVersion(version string) (int, int) {
+	trimmed := strings.TrimSpace(version)
+	if trimmed == "" {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.TrimPrefix(trimmed, "v"), ".", 3)
+	if len(parts) < 2 {
+		return 0, 0
+	}
+	major, _ := strconv.Atoi(parts[0])
+	minor, _ := strconv.Atoi(parts[1])
+	return major, minor
 }
 
 func (r *Runner) resolvePlatformConfig() platformConfig {

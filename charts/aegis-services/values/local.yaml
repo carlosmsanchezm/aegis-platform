@@ -100,6 +100,16 @@ platformApi:
     AEGIS_PLATFORM_API_ENDPOINT: "https://remote.aegis-platform.tech"
     AEGIS_PLATFORM_API_CA_FILE: ""
     AEGIS_PLATFORM_API_GRPC_INSECURE: "true"
+    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"

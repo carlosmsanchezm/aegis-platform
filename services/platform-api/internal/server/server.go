@@ -384,27 +384,31 @@ func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workl
 		)
 	}
 	queueName := strings.TrimSpace(w.GetQueue())
-	if queueName != "" && s.store.GetQueue(queueName) == nil {
-		s.store.PutQueue(&aegis.Queue{
-			Name:                      queueName,
-			ProjectId:                 projectID,
-			DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
-		})
-		s.log.Info("autobootstrap: queue created",
-			zap.String("queue", queueName),
-			zap.String("project_id", projectID),
-			zap.String("workload_id", w.GetId()),
-		)
+	if queueName != "" {
+		queue := s.store.GetQueue(queueName)
+		if queue == nil {
+			queue = &aegis.Queue{
+				Name:                      queueName,
+				ProjectId:                 projectID,
+				DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
+				AllowedFlavors:            []string{reqFlavor},
+			}
+			s.store.PutQueue(queue)
+			s.log.Info("autobootstrap: queue created",
+				zap.String("queue", queueName),
+				zap.String("project_id", projectID),
+				zap.String("workload_id", w.GetId()),
+			)
+		} else if ensureQueueAllowsFlavor(queue, reqFlavor) {
+			s.store.PutQueue(queue)
+			s.log.Info("autobootstrap: queue updated",
+				zap.String("queue", queueName),
+				zap.String("project_id", projectID),
+				zap.String("flavor", reqFlavor),
+			)
+		}
 	}
-	if s.store.GetFlavor(reqFlavor) == nil {
-		flavor := defaultFlavorForName(reqFlavor)
-		s.store.PutFlavor(flavor)
-		s.log.Info("autobootstrap: flavor created",
-			zap.String("flavor", reqFlavor),
-			zap.String("resource_name", flavor.GetResourceName()),
-			zap.Int32("gpu_count", flavor.GetGpuCount()),
-		)
-	}
+	s.ensureFlavorDefaults(reqFlavor)
 }
 
 func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRequest) (*aegis.Workload, error) {
@@ -446,6 +450,10 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	flavorObj := s.store.GetFlavor(reqFlavor)
+	if flavorObj == nil && s.autoBootstrap {
+		s.ensureFlavorDefaults(reqFlavor)
+		flavorObj = s.store.GetFlavor(reqFlavor)
+	}
 	if flavorObj == nil {
 		s.log.Warn("submit workload rejected; unknown flavor",
 			zap.String("workload_id", w.GetId()),
@@ -2154,16 +2162,93 @@ func isWorkloadActive(status string) bool {
 	}
 }
 
-func defaultFlavorForName(name string) *aegis.Flavor {
-	flavor := &aegis.Flavor{
-		Name:               name,
-		CpuCoresRequest:    "2",
-		MemoryRequest:      "4Gi",
-		ResourceName:       name,
-		GpuCount:           0,
-		PriceUsdPerGpuHour: 0,
+func ensureQueueAllowsFlavor(q *aegis.Queue, flavor string) bool {
+	if q == nil {
+		return false
 	}
-	return flavor
+	normalized := strings.TrimSpace(flavor)
+	if normalized == "" {
+		return false
+	}
+	existing := q.GetAllowedFlavors()
+	for _, item := range existing {
+		if strings.EqualFold(strings.TrimSpace(item), normalized) {
+			return false
+		}
+	}
+	q.AllowedFlavors = append(existing, normalized)
+	return true
+}
+
+func defaultFlavorForName(name string) *aegis.Flavor {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	switch normalized {
+	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4":
+		return &aegis.Flavor{
+			Name:               name,
+			Chip:               "nvidia-t4",
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          16,
+			CpuCoresRequest:    "4",
+			MemoryRequest:      "16Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "a10-1gpu", "a10g-1gpu":
+		return &aegis.Flavor{
+			Name: name,
+			Chip: "nvidia-a10g",
+			// Full A10G GPU uses the standard NVIDIA device plugin resource name.
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          24,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "a10g-mig-1g", "a10-mig-1g":
+		return &aegis.Flavor{
+			Name: name,
+			Chip: "nvidia-a10g",
+			// MIG 1g.10gb profile as reported by the NVIDIA device plugin.
+			ResourceName:       "nvidia.com/mig-1g.10gb",
+			GpuCount:           1,
+			MemoryGib:          10,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	default:
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "4Gi",
+			ResourceName:       name,
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	}
+}
+
+func (s *Server) ensureFlavorDefaults(name string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return
+	}
+	existing := s.store.GetFlavor(trimmed)
+	expected := defaultFlavorForName(trimmed)
+	if expected == nil {
+		return
+	}
+
+	if existing == nil || strings.TrimSpace(existing.GetResourceName()) == "" || (expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) {
+		s.store.PutFlavor(expected)
+		s.log.Info("autobootstrap: flavor ensured",
+			zap.String("flavor", trimmed),
+			zap.String("resource_name", expected.GetResourceName()),
+			zap.Int32("gpu_count", expected.GetGpuCount()),
+		)
+	}
 }
 
 func stringPtr(in string) *string {

@@ -105,8 +105,16 @@ type ClusterOutput struct {
 
 // ObservabilityOutput holds optional telemetry endpoints for a cluster.
 type ObservabilityOutput struct {
-	OtelEndpoint string `json:"otelEndpoint,omitempty"`
-	MetricsURL   string `json:"metricsUrl,omitempty"`
+	Namespace                string `json:"namespace,omitempty"`
+	PrometheusService        string `json:"prometheusService,omitempty"`
+	PrometheusPort           int32  `json:"prometheusPort,omitempty"`
+	AlertmanagerService      string `json:"alertmanagerService,omitempty"`
+	AlertmanagerPort         int32  `json:"alertmanagerPort,omitempty"`
+	AlertmanagerConfigSecret string `json:"alertmanagerConfigSecret,omitempty"`
+	MetricsServerService     string `json:"metricsServerService,omitempty"`
+	MetricsServerPort        int32  `json:"metricsServerPort,omitempty"`
+	OtelEndpoint             string `json:"otelEndpoint,omitempty"`
+	MetricsURL               string `json:"metricsUrl,omitempty"`
 }
 
 // +kubebuilder:object:root=true

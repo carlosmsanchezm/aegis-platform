@@ -470,7 +470,7 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			if hasGpuNodePool(clusterDef.NodePools) {
 				deps := append([]pulumi.Resource{}, nodeGroups...)
 				deps = append(deps, cluster)
-				if err := r.installNvidiaDevicePlugin(ctx, clusterDef.ClusterID, kubeProvider, deps); err != nil {
+				if err := r.installNvidiaDevicePlugin(ctx, clusterDef.ClusterID, clusterDef.NodePools, kubeProvider, deps); err != nil {
 					return err
 				}
 			}
@@ -824,7 +824,7 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	return nil
 }
 
-func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string, nodePools []infraapi.NodePool, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
 	key := sanitize(clusterID)
 	if key == "" {
 		key = "aegis"
@@ -843,6 +843,15 @@ func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string
 				"operator": pulumi.String("Exists"),
 			},
 		},
+	}
+
+	// Restrict scheduling to GPU nodegroups using labels from the GPU pool, if present.
+	if sel := gpuNodeSelector(nodePools); len(sel) > 0 {
+		ns := pulumi.Map{}
+		for k, v := range sel {
+			ns[k] = pulumi.String(v)
+		}
+		values["nodeSelector"] = ns
 	}
 
 	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
@@ -1191,6 +1200,23 @@ func hasMigTaint(taints []corev1.Taint) bool {
 
 func hasGpuNodePool(pools []infraapi.NodePool) bool {
 	return slices.ContainsFunc(pools, isGpuNodePool)
+}
+
+// gpuNodeSelector derives a nodeSelector from GPU pool labels to target the device plugin to GPU nodes.
+// Prefer a specific GPU flavor label; fall back to a generic purpose label if present.
+func gpuNodeSelector(pools []infraapi.NodePool) map[string]string {
+	for _, p := range pools {
+		if !isGpuNodePool(p) {
+			continue
+		}
+		if flavor, ok := p.Labels["aegis.io/gpu-flavor"]; ok && strings.TrimSpace(flavor) != "" {
+			return map[string]string{"aegis.io/gpu-flavor": strings.TrimSpace(flavor)}
+		}
+		if purpose, ok := p.Labels["aegis.dev/purpose"]; ok && strings.TrimSpace(purpose) != "" {
+			return map[string]string{"aegis.dev/purpose": strings.TrimSpace(purpose)}
+		}
+	}
+	return nil
 }
 
 func gpuAmiType(clusterVersion string) string {

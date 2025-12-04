@@ -1158,8 +1158,9 @@ func normalizeInstanceType(instanceType string) string {
 		return trimmed
 	}
 	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "g5") {
-		return "g4dn.xlarge"
+	if lower == "g5" {
+		// If only the family is provided, default to a concrete g5 size; otherwise preserve the requested type.
+		return "g5.xlarge"
 	}
 	return trimmed
 }

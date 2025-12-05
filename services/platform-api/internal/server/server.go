@@ -46,11 +46,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type kubeClientProvider interface {
+	ClientFor(clusterID string) (client.Client, error)
+}
+
 type Server struct {
 	aegis.UnimplementedAegisPlatformServer
 	log                  *zap.Logger
 	store                store.Store
-	kubeClients          *kubeclients.Manager
+	kubeClients          kubeClientProvider
 	policyOverlay        *placement.PolicyOverlay
 	targetNamespace      string
 	proxyBaseURL         string
@@ -470,6 +474,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.FailedPrecondition, "unknown flavor: "+reqFlavor)
 	}
 	queueObj := s.store.GetQueue(w.GetQueue())
+	requestedCluster := strings.TrimSpace(w.GetClusterId())
 
 	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
 		s.applyWorkspaceDefaults(wk.Workspace)
@@ -567,7 +572,11 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	infos := s.store.ListClusterInfos()
 	cands := make([]placement.Candidate, 0, len(infos))
 	now := time.Now()
+	var requestedInfo *store.ClusterInfo
 	for _, ci := range infos {
+		if strings.EqualFold(strings.TrimSpace(ci.ID), requestedCluster) {
+			requestedInfo = ci
+		}
 		if ci.LastHeartbeat.IsZero() || now.Sub(ci.LastHeartbeat) > heartbeatTTL {
 			s.log.Debug("skipping stale cluster",
 				zap.String("cluster_id", ci.ID),
@@ -598,17 +607,51 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	if flavorObj.GetGpuCount() == 0 && flavorObj.GetResourceName() == "" {
 		placementFlavor = ""
 	}
-	chosen, perr := placement.ChooseCluster(cands, pd, placementFlavor, clusterLoads)
-	if perr != nil {
-		s.log.Warn("placement failed",
-			zap.String("workload_id", w.GetId()),
-			zap.String("project_id", w.GetProjectId()),
-			zap.String("flavor", reqFlavor),
-			zap.Strings("regions", regions),
-			zap.Int("candidate_count", len(cands)),
-			zap.Error(perr),
-		)
-		return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("no eligible cluster for flavor=%s in policy regions=%v", reqFlavor, regions))
+	var chosen string
+	if requestedCluster != "" {
+		if requestedInfo == nil {
+			return nil, status.Errorf(codes.NotFound, "cluster %q not registered", requestedCluster)
+		}
+		if !clusterReady(requestedInfo, now) {
+			return nil, status.Errorf(codes.FailedPrecondition, "cluster %q not ready", requestedCluster)
+		}
+		pinned := make([]placement.Candidate, 0, 1)
+		for _, cand := range cands {
+			if strings.EqualFold(cand.ClusterID, requestedCluster) {
+				pinned = append(pinned, cand)
+				break
+			}
+		}
+		if len(pinned) == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "cluster %q not eligible", requestedCluster)
+		}
+		var perr error
+		chosen, perr = placement.ChooseCluster(pinned, pd, placementFlavor, clusterLoads)
+		if perr != nil {
+			s.log.Warn("placement failed for requested cluster",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+				zap.String("flavor", reqFlavor),
+				zap.Strings("regions", regions),
+				zap.String("requested_cluster", requestedCluster),
+				zap.Error(perr),
+			)
+			return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("requested cluster %s not eligible: %v", requestedCluster, perr))
+		}
+	} else {
+		var perr error
+		chosen, perr = placement.ChooseCluster(cands, pd, placementFlavor, clusterLoads)
+		if perr != nil {
+			s.log.Warn("placement failed",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+				zap.String("flavor", reqFlavor),
+				zap.Strings("regions", regions),
+				zap.Int("candidate_count", len(cands)),
+				zap.Error(perr),
+			)
+			return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("no eligible cluster for flavor=%s in policy regions=%v", reqFlavor, regions))
+		}
 	}
 
 	w.ClusterId = chosen
@@ -1728,6 +1771,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	if err := aegis.RegisterAegisPlatformHandlerServer(ctx, mux, svc); err != nil {
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
+	registerWorkspaceWizardRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

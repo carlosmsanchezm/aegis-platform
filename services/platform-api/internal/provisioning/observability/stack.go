@@ -3,6 +3,7 @@ package observability
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,23 +15,38 @@ import (
 )
 
 const (
-	envObservabilityChart         = "AEGIS_OBSERVABILITY_CHART"
-	envObservabilityChartVersion  = "AEGIS_OBSERVABILITY_CHART_VERSION"
-	envObservabilityRepo          = "AEGIS_OBSERVABILITY_REPO"
-	envObservabilityValuesFile    = "AEGIS_OBSERVABILITY_VALUES_FILE"
-	envObservabilityEnabled       = "AEGIS_OBSERVABILITY_ENABLED"
-	envMetricsServerChart         = "AEGIS_METRICS_SERVER_CHART"
-	envMetricsServerVersion       = "AEGIS_METRICS_SERVER_CHART_VERSION"
-	envMetricsServerRepo          = "AEGIS_METRICS_SERVER_REPO"
-	envMetricsServerValuesFile    = "AEGIS_METRICS_SERVER_VALUES_FILE"
-	defaultObservabilityNamespace = "aegis-observability"
-	defaultObservabilityRelease   = "aegis-obsv"
-	defaultObservabilityBaseName  = "aegis-obsv"
-	defaultMetricsRelease         = "aegis-metrics"
-	defaultPrometheusPort         = 9090
-	defaultAlertmanagerPort       = 9093
-	maxObservabilityNameLength    = 40
-	defaultHelmTimeout            = 15 * time.Minute
+	envObservabilityChart          = "AEGIS_OBSERVABILITY_CHART"
+	envObservabilityChartVersion   = "AEGIS_OBSERVABILITY_CHART_VERSION"
+	envObservabilityRepo           = "AEGIS_OBSERVABILITY_REPO"
+	envObservabilityValuesFile     = "AEGIS_OBSERVABILITY_VALUES_FILE"
+	envObservabilityEnabled        = "AEGIS_OBSERVABILITY_ENABLED"
+	envMetricsServerChart          = "AEGIS_METRICS_SERVER_CHART"
+	envMetricsServerVersion        = "AEGIS_METRICS_SERVER_CHART_VERSION"
+	envMetricsServerRepo           = "AEGIS_METRICS_SERVER_REPO"
+	envMetricsServerValuesFile     = "AEGIS_METRICS_SERVER_VALUES_FILE"
+	envLoggingLokiChart            = "AEGIS_LOGGING_LOKI_CHART"
+	envLoggingLokiChartVersion     = "AEGIS_LOGGING_LOKI_CHART_VERSION"
+	envLoggingLokiRepo             = "AEGIS_LOGGING_LOKI_REPO"
+	envLoggingLokiValuesFile       = "AEGIS_LOGGING_LOKI_VALUES_FILE"
+	envLoggingFluentBitChart       = "AEGIS_LOGGING_FLUENT_BIT_CHART"
+	envLoggingFluentBitVersion     = "AEGIS_LOGGING_FLUENT_BIT_CHART_VERSION"
+	envLoggingFluentBitRepo        = "AEGIS_LOGGING_FLUENT_BIT_REPO"
+	envLoggingFluentBitValuesFile  = "AEGIS_LOGGING_FLUENT_BIT_VALUES_FILE"
+	defaultObservabilityNamespace  = "aegis-observability"
+	defaultObservabilityRelease    = "aegis-obsv"
+	defaultObservabilityBaseName   = "aegis-obsv"
+	defaultMetricsRelease          = "aegis-metrics"
+	defaultLoggingNamespace        = "aegis-logging"
+	defaultLoggingBaseName         = "aegis-logging"
+	defaultLoggingLokiRelease      = "aegis-loki"
+	defaultLoggingFluentBitRelease = "aegis-fluentbit"
+	defaultLokiPort                = 3100
+	defaultLokiRetention           = "168h"
+	defaultPrometheusPort          = 9090
+	defaultAlertmanagerPort        = 9093
+	maxObservabilityNameLength     = 40
+	maxLoggingNameLength           = 40
+	defaultHelmTimeout             = 15 * time.Minute
 )
 
 // HelmConfig describes a helm release configuration.
@@ -49,11 +65,23 @@ type HelmConfig struct {
 type Config struct {
 	Stack            HelmConfig
 	MetricsServer    HelmConfig
+	Logging          LoggingConfig
 	Namespace        string
 	BaseName         string
 	PrometheusPort   int
 	AlertmanagerPort int
 	Enable           bool
+}
+
+// LoggingConfig captures the Loki + Fluent Bit settings.
+type LoggingConfig struct {
+	Loki            HelmConfig
+	FluentBit       HelmConfig
+	Namespace       string
+	BaseName        string
+	LokiPort        int
+	RetentionPeriod string
+	Enable          bool
 }
 
 // Installer allows swapping observability implementations.
@@ -108,6 +136,32 @@ func ResolveFromEnv(repoRoot string) Config {
 		}
 	}
 
+	lokiChart := strings.TrimSpace(os.Getenv(envLoggingLokiChart))
+	if lokiChart == "" {
+		lokiChart = "loki"
+	}
+	lokiRepo := strings.TrimSpace(os.Getenv(envLoggingLokiRepo))
+	if lokiRepo == "" {
+		lokiRepo = "https://grafana.github.io/helm-charts"
+	}
+	lokiValues := strings.TrimSpace(os.Getenv(envLoggingLokiValuesFile))
+	if lokiValues == "" {
+		lokiValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "loki-values.yaml")
+	}
+
+	fluentChart := strings.TrimSpace(os.Getenv(envLoggingFluentBitChart))
+	if fluentChart == "" {
+		fluentChart = "fluent-bit"
+	}
+	fluentRepo := strings.TrimSpace(os.Getenv(envLoggingFluentBitRepo))
+	if fluentRepo == "" {
+		fluentRepo = "https://fluent.github.io/helm-charts"
+	}
+	fluentValues := strings.TrimSpace(os.Getenv(envLoggingFluentBitValuesFile))
+	if fluentValues == "" {
+		fluentValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "fluent-bit-values.yaml")
+	}
+
 	timeout := defaultHelmTimeout
 	return Config{
 		Namespace:        defaultObservabilityNamespace,
@@ -134,6 +188,33 @@ func ResolveFromEnv(repoRoot string) Config {
 			ReleaseName:      defaultMetricsRelease,
 			Timeout:          timeout,
 			EnableDependency: true,
+		},
+		Logging: LoggingConfig{
+			Namespace:       defaultLoggingNamespace,
+			BaseName:        defaultLoggingBaseName,
+			LokiPort:        defaultLokiPort,
+			RetentionPeriod: defaultLokiRetention,
+			Enable:          true,
+			Loki: HelmConfig{
+				ChartPath:        lokiChart,
+				Repository:       lokiRepo,
+				Version:          strings.TrimSpace(os.Getenv(envLoggingLokiChartVersion)),
+				ValuesFile:       lokiValues,
+				Namespace:        defaultLoggingNamespace,
+				ReleaseName:      defaultLoggingLokiRelease,
+				Timeout:          timeout,
+				EnableDependency: true,
+			},
+			FluentBit: HelmConfig{
+				ChartPath:        fluentChart,
+				Repository:       fluentRepo,
+				Version:          strings.TrimSpace(os.Getenv(envLoggingFluentBitVersion)),
+				ValuesFile:       fluentValues,
+				Namespace:        defaultLoggingNamespace,
+				ReleaseName:      defaultLoggingFluentBitRelease,
+				Timeout:          timeout,
+				EnableDependency: true,
+			},
 		},
 	}
 }
@@ -261,6 +342,11 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		return nil, err
 	}
 
+	loggingOutputs, err := installLogging(ctx, clusterKey, kubeProvider, cfg, depends)
+	if err != nil {
+		return nil, err
+	}
+
 	outputs := pulumi.Map{
 		"namespace":                pulumi.String(namespace),
 		"prometheusService":        pulumi.String(stackFullname + "-prometheus"),
@@ -271,7 +357,285 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		"metricsServerService":     pulumi.String(metricsFullname),
 		"metricsServerPort":        pulumi.Int(443),
 	}
+	for k, v := range loggingOutputs {
+		outputs[k] = v
+	}
 	return outputs, nil
+}
+
+func installLogging(ctx *pulumi.Context, clusterKey string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
+	if cfg.Logging.Enable && kubeProvider == nil {
+		return nil, fmt.Errorf("kubernetes provider is required for logging installs")
+	}
+	if !cfg.Logging.Enable {
+		return pulumi.Map{}, nil
+	}
+
+	namespace := strings.TrimSpace(cfg.Logging.Namespace)
+	if namespace == "" {
+		namespace = defaultLoggingNamespace
+	}
+	baseName := strings.TrimSpace(cfg.Logging.BaseName)
+	if baseName == "" {
+		baseName = defaultLoggingBaseName
+	}
+
+	lokiPort := cfg.Logging.LokiPort
+	if lokiPort == 0 {
+		lokiPort = defaultLokiPort
+	}
+	retention := strings.TrimSpace(cfg.Logging.RetentionPeriod)
+	if retention == "" {
+		retention = defaultLokiRetention
+	}
+
+	lokiReleaseName := pulumiResourceName(cfg.Logging.Loki.ReleaseName+"-"+clusterKey, 53)
+	lokiFullname := pulumiResourceName(baseName+"-"+clusterKey+"-loki", maxLoggingNameLength)
+
+	lokiTimeout := cfg.Logging.Loki.Timeout
+	if lokiTimeout == 0 {
+		lokiTimeout = defaultHelmTimeout
+	}
+
+	lokiValues := pulumi.Map{
+		"deploymentMode":   pulumi.String("SingleBinary"),
+		"fullnameOverride": pulumi.String(lokiFullname),
+		"loki": pulumi.Map{
+			"auth_enabled": pulumi.Bool(false),
+			"analytics": pulumi.Map{
+				"reporting_enabled": pulumi.Bool(false),
+			},
+			"server": pulumi.Map{
+				"http_listen_port": pulumi.Int(lokiPort),
+			},
+			"limits_config": pulumi.Map{
+				"retention_period": pulumi.String(retention),
+			},
+			"commonConfig": pulumi.Map{
+				"replication_factor": pulumi.Int(1),
+			},
+			"storage": pulumi.Map{
+				"type": pulumi.String("filesystem"),
+				"filesystem": pulumi.Map{
+					"chunks_directory": pulumi.String("/var/loki/chunks"),
+					"rules_directory":  pulumi.String("/var/loki/rules"),
+				},
+			},
+		},
+		"singleBinary": pulumi.Map{
+			"replicas": pulumi.Int(1),
+			"persistence": pulumi.Map{
+				"enabled": pulumi.Bool(false),
+			},
+			"resources": pulumi.Map{
+				"requests": pulumi.Map{
+					"cpu":    pulumi.String("200m"),
+					"memory": pulumi.String("512Mi"),
+				},
+				"limits": pulumi.Map{
+					"cpu":    pulumi.String("500m"),
+					"memory": pulumi.String("1Gi"),
+				},
+			},
+			"service": pulumi.Map{
+				"type": pulumi.String("ClusterIP"),
+			},
+		},
+		"gateway": pulumi.Map{
+			"enabled": pulumi.Bool(false),
+		},
+	}
+
+	lokiArgs := &helm.ReleaseArgs{
+		Name:            pulumi.StringPtr(lokiReleaseName),
+		Namespace:       pulumi.StringPtr(namespace),
+		Chart:           pulumi.String(cfg.Logging.Loki.ChartPath),
+		Values:          lokiValues,
+		Timeout:         pulumi.IntPtr(int(lokiTimeout.Seconds())),
+		CreateNamespace: pulumi.BoolPtr(true),
+	}
+	if cfg.Logging.Loki.Repository != "" {
+		opts := helm.RepositoryOptsArgs{Repo: pulumi.StringPtr(cfg.Logging.Loki.Repository)}
+		lokiArgs.RepositoryOpts = opts.ToRepositoryOptsPtrOutput()
+	}
+	if cfg.Logging.Loki.Version != "" {
+		lokiArgs.Version = pulumi.StringPtr(cfg.Logging.Loki.Version)
+	}
+	if cfg.Logging.Loki.ValuesFile != "" {
+		lokiArgs.ValueYamlFiles = pulumi.AssetOrArchiveArray{
+			pulumi.NewFileAsset(cfg.Logging.Loki.ValuesFile),
+		}
+	}
+	if cfg.Logging.Loki.EnableDependency {
+		lokiArgs.DependencyUpdate = pulumi.BoolPtr(true)
+	}
+
+	lokiRelease, err := helm.NewRelease(ctx, pulumiResourceName(clusterKey+"-loki", 53), lokiArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return nil, err
+	}
+
+	fluentReleaseName := pulumiResourceName(cfg.Logging.FluentBit.ReleaseName+"-"+clusterKey, 53)
+	fluentFullname := pulumiResourceName(baseName+"-"+clusterKey+"-fluentbit", maxLoggingNameLength)
+	fluentTimeout := cfg.Logging.FluentBit.Timeout
+	if fluentTimeout == 0 {
+		fluentTimeout = defaultHelmTimeout
+	}
+
+	fluentServiceConfig := `[SERVICE]
+    Daemon Off
+    Flush 1
+    Log_Level info
+    Parsers_File /fluent-bit/etc/parsers.conf
+    Parsers_File /fluent-bit/etc/conf/custom_parsers.conf
+    HTTP_Server On
+    HTTP_Listen 0.0.0.0
+    HTTP_Port 2020
+    Health_Check On
+`
+	fluentInputs := `[INPUT]
+    Name tail
+    Path /var/log/containers/*.log
+    multiline.parser docker, cri
+    Tag kube.*
+    Mem_Buf_Limit 5MB
+    Skip_Long_Lines On
+
+[INPUT]
+    Name kubernetes_events
+    Tag kube.events
+    kube_url https://kubernetes.default.svc:443
+    kube_ca_file /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    kube_token_file /var/run/secrets/kubernetes.io/serviceaccount/token
+    tls.verify On
+`
+	fluentFilters := fmt.Sprintf(`[FILTER]
+    Name kubernetes
+    Match kube.*
+    Merge_Log On
+    Keep_Log Off
+    K8S-Logging.Parser On
+    K8S-Logging.Exclude Off
+    Kube_Tag_Prefix kube.var.log.containers.
+
+[FILTER]
+    Name modify
+    Match kube.*
+    Add cluster_id %s
+
+[FILTER]
+    Name modify
+    Match kube.events
+    Add cluster_id %s
+`, clusterKey, clusterKey)
+
+	fluentOutputs := fmt.Sprintf(`[OUTPUT]
+    Name loki
+    Match kube.*
+    Host %s
+    Port %d
+    labels cluster=%s,namespace=$kubernetes['namespace_name'],pod=$kubernetes['pod_name'],container=$kubernetes['container_name'],app=$kubernetes['labels']['app']
+    label_keys $kubernetes['namespace_name'],$kubernetes['pod_name'],$kubernetes['container_name'],$kubernetes['labels']['app']
+    remove_keys kubernetes,stream
+    line_format json
+    auto_kubernetes_labels off
+
+[OUTPUT]
+    Name loki
+    Match kube.events
+    Host %s
+    Port %d
+    labels cluster=%s,namespace=$kubernetes['namespace_name'],event_reason=$reason,event_type=$type
+    label_keys $kubernetes['namespace_name'],$reason,$type
+    remove_keys kubernetes,stream
+    line_format json
+    auto_kubernetes_labels off
+`, lokiFullname, lokiPort, clusterKey, lokiFullname, lokiPort, clusterKey)
+
+	fluentValues := pulumi.Map{
+		"fullnameOverride": pulumi.String(fluentFullname),
+		"rbac": pulumi.Map{
+			"create":       pulumi.Bool(true),
+			"nodeAccess":   pulumi.Bool(true),
+			"eventsAccess": pulumi.Bool(true),
+		},
+		"service": pulumi.Map{
+			"type": pulumi.String("ClusterIP"),
+		},
+		"serviceAccount": pulumi.Map{
+			"automountServiceAccountToken": pulumi.BoolPtr(true),
+		},
+		"env": pulumi.Array{
+			pulumi.Map{
+				"name":  pulumi.String("CLUSTER_ID"),
+				"value": pulumi.String(clusterKey),
+			},
+			pulumi.Map{
+				"name":  pulumi.String("LOKI_HOST"),
+				"value": pulumi.String(lokiFullname),
+			},
+			pulumi.Map{
+				"name":  pulumi.String("LOKI_PORT"),
+				"value": pulumi.Sprintf("%d", lokiPort),
+			},
+		},
+		"config": pulumi.Map{
+			"service": pulumi.String(fluentServiceConfig),
+			"inputs":  pulumi.String(fluentInputs),
+			"filters": pulumi.String(fluentFilters),
+			"outputs": pulumi.String(fluentOutputs),
+		},
+		"resources": pulumi.Map{
+			"requests": pulumi.Map{
+				"cpu":    pulumi.String("100m"),
+				"memory": pulumi.String("128Mi"),
+			},
+			"limits": pulumi.Map{
+				"cpu":    pulumi.String("400m"),
+				"memory": pulumi.String("256Mi"),
+			},
+		},
+		"testFramework": pulumi.Map{
+			"enabled": pulumi.Bool(false),
+		},
+	}
+
+	fluentArgs := &helm.ReleaseArgs{
+		Name:            pulumi.StringPtr(fluentReleaseName),
+		Namespace:       pulumi.StringPtr(namespace),
+		Chart:           pulumi.String(cfg.Logging.FluentBit.ChartPath),
+		Values:          fluentValues,
+		Timeout:         pulumi.IntPtr(int(fluentTimeout.Seconds())),
+		CreateNamespace: pulumi.BoolPtr(true),
+	}
+	if cfg.Logging.FluentBit.Repository != "" {
+		opts := helm.RepositoryOptsArgs{Repo: pulumi.StringPtr(cfg.Logging.FluentBit.Repository)}
+		fluentArgs.RepositoryOpts = opts.ToRepositoryOptsPtrOutput()
+	}
+	if cfg.Logging.FluentBit.Version != "" {
+		fluentArgs.Version = pulumi.StringPtr(cfg.Logging.FluentBit.Version)
+	}
+	if cfg.Logging.FluentBit.ValuesFile != "" {
+		fluentArgs.ValueYamlFiles = pulumi.AssetOrArchiveArray{
+			pulumi.NewFileAsset(cfg.Logging.FluentBit.ValuesFile),
+		}
+	}
+	if cfg.Logging.FluentBit.EnableDependency {
+		fluentArgs.DependencyUpdate = pulumi.BoolPtr(true)
+	}
+
+	fluentDeps := append([]pulumi.Resource{}, depends...)
+	fluentDeps = append(fluentDeps, lokiRelease)
+	if _, err := helm.NewRelease(ctx, pulumiResourceName(clusterKey+"-fluentbit", 53), fluentArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(fluentDeps)); err != nil {
+		return nil, err
+	}
+
+	return pulumi.Map{
+		"lokiNamespace":  pulumi.String(namespace),
+		"lokiService":    pulumi.String(lokiFullname),
+		"lokiPort":       pulumi.Int(lokiPort),
+		"lokiAuthSecret": pulumi.String(""),
+	}, nil
 }
 
 func findRepoRoot() string {

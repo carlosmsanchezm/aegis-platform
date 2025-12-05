@@ -39,7 +39,7 @@ ports:
     servicePort: 8888
     protocol: TCP
 
-alternateConfig:
+config:
   exporters:
     otlp:
       endpoint: aegis-tracing-tempo:4317

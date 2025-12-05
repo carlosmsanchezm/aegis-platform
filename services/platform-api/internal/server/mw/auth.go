@@ -390,6 +390,10 @@ func buildIdentity(claims *TokenClaims) *Identity {
 	roles := aggregateRoles(claims)
 	amr := normalizeStrings(claims.AMR)
 	acr := strings.ToLower(strings.TrimSpace(claims.ACR))
+	clientID := strings.TrimSpace(claims.ClientID)
+	if clientID == "" {
+		clientID = strings.TrimSpace(claims.AuthorizedParty)
+	}
 
 	return &Identity{
 		Subject:           strings.TrimSpace(claims.Subject),

@@ -100,6 +100,7 @@ if [[ "${GRANT_TYPE}" == "client_credentials" ]]; then
   detect_client_secret
   if [[ -z "${CLIENT_SECRET}" ]]; then
     echo "✖ KEYCLOAK_CLIENT_SECRET is required for client_credentials grant" >&2
+
     exit 1
   fi
 fi
@@ -143,6 +144,11 @@ esac
 
 [[ -n "${SCOPE}" ]] && FORM_DATA+=("scope=${SCOPE}")
 [[ -n "${AUDIENCE}" ]] && FORM_DATA+=("audience=${AUDIENCE}")
+
+declare -a CURL_ARGS=("${CURL_TRANSPORT_ARGS[@]}" "--request" "POST" "${TOKEN_URL}")
+if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
+  CURL_ARGS+=("-v")
+fi
 
 for entry in "${FORM_DATA[@]}"; do
   CURL_ARGS+=(--data "${entry}")

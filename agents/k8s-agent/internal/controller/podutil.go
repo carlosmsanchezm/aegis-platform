@@ -43,16 +43,16 @@ func ApplyResourceHints(pod *corev1.PodSpec, hints *aegisv1alpha1.ResourceHints)
 		pod.NodeSelector = map[string]string{}
 	}
 	flavorLabel := "nvidia-tesla-t4"
-	cpuHint := ""
-	if hints.CpuCoresRequest != nil {
-		cpuHint = strings.TrimSpace(*hints.CpuCoresRequest)
-	}
-	memHint := ""
-	if hints.MemoryRequest != nil {
-		memHint = strings.ToLower(strings.TrimSpace(*hints.MemoryRequest))
-	}
-	if strings.Contains(resourceName, "mig-1g.10gb") || strings.Contains(resourceName, "a10") || cpuHint == "8" || strings.HasPrefix(memHint, "32g") {
+	if strings.Contains(resourceName, "mig-1g.10gb") {
 		flavorLabel = "nvidia-a10g-mig"
+		// Also tolerate MIG taint when targeting MIG resources.
+		if !hasToleration(pod.Tolerations, "nvidia.com/mig-1g.10gb") {
+			pod.Tolerations = append(pod.Tolerations, corev1.Toleration{
+				Key:      "nvidia.com/mig-1g.10gb",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			})
+		}
 	}
 	pod.NodeSelector["aegis.io/gpu-flavor"] = flavorLabel
 

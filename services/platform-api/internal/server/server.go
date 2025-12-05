@@ -2080,6 +2080,9 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 	if projectID == "" {
 		return nil, status.Error(codes.InvalidArgument, "project_id is required")
 	}
+	if err := s.authorize(ctx, projectID, "", "createCluster"); err != nil {
+		return nil, err
+	}
 	if clusterID == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -2155,6 +2158,9 @@ func (s *Server) GetClusterJobStatus(ctx context.Context, req *aegis.GetClusterJ
 			return nil, status.Errorf(codes.NotFound, "cluster job %q not found", req.GetJobId())
 		}
 		return nil, status.Errorf(codes.Internal, "get job status: %v", err)
+	}
+	if err := s.authorize(ctx, infra.Spec.ProjectID, "", "getClusterJobStatus"); err != nil {
+		return nil, err
 	}
 	return &aegis.GetClusterJobStatusResponse{Job: jobFromInfra(infra, req.GetJobId())}, nil
 }

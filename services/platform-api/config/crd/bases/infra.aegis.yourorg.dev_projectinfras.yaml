@@ -249,6 +249,15 @@ spec:
                           metricsServerPort:
                             type: integer
                             format: int32
+                          lokiNamespace:
+                            type: string
+                          lokiService:
+                            type: string
+                          lokiPort:
+                            type: integer
+                            format: int32
+                          lokiAuthSecret:
+                            type: string
                           otelEndpoint:
                             type: string
                           metricsUrl:

@@ -119,6 +119,12 @@ type ObservabilityOutput struct {
 	LokiAuthSecret           string `json:"lokiAuthSecret,omitempty"`
 	OtelEndpoint             string `json:"otelEndpoint,omitempty"`
 	MetricsURL               string `json:"metricsUrl,omitempty"`
+	TracingNamespace         string `json:"tracingNamespace,omitempty"`
+	TempoService             string `json:"tempoService,omitempty"`
+	TempoPort                int32  `json:"tempoPort,omitempty"`
+	OtelService              string `json:"otelService,omitempty"`
+	OtelGrpcPort             int32  `json:"otelGrpcPort,omitempty"`
+	OtelHttpPort             int32  `json:"otelHttpPort,omitempty"`
 }
 
 // +kubebuilder:object:root=true

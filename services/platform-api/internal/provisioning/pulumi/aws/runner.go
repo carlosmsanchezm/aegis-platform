@@ -1172,6 +1172,12 @@ func observabilityFromEntry(val interface{}) infraapi.ObservabilityOutput {
 	obs.LokiAuthSecret = stringFromEntry(raw, "lokiAuthSecret", "")
 	obs.OtelEndpoint = stringFromEntry(raw, "otelEndpoint", "")
 	obs.MetricsURL = stringFromEntry(raw, "metricsUrl", "")
+	obs.TracingNamespace = stringFromEntry(raw, "tracingNamespace", "")
+	obs.TempoService = stringFromEntry(raw, "tempoService", "")
+	obs.TempoPort = int32(intFromEntry(raw, "tempoPort", 0))
+	obs.OtelService = stringFromEntry(raw, "otelService", "")
+	obs.OtelGrpcPort = int32(intFromEntry(raw, "otelGrpcPort", 0))
+	obs.OtelHttpPort = int32(intFromEntry(raw, "otelHttpPort", 0))
 	return obs
 }
 

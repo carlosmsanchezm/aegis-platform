@@ -39,7 +39,7 @@
     "standardFlowEnabled" true
     "implicitFlowEnabled" false
     "directAccessGrantsEnabled" false
-    "serviceAccountsEnabled" false
+    "serviceAccountsEnabled" (ternary true false (hasKey $client "serviceAccountsEnabled") | ternary $client.serviceAccountsEnabled false)
     "redirectUris" (default (list) $client.redirectUris)
     "webOrigins" (default (list) $client.webOrigins)
     "clientAuthenticatorType" "client-secret"

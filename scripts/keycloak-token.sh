@@ -15,6 +15,14 @@ need() {
 need curl
 need jq
 
+# Normalize optional curl transport args into an array to avoid nounset issues.
+declare -a CURL_TRANSPORT_ARGS
+if [[ -n "${CURL_TRANSPORT_ARGS:-}" ]]; then
+  read -r -a CURL_TRANSPORT_ARGS <<<"${CURL_TRANSPORT_ARGS}"
+else
+  CURL_TRANSPORT_ARGS=()
+fi
+
 BASE_URL="${KEYCLOAK_BASE_URL:-https://keycloak.localtest.me}"
 REALM="${KEYCLOAK_REALM:-aegis}"
 TOKEN_URL="${KEYCLOAK_TOKEN_URL:-${BASE_URL%/}/realms/${REALM}/protocol/openid-connect/token}"
@@ -33,7 +41,7 @@ WAIT_ENABLED="${KEYCLOAK_WAIT:-1}"
 wait_for_keycloak() {
   [[ "${WAIT_ENABLED}" == "0" ]] && return
   command -v kubectl >/dev/null 2>&1 || return
-  local ns label deadline pods_json not_ready
+  local ns label deadline pods_json not_ready health_check_url
   ns="${KEYCLOAK_NAMESPACE:-keycloak}"
   label="${KEYCLOAK_POD_LABEL:-app.kubernetes.io/name=keycloak}"
   if ! kubectl get ns "${ns}" >/dev/null 2>&1; then
@@ -44,8 +52,10 @@ wait_for_keycloak() {
   if kubectl -n "${ns}" get pods -l "${label}" --no-headers >/dev/null 2>&1; then
     if kubectl -n "${ns}" wait pod -l "${label}" --for=condition=Ready --timeout="${WAIT_SECONDS}s" >/dev/null 2>&1; then
       echo "✅ Keycloak pods ready (label ${label})" >&2
-      return
+    else
+      echo "⚠ Keycloak pods not ready via label ${label}; falling back to all pods" >&2
     fi
+  else
     echo "⚠ Keycloak pods not ready via label ${label}; falling back to all pods" >&2
   fi
   deadline=$((SECONDS + WAIT_SECONDS))
@@ -57,15 +67,33 @@ wait_for_keycloak() {
       continue
     fi
     not_ready="$(printf '%s\n' "${pods_json}" | jq -r '.items[] | select(.status.phase!="Succeeded" and any(.status.containerStatuses[]?; .ready!=true)) | .metadata.name')"
-    if [[ -z "${not_ready}" ]]; then
-      echo "✅ Keycloak pods ready" >&2
-      return
+    if [[ -n "${not_ready}" ]]; then
+      echo "… waiting on pods: ${not_ready}" >&2
+      sleep 5
+      continue
     fi
-    echo "… waiting on pods: ${not_ready}" >&2
-    sleep 5
+    break
   done
-  echo "✖ Keycloak pods not ready after ${WAIT_SECONDS}s" >&2
-  exit 1
+
+  # Now wait for Keycloak to actually respond to HTTP requests
+  echo "⏳ Waiting for Keycloak to be ready to serve requests..." >&2
+  health_check_url="${BASE_URL%/}/realms/${REALM}"
+  deadline=$((SECONDS + 60))
+  while (( SECONDS < deadline )); do
+    local curl_args=(-sS -o /dev/null -w '%{http_code}')
+    [[ -n "${CA_CERT}" && -f "${CA_CERT}" ]] && curl_args+=(--cacert "${CA_CERT}")
+    [[ "${INSECURE}" == "1" ]] && curl_args+=(--insecure)
+
+    if http_code=$(curl "${curl_args[@]}" "${health_check_url}" 2>/dev/null); then
+      if [[ "$http_code" == "200" ]]; then
+        echo "✅ Keycloak is ready to serve requests" >&2
+        return
+      fi
+    fi
+    echo "… Keycloak health check returned ${http_code:-connection failed}, retrying..." >&2
+    sleep 3
+  done
+  echo "⚠ Keycloak health check did not return 200 within timeout, proceeding anyway..." >&2
 }
 
 # If grant type not set, infer from presence of username/password.
@@ -106,14 +134,6 @@ if [[ "${GRANT_TYPE}" == "client_credentials" ]]; then
 fi
 wait_for_keycloak
 
-CURL_ARGS=(-sS --fail --request POST "${TOKEN_URL}")
-if [[ -n "${CA_CERT}" && -f "${CA_CERT}" ]]; then
-  CURL_ARGS+=(--cacert "${CA_CERT}")
-fi
-if [[ "${INSECURE}" == "1" ]]; then
-  CURL_ARGS+=(--insecure)
-fi
-
 declare -a FORM_DATA
 case "${GRANT_TYPE}" in
   password)
@@ -145,7 +165,17 @@ esac
 [[ -n "${SCOPE}" ]] && FORM_DATA+=("scope=${SCOPE}")
 [[ -n "${AUDIENCE}" ]] && FORM_DATA+=("audience=${AUDIENCE}")
 
-declare -a CURL_ARGS=("${CURL_TRANSPORT_ARGS[@]}" "--request" "POST" "${TOKEN_URL}")
+declare -a CURL_ARGS=()
+if [[ ${#CURL_TRANSPORT_ARGS[@]:-0} -gt 0 ]]; then
+  CURL_ARGS+=("${CURL_TRANSPORT_ARGS[@]}")
+fi
+CURL_ARGS+=(-sS --fail "--request" "POST" "${TOKEN_URL}")
+if [[ -n "${CA_CERT}" && -f "${CA_CERT}" ]]; then
+  CURL_ARGS+=(--cacert "${CA_CERT}")
+fi
+if [[ "${INSECURE}" == "1" ]]; then
+  CURL_ARGS+=(--insecure)
+fi
 if [[ "${KEYCLOAK_DEBUG:-0}" == "1" ]]; then
   CURL_ARGS+=("-v")
 fi

@@ -514,6 +514,7 @@
         "CONFIGURE_TOTP"
       ],
       "realmRoles": [
+        "workspace-admin",
         "default-roles-aegis"
       ],
       "notBefore": 0,

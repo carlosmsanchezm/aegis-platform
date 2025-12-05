@@ -1,7 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,13 +15,39 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	agentv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type staticKubeClient struct {
+	cli client.Client
+}
+
+func (s staticKubeClient) ClientFor(clusterID string) (client.Client, error) {
+	return s.cli, nil
+}
+
+func newFakeWorkspaceClient(t *testing.T) client.Client {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = agentv1alpha1.AddToScheme(scheme)
+	workspaceGV := schema.GroupVersion{Group: "aegis.yourorg.dev", Version: "v1alpha2"}
+	scheme.AddKnownTypeWithName(workspaceGV.WithKind("Workspace"), &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(workspaceGV.WithKind("WorkspaceList"), &unstructured.UnstructuredList{})
+	return fake.NewClientBuilder().WithScheme(scheme).Build()
+}
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -30,6 +60,7 @@ func newTestServer(t *testing.T) *Server {
 	st := store.NewMemStore()
 
 	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay(), nil, "")
+	srv.kubeClients = staticKubeClient{cli: newFakeWorkspaceClient(t)}
 	return srv
 }
 
@@ -398,5 +429,133 @@ func TestSubmitWorkload_BootstrapDisabledRequiresProject(t *testing.T) {
 	}
 	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "unknown project") {
 		t.Fatalf("expected unknown project error, got %v", err)
+	}
+}
+
+func TestSubmitWorkload_RespectsRequestedCluster(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	req := &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-1",
+			Queue:     "queue-a",
+			ClusterId: "cluster-1",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{
+					Flavor: "cpu-small",
+					Image:  "alpine:3.19",
+				},
+			},
+		},
+	}
+
+	ctx := contextWithSubject("clustered@example.com")
+	res, err := srv.SubmitWorkload(ctx, req)
+	if err != nil {
+		t.Fatalf("SubmitWorkload returned error: %v", err)
+	}
+	if res.GetClusterId() != "cluster-1" {
+		t.Fatalf("expected workload pinned to requested cluster, got %q", res.GetClusterId())
+	}
+}
+
+func TestWizardHandlers_ListProjectsAndClusters(t *testing.T) {
+	srv := newTestServer(t)
+	srv.store.PutProject(&aegis.Project{Id: "proj-1", DisplayName: "Project One"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{
+		ClusterId: "proj-1-cluster",
+		Provider:  "aws",
+		Region:    "us-west-2",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "proj-1", "k8sVersion": "1.27"},
+	})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "proj-1-cluster",
+		AvailableFlavors: []*aegis.Flavor{{Name: "a10-1gpu"}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	req = req.WithContext(contextWithSubject("wizard@example.com"))
+	rec := httptest.NewRecorder()
+
+	srv.handleProjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 response, got %d", rec.Code)
+	}
+	var resp struct {
+		Projects []projectView `json:"projects"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Projects) != 1 {
+		t.Fatalf("expected one project, got %d", len(resp.Projects))
+	}
+	if resp.Projects[0].ID != "proj-1" {
+		t.Fatalf("expected project id proj-1, got %s", resp.Projects[0].ID)
+	}
+	if len(resp.Projects[0].Clusters) != 1 {
+		t.Fatalf("expected one cluster, got %d", len(resp.Projects[0].Clusters))
+	}
+	cluster := resp.Projects[0].Clusters[0]
+	if !cluster.HasGPU {
+		t.Fatal("expected cluster to indicate GPU availability")
+	}
+	if cluster.Status != "ready" {
+		t.Fatalf("expected cluster status ready, got %s", cluster.Status)
+	}
+}
+
+func TestWizardHandlers_CreateWorkspace(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1", DisplayName: "Project One"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{
+		ClusterId: "proj-1-cluster",
+		Provider:  "aws",
+		Region:    "us-west-2",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "proj-1"},
+	})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "proj-1-cluster",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	payload := workspaceCreateRequest{
+		ProjectID: "proj-1",
+		ClusterID: "proj-1-cluster",
+		Name:      "demo-workspace",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req = req.WithContext(contextWithSubject("wizard@example.com"))
+	rec := httptest.NewRecorder()
+
+	srv.handleCreateWorkspace(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 response, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var resp workspaceCreateResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ProjectID != payload.ProjectID || resp.ClusterID != payload.ClusterID {
+		t.Fatalf("unexpected ids in response: %+v", resp)
+	}
+	if resp.Status == "" || resp.ID == "" {
+		t.Fatalf("expected id and status to be populated: %+v", resp)
+	}
+	if stored := srv.store.GetWorkload(resp.ID); stored == nil {
+		t.Fatalf("expected workload %s to be persisted", resp.ID)
 	}
 }

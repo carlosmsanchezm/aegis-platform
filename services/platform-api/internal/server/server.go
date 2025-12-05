@@ -271,11 +271,19 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 }
 
 func (s *Server) ListProjects(ctx context.Context, _ *aegis.ListProjectsRequest) (*aegis.ListProjectsResponse, error) {
-	projects := s.store.ListProjects()
-	for _, project := range projects {
+	all := s.store.ListProjects()
+	authorized := make([]*aegis.Project, 0, len(all))
+	for _, project := range all {
+		if err := s.authorize(ctx, project.GetId(), "", "listProjects"); err != nil {
+			if status.Code(err) == codes.PermissionDenied {
+				continue
+			}
+			return nil, err
+		}
 		populateProjectAwsFromAnnotations(project)
+		authorized = append(authorized, project)
 	}
-	return &aegis.ListProjectsResponse{Items: projects}, nil
+	return &aegis.ListProjectsResponse{Items: authorized}, nil
 }
 
 func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetRequest) (*aegis.Budget, error) {

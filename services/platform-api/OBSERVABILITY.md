@@ -1,23 +1,80 @@
 # Observability stack
 
-This repository now installs a minimal in-cluster metrics stack for every provisioned AWS cluster. The stack lives entirely inside the cluster and is intended to be consumed via backend proxies rather than exposed publicly.
+The platform now installs a minimal metrics + logging stack into every provisioned AWS cluster. Everything stays inside the cluster and is meant to be consumed via backend proxies—not exposed publicly.
 
 ## Components
-- `kube-prometheus-stack` (Prometheus, Alertmanager, kube-state-metrics, node-exporter) with small resource requests and 24h retention
-- `metrics-server` (one replica) with a ServiceMonitor so Prometheus can scrape it
-- Namespace: `aegis-observability` (created automatically)
-- Services are `ClusterIP` only (no ingresses/load balancers)
-- Chart values: `services/platform-api/config/observability/values-mvp.yaml` and `services/platform-api/config/observability/metrics-server-values.yaml`
+- Metrics: `kube-prometheus-stack` with small resource requests and 24h retention.
+- Metrics: `metrics-server` (1 replica) scraped via ServiceMonitor.
+- Logs: `loki` single-binary (filesystem storage, 7d retention, analytics disabled) in namespace `aegis-logging`, `ClusterIP` service only.
+- Logs: `fluent-bit` DaemonSet shipping container logs and Kubernetes events into Loki with labels for `cluster`, `namespace`, `pod`, `container`, `app`, and event `reason/type`.
+- Chart values: `services/platform-api/config/observability/values-mvp.yaml`, `metrics-server-values.yaml`, `loki-values.yaml`, and `fluent-bit-values.yaml`.
+- Namespaces: metrics in `aegis-observability`; logging in `aegis-logging`.
 
 ## Pulumi outputs (per cluster)
 `ProjectInfra.status.outputs[].observability` contains:
-- `namespace`: namespace for all observability workloads (`aegis-observability`)
-- `prometheusService` / `prometheusPort`: service/port for Prometheus (e.g., `aegis-obsv-<cluster>-prometheus:9090`)
-- `alertmanagerService` / `alertmanagerPort`: service/port for Alertmanager (e.g., `aegis-obsv-<cluster>-alertmanager:9093`)
-- `alertmanagerConfigSecret`: name of the Alertmanager config secret (for later wiring to routes/receivers)
-- `metricsServerService` / `metricsServerPort`: service/port for metrics-server
+- `namespace`: metrics namespace (`aegis-observability`)
+- `prometheusService` / `prometheusPort`
+- `alertmanagerService` / `alertmanagerPort`
+- `alertmanagerConfigSecret`
+- `metricsServerService` / `metricsServerPort`
+- `lokiNamespace`: logging namespace (`aegis-logging`)
+- `lokiService` / `lokiPort`: Loki HTTP service/port (single-binary gateway)
+- `lokiAuthSecret`: empty when auth is disabled (default)
 
-Backend/UI proxy contract: build cluster-internal URLs as `http://<service>.<namespace>.svc:<port>` using the values above. No public exposure should be configured; proxies must run in-cluster.
+Backend/UI proxies should build URLs as `http://<service>.<namespace>.svc:<port>` using these values. No public exposure.
+
+### Log query contract
+The backend should proxy to Loki’s HTTP API using the outputs above.
+
+Suggested request shape (backend endpoint `POST /logs/query`):
+
+```
+{
+  "clusterId": "aegis-use1-dev",
+  "namespace": "platform-api",
+  "pod": "platform-api-7f9c5b9c8f-abcde",
+  "substring": "error",
+  "start": "2024-12-01T12:00:00Z",
+  "end": "2024-12-01T12:10:00Z",
+  "limit": 200,
+  "cursor": ""
+}
+```
+
+Translate to Loki `query_range`:
+
+```
+{cluster="aegis-use1-dev",namespace="platform-api",pod="platform-api-7f9c5b9c8f-abcde"} |= "error"
+```
+
+Sample response shape:
+
+```
+{
+  "entries": [
+    {
+      "timestamp": "2024-12-01T12:03:21.123456Z",
+      "namespace": "platform-api",
+      "pod": "platform-api-7f9c5b9c8f-abcde",
+      "container": "platform-api",
+      "app": "platform-api",
+      "eventReason": "",
+      "eventType": "",
+      "message": "handler failed: 500 ...",
+      "labels": {
+        "cluster": "aegis-use1-dev",
+        "namespace": "platform-api",
+        "pod": "platform-api-7f9c5b9c8f-abcde",
+        "container": "platform-api",
+        "app": "platform-api"
+      }
+    }
+  ],
+  "nextCursor": "<opaque Loki cursor>"
+}
+```
+
+Pagination: propagate Loki `limit` and `cursor` (forward token from `query_range`). Supported filters: required `clusterId`; optional `namespace`, `pod`, `substring`; required `start`/`end` time window.
 
 ## Alert rules
 Baseline alerts are installed for:
@@ -27,15 +84,13 @@ Baseline alerts are installed for:
 - API server latency (p99 > 1s)
 - API server 5xx rate
 
-These run alongside the kube-prometheus default rules, with heavy control-plane-only rules (scheduler/controller-manager/etcd) disabled to avoid noise on managed EKS.
+These run alongside kube-prometheus defaults; heavy control-plane-only rules are disabled to avoid noise on managed EKS.
 
 ## How to validate locally (docker-desktop/kind)
-The observability installer is now a shared helper (`internal/provisioning/observability/stack.go`). To verify it on your local cluster without touching Helm values:
-
-1. Ensure your kube context points at the local cluster: `kubectl config current-context` → `docker-desktop`.
-2. Install using the same charts/values the Pulumi installer uses:
+1. Ensure your kube context points at the local cluster (`kubectl config current-context`).
+2. Install metrics stack:
    ```bash
-   helm upgrade --install aegis-obsv charts/kube-prometheus-stack \
+   helm upgrade --install aegis-obsv kube-prometheus-stack \
      --repo https://prometheus-community.github.io/helm-charts \
      -f services/platform-api/config/observability/values-mvp.yaml \
      --namespace aegis-observability --create-namespace
@@ -45,22 +100,37 @@ The observability installer is now a shared helper (`internal/provisioning/obser
      -f services/platform-api/config/observability/metrics-server-values.yaml \
      --namespace aegis-observability --create-namespace
    ```
-3. Check health:
-   - `kubectl get pods,svc -n aegis-observability`
-   - `kubectl -n aegis-observability port-forward svc/aegis-obsv-prometheus 9090:9090` and `curl http://127.0.0.1:9090/-/healthy`
-   - Alertmanager secret: `kubectl get secret alertmanager-aegis-obsv-alertmanager -n aegis-observability`
+3. Install logging stack (adjust `CLUSTER_ID` if you want namespaced labels):
+   ```bash
+   helm upgrade --install aegis-logging-loki loki \
+     --repo https://grafana.github.io/helm-charts \
+     -f services/platform-api/config/observability/loki-values.yaml \
+     --namespace aegis-logging --create-namespace
 
-This mirrors what Pulumi will do during provisioning; it’s a quick smoke test of charts/values.
+   helm upgrade --install aegis-logging-fluentbit fluent-bit \
+     --repo https://fluent.github.io/helm-charts \
+     -f services/platform-api/config/observability/fluent-bit-values.yaml \
+     --namespace aegis-logging --create-namespace \
+     --set env[0].value=local-demo \
+     --set env[1].value=aegis-logging-loki \
+     --set env[2].value=3100
+   ```
+4. Checks:
+   - `kubectl get pods,svc -n aegis-observability`
+   - `kubectl get pods,svc -n aegis-logging`
+   - Port-forward Loki: `kubectl -n aegis-logging port-forward svc/aegis-logging-loki 3100:3100` and query logs: `curl -G "http://127.0.0.1:3100/loki/api/v1/query" --data-urlencode 'query={cluster="local-demo"} |= "fluent-bit"'`
+   - Confirm fluent-bit DaemonSet status: `kubectl -n aegis-logging get ds aegis-logging-fluentbit`
 
 ## How to validate in AWS (EKS)
 1. Point kube context to EKS with the provisioning role (example):
    ```bash
    aws eks update-kubeconfig --name <cluster> --region <region> --role-arn arn:aws:iam::567751785679:role/aegis-platform --profile aegis
    ```
-2. Provision via ProjectInfra with `addons.observability: true` (current default). The AWS runner calls the shared installer and deploys to `aegis-observability`.
-3. Validate in the same way as local:
+2. Provision via ProjectInfra with `addons.observability: true` (default). The AWS runner installs metrics + logging to `aegis-observability` and `aegis-logging`.
+3. Validate:
    - `kubectl get pods,svc -n aegis-observability`
-   - Port-forward Prometheus/Alertmanager for health checks.
+   - `kubectl get pods,svc -n aegis-logging`
+   - Port-forward Loki and run a query as in the local section to confirm labels (`cluster`, `namespace`, `pod`, `event_reason`, `event_type`).
 
 Outputs for backend/UI remain the same (namespace + service names/ports + alertmanager secret) and are exported via Pulumi stack outputs and `ClusterOutput.Observability`.
 

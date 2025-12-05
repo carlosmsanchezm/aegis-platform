@@ -113,6 +113,10 @@ type ObservabilityOutput struct {
 	AlertmanagerConfigSecret string `json:"alertmanagerConfigSecret,omitempty"`
 	MetricsServerService     string `json:"metricsServerService,omitempty"`
 	MetricsServerPort        int32  `json:"metricsServerPort,omitempty"`
+	LokiNamespace            string `json:"lokiNamespace,omitempty"`
+	LokiService              string `json:"lokiService,omitempty"`
+	LokiPort                 int32  `json:"lokiPort,omitempty"`
+	LokiAuthSecret           string `json:"lokiAuthSecret,omitempty"`
 	OtelEndpoint             string `json:"otelEndpoint,omitempty"`
 	MetricsURL               string `json:"metricsUrl,omitempty"`
 }

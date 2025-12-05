@@ -60,6 +60,9 @@ type Server struct {
 	workspaceEnvDefaults map[string]string
 	autoBootstrap        bool
 	authzPolicy          *authz.Policy
+	infraClient          client.Client
+	infraNamespace       string
+	clusterProfiles      map[string]*clusterProfileTemplate
 }
 
 type proxyClaims struct {
@@ -139,7 +142,7 @@ var (
 	)
 )
 
-func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay) *Server {
+func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay, infraClient client.Client, infraNamespace string) *Server {
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -185,6 +188,13 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		}
 		panic(fmt.Errorf("failed to load authorization policy: %w", err))
 	}
+	if strings.TrimSpace(infraNamespace) == "" {
+		infraNamespace = defaultInfraNamespace
+	}
+	profiles := defaultClusterProfiles()
+	if profiles == nil {
+		profiles = map[string]*clusterProfileTemplate{}
+	}
 	return &Server{
 		log:                  log,
 		store:                st,
@@ -198,6 +208,9 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		workspaceEnvDefaults: defaults,
 		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
 		authzPolicy:          policy,
+		infraClient:          infraClient,
+		infraNamespace:       infraNamespace,
+		clusterProfiles:      profiles,
 	}
 }
 
@@ -238,9 +251,39 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	if err := s.authorize(ctx, p.GetId(), "", "createProject"); err != nil {
 		return nil, err
 	}
+	awsCreds := mergeProjectAwsDefaults(sanitizeProjectAws(p.GetAws()))
+	if awsCreds != nil {
+		if err := validateProjectAwsCredentials(awsCreds); err != nil {
+			errStatus := status.Error(codes.InvalidArgument, err.Error())
+			s.log.Warn("create project rejected; invalid aws credentials",
+				zap.String("project_id", p.GetId()),
+				zap.Error(errStatus),
+			)
+			return nil, errStatus
+		}
+	}
+	p.Aws = awsCreds
+	p.Annotations = mergeProjectAnnotations(p.GetAnnotations(), awsCreds)
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
+	populateProjectAwsFromAnnotations(p)
 	return p, nil
+}
+
+func (s *Server) ListProjects(ctx context.Context, _ *aegis.ListProjectsRequest) (*aegis.ListProjectsResponse, error) {
+	all := s.store.ListProjects()
+	authorized := make([]*aegis.Project, 0, len(all))
+	for _, project := range all {
+		if err := s.authorize(ctx, project.GetId(), "", "listProjects"); err != nil {
+			if status.Code(err) == codes.PermissionDenied {
+				continue
+			}
+			return nil, err
+		}
+		populateProjectAwsFromAnnotations(project)
+		authorized = append(authorized, project)
+	}
+	return &aegis.ListProjectsResponse{Items: authorized}, nil
 }
 
 func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetRequest) (*aegis.Budget, error) {
@@ -349,27 +392,31 @@ func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workl
 		)
 	}
 	queueName := strings.TrimSpace(w.GetQueue())
-	if queueName != "" && s.store.GetQueue(queueName) == nil {
-		s.store.PutQueue(&aegis.Queue{
-			Name:                      queueName,
-			ProjectId:                 projectID,
-			DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
-		})
-		s.log.Info("autobootstrap: queue created",
-			zap.String("queue", queueName),
-			zap.String("project_id", projectID),
-			zap.String("workload_id", w.GetId()),
-		)
+	if queueName != "" {
+		queue := s.store.GetQueue(queueName)
+		if queue == nil {
+			queue = &aegis.Queue{
+				Name:                      queueName,
+				ProjectId:                 projectID,
+				DefaultMaxDurationSeconds: s.defaultMaxRuntimeSeconds(nil),
+				AllowedFlavors:            []string{reqFlavor},
+			}
+			s.store.PutQueue(queue)
+			s.log.Info("autobootstrap: queue created",
+				zap.String("queue", queueName),
+				zap.String("project_id", projectID),
+				zap.String("workload_id", w.GetId()),
+			)
+		} else if ensureQueueAllowsFlavor(queue, reqFlavor) {
+			s.store.PutQueue(queue)
+			s.log.Info("autobootstrap: queue updated",
+				zap.String("queue", queueName),
+				zap.String("project_id", projectID),
+				zap.String("flavor", reqFlavor),
+			)
+		}
 	}
-	if s.store.GetFlavor(reqFlavor) == nil {
-		flavor := defaultFlavorForName(reqFlavor)
-		s.store.PutFlavor(flavor)
-		s.log.Info("autobootstrap: flavor created",
-			zap.String("flavor", reqFlavor),
-			zap.String("resource_name", flavor.GetResourceName()),
-			zap.Int32("gpu_count", flavor.GetGpuCount()),
-		)
-	}
+	s.ensureFlavorDefaults(reqFlavor)
 }
 
 func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRequest) (*aegis.Workload, error) {
@@ -411,6 +458,10 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	flavorObj := s.store.GetFlavor(reqFlavor)
+	if flavorObj == nil && s.autoBootstrap {
+		s.ensureFlavorDefaults(reqFlavor)
+		flavorObj = s.store.GetFlavor(reqFlavor)
+	}
 	if flavorObj == nil {
 		s.log.Warn("submit workload rejected; unknown flavor",
 			zap.String("workload_id", w.GetId()),
@@ -1678,6 +1729,10 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
 	root := http.NewServeMux()
+	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "OK")
+	}))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}
@@ -1989,6 +2044,127 @@ func (s *Server) activeWorkloadStats(projectID string) (map[string]int, map[stri
 	return flavorCounts, clusterLoads
 }
 
+func (s *Server) CreateWorkspace(ctx context.Context, req *aegis.CreateWorkspaceRequest) (*aegis.CreateWorkspaceResponse, error) {
+	if req == nil || req.Workspace == nil {
+		return nil, status.Error(codes.InvalidArgument, "workspace payload required")
+	}
+
+	w := &aegis.Workload{
+		Id:        req.WorkspaceId,
+		ProjectId: req.ProjectId,
+		Queue:     req.Queue,
+		Kind: &aegis.Workload_Workspace{
+			Workspace: req.Workspace,
+		},
+	}
+
+	submittedWorkload, err := s.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{Workload: w})
+	if err != nil {
+		return nil, err
+	}
+
+	return &aegis.CreateWorkspaceResponse{Workload: submittedWorkload}, nil
+}
+
+func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequest) (*aegis.CreateClusterResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	if s.infraClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster provisioning is not configured")
+	}
+	projectID := strings.TrimSpace(req.GetProjectId())
+	clusterID := strings.TrimSpace(req.GetClusterId())
+	region := strings.TrimSpace(req.GetRegion())
+	provider := canonicalProvider(req.GetProvider())
+	if projectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id is required")
+	}
+	if err := s.authorize(ctx, projectID, "", "createCluster"); err != nil {
+		return nil, err
+	}
+	if clusterID == "" {
+		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
+	}
+	if region == "" {
+		return nil, status.Error(codes.InvalidArgument, "region is required")
+	}
+	if provider != "aws" {
+		return nil, status.Errorf(codes.InvalidArgument, "provider %q not supported", provider)
+	}
+	profileReq := req.GetProfile()
+	if profileReq == nil || strings.TrimSpace(profileReq.GetId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "profile.id is required")
+	}
+	profileID := strings.ToLower(strings.TrimSpace(profileReq.GetId()))
+	tmpl, ok := s.clusterProfiles[profileID]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "profile %q not registered", profileReq.GetId())
+	}
+	project := s.store.GetProject(projectID)
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
+	}
+	populateProjectAwsFromAnnotations(project)
+	creds := resolveProjectCredentials(project)
+	if err := creds.validate(); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "project %q missing AWS credentials: %v", projectID, err)
+	}
+	infra, err := s.buildProjectInfra(req, tmpl, project, creds)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureUniqueInfraName(ctx, infra); err != nil {
+		return nil, err
+	}
+	if err := s.infraClient.Create(ctx, infra); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			reset, resetErr := s.resetFailedInfraJob(ctx, infra.Name, projectID, clusterID)
+			if resetErr != nil {
+				return nil, resetErr
+			}
+			if !reset {
+				return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+			}
+			if err := s.infraClient.Create(ctx, infra); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					return nil, status.Errorf(codes.AlreadyExists, "cluster job %q already exists", infra.Name)
+				}
+				return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
+		}
+	}
+	s.log.Info("cluster provisioning job created",
+		zap.String("project", projectID),
+		zap.String("cluster", clusterID),
+		zap.String("profile", tmpl.ID),
+		zap.String("job", infra.Name),
+	)
+	return &aegis.CreateClusterResponse{Job: jobFromInfra(infra, infra.Name)}, nil
+}
+
+func (s *Server) GetClusterJobStatus(ctx context.Context, req *aegis.GetClusterJobStatusRequest) (*aegis.GetClusterJobStatusResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	if s.infraClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster provisioning is not configured")
+	}
+	infra, err := s.fetchInfra(ctx, strings.TrimSpace(req.GetJobId()))
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, status.Errorf(codes.NotFound, "cluster job %q not found", req.GetJobId())
+		}
+		return nil, status.Errorf(codes.Internal, "get job status: %v", err)
+	}
+	if err := s.authorize(ctx, infra.Spec.ProjectID, "", "getClusterJobStatus"); err != nil {
+		return nil, err
+	}
+	return &aegis.GetClusterJobStatusResponse{Job: jobFromInfra(infra, req.GetJobId())}, nil
+}
+
 func isWorkloadActive(status string) bool {
 	switch {
 	case strings.EqualFold(status, statusPlaced):
@@ -2000,16 +2176,93 @@ func isWorkloadActive(status string) bool {
 	}
 }
 
-func defaultFlavorForName(name string) *aegis.Flavor {
-	flavor := &aegis.Flavor{
-		Name:               name,
-		CpuCoresRequest:    "2",
-		MemoryRequest:      "4Gi",
-		ResourceName:       name,
-		GpuCount:           0,
-		PriceUsdPerGpuHour: 0,
+func ensureQueueAllowsFlavor(q *aegis.Queue, flavor string) bool {
+	if q == nil {
+		return false
 	}
-	return flavor
+	normalized := strings.TrimSpace(flavor)
+	if normalized == "" {
+		return false
+	}
+	existing := q.GetAllowedFlavors()
+	for _, item := range existing {
+		if strings.EqualFold(strings.TrimSpace(item), normalized) {
+			return false
+		}
+	}
+	q.AllowedFlavors = append(existing, normalized)
+	return true
+}
+
+func defaultFlavorForName(name string) *aegis.Flavor {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	switch normalized {
+	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4":
+		return &aegis.Flavor{
+			Name:               name,
+			Chip:               "nvidia-t4",
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          16,
+			CpuCoresRequest:    "4",
+			MemoryRequest:      "16Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "a10-1gpu", "a10g-1gpu":
+		return &aegis.Flavor{
+			Name: name,
+			Chip: "nvidia-a10g",
+			// Full A10G GPU uses the standard NVIDIA device plugin resource name.
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          24,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "a10g-mig-1g", "a10-mig-1g":
+		return &aegis.Flavor{
+			Name: name,
+			Chip: "nvidia-a10g",
+			// MIG 1g.10gb profile as reported by the NVIDIA device plugin.
+			ResourceName:       "nvidia.com/mig-1g.10gb",
+			GpuCount:           1,
+			MemoryGib:          10,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	default:
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "4Gi",
+			ResourceName:       name,
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	}
+}
+
+func (s *Server) ensureFlavorDefaults(name string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return
+	}
+	existing := s.store.GetFlavor(trimmed)
+	expected := defaultFlavorForName(trimmed)
+	if expected == nil {
+		return
+	}
+
+	if existing == nil || strings.TrimSpace(existing.GetResourceName()) == "" || (expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) {
+		s.store.PutFlavor(expected)
+		s.log.Info("autobootstrap: flavor ensured",
+			zap.String("flavor", trimmed),
+			zap.String("resource_name", expected.GetResourceName()),
+			zap.Int32("gpu_count", expected.GetGpuCount()),
+		)
+	}
 }
 
 func stringPtr(in string) *string {

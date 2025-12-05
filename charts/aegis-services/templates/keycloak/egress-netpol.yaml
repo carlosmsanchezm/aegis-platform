@@ -1,0 +1,42 @@
+{{- $kc := .Values.keycloak | default dict }}
+{{- $crdReady := or (.Capabilities.APIVersions.Has "k8s.keycloak.org/v2alpha1") ($kc.forceRender | default false) }}
+{{- if and ($kc.enabled | default false) $crdReady }}
+{{- $ns := include "aegis-services.keycloak.namespace" . }}
+{{- $networkPolicy := $kc.networkPolicy | default dict }}
+{{- if $networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis-services.keycloak.fullname" . }}-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis-services.keycloak.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+      app.kubernetes.io/instance: {{ include "aegis-services.keycloak.fullname" . }}
+      app.kubernetes.io/managed-by: keycloak-operator
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow connection to PostgreSQL database
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: keycloak-postgres
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: {{ default 5432 ($kc.database | default dict).port }}
+{{- end }}
+{{- end }}

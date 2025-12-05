@@ -1,0 +1,113 @@
+=== Context ===
+Local environment: make clean-local → make deploy-local-tls
+All commands run from /Users/carlossanchez/code/aegis-platform unless noted otherwise.
+
+=== Key Observations ===
+
+1. grpcurl service discovery (fails)
+Command:
+  grpcurl --insecure \
+    -authority platform-api-grpc.localtest.me \
+    -H "authorization: Bearer $TOKEN" \
+    localhost:8081 list
+Output:
+  Failed to list services: rpc error: code = Unauthenticated desc = invalid bearer token
+
+(Same error when trying ports 8443/18081.)
+
+2. Token acquisition (succeeds)
+Command:
+  curl -sk --resolve keycloak.localtest.me:443:127.0.0.1 \
+    --cacert $HOME/keycloak.localtest.me.crt \
+    -d "client_id=backstage" \
+    -d "client_secret=local-backstage-client-secret" \
+    -d "grant_type=client_credentials" \
+    https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/token
+Output (truncated):
+  {"access_token":"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJrS1BsbVdtVFRZcEYwVnBnWkF4Y2RoUXRlT1UyNDVUQ1RBVVkxaDRFR1I0In0....","expires_in":300,...}
+
+3. Platform API logs (JWKS TLS failure)
+Command:
+  kubectl logs -l app.kubernetes.io/component=platform-api -n aegis-system --tail=10
+Output:
+  {"level":"warn","caller":"mw/auth.go:291","msg":"authentication failed","reason":"token_parse","error":"token is unverifiable: error while executing keyfunc: failed to fetch JWKS: Get \"https://aegis-services-keycloak.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs\": tls: failed to verify certificate: x509: certificate signed by unknown authority"}
+  (Repeated for ListWorkloads and gRPC reflection.)
+
+4. Keycloak pod status (before fix)
+Command:
+  kubectl get pods -n keycloak
+Output (during crash loop):
+  aegis-services-keycloak-0             0/1     Running     3 (38s ago)   2m2s
+  aegis-services-keycloak-db-0          1/1     Running     0             8m51s
+  aegis-services-keycloak-realm-f7d2k   0/1     Completed   0             2m3s
+  keycloak-operator-79b549f46b-mxq2l    1/1     Running     0             2m3s
+
+After redeploy (healthy):
+  aegis-services-keycloak-0             1/1     Running   0   41s
+  aegis-services-keycloak-db-0          1/1     Running   0   48s
+  aegis-services-keycloak-realm-jvwm7   0/1     Completed 0   22s
+
+5. Keycloak crash-loop log (Liquibase checksum)
+Command:
+  kubectl logs aegis-services-keycloak-0 -n keycloak | tail -n 60
+Excerpt:
+  Caused by: liquibase.exception.ValidationFailedException: Validation Failed:
+       META-INF/jpa-changelog-2.5.0.xml::2.5.0-unicode-oracle::hmlnarik@redhat.com was: 9:f9753208029f582525ed12011a19d054 but is now: 9:3a32bace77c84d7678d035a7f5a8084e
+
+6. make clean-local (timed out ~11s)
+Output:
+  Uninstalling aegis-services...
+  Uninstalling aegis-spoke...
+
+7. make deploy-local-tls (success)
+Highlights:
+  NAME: aegis-services (STATUS: deployed)
+  NAME: aegis-spoke (STATUS: deployed)
+  Syncing platform API certificate to ~/aegis-platform-api-ca.crt
+  Syncing Keycloak certificate to ~/keycloak.localtest.me.crt
+
+8. Platform API env confirmation
+Command:
+  kubectl exec deploy/aegis-services-platform-api -n aegis-system -- env | grep OIDC
+Output:
+  OIDC_ISSUER_URL=https://keycloak.localtest.me/realms/aegis
+  OIDC_JWKS_URL=https://aegis-services-keycloak.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs
+  OIDC_CA_BUNDLE=/etc/aegis-platform-api/oidc/ca.crt
+  OIDC_AUDIENCE=backstage
+
+9. Secret contents
+Command:
+  kubectl get secret aegis-platform-api-oidc-ca -n aegis-system -o jsonpath='{.data.ca\.crt}' | base64 --decode
+Current content (after latest edit):
+  -----BEGIN CERTIFICATE-----
+  MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
+  ... (Aegis Local Root CA) ...
+  -----END CERTIFICATE-----
+  (Note: leaf cert was removed in latest change—may need reintroducing.)
+
+10. In-pod JWKS fetch (succeeds manually)
+Command:
+  kubectl exec deploy/aegis-services-platform-api -n aegis-system -- \
+    curl -sS --cacert /etc/aegis-platform-api/oidc/ca.crt \
+    https://aegis-services-keycloak.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs
+Output:
+  {"keys":[{"kid":"M_Eeve9uQVXB8gWIapMiARAzwwhojFH66gpZ4-kd5yw",...},{"kid":"1oJ6b2Z4Hz17bF85ug_eyEui_QXZzTwCdcEWYsCJ7is",...}]}
+
+11. Persistent grpcurl failure (example transcript)
+Command:
+  TOKEN=$(curl -sk --resolve keycloak.localtest.me:443:127.0.0.1 \
+      --cacert $HOME/keycloak.localtest.me.crt \
+      -d "client_id=backstage" -d "client_secret=local-backstage-client-secret" \
+      -d "grant_type=client_credentials" \
+      https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/token \
+      | jq -r '.access_token')
+  grpcurl --insecure -authority platform-api-grpc.localtest.me \
+      -H "authorization: Bearer $TOKEN" \
+      localhost:8081 list
+Output:
+  Failed to list services: rpc error: code = Unauthenticated desc = invalid bearer token
+
+=== Summary ===
+- Keycloak client credentials flow works; certificates retrieved from the cluster are trusted manually.
+- Platform API still refuses tokens because its JWKS fetch cannot verify Keycloak’s certificate (x509 unknown authority).
+- Next fixes: ensure CA bundle mounted in the pod includes the full chain (leaf + root), confirm `OIDC_CA_BUNDLE` is honored inside auth config, and retry.

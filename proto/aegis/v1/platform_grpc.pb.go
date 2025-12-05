@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AegisPlatform_CreateProject_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateProject"
+	AegisPlatform_ListProjects_FullMethodName                  = "/aegis.v1.AegisPlatform/ListProjects"
 	AegisPlatform_UpsertBudget_FullMethodName                  = "/aegis.v1.AegisPlatform/UpsertBudget"
 	AegisPlatform_GetBudget_FullMethodName                     = "/aegis.v1.AegisPlatform/GetBudget"
 	AegisPlatform_ListBudgets_FullMethodName                   = "/aegis.v1.AegisPlatform/ListBudgets"
@@ -29,6 +30,9 @@ const (
 	AegisPlatform_SubmitWorkload_FullMethodName                = "/aegis.v1.AegisPlatform/SubmitWorkload"
 	AegisPlatform_GetWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/GetWorkload"
 	AegisPlatform_ListWorkloads_FullMethodName                 = "/aegis.v1.AegisPlatform/ListWorkloads"
+	AegisPlatform_CreateWorkspace_FullMethodName               = "/aegis.v1.AegisPlatform/CreateWorkspace"
+	AegisPlatform_CreateCluster_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateCluster"
+	AegisPlatform_GetClusterJobStatus_FullMethodName           = "/aegis.v1.AegisPlatform/GetClusterJobStatus"
 	AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName = "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"
 	AegisPlatform_CreateConnectionSession_FullMethodName       = "/aegis.v1.AegisPlatform/CreateConnectionSession"
 	AegisPlatform_RenewConnectionSession_FullMethodName        = "/aegis.v1.AegisPlatform/RenewConnectionSession"
@@ -47,6 +51,7 @@ const (
 // Service
 type AegisPlatformClient interface {
 	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*Project, error)
+	ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error)
 	UpsertBudget(ctx context.Context, in *UpsertBudgetRequest, opts ...grpc.CallOption) (*Budget, error)
 	GetBudget(ctx context.Context, in *GetBudgetRequest, opts ...grpc.CallOption) (*GetBudgetResponse, error)
 	ListBudgets(ctx context.Context, in *ListBudgetsRequest, opts ...grpc.CallOption) (*ListBudgetsResponse, error)
@@ -55,6 +60,9 @@ type AegisPlatformClient interface {
 	SubmitWorkload(ctx context.Context, in *SubmitWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
+	CreateWorkspace(ctx context.Context, in *CreateWorkspaceRequest, opts ...grpc.CallOption) (*CreateWorkspaceResponse, error)
+	CreateCluster(ctx context.Context, in *CreateClusterRequest, opts ...grpc.CallOption) (*CreateClusterResponse, error)
+	GetClusterJobStatus(ctx context.Context, in *GetClusterJobStatusRequest, opts ...grpc.CallOption) (*GetClusterJobStatusResponse, error)
 	GetWorkspaceConnectionDetails(ctx context.Context, in *GetWorkspaceConnectionDetailsRequest, opts ...grpc.CallOption) (*GetWorkspaceConnectionDetailsResponse, error)
 	CreateConnectionSession(ctx context.Context, in *CreateConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error)
 	RenewConnectionSession(ctx context.Context, in *RenewConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error)
@@ -78,6 +86,16 @@ func (c *aegisPlatformClient) CreateProject(ctx context.Context, in *CreateProje
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Project)
 	err := c.cc.Invoke(ctx, AegisPlatform_CreateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProjectsResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_ListProjects_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +176,36 @@ func (c *aegisPlatformClient) ListWorkloads(ctx context.Context, in *ListWorkloa
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorkloadsResponse)
 	err := c.cc.Invoke(ctx, AegisPlatform_ListWorkloads_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) CreateWorkspace(ctx context.Context, in *CreateWorkspaceRequest, opts ...grpc.CallOption) (*CreateWorkspaceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateWorkspaceResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_CreateWorkspace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) CreateCluster(ctx context.Context, in *CreateClusterRequest, opts ...grpc.CallOption) (*CreateClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateClusterResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_CreateCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) GetClusterJobStatus(ctx context.Context, in *GetClusterJobStatusRequest, opts ...grpc.CallOption) (*GetClusterJobStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClusterJobStatusResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_GetClusterJobStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +309,7 @@ func (c *aegisPlatformClient) Heartbeat(ctx context.Context, in *ClusterHeartbea
 // Service
 type AegisPlatformServer interface {
 	CreateProject(context.Context, *CreateProjectRequest) (*Project, error)
+	ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error)
 	UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error)
 	GetBudget(context.Context, *GetBudgetRequest) (*GetBudgetResponse, error)
 	ListBudgets(context.Context, *ListBudgetsRequest) (*ListBudgetsResponse, error)
@@ -269,6 +318,9 @@ type AegisPlatformServer interface {
 	SubmitWorkload(context.Context, *SubmitWorkloadRequest) (*Workload, error)
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
+	CreateWorkspace(context.Context, *CreateWorkspaceRequest) (*CreateWorkspaceResponse, error)
+	CreateCluster(context.Context, *CreateClusterRequest) (*CreateClusterResponse, error)
+	GetClusterJobStatus(context.Context, *GetClusterJobStatusRequest) (*GetClusterJobStatusResponse, error)
 	GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error)
 	CreateConnectionSession(context.Context, *CreateConnectionSessionRequest) (*ConnectionSession, error)
 	RenewConnectionSession(context.Context, *RenewConnectionSessionRequest) (*ConnectionSession, error)
@@ -290,6 +342,9 @@ type UnimplementedAegisPlatformServer struct{}
 
 func (UnimplementedAegisPlatformServer) CreateProject(context.Context, *CreateProjectRequest) (*Project, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateProject not implemented")
+}
+func (UnimplementedAegisPlatformServer) ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListProjects not implemented")
 }
 func (UnimplementedAegisPlatformServer) UpsertBudget(context.Context, *UpsertBudgetRequest) (*Budget, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpsertBudget not implemented")
@@ -314,6 +369,15 @@ func (UnimplementedAegisPlatformServer) GetWorkload(context.Context, *GetWorkloa
 }
 func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkloads not implemented")
+}
+func (UnimplementedAegisPlatformServer) CreateWorkspace(context.Context, *CreateWorkspaceRequest) (*CreateWorkspaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateWorkspace not implemented")
+}
+func (UnimplementedAegisPlatformServer) CreateCluster(context.Context, *CreateClusterRequest) (*CreateClusterResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateCluster not implemented")
+}
+func (UnimplementedAegisPlatformServer) GetClusterJobStatus(context.Context, *GetClusterJobStatusRequest) (*GetClusterJobStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetClusterJobStatus not implemented")
 }
 func (UnimplementedAegisPlatformServer) GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkspaceConnectionDetails not implemented")
@@ -377,6 +441,24 @@ func _AegisPlatform_CreateProject_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AegisPlatformServer).CreateProject(ctx, req.(*CreateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_ListProjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ListProjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ListProjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ListProjects(ctx, req.(*ListProjectsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -521,6 +603,60 @@ func _AegisPlatform_ListWorkloads_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AegisPlatformServer).ListWorkloads(ctx, req.(*ListWorkloadsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_CreateWorkspace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateWorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).CreateWorkspace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_CreateWorkspace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).CreateWorkspace(ctx, req.(*CreateWorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_CreateCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).CreateCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_CreateCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).CreateCluster(ctx, req.(*CreateClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_GetClusterJobStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClusterJobStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).GetClusterJobStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_GetClusterJobStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).GetClusterJobStatus(ctx, req.(*GetClusterJobStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -699,6 +835,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AegisPlatform_CreateProject_Handler,
 		},
 		{
+			MethodName: "ListProjects",
+			Handler:    _AegisPlatform_ListProjects_Handler,
+		},
+		{
 			MethodName: "UpsertBudget",
 			Handler:    _AegisPlatform_UpsertBudget_Handler,
 		},
@@ -729,6 +869,18 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkloads",
 			Handler:    _AegisPlatform_ListWorkloads_Handler,
+		},
+		{
+			MethodName: "CreateWorkspace",
+			Handler:    _AegisPlatform_CreateWorkspace_Handler,
+		},
+		{
+			MethodName: "CreateCluster",
+			Handler:    _AegisPlatform_CreateCluster_Handler,
+		},
+		{
+			MethodName: "GetClusterJobStatus",
+			Handler:    _AegisPlatform_GetClusterJobStatus_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceConnectionDetails",

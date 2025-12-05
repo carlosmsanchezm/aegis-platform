@@ -30,10 +30,18 @@ rules:
     resources: ["projectinfras", "projectinfras/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["infra.aegis.yourorg.dev"]
+    resources: ["projectinfras/finalizers"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["infra.aegis.yourorg.dev"]
     resources: ["projectplacements", "projectplacements/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["infra.aegis.yourorg.dev"]
     resources: ["aegisclusters", "aegisclusters/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Coordination locks for stack-level leasing
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Namespace permissions to create workload namespaces dynamically

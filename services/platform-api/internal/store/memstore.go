@@ -274,6 +274,19 @@ func (s *MemStore) GetProject(id string) *aegis.Project {
 	defer s.mu.RUnlock()
 	return s.projects[id]
 }
+func (s *MemStore) ListProjects() []*aegis.Project {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*aegis.Project, 0, len(s.projects))
+	for _, p := range s.projects {
+		if p == nil {
+			continue
+		}
+		copy := *p
+		out = append(out, &copy)
+	}
+	return out
+}
 
 func budgetKey(projectID, queue string) string { return projectID + "|" + queue }
 

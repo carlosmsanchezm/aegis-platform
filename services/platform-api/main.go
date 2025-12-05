@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
@@ -98,10 +100,21 @@ func main() {
 		logger.Info("management-plane controllers disabled; AEGIS_INFRA_CONTROLLER!=true")
 	}
 
+	infraNamespace := getenv("AEGIS_INFRA_NAMESPACE", "")
+	var infraClient client.Client
+	if cfg, err := clientconfig.GetConfig(); err != nil {
+		logger.Warn("kubeconfig not available; cluster provisioning disabled", zap.Error(err))
+	} else {
+		infraClient, err = client.New(cfg, client.Options{Scheme: scheme})
+		if err != nil {
+			logger.Warn("failed to initialize infra client", zap.Error(err))
+		}
+	}
+
 	kubeconfigsDir := getenv("KUBECONFIGS_DIR", "/tmp/kubeconfigs")
 	targetNamespace := getenv("AEGIS_NAMESPACE", "default")
 	kubeClientManager := kubeclients.New(kubeconfigsDir)
-	svc := server.New(logger, st, kubeClientManager, targetNamespace, overlay)
+	svc := server.New(logger, st, kubeClientManager, targetNamespace, overlay, infraClient, infraNamespace)
 
 	logger.Info("starting platform API", zap.String("grpc_addr", grpcAddr), zap.String("http_addr", httpAddr))
 

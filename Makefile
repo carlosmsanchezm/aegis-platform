@@ -17,16 +17,17 @@ AEGIS_REGION ?= us-local
 AEGIS_PROVIDER ?= DEV
 AEGIS_DISABLE_KUEUE ?= 1
 HEALTH_PROBE_BIND_ADDRESS ?= :8081
-AEGIS_FLAVORS ?=
+AEGIS_FLAVORS ?= 
 
 PF_PLATFORM_HTTP_PORT ?= 10080
 PF_PLATFORM_GRPC_PORT ?= 10081
 PF_PROXY_HTTP_PORT ?= 10085
+PF_KEYCLOAK_HTTPS_PORT ?= 10443
 
 .PHONY: all proto tidy build test verify run-api run-operator stop \
 	setup-local deploy-local deploy-local-tls port-forward \
 	dev-backstage dev-backstage-cloud dev-backstage-cloud-tls clean-local \
-	rerun-preview-failures
+	rerun-preview-failures roll-platform-api
 
 all: proto tidy build
 
@@ -151,6 +152,12 @@ setup-local:
 	@echo "Switching to docker-desktop context..."
 	@kubectl config use-context docker-desktop
 
+roll-platform-api:
+	@echo "Rolling platform-api deployment to $(PLATFORM_API_IMAGE)"
+	@kubectl set image deployment/aegis-services-platform-api platform-api=$(PLATFORM_API_IMAGE) -n aegis-system
+	@echo "Waiting for rollout to complete..."
+	@kubectl rollout status deployment/aegis-services-platform-api -n aegis-system
+
 K8S_AGENT_IMAGE ?= carlosmsanchez/aegis-k8s-agent:dev
 PLATFORM_API_IMAGE ?= carlosmsanchez/aegis-platform-api:dev
 PROXY_IMAGE ?= carlosmsanchez/aegis-proxy:dev
@@ -186,53 +193,60 @@ ifeq ($(PUSH_LATEST),1)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
 endif
 
+.PHONY: clean-webhook
+clean-webhook:
+	@echo "Checking ingress-nginx admission webhook health..."
+	@if kubectl get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then \
+		echo "Cleaning up potentially stale webhook configuration..."; \
+		kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found >/dev/null 2>&1 || true; \
+		sleep 2; \
+	fi
+
 .PHONY: deploy-local
-.PHONY: deploy-local
-deploy-local: setup-local
+deploy-local: setup-local clean-webhook
 	@ \
 	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
 	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
 	  PLATFORM_API_REPO="$${PLATFORM_API_IMAGE%:*}"; \
-	  PLATFORM_API_TAG="$${PLATFORM_API_IMAGE##*:}"; \
+	  PLATFORM_API_TAG="$${PLATFORM_API_IMAGE##*:} "; \
 	else \
 	  PLATFORM_API_REPO="$$PLATFORM_API_IMAGE"; \
 	  PLATFORM_API_TAG="latest"; \
 	fi; \
 	K8S_AGENT_IMAGE="$(K8S_AGENT_IMAGE)"; \
 	if [[ "$$K8S_AGENT_IMAGE" == *":"* ]]; then \
-	  K8S_AGENT_REPO="$${K8S_AGENT_IMAGE%:*}"; \
-	  K8S_AGENT_TAG="$${K8S_AGENT_IMAGE##*:}"; \
+	  K8S_AGENT_REPO="$${K8S_AGENT_IMAGE%:*} "; \
+	  K8S_AGENT_TAG="$${K8S_AGENT_IMAGE##*:} "; \
 	else \
 	  K8S_AGENT_REPO="$$K8S_AGENT_IMAGE"; \
 	  K8S_AGENT_TAG="latest"; \
 	fi; \
-	echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
-	echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
-	echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
-	helm dependency update charts/aegis-services >/dev/null; \
-	echo "Deploying Aegis services locally (no TLS)..."; \
-	helm upgrade --install aegis-services charts/aegis-services \
-	  -f charts/aegis-services/values/common.yaml \
-	  -f charts/aegis-services/values/local.yaml \
-	  --set platformApi.image.repository=$$PLATFORM_API_REPO \
-	  --set platformApi.image.tag=$$PLATFORM_API_TAG \
-	  --namespace aegis-system --create-namespace \
-	  --wait --timeout 5m; \
-	echo "Deploying Aegis spoke locally (no TLS)..."; \
-	helm upgrade --install aegis-spoke charts/aegis-spoke \
-	  -f charts/aegis-spoke/values.yaml \
-	  -f charts/aegis-spoke/values-local.yaml \
-	  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
-	  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
-	  --set k8sAgent.image.pullPolicy=Always \
-	  --namespace aegis-system --create-namespace; \
-	echo "✅ Deployed local stack without TLS"; \
-	echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"; \
-	echo "   Proxy: http://proxy.localtest.me"
+		echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
+		echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
+		echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
+		helm dependency update charts/aegis-services >/dev/null; \
+		echo "Deploying Aegis services locally (no TLS)..."; \
+		helm upgrade --install aegis-services charts/aegis-services \
+		  -f charts/aegis-services/values/common.yaml \
+		  -f charts/aegis-services/values/local.yaml \
+		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
+		  --set platformApi.image.tag=$$PLATFORM_API_TAG \
+		  --namespace aegis-system --create-namespace \
+		  --wait --timeout 5m; \
+		echo "Deploying Aegis spoke locally (no TLS)..."; \
+		helm upgrade --install aegis-spoke charts/aegis-spoke \
+		  -f charts/aegis-spoke/values.yaml \
+		  -f charts/aegis-spoke/values-local.yaml \
+		  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
+		  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+		  --set k8sAgent.image.pullPolicy=Always \
+		  --namespace aegis-system --create-namespace; \
+		echo "✅ Deployed local stack without TLS"; \
+		echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"; \
+		echo "   Proxy: http://proxy.localtest.me"
 
 .PHONY: deploy-local-tls
-.PHONY: deploy-local-tls
-deploy-local-tls: setup-local
+deploy-local-tls: setup-local clean-webhook
 	@ \
 	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
 	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
@@ -250,63 +264,40 @@ deploy-local-tls: setup-local
 	  K8S_AGENT_REPO="$$K8S_AGENT_IMAGE"; \
 	  K8S_AGENT_TAG="latest"; \
 	fi; \
-	echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
-	echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
-	echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
-	helm dependency update charts/aegis-services >/dev/null; \
-	if [[ -n "$(RHBK_USERNAME)" && -n "$(RHBK_PASSWORD)" ]]; then \
-	  echo "Configuring registry.redhat.io pull secret in keycloak namespace"; \
-	  if kubectl get namespace keycloak >/dev/null 2>&1; then \
-	    phase=$$(kubectl get namespace keycloak -o jsonpath='{.status.phase}'); \
-	    if [[ "$$phase" == "Terminating" ]]; then \
-	      echo "Waiting for keycloak namespace to finish terminating"; \
-	      kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true; \
-	    fi; \
-	  fi; \
-	  kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
-	  kubectl delete secret redhat-pull-secret -n keycloak --ignore-not-found >/dev/null; \
-	  kubectl create secret docker-registry redhat-pull-secret \
-	    --namespace keycloak \
-	    --docker-server=registry.redhat.io \
-	    --docker-username="$(RHBK_USERNAME)" \
-	    --docker-password="$(RHBK_PASSWORD)" \
-	    --docker-email="$(RHBK_EMAIL)" >/dev/null; \
-	else \
-	  echo "RHBK_USERNAME/RHBK_PASSWORD not set; skipping redhat-pull-secret creation (Keycloak pods must already have access)."; \
-	fi; \
-	echo "Deploying Aegis services locally with TLS..."; \
-	helm upgrade --install aegis-services charts/aegis-services \
-	  -f charts/aegis-services/values/common.yaml \
-	  -f charts/aegis-services/values/local.yaml \
-	  -f charts/aegis-services/values/local-tls.yaml \
-	  --set platformApi.image.repository=$$PLATFORM_API_REPO \
-	  --set platformApi.image.tag=$$PLATFORM_API_TAG \
-	  --namespace aegis-system --create-namespace \
-	  --wait --timeout 5m; \
-	kubectl rollout status deployment/keycloak-operator -n keycloak --timeout=3m >/dev/null 2>&1 || true; \
-	kubectl rollout status deployment/aegis-services-ingress-nginx-controller -n aegis-system --timeout=3m >/dev/null 2>&1 || true; \
-	kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=controller -n aegis-system --timeout=3m >/dev/null 2>&1 || true; \
-	for i in $$(seq 1 30); do \
-	  if kubectl get endpoints aegis-services-ingress-nginx-controller-admission -n aegis-system -o jsonpath='{.subsets[0].addresses[0].ip}' >/dev/null 2>&1; then \
-	    break; \
-	  fi; \
-	  sleep 2; \
-	done; \
-	admission_ready=0; \
-	for attempt in $$(seq 1 6); do \
-	  probe=ingress-admission-probe-$$RANDOM; \
-	  if kubectl run $$probe --namespace aegis-system --rm -i --restart=Never --image=curlimages/curl:8.11.1 --image-pull-policy=IfNotPresent --command -- curl -k -sS -o /dev/null -w "%{http_code}" -m 5 https://aegis-services-ingress-nginx-controller-admission.aegis-system.svc:443/networking/v1/ingresses >/tmp/ingress-admission-probe.log 2>&1; then \
-	    admission_ready=1; \
-	    break; \
-	  fi; \
-	  kubectl delete pod $$probe -n aegis-system --ignore-not-found >/dev/null 2>&1 || true; \
-	  sleep 5; \
-	done; \
-	if [[ $$admission_ready -ne 1 ]]; then \
-	  echo "Ingress admission webhook did not respond after multiple attempts. See /tmp/ingress-admission-probe.log for details."; \
-	  cat /tmp/ingress-admission-probe.log; \
-	  exit 1; \
-	fi; \
+		echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
+		echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
+		echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
+		helm dependency update charts/aegis-services >/dev/null; \
+		if [[ -n "$(RHBK_USERNAME)" && -n "$(RHBK_PASSWORD)" ]]; then \
+		  echo "Configuring registry.redhat.io pull secret in keycloak namespace"; \
+		  if kubectl get namespace keycloak >/dev/null 2>&1; then \
+		    phase=$$(kubectl get namespace keycloak -o jsonpath='{.status.phase}'); \
+		    if [[ "$$phase" == "Terminating" ]]; then \
+		      echo "Waiting for keycloak namespace to finish terminating"; \
+		      kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true; \
+		    fi; \
+		  fi; \
+		  kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
+		  kubectl delete secret redhat-pull-secret -n keycloak --ignore-not-found >/dev/null; \
+		  kubectl create secret docker-registry redhat-pull-secret \
+		    --namespace keycloak \
+		    --docker-server=registry.redhat.io \
+		    --docker-username="$(RHBK_USERNAME)" \
+		    --docker-password="$(RHBK_PASSWORD)" \
+		    --docker-email="$(RHBK_EMAIL)" >/dev/null; \
+		else \
+		  echo "RHBK_USERNAME/RHBK_PASSWORD not set; skipping redhat-pull-secret creation (Keycloak pods must already have access)."; \
+		fi; \
+		echo "Deploying Aegis services locally with TLS..."; \
+		helm upgrade --install aegis-services charts/aegis-services \
+		  -f charts/aegis-services/values/common.yaml \
+		  -f charts/aegis-services/values/local.yaml \
+		  -f charts/aegis-services/values/local-tls.yaml \
+		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
+		  --set platformApi.image.tag=$$PLATFORM_API_TAG \
+		  --namespace aegis-system --create-namespace \
+		  --wait --timeout 5m; \
+
 	KEYCLOAK_HOST_RAW=$$(kubectl get keycloak aegis-services-keycloak -n keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || echo "keycloak.localtest.me"); \
 	KEYCLOAK_HOST=$${KEYCLOAK_HOST_RAW#https://}; \
 	KEYCLOAK_HOST=$${KEYCLOAK_HOST#http://}; \
@@ -323,8 +314,8 @@ deploy-local-tls: setup-local
 	    -f charts/aegis-spoke/values.yaml \
 	    -f charts/aegis-spoke/values-local.yaml \
 	    -f charts/aegis-spoke/values-local-tls.yaml \
-	    --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
-	    --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+	    --set k8sAgent.image.repository=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f1) \
+	    --set k8sAgent.image.tag=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f2) \
 	    --set k8sAgent.image.pullPolicy=Always \
 	    --namespace aegis-system --create-namespace; then \
 	      success=1; \
@@ -354,7 +345,7 @@ deploy-local-tls: setup-local
 	echo "   To trust the platform API system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
 	echo "   Launch VS Code with TLS trust:"; \
 	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-local-trust.pem \"; \
-	echo "       /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
+	echo "       /Applications/Visual\ Studio\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
 	echo "✅ Deployed with TLS using self-signed certificates"; \
 	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
 	echo "   Platform API HTTPS: https://platform-api.localtest.me"; \
@@ -366,21 +357,45 @@ deploy-local-tls: setup-local
 	echo "   ./scripts/e2e-platform-api.sh"
 
 
+.PHONY: sync-certs
+sync-certs:
+	@echo "Syncing platform API certificate to $$HOME/aegis-platform-api-ca.crt ..."; 
+	kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; 
+	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; 
+	echo "Syncing Keycloak certificate to $$HOME/keycloak.localtest.me.crt ..."; 
+	kubectl get secret keycloak-tls -n keycloak -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; 
+	chmod 0644 "$$HOME/keycloak.localtest.me.crt"; 
+	cat "$$HOME/aegis-platform-api-ca.crt" "$$HOME/keycloak.localtest.me.crt" > "$$HOME/aegis-local-trust.pem"; 
+	chmod 0644 "$$HOME/aegis-local-trust.pem"; 
+	echo "   CA bundles refreshed."; 
+	echo "   Combined trust store: $$HOME/aegis-local-trust.pem";
+
 port-forward:
 	@echo "Stopping any existing port-forwards..."
-	@while pgrep -f "kubectl port-forward .*aegis-system" >/dev/null; do \
-		pkill -f "kubectl port-forward .*aegis-system" || true; \
-		sleep 1; \
-	done
+	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
+	@sleep 2
 	@echo "Setting up port-forwarding..."
-	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 &
-	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 &
-	@echo "Port-forwarding started. Platform API on $(PF_PLATFORM_HTTP_PORT)/$(PF_PLATFORM_GRPC_PORT), proxy on $(PF_PROXY_HTTP_PORT). Use 'pkill -f \"kubectl port-forward\"' to stop."
+	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 >/dev/null 2>&1 &
+	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 >/dev/null 2>&1 &
+	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service $(PF_KEYCLOAK_HTTPS_PORT):8443 >/dev/null 2>&1 &
+	@sleep 1
+	@echo "Port-forwarding started:"
+	@echo "  Platform API: http://localhost:$(PF_PLATFORM_HTTP_PORT) (HTTP) / localhost:$(PF_PLATFORM_GRPC_PORT) (gRPC)"
+	@echo "  Proxy: http://localhost:$(PF_PROXY_HTTP_PORT)"
+	@echo "  Keycloak: https://localhost:$(PF_KEYCLOAK_HTTPS_PORT)"
+	@echo ""
+	@echo "Use 'make stop-port-forward' or 'pkill -f \"kubectl.*port-forward\"' to stop all port-forwards."
+
+.PHONY: stop-port-forward
+stop-port-forward:
+	@echo "Stopping all port-forwards..."
+	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
+	@echo "All port-forwards stopped."
 
 dev-backstage:
 	@echo "Starting Backstage development server (local mode)..."
 	@echo "   Backend: https://platform-api.localtest.me (ingress, no port-forward required)"
-	@cd aegis-platform && NODE_EXTRA_CA_CERTS="$${NODE_EXTRA_CA_CERTS:-$$HOME/aegis-local-trust.pem}" yarn dev
+	@cd aegis-platform && NODE_EXTRA_CA_CERTS="$${NODE_EXTRA_CA_CERTS:-\\$HOME/aegis-local-trust.pem}" yarn dev
 
 dev-backstage-cloud:
 	@echo "Starting Backstage development server (cloud mode)..."
@@ -401,5 +416,7 @@ clean-local:
 			echo "Skipping $$release (not installed)"; \
 		fi; \
 	done
+	@echo "Cleaning up ingress-nginx admission webhook..."
+	@kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl delete namespace keycloak --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true

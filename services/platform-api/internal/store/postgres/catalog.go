@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -26,16 +27,17 @@ func (s *PostgresStore) PutProject(p *aegis.Project) {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
-INSERT INTO projects (id, display_name, owner_group, policy_regions, policy_data_level, policy_deny_egress_by_default, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+INSERT INTO projects (id, display_name, owner_group, policy_regions, policy_data_level, policy_deny_egress_by_default, annotations, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 ON CONFLICT (id) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     owner_group = EXCLUDED.owner_group,
     policy_regions = EXCLUDED.policy_regions,
     policy_data_level = EXCLUDED.policy_data_level,
     policy_deny_egress_by_default = EXCLUDED.policy_deny_egress_by_default,
+    annotations = EXCLUDED.annotations,
     updated_at = now()
-`, p.GetId(), nullableString(p.GetDisplayName()), p.GetOwnerGroup(), regions, nullableString(dataLevel), denyEgress)
+`, p.GetId(), nullableString(p.GetDisplayName()), p.GetOwnerGroup(), regions, nullableString(dataLevel), denyEgress, mapToJSONB(p.GetAnnotations()))
 	s.logExecError("upsert_project", err, zap.String("project_id", p.GetId()))
 }
 
@@ -47,18 +49,19 @@ func (s *PostgresStore) GetProject(id string) *aegis.Project {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 	row := s.pool.QueryRow(ctx, `
-SELECT id, COALESCE(display_name, ''), owner_group, policy_regions, COALESCE(policy_data_level, ''), policy_deny_egress_by_default
+SELECT id, COALESCE(display_name, ''), owner_group, policy_regions, COALESCE(policy_data_level, ''), policy_deny_egress_by_default, annotations
 FROM projects WHERE id=$1
 `, id)
 	var (
-		projID     string
-		display    string
-		owner      string
-		regions    []string
-		dataLevel  string
-		denyEgress bool
+		projID          string
+		display         string
+		owner           string
+		regions         []string
+		dataLevel       string
+		denyEgress      bool
+		annotationsJSON []byte
 	)
-	if err := row.Scan(&projID, &display, &owner, &regions, &dataLevel, &denyEgress); err != nil {
+	if err := row.Scan(&projID, &display, &owner, &regions, &dataLevel, &denyEgress, &annotationsJSON); err != nil {
 		if err != pgx.ErrNoRows {
 			s.logExecError("get_project", err, zap.String("project_id", id))
 		}
@@ -76,7 +79,75 @@ FROM projects WHERE id=$1
 			DenyEgressByDefault: denyEgress,
 		}
 	}
+	if len(annotationsJSON) > 0 {
+		var annotations map[string]string
+		if err := json.Unmarshal(annotationsJSON, &annotations); err == nil {
+			project.Annotations = annotations
+		}
+	}
 	return project
+}
+
+func (s *PostgresStore) ListProjects() []*aegis.Project {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	rows, err := s.pool.Query(ctx, `
+SELECT id, COALESCE(display_name, ''), owner_group, policy_regions, COALESCE(policy_data_level, ''), policy_deny_egress_by_default, annotations
+FROM projects
+ORDER BY id
+`)
+	if err != nil {
+		s.logExecError("list_projects", err)
+		return nil
+	}
+	defer rows.Close()
+	var items []*aegis.Project
+	for rows.Next() {
+		var (
+			projID          string
+			display         string
+			owner           string
+			regions         []string
+			dataLevel       string
+			denyEgress      bool
+			annotationsJSON []byte
+		)
+		if err := rows.Scan(&projID, &display, &owner, &regions, &dataLevel, &denyEgress, &annotationsJSON); err != nil {
+			s.logExecError("scan_project", err)
+			continue
+		}
+		project := &aegis.Project{
+			Id:          projID,
+			DisplayName: display,
+			OwnerGroup:  owner,
+		}
+		if len(regions) > 0 || dataLevel != "" || denyEgress {
+			project.Policy = &aegis.PolicyDomain{
+				Regions:             append([]string{}, regions...),
+				DataLevel:           dataLevel,
+				DenyEgressByDefault: denyEgress,
+			}
+		}
+		if len(annotationsJSON) > 0 {
+			var annotations map[string]string
+			if err := json.Unmarshal(annotationsJSON, &annotations); err == nil {
+				project.Annotations = annotations
+			}
+		}
+		items = append(items, project)
+	}
+	return items
+}
+
+func mapToJSONB(m map[string]string) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (s *PostgresStore) PutBudget(b *aegis.Budget) {

@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
@@ -36,12 +41,16 @@ type ProjectInfraReconciler struct {
 	Store                     store.Store
 	KubeconfigSecretName      string
 	KubeconfigSecretNamespace string
+	LocalLocks                map[string]*sync.Mutex
+	LocalLocksMu              sync.Mutex
+	HolderIdentity            string
 }
 
 // SetupWithManager registers the reconciler with the manager.
-func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infraapi.ProjectInfra{}).
+		WithOptions(opts).
 		Complete(r)
 }
 
@@ -52,6 +61,21 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var infra infraapi.ProjectInfra
 	if err := r.Get(ctx, req.NamespacedName, &infra); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	releaseLock, res, err := r.acquireStackLock(ctx, &infra)
+	if err != nil {
+		return res, err
+	}
+	// If we failed to acquire the lease, requeue instead of proceeding without coordination.
+	if res.Requeue || res.RequeueAfter > 0 {
+		if releaseLock != nil {
+			releaseLock()
+		}
+		return res, nil
+	}
+	if releaseLock != nil {
+		defer releaseLock()
 	}
 
 	if !infra.DeletionTimestamp.IsZero() {
@@ -66,6 +90,13 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
+	// the ProjectInfra to retry, so keep the object idle in error state.
+	if strings.EqualFold(infra.Status.Phase, "Error") {
+		log.Info("skipping reconcile; infrastructure is in error state")
+		return ctrl.Result{}, nil
+	}
+
 	if infra.Spec.Aws != nil {
 		if strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeImport)) {
 			return r.handleAWSImport(ctx, log, infra)
@@ -222,7 +253,8 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	if err != nil {
 		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
-		return ctrl.Result{}, err
+		// Do not requeue automatically on failure; require an explicit relaunch.
+		return ctrl.Result{}, nil
 	}
 
 	kubeconfigData := map[string][]byte{}
@@ -280,17 +312,34 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 
 func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	clusterIDs := collectClusterIDs(infra)
+	log.Info("reconciling project infrastructure deletion",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+		zap.String("project", infra.Spec.ProjectID),
+		zap.String("region", infra.Spec.Region),
+		zap.Strings("cluster_ids", clusterIDs),
+	)
 	if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+		log.Error("failed to remove kubeconfigs", zap.Error(err))
 		return ctrl.Result{}, err
 	}
 	if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+		log.Error("failed to delete aegis clusters", zap.Error(err))
 		return ctrl.Result{}, err
 	}
 	if infra.Spec.Aws != nil && r.Provisioner != nil {
+		log.Info("triggering aws destroy via pulumi",
+			zap.String("project", infra.Spec.ProjectID),
+			zap.String("region", infra.Spec.Region),
+			zap.Strings("cluster_ids", clusterIDs),
+		)
 		if err := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); err != nil {
+			log.Error("aws destroy failed", zap.Error(err))
 			return ctrl.Result{}, err
 		}
 		log.Info("aws infrastructure destroy triggered", zap.Int("clusters", len(clusterIDs)))
+	} else if infra.Spec.Aws != nil && r.Provisioner == nil {
+		log.Warn("aws destroy skipped; provisioner not configured")
 	}
 
 	patched := infra.DeepCopy()
@@ -298,6 +347,10 @@ func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.L
 	if err := r.Patch(ctx, patched, client.MergeFrom(infra)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
+	log.Info("project infrastructure deletion finalized",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+	)
 	return ctrl.Result{}, nil
 }
 
@@ -602,4 +655,214 @@ func (r *ProjectInfraReconciler) logger() *zap.Logger {
 		return r.Log
 	}
 	return zap.NewNop()
+}
+
+// ----------------------------------------------------------------------------- //
+// Stack-level locking to avoid concurrent Pulumi runs for the same stack.
+
+func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *infraapi.ProjectInfra) (func(), ctrl.Result, error) {
+	stackKey := stackLockKey(infra)
+	unlockLocal := r.lockLocal(stackKey)
+	holder := r.holderIdentity()
+
+	leaseName := leaseNameForInfra(infra)
+	leaseNS := infra.Namespace
+
+	lease := &coordinationv1.Lease{}
+	err := r.Get(ctx, types.NamespacedName{Name: leaseName, Namespace: leaseNS}, lease)
+	now := metav1.NowMicro()
+	leaseDuration := int32(15 * 60) // 15 minutes
+
+	// Keepalive/renewal loop to hold the lease while reconcile is running.
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				_ = r.renewLease(context.Background(), leaseName, leaseNS, holder, leaseDuration)
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	release := func() {
+		close(stop)
+		// Best-effort delete only if we hold the lease.
+		r.releaseLease(ctx, leaseName, leaseNS, holder)
+		unlockLocal()
+	}
+
+	if apierrors.IsNotFound(err) {
+		newLease := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      leaseName,
+				Namespace: leaseNS,
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity:       ptr.To(holder),
+				LeaseDurationSeconds: ptr.To(leaseDuration),
+				AcquireTime:          &now,
+				RenewTime:            &now,
+			},
+		}
+		if createErr := r.Create(ctx, newLease); createErr != nil {
+			unlockLocal()
+			close(stop)
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, client.IgnoreNotFound(createErr)
+		}
+		return release, ctrl.Result{}, nil
+	} else if err != nil {
+		unlockLocal()
+		close(stop)
+		return nil, ctrl.Result{}, err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+	expired := false
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	} else {
+		expired = true
+	}
+
+	if existingHolder != "" && existingHolder != holder && !expired {
+		unlockLocal()
+		close(stop)
+		return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Take over or renew the lease.
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.RenewTime = &now
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if err := r.Update(ctx, lease); err != nil {
+		unlockLocal()
+		if apierrors.IsConflict(err) {
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		return nil, ctrl.Result{}, err
+	}
+
+	return release, ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) releaseLease(ctx context.Context, name, namespace, holder string) {
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		return
+	}
+	if lease.Spec.HolderIdentity != nil && strings.TrimSpace(*lease.Spec.HolderIdentity) != holder {
+		return
+	}
+	_ = r.Delete(ctx, lease)
+}
+
+// renewLease refreshes the lease if we hold it, or if it is expired/unheld. Best-effort; ignores not found.
+func (r *ProjectInfraReconciler) renewLease(ctx context.Context, name, namespace, holder string, leaseDuration int32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+
+	expired := true
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	}
+
+	// Only renew if we hold it or it is expired/unheld.
+	if existingHolder != "" && existingHolder != holder && !expired {
+		return nil
+	}
+
+	now := metav1.NowMicro()
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if lease.Spec.AcquireTime == nil {
+		lease.Spec.AcquireTime = &now
+	}
+	lease.Spec.RenewTime = &now
+
+	return r.Update(ctx, lease)
+}
+
+func (r *ProjectInfraReconciler) lockLocal(key string) func() {
+	if r.LocalLocks == nil {
+		r.LocalLocks = map[string]*sync.Mutex{}
+	}
+	r.LocalLocksMu.Lock()
+	m, ok := r.LocalLocks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		r.LocalLocks[key] = m
+	}
+	r.LocalLocksMu.Unlock()
+	m.Lock()
+	return func() {
+		m.Unlock()
+	}
+}
+
+func stackLockKey(infra *infraapi.ProjectInfra) string {
+	return fmt.Sprintf("%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+}
+
+func leaseNameForInfra(infra *infraapi.ProjectInfra) string {
+	base := fmt.Sprintf("pi-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	return sanitizeName(base, 63)
+}
+
+func sanitizeName(in string, maxLen int) string {
+	out := make([]rune, 0, len(in))
+	for _, r := range strings.ToLower(in) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			out = append(out, r)
+		} else {
+			out = append(out, '-')
+		}
+	}
+	name := strings.Trim(outStr(out), "-")
+	if len(name) > maxLen {
+		name = name[:maxLen]
+	}
+	if name == "" {
+		name = "pi-stack"
+	}
+	return name
+}
+
+func outStr(r []rune) string {
+	return string(r)
+}
+
+func (r *ProjectInfraReconciler) holderIdentity() string {
+	if s := strings.TrimSpace(r.HolderIdentity); s != "" {
+		return s
+	}
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "aegis-platform-api"
 }

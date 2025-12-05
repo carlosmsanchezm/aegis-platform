@@ -62,16 +62,46 @@ func local_request_AegisPlatform_CreateProject_0(ctx context.Context, marshaler 
 	return msg, metadata, err
 }
 
+func request_AegisPlatform_ListProjects_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListProjectsRequest
+		metadata runtime.ServerMetadata
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.ListProjects(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_ListProjects_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListProjectsRequest
+		metadata runtime.ServerMetadata
+	)
+	msg, err := server.ListProjects(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 func request_AegisPlatform_UpsertBudget_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq UpsertBudgetRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["budget.project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "budget.project_id")
+	}
+	err = runtime.PopulateFieldFromPath(&protoReq, "budget.project_id", val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "budget.project_id", err)
 	}
 	msg, err := client.UpsertBudget(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -81,24 +111,47 @@ func local_request_AegisPlatform_UpsertBudget_0(ctx context.Context, marshaler r
 	var (
 		protoReq UpsertBudgetRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["budget.project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "budget.project_id")
+	}
+	err = runtime.PopulateFieldFromPath(&protoReq, "budget.project_id", val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "budget.project_id", err)
 	}
 	msg, err := server.UpsertBudget(ctx, &protoReq)
 	return msg, metadata, err
 }
 
+var filter_AegisPlatform_GetBudget_0 = &utilities.DoubleArray{Encoding: map[string]int{"project_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
+
 func request_AegisPlatform_GetBudget_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq GetBudgetRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
+	}
+	if err := req.ParseForm(); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_AegisPlatform_GetBudget_0); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	msg, err := client.GetBudget(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -108,8 +161,20 @@ func local_request_AegisPlatform_GetBudget_0(ctx context.Context, marshaler runt
 	var (
 		protoReq GetBudgetRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
+	}
+	if err := req.ParseForm(); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_AegisPlatform_GetBudget_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	msg, err := server.GetBudget(ctx, &protoReq)
@@ -120,12 +185,18 @@ func request_AegisPlatform_ListBudgets_0(ctx context.Context, marshaler runtime.
 	var (
 		protoReq ListBudgetsRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
 	}
 	msg, err := client.ListBudgets(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -135,9 +206,15 @@ func local_request_AegisPlatform_ListBudgets_0(ctx context.Context, marshaler ru
 	var (
 		protoReq ListBudgetsRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
 	}
 	msg, err := server.ListBudgets(ctx, &protoReq)
 	return msg, metadata, err
@@ -228,12 +305,18 @@ func request_AegisPlatform_GetWorkload_0(ctx context.Context, marshaler runtime.
 	var (
 		protoReq GetWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := client.GetWorkload(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -243,9 +326,15 @@ func local_request_AegisPlatform_GetWorkload_0(ctx context.Context, marshaler ru
 	var (
 		protoReq GetWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := server.GetWorkload(ctx, &protoReq)
 	return msg, metadata, err
@@ -255,12 +344,18 @@ func request_AegisPlatform_ListWorkloads_0(ctx context.Context, marshaler runtim
 	var (
 		protoReq ListWorkloadsRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
 	}
 	msg, err := client.ListWorkloads(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -270,17 +365,23 @@ func local_request_AegisPlatform_ListWorkloads_0(ctx context.Context, marshaler 
 	var (
 		protoReq ListWorkloadsRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	val, ok := pathParams["project_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "project_id")
+	}
+	protoReq.ProjectId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "project_id", err)
 	}
 	msg, err := server.ListWorkloads(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-func request_AegisPlatform_GetWorkspaceConnectionDetails_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_AegisPlatform_CreateWorkspace_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq GetWorkspaceConnectionDetailsRequest
+		protoReq CreateWorkspaceRequest
 		metadata runtime.ServerMetadata
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
@@ -288,6 +389,105 @@ func request_AegisPlatform_GetWorkspaceConnectionDetails_0(ctx context.Context, 
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.CreateWorkspace(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_CreateWorkspace_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateWorkspaceRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.CreateWorkspace(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_AegisPlatform_CreateCluster_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateClusterRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.CreateCluster(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_CreateCluster_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateClusterRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.CreateCluster(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_AegisPlatform_GetClusterJobStatus_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetClusterJobStatusRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["job_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "job_id")
+	}
+	protoReq.JobId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "job_id", err)
+	}
+	msg, err := client.GetClusterJobStatus(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_GetClusterJobStatus_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetClusterJobStatusRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["job_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "job_id")
+	}
+	protoReq.JobId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "job_id", err)
+	}
+	msg, err := server.GetClusterJobStatus(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_AegisPlatform_GetWorkspaceConnectionDetails_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetWorkspaceConnectionDetailsRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := client.GetWorkspaceConnectionDetails(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -297,9 +497,15 @@ func local_request_AegisPlatform_GetWorkspaceConnectionDetails_0(ctx context.Con
 	var (
 		protoReq GetWorkspaceConnectionDetailsRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := server.GetWorkspaceConnectionDetails(ctx, &protoReq)
 	return msg, metadata, err
@@ -336,12 +542,21 @@ func request_AegisPlatform_RenewConnectionSession_0(ctx context.Context, marshal
 	var (
 		protoReq RenewConnectionSessionRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["session_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "session_id")
+	}
+	protoReq.SessionId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "session_id", err)
 	}
 	msg, err := client.RenewConnectionSession(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -351,9 +566,18 @@ func local_request_AegisPlatform_RenewConnectionSession_0(ctx context.Context, m
 	var (
 		protoReq RenewConnectionSessionRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["session_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "session_id")
+	}
+	protoReq.SessionId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "session_id", err)
 	}
 	msg, err := server.RenewConnectionSession(ctx, &protoReq)
 	return msg, metadata, err
@@ -363,12 +587,21 @@ func request_AegisPlatform_RevokeConnectionSession_0(ctx context.Context, marsha
 	var (
 		protoReq RevokeConnectionSessionRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["session_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "session_id")
+	}
+	protoReq.SessionId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "session_id", err)
 	}
 	msg, err := client.RevokeConnectionSession(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -378,9 +611,18 @@ func local_request_AegisPlatform_RevokeConnectionSession_0(ctx context.Context, 
 	var (
 		protoReq RevokeConnectionSessionRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["session_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "session_id")
+	}
+	protoReq.SessionId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "session_id", err)
 	}
 	msg, err := server.RevokeConnectionSession(ctx, &protoReq)
 	return msg, metadata, err
@@ -417,12 +659,21 @@ func request_AegisPlatform_StartWorkload_0(ctx context.Context, marshaler runtim
 	var (
 		protoReq StartWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := client.StartWorkload(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -432,9 +683,18 @@ func local_request_AegisPlatform_StartWorkload_0(ctx context.Context, marshaler 
 	var (
 		protoReq StartWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := server.StartWorkload(ctx, &protoReq)
 	return msg, metadata, err
@@ -444,12 +704,21 @@ func request_AegisPlatform_AckWorkload_0(ctx context.Context, marshaler runtime.
 	var (
 		protoReq AckWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := client.AckWorkload(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -459,9 +728,18 @@ func local_request_AegisPlatform_AckWorkload_0(ctx context.Context, marshaler ru
 	var (
 		protoReq AckWorkloadRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "id")
+	}
+	protoReq.Id, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "id", err)
 	}
 	msg, err := server.AckWorkload(ctx, &protoReq)
 	return msg, metadata, err
@@ -533,7 +811,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateProject", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateProject"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateProject", runtime.WithHTTPPathPattern("/api/v1/projects"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -547,13 +825,33 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_CreateProject_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListProjects_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertBudget", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertBudget"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListProjects", runtime.WithHTTPPathPattern("/api/v1/projects"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_ListProjects_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_ListProjects_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertBudget", runtime.WithHTTPPathPattern("/api/v1/projects/{budget.project_id}/budgets"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -567,13 +865,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_UpsertBudget_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetBudget", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetBudget"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetBudget", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/budgets"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -587,13 +885,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetBudget_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_ListBudgets_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListBudgets_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListBudgets", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/ListBudgets"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListBudgets", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/budgets/list"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -607,13 +905,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListBudgets_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertFlavor_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertFlavor_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertFlavor", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertFlavor"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertFlavor", runtime.WithHTTPPathPattern("/api/v1/flavors"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -627,13 +925,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_UpsertFlavor_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertQueue_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertQueue_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertQueue", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertQueue"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertQueue", runtime.WithHTTPPathPattern("/api/v1/queues"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -653,7 +951,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/SubmitWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/SubmitWorkload"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/SubmitWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -667,13 +965,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_SubmitWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetWorkload"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -687,13 +985,13 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_ListWorkloads_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListWorkloads_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListWorkloads", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/ListWorkloads"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListWorkloads", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/workloads"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -707,13 +1005,73 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListWorkloads_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetWorkspaceConnectionDetails_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateWorkspace_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateWorkspace", runtime.WithHTTPPathPattern("/api/v1/workspaces"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_CreateWorkspace_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateWorkspace_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateCluster_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateCluster", runtime.WithHTTPPathPattern("/api/v1/clusters"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_CreateCluster_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateCluster_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetClusterJobStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetClusterJobStatus", runtime.WithHTTPPathPattern("/api/v1/clusters/jobs/{job_id}/status"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_GetClusterJobStatus_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_GetClusterJobStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetWorkspaceConnectionDetails_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/connection_details"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -733,7 +1091,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateConnectionSession"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -753,7 +1111,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RenewConnectionSession"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions/{session_id}/renew"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -773,7 +1131,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RevokeConnectionSession"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions/{session_id}/revoke"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -793,7 +1151,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/LeaseWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/LeaseWorkload"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/LeaseWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/lease"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -813,7 +1171,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/StartWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/StartWorkload"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/StartWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/start"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -833,7 +1191,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/AckWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/AckWorkload"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/AckWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/ack"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -853,7 +1211,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RegisterCluster", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RegisterCluster"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RegisterCluster", runtime.WithHTTPPathPattern("/api/v1/clusters/register"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -873,7 +1231,7 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/Heartbeat", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/Heartbeat"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/Heartbeat", runtime.WithHTTPPathPattern("/api/v1/clusters/heartbeat"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -931,7 +1289,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateProject", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateProject"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateProject", runtime.WithHTTPPathPattern("/api/v1/projects"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -944,11 +1302,28 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_CreateProject_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListProjects_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertBudget", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertBudget"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListProjects", runtime.WithHTTPPathPattern("/api/v1/projects"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_ListProjects_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_ListProjects_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertBudget", runtime.WithHTTPPathPattern("/api/v1/projects/{budget.project_id}/budgets"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -961,11 +1336,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_UpsertBudget_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetBudget_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetBudget", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetBudget"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetBudget", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/budgets"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -978,11 +1353,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetBudget_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_ListBudgets_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListBudgets_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListBudgets", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/ListBudgets"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListBudgets", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/budgets/list"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -995,11 +1370,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListBudgets_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertFlavor_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertFlavor_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertFlavor", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertFlavor"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertFlavor", runtime.WithHTTPPathPattern("/api/v1/flavors"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1012,11 +1387,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_UpsertFlavor_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_UpsertQueue_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPut, pattern_AegisPlatform_UpsertQueue_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertQueue", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/UpsertQueue"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/UpsertQueue", runtime.WithHTTPPathPattern("/api/v1/queues"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1033,7 +1408,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/SubmitWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/SubmitWorkload"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/SubmitWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1046,11 +1421,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_SubmitWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetWorkload"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1063,11 +1438,11 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_GetWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_ListWorkloads_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListWorkloads_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListWorkloads", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/ListWorkloads"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListWorkloads", runtime.WithHTTPPathPattern("/api/v1/projects/{project_id}/workloads"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1080,11 +1455,62 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListWorkloads_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodPost, pattern_AegisPlatform_GetWorkspaceConnectionDetails_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateWorkspace_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateWorkspace", runtime.WithHTTPPathPattern("/api/v1/workspaces"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_CreateWorkspace_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateWorkspace_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_AegisPlatform_CreateCluster_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateCluster", runtime.WithHTTPPathPattern("/api/v1/clusters"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_CreateCluster_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_CreateCluster_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetClusterJobStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetClusterJobStatus", runtime.WithHTTPPathPattern("/api/v1/clusters/jobs/{job_id}/status"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_GetClusterJobStatus_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_GetClusterJobStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetWorkspaceConnectionDetails_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/connection_details"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1101,7 +1527,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/CreateConnectionSession"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/CreateConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1118,7 +1544,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RenewConnectionSession"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RenewConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions/{session_id}/renew"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1135,7 +1561,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RevokeConnectionSession"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RevokeConnectionSession", runtime.WithHTTPPathPattern("/api/v1/connection_sessions/{session_id}/revoke"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1152,7 +1578,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/LeaseWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/LeaseWorkload"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/LeaseWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/lease"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1169,7 +1595,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/StartWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/StartWorkload"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/StartWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/start"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1186,7 +1612,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/AckWorkload", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/AckWorkload"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/AckWorkload", runtime.WithHTTPPathPattern("/api/v1/workloads/{id}/ack"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1203,7 +1629,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RegisterCluster", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/RegisterCluster"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/RegisterCluster", runtime.WithHTTPPathPattern("/api/v1/clusters/register"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1220,7 +1646,7 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/Heartbeat", runtime.WithHTTPPathPattern("/aegis.v1.AegisPlatform/Heartbeat"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/Heartbeat", runtime.WithHTTPPathPattern("/api/v1/clusters/heartbeat"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -1237,28 +1663,33 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 }
 
 var (
-	pattern_AegisPlatform_CreateProject_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "CreateProject"}, ""))
-	pattern_AegisPlatform_UpsertBudget_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "UpsertBudget"}, ""))
-	pattern_AegisPlatform_GetBudget_0                     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "GetBudget"}, ""))
-	pattern_AegisPlatform_ListBudgets_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "ListBudgets"}, ""))
-	pattern_AegisPlatform_UpsertFlavor_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "UpsertFlavor"}, ""))
-	pattern_AegisPlatform_UpsertQueue_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "UpsertQueue"}, ""))
-	pattern_AegisPlatform_SubmitWorkload_0                = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "SubmitWorkload"}, ""))
-	pattern_AegisPlatform_GetWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "GetWorkload"}, ""))
-	pattern_AegisPlatform_ListWorkloads_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "ListWorkloads"}, ""))
-	pattern_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "GetWorkspaceConnectionDetails"}, ""))
-	pattern_AegisPlatform_CreateConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "CreateConnectionSession"}, ""))
-	pattern_AegisPlatform_RenewConnectionSession_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "RenewConnectionSession"}, ""))
-	pattern_AegisPlatform_RevokeConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "RevokeConnectionSession"}, ""))
-	pattern_AegisPlatform_LeaseWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "LeaseWorkload"}, ""))
-	pattern_AegisPlatform_StartWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "StartWorkload"}, ""))
-	pattern_AegisPlatform_AckWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "AckWorkload"}, ""))
-	pattern_AegisPlatform_RegisterCluster_0               = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "RegisterCluster"}, ""))
-	pattern_AegisPlatform_Heartbeat_0                     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"aegis.v1.AegisPlatform", "Heartbeat"}, ""))
+	pattern_AegisPlatform_CreateProject_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "projects"}, ""))
+	pattern_AegisPlatform_ListProjects_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "projects"}, ""))
+	pattern_AegisPlatform_UpsertBudget_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "projects", "budget.project_id", "budgets"}, ""))
+	pattern_AegisPlatform_GetBudget_0                     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "projects", "project_id", "budgets"}, ""))
+	pattern_AegisPlatform_ListBudgets_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 2, 5}, []string{"api", "v1", "projects", "project_id", "budgets", "list"}, ""))
+	pattern_AegisPlatform_UpsertFlavor_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "flavors"}, ""))
+	pattern_AegisPlatform_UpsertQueue_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "queues"}, ""))
+	pattern_AegisPlatform_SubmitWorkload_0                = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "workloads"}, ""))
+	pattern_AegisPlatform_GetWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"api", "v1", "workloads", "id"}, ""))
+	pattern_AegisPlatform_ListWorkloads_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "projects", "project_id", "workloads"}, ""))
+	pattern_AegisPlatform_CreateWorkspace_0               = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "workspaces"}, ""))
+	pattern_AegisPlatform_CreateCluster_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "clusters"}, ""))
+	pattern_AegisPlatform_GetClusterJobStatus_0           = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 1, 0, 4, 1, 5, 4, 2, 5}, []string{"api", "v1", "clusters", "jobs", "job_id", "status"}, ""))
+	pattern_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "connection_details"}, ""))
+	pattern_AegisPlatform_CreateConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "connection_sessions"}, ""))
+	pattern_AegisPlatform_RenewConnectionSession_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "connection_sessions", "session_id", "renew"}, ""))
+	pattern_AegisPlatform_RevokeConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "connection_sessions", "session_id", "revoke"}, ""))
+	pattern_AegisPlatform_LeaseWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "workloads", "lease"}, ""))
+	pattern_AegisPlatform_StartWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "start"}, ""))
+	pattern_AegisPlatform_AckWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "ack"}, ""))
+	pattern_AegisPlatform_RegisterCluster_0               = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "clusters", "register"}, ""))
+	pattern_AegisPlatform_Heartbeat_0                     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "clusters", "heartbeat"}, ""))
 )
 
 var (
 	forward_AegisPlatform_CreateProject_0                 = runtime.ForwardResponseMessage
+	forward_AegisPlatform_ListProjects_0                  = runtime.ForwardResponseMessage
 	forward_AegisPlatform_UpsertBudget_0                  = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetBudget_0                     = runtime.ForwardResponseMessage
 	forward_AegisPlatform_ListBudgets_0                   = runtime.ForwardResponseMessage
@@ -1267,6 +1698,9 @@ var (
 	forward_AegisPlatform_SubmitWorkload_0                = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetWorkload_0                   = runtime.ForwardResponseMessage
 	forward_AegisPlatform_ListWorkloads_0                 = runtime.ForwardResponseMessage
+	forward_AegisPlatform_CreateWorkspace_0               = runtime.ForwardResponseMessage
+	forward_AegisPlatform_CreateCluster_0                 = runtime.ForwardResponseMessage
+	forward_AegisPlatform_GetClusterJobStatus_0           = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_CreateConnectionSession_0       = runtime.ForwardResponseMessage
 	forward_AegisPlatform_RenewConnectionSession_0        = runtime.ForwardResponseMessage

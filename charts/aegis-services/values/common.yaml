@@ -22,6 +22,14 @@ platformApi:
     repository: aegis-platform-api
     tag: 8afb9e0-vscode-dynamic
     pullPolicy: IfNotPresent
+
+  pulumi:
+    backendUrl: ""          # e.g., s3://aegis-pulumi-state-dev/aegis/pulumi
+    secretsProvider: ""      # e.g., awskms://arn:aws:kms:...
+    configPassphrase: ""     # optional fallback if secretsProvider is not set
+    githubTokenSecret:       # optional: { name: my-gh-token, key: token }
+      name: ""
+      key: ""
   
   replicas: 2
   

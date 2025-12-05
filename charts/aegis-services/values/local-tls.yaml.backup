@@ -1,0 +1,309 @@
+# Local TLS overlay for aegis-services
+# Apply alongside local.yaml when testing TLS locally on Docker Desktop
+#
+# Usage:
+#   helm upgrade --install aegis-services charts/aegis-services \
+#     -f charts/aegis-services/values/common.yaml \
+#     -f charts/aegis-services/values/local.yaml \
+#     -f charts/aegis-services/values/local-tls.yaml \
+#     --namespace aegis-system --create-namespace
+
+ingress-nginx:
+  controller:
+    admissionWebhooks:
+      timeoutSeconds: 30
+
+backstage:
+  caBundle:
+    create: true
+
+platformApi:
+  ingress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPCS"
+      nginx.ingress.kubernetes.io/proxy-ssl-secret: "aegis-system/aegis-services-platform-api-tls"
+      nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+      nginx.ingress.kubernetes.io/proxy-ssl-server-name: "platform-api-grpc.localtest.me"
+      nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+      nginx.ingress.kubernetes.io/ssl-ciphers: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+      nginx.ingress.kubernetes.io/ssl-prefer-server-ciphers: "true"
+    tls:
+      - secretName: aegis-services-platform-api-tls
+        hosts:
+          - platform-api-grpc.localtest.me
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
+  tls:
+    enabled: true
+    serveGrpc: true
+    # Local testing certificate chain: leaf served to clients followed by the embedded root CA.
+    # To rotate, create a root CA and sign a new leaf, e.g.:
+    #   openssl req -x509 -nodes -newkey rsa:4096 -days 3650 \
+    #     -keyout /tmp/aegis-root.key -out /tmp/aegis-root.pem \
+    #     -subj "/O=Aegis Dev/CN=Aegis Local Root CA" \
+    #     -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+    #     -addext "keyUsage=critical,keyCertSign,cRLSign"
+    #   openssl req -new -nodes -newkey rsa:2048 \
+    #     -keyout /tmp/platform-api.key -out /tmp/platform-api.csr \
+    #     -subj "/O=Aegis Dev/CN=platform-api.localtest.me" \
+    #     -addext "subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me" \
+    #     -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+    #     -addext "extendedKeyUsage=serverAuth"
+    #   openssl x509 -req -in /tmp/platform-api.csr -CA /tmp/aegis-root.pem -CAkey /tmp/aegis-root.key -CAcreateserial \
+    #     -out /tmp/platform-api.pem -days 825 -sha256 \
+    #     -extfile <(printf \"subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me\\nkeyUsage=critical,digitalSignature,keyEncipherment\\nextendedKeyUsage=serverAuth\")
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
+      BAoMCUFlZ2lzIERldjEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTAeFw0y
+      NTEwMjkwNzE4MTdaFw0yODAyMDEwNzE4MTdaMDgxEjAQBgNVBAoMCUFlZ2lzIERl
+      djEiMCAGA1UEAwwZcGxhdGZvcm0tYXBpLmxvY2FsdGVzdC5tZTCCASIwDQYJKoZI
+      hvcNAQEBBQADggEPADCCAQoCggEBAK4iEu00RTXuUQ3jOASUN+sWZJAbF4He4Pbb
+      FGx4uM9eoHnFoZx9h3qsBPT5J9QKpItAO9rQFN/KIdCRfG1NUFdJMlkEYH/Bqt8/
+      wMQZ6sRt0VOsTqTGCbSsU/QHUrUOLL5otwZoyQVAvj6eiemXh7cmFz57lMuVCzq5
+      3E6Iw80J5Yqv3xcUO3zAz+2b5Xzi7mlOGvTZm/S3vL8W38GdplIs+zSkP5JQVS38
+      pXUVpV6Z8G8aIn/StV0SBQYydWSca7yYFDb6TtLCoqWG25utLPPCXRZa2k2pXh6E
+      fcr3kpV/8Jxrap2WK5QzDFvizue6WP86V/hn/E65K+wSvLvQYoECAwEAAaOBgTB/
+      MFgGA1UdEQRRME+CGXBsYXRmb3JtLWFwaS5sb2NhbHRlc3QubWWCHnBsYXRmb3Jt
+      LWFwaS1ncnBjLmxvY2FsdGVzdC5tZYIScHJveHkubG9jYWx0ZXN0Lm1lMA4GA1Ud
+      DwEB/wQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDATANBgkqhkiG9w0BAQsFAAOC
+      AgEAXviogivlAN3k6V43RB/hTkbQ5lrtVJx1t6a6xH9uUpAQJ0OM1A31qQUG/rPW
+      7RAyMVAZE2QlxfJXNR78mW/DXkXIOExR6SDGblsAcl/umJYhLwa8js4seXeVWTBQ
+      uVvfJ9d51iDC1WDyIzNQ6jz2XLFTId36+zFl8KIzVyXoJyg4OuCLP/nmsh/tx5SM
+      2jSzMlKxXZ9oYtUWmvYCxyHjHR51uZjILP3EO91vAhwCIghIjDaqt7hRFr7/Wpbj
+      R7+OQeqCZjN6N66uwNYEuvhT989dD098h/Ishr2DyFTIoeDjNKfYdI7De2dl/Cwq
+      U2maDM1iSjnGxpNqv9DEsKCg3OvV1RPMErfPiFRXeX6yHi76OX9JIu2ah2eg3QHx
+      /NIUnAe0HaAU5g3BsefU4JTOJaL1yIIZ9JVQOzua8IVeTMyqLGFyboOBYaz/vmFS
+      fWSq0UTyiB7lpX/04vT0vNYYzSEqOdcEEq+rQNVaisJ7fHTQZF9obeBhn5U4YCWh
+      e6pscbHK2CjqiHiHto4d76urk4Ry4xhwjIrJ4TJ2m9sdw+eRf5icNzgNHYle8yza
+      J7H924Im+vrzCQRSGAqgOxKXdf43/qmorwgksw2v7wTznvDOxLy6Fve2Hm3bxlev
+      VRz8KxNs2viTqNe3Gnexnt3TDl38kg4WyIunR/HPNC4kA90=
+      -----END CERTIFICATE-----
+      -----BEGIN CERTIFICATE-----
+      MIIFDTCCAvWgAwIBAgIJALX4T+Vg1b06MA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
+      BAoMCUFlZ2lzIERldjEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTAeFw0y
+      NTEwMjkwNzE4MDRaFw0zNTEwMjcwNzE4MDRaMDIxEjAQBgNVBAoMCUFlZ2lzIERl
+      djEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTCCAiIwDQYJKoZIhvcNAQEB
+      BQADggIPADCCAgoCggIBAM3sn5cgKQ+p7F+3jg1uSt4XzI1bTcrGNpJr7rofJwTz
+      jvwII+wNsjCnLwQEQ0CbAWhGp9+yzawN2A8nDVY8JPNaM+lCVzClLQLJKlWKDIVG
+      AMO/t7qzfCvjlI/ZjBaTaESVuG6nY0x/woUcIYt3kLBT9e1T6ZfR4OXmxNxRKsrH
+      YWS36lIIPH/xSuDAbzUq2i9V88tA7Ldl1Mh5PyDqR3rSMiCT1GCIDquHH57PX/11
+      L9cxRgfnKp7FeuIlnAiDK4j0O42JMLlKBn46p7QdQMAHMsFj0T/eNPJzQd66myUU
+      e1ue19+c9MDHGEWIkWfkJYYMW/epNKTE+gwErnO+xe2bIhAoW8LTYAFUprA+I8Bl
+      D70PiO7klK2oI7ccDLuLraa6ZB/3Hov3xdATFJ3rKUpLgfWVgnRdbg6tTj/aWHRR
+      ++7CUn0Bo4XNFLbDodf7R41Jimph+U8ZKkzXRhpf6Z/Zmp3QaGpfWit0gxUo4J13
+      DsS7oC2C2CQWsoc2wcUIkTX6ONyH8veNAgCx9e0kU3xyODiAE0VaJHSas6z//Zth
+      asjbaIiTU8MQOjQYVLel40kEEyc2sND8yEHI10+boDOMT5j8W17TUoGhX4DotdTg
+      qGzC6eutbEVwCjyCtrnmjQx62dYSZXKueUfm32jna3qRDf4ZAUvGb21MlF+OTKCh
+      AgMBAAGjJjAkMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYDVR0PAQH/BAQDAgEGMA0G
+      CSqGSIb3DQEBCwUAA4ICAQA7QSGZlL/XqQwMID/mqgq+ZWpNax8Y7xUzKaZu1/fK
+      tK7DIJhw0NaNdmfB93TPLVY5tV85Ev9GjxRr+jETHinYW0dONFqvnNWTRdhmVLG2
+      eWo9yv9d7FOgPJRi6OoTCeYUt67fLCh/TSdCyvDum8ixUrWkSZCRS881dXw6nF6i
+      gHknmEb0c+VSKONnDhpkEJlT+6qibWVk8q/2GKxG+tBQv1E3Uk7BijkCGhmhzRos
+      4Jrf0LUdePSoQtfnLn9A/Sp19Jck/DL7DACTfIN2IOe1ufXEInE3g0C4zPsLviIu
+      2KCFIo8++HVXhjlbHcLtT8XAKKlXORXOpeMN08UWLA3yA5ML5hmZ172pbhfzX8i7
+      eSXbgxEPBzlrVjgP81CO3CnUcwnbKnlxi+FvHPqPdYKgAv+LobBVDWm4XOBzdi1d
+      RUDFHep0n11JqiRpXyGdUdAPPwrf8GkUtnCvVp4n7CE8o1WYYs3v1y9IV84h6rSr
+      rV42LTYYoH4XHT8vIcUjuhlftgGd3CjXvjr9TDTVw7faGxrZ62eEIBILI9D81Eu8
+      LYp98CVBewVZCsbcfnxvrAQATfmJdXsUSYbH0NkE0odWn5M3t+yVu/5VmSEul44N
+      +lIlUIsKepMxtx8VBHLQA/RQToU7IxsoJ/hBXg0s1fyGS04pqshytNsVv9hMG07B
+      lg==
+      -----END CERTIFICATE-----
+    key: |
+      -----REDACTED-PRIVATE-KEY-----
+  env:
+    AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
+  env:
+    OIDC_ISSUER_URL: "https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443/realms/aegis"
+  httpIngress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    tls:
+      - secretName: aegis-services-platform-api-tls
+        hosts:
+          - platform-api.localtest.me
+    hosts:
+      - host: platform-api.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+
+proxy:
+  ingress:
+    enabled: true
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+  tls:
+    enabled: true
+    cert: |
+      -----BEGIN CERTIFICATE-----
+      MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
+      BAoMCUFlZ2lzIERldjEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTAeFw0y
+      NTEwMjkwNzE4MTdaFw0yODAyMDEwNzE4MTdaMDgxEjAQBgNVBAoMCUFlZ2lzIERl
+      djEiMCAGA1UEAwwZcGxhdGZvcm0tYXBpLmxvY2FsdGVzdC5tZTCCASIwDQYJKoZI
+      hvcNAQEBBQADggEPADCCAQoCggEBAK4iEu00RTXuUQ3jOASUN+sWZJAbF4He4Pbb
+      FGx4uM9eoHnFoZx9h3qsBPT5J9QKpItAO9rQFN/KIdCRfG1NUFdJMlkEYH/Bqt8/
+      wMQZ6sRt0VOsTqTGCbSsU/QHUrUOLL5otwZoyQVAvj6eiemXh7cmFz57lMuVCzq5
+      3E6Iw80J5Yqv3xcUO3zAz+2b5Xzi7mlOGvTZm/S3vL8W38GdplIs+zSkP5JQVS38
+      pXUVpV6Z8G8aIn/StV0SBQYydWSca7yYFDb6TtLCoqWG25utLPPCXRZa2k2pXh6E
+      fcr3kpV/8Jxrap2WK5QzDFvizue6WP86V/hn/E65K+wSvLvQYoECAwEAAaOBgTB/
+      MFgGA1UdEQRRME+CGXBsYXRmb3JtLWFwaS5sb2NhbHRlc3QubWWCHnBsYXRmb3Jt
+      LWFwaS1ncnBjLmxvY2FsdGVzdC5tZYIScHJveHkubG9jYWx0ZXN0Lm1lMA4GA1Ud
+      DwEB/wQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDATANBgkqhkiG9w0BAQsFAAOC
+      AgEAXviogivlAN3k6V43RB/hTkbQ5lrtVJx1t6a6xH9uUpAQJ0OM1A31qQUG/rPW
+      7RAyMVAZE2QlxfJXNR78mW/DXkXIOExR6SDGblsAcl/umJYhLwa8js4seXeVWTBQ
+      uVvfJ9d51iDC1WDyIzNQ6jz2XLFTId36+zFl8KIzVyXoJyg4OuCLP/nmsh/tx5SM
+      2jSzMlKxXZ9oYtUWmvYCxyHjHR51uZjILP3EO91vAhwCIghIjDaqt7hRFr7/Wpbj
+      R7+OQeqCZjN6N66uwNYEuvhT989dD098h/Ishr2DyFTIoeDjNKfYdI7De2dl/Cwq
+      U2maDM1iSjnGxpNqv9DEsKCg3OvV1RPMErfPiFRXeX6yHi76OX9JIu2ah2eg3QHx
+      /NIUnAe0HaAU5g3BsefU4JTOJaL1yIIZ9JVQOzua8IVeTMyqLGFyboOBYaz/vmFS
+      fWSq0UTyiB7lpX/04vT0vNYYzSEqOdcEEq+rQNVaisJ7fHTQZF9obeBhn5U4YCWh
+      e6pscbHK2CjqiHiHto4d76urk4Ry4xhwjIrJ4TJ2m9sdw+eRf5icNzgNHYle8yza
+      J7H924Im+vrzCQRSGAqgOxKXdf43/qmorwgksw2v7wTznvDOxLy6Fve2Hm3bxlev
+      VRz8KxNs2viTqNe3Gnexnt3TDl38kg4WyIunR/HPNC4kA90=
+      -----END CERTIFICATE-----
+      -----BEGIN CERTIFICATE-----
+      MIIFDTCCAvWgAwIBAgIJALX4T+Vg1b06MA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
+      BAoMCUFlZ2lzIERldjEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTAeFw0y
+      NTEwMjkwNzE4MDRaFw0zNTEwMjcwNzE4MDRaMDIxEjAQBgNVBAoMCUFlZ2lzIERl
+      djEcMBoGA1UEAwwTQWVnaXMgTG9jYWwgUm9vdCBDQTCCAiIwDQYJKoZIhvcNAQEB
+      BQADggIPADCCAgoCggIBAM3sn5cgKQ+p7F+3jg1uSt4XzI1bTcrGNpJr7rofJwTz
+      jvwII+wNsjCnLwQEQ0CbAWhGp9+yzawN2A8nDVY8JPNaM+lCVzClLQLJKlWKDIVG
+      AMO/t7qzfCvjlI/ZjBaTaESVuG6nY0x/woUcIYt3kLBT9e1T6ZfR4OXmxNxRKsrH
+      YWS36lIIPH/xSuDAbzUq2i9V88tA7Ldl1Mh5PyDqR3rSMiCT1GCIDquHH57PX/11
+      L9cxRgfnKp7FeuIlnAiDK4j0O42JMLlKBn46p7QdQMAHMsFj0T/eNPJzQd66myUU
+      e1ue19+c9MDHGEWIkWfkJYYMW/epNKTE+gwErnO+xe2bIhAoW8LTYAFUprA+I8Bl
+      D70PiO7klK2oI7ccDLuLraa6ZB/3Hov3xdATFJ3rKUpLgfWVgnRdbg6tTj/aWHRR
+      ++7CUn0Bo4XNFLbDodf7R41Jimph+U8ZKkzXRhpf6Z/Zmp3QaGpfWit0gxUo4J13
+      DsS7oC2C2CQWsoc2wcUIkTX6ONyH8veNAgCx9e0kU3xyODiAE0VaJHSas6z//Zth
+      asjbaIiTU8MQOjQYVLel40kEEyc2sND8yEHI10+boDOMT5j8W17TUoGhX4DotdTg
+      qGzC6eutbEVwCjyCtrnmjQx62dYSZXKueUfm32jna3qRDf4ZAUvGb21MlF+OTKCh
+      AgMBAAGjJjAkMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYDVR0PAQH/BAQDAgEGMA0G
+      CSqGSIb3DQEBCwUAA4ICAQA7QSGZlL/XqQwMID/mqgq+ZWpNax8Y7xUzKaZu1/fK
+      tK7DIJhw0NaNdmfB93TPLVY5tV85Ev9GjxRr+jETHinYW0dONFqvnNWTRdhmVLG2
+      eWo9yv9d7FOgPJRi6OoTCeYUt67fLCh/TSdCyvDum8ixUrWkSZCRS881dXw6nF6i
+      gHknmEb0c+VSKONnDhpkEJlT+6qibWVk8q/2GKxG+tBQv1E3Uk7BijkCGhmhzRos
+      4Jrf0LUdePSoQtfnLn9A/Sp19Jck/DL7DACTfIN2IOe1ufXEInE3g0C4zPsLviIu
+      2KCFIo8++HVXhjlbHcLtT8XAKKlXORXOpeMN08UWLA3yA5ML5hmZ172pbhfzX8i7
+      eSXbgxEPBzlrVjgP81CO3CnUcwnbKnlxi+FvHPqPdYKgAv+LobBVDWm4XOBzdi1d
+      RUDFHep0n11JqiRpXyGdUdAPPwrf8GkUtnCvVp4n7CE8o1WYYs3v1y9IV84h6rSr
+      rV42LTYYoH4XHT8vIcUjuhlftgGd3CjXvjr9TDTVw7faGxrZ62eEIBILI9D81Eu8
+      LYp98CVBewVZCsbcfnxvrAQATfmJdXsUSYbH0NkE0odWn5M3t+yVu/5VmSEul44N
+      +lIlUIsKepMxtx8VBHLQA/RQToU7IxsoJ/hBXg0s1fyGS04pqshytNsVv9hMG07B
+      lg==
+      -----END CERTIFICATE-----
+    key: |
+      -----REDACTED-PRIVATE-KEY-----
+
+     1 keycloak:
+     2   enabled: true
+     3   forceRender: true
+     4   createNamespace: false
+     5   operator:
+     6     imagePullSecrets:
+     7       - name: redhat-pull-secret
+     8   imagePullSecrets:
+     9     - name: redhat-pull-secret
+    10   http:
+    11     httpEnabled: false
+    12   admin:
+    13     secret:
+    14       create: true
+    15       name: keycloak-admin-secret
+    16       username: admin
+    17       password: REDACTED_KEYCLOAK_ADMIN_PASSWORD
+    18   database:
+    19     secret:
+    20       create: true
+    21       name: keycloak-db-secret
+    22       username: keycloak
+    23       password: REDACTED_KEYCLOAK_DB_PASSWORD
+    24   realm:
+    25     enabled: true
+    26     name: aegis
+    27     displayName: Aegis
+    28     client:
+    29       id: backstage
+    30       name: Backstage
+    31       redirectUris:
+    32         - http://localhost:7008/*
+    33         - https://backstage.localtest.me/*
+    34       webOrigins:
+    35         - http://localhost:3000
+    36         - https://backstage.localtest.me
+    37       secret:
+    38         create: true
+    39         name: keycloak-backstage-client-secret
+    40         value: local-backstage-client-secret
+    41         placeholder: BACKSTAGE_CLIENT_SECRET
+    42     requiredActions:
+    43       - alias: CONFIGURE_TOTP
+    44         name: Configure OTP
+    45         providerId: CONFIGURE_TOTP
+    46         defaultAction: true
+    47         enabled: true
+    48   tls:
+    49     secret:
+    50       create: true
+    51       name: keycloak-tls
+    52       cert: |
+    53         -----BEGIN CERTIFICATE-----
+    54         MIIEAjCCAuqgAwIBAgIUO1WzpGe8Wk5Ee+67Cb5Lug2Y+ywwDQYJKoZIhvcNAQEL
+    55         BQAwRTFDMEEGA1UEAww6YWVnaXMtc2VydmljZXMta2V5Y2xvYWstc2VydmljZS5r
+    56         ZXljbG9hay5zdmMuY2x1c3Rlci5sb2NhbDAeFw0yNTExMDMxNzM0MDhaFw0yNjEx
+    57         MDMxNzM0MDhaMEUxQzBBBgNVBAMMOmFlZ2lzLXNlcnZpY2VzLWtleWNsb2FrLXNl
+    58         cnZpY2Uua2V5Y2xvYWsuc3ZjLmNsdXN0ZXIubG9jYWwwggEiMA0GCSqGSIb3DQEB
+    59         AQUAA4IBDwAwggEKAoIBAQDdi+3i4mFHFrY3V1rm5YwmepRvoBLTOPaiWmXG77fn
+    60         gHI1u1US08IqshWeYA/hnHf9j0RfNIZRiZwCsao1JrSzanI1/wU2qrdmogVp8F7B
+    61         nwKzpSO6qKi8usyerKXjEnpn3t7ljuq1lDazfC/2W6LNCtfqA419oy+EUBm30rlI
+    62         Hc+FD71XMtCzNW/XIX8a5xaymieueFPxouWVt//wJDR1CxTXhRrlrntfxeXWsk2a
+    63         d9GI0KwZM5dDWLhc+1RsGeFEuAReIR56OyS4bOgTOR5Mbcr0OpnKOTnL4Lw/ar0/
+    64         VYTHbyGHGIXmeY3ZcwiAh49VmEMYbjzybUdT+zNjguLNAgMBAAGjgekwgeYwHQYD
+    65         VR0OBBYEFDIm2KgPNo8UxBSZ0H0XeoibBn70MB8GA1UdIwQYMBaAFDIm2KgPNo8U
+    66         xBSZ0H0XeoibBn70MA8GA1UdEwEB/wQFMAMBAf8wgZIGA1UdEQSBijCBh4I6YWVn
+    67 
+    68         aXMtc2VydmljZXMta2V5Y2xvYWstc2VydmljZS5rZXljbG9hay5zdmMuY2x1c3Rl
+    69         ci5sb2NhbIIyYWVnaXMtc2VydmljZXMta2V5Y2xvYWsua2V5Y2xvYWsuc3ZjLmNs
+    70         dXN0ZXIubG9jYWyCFWtleWNsb2FrLmxvY2FsdGVzdC5tZTANBgkqhkiG9w0BAQsF
+    71         AAOCAQEAuBLpc0SL5G3EhOIxNb7rY7MFsfvO/6AwobXkMJWqbxLNy6Tq60sMJ+Ew
+    72         6vNT9E5NAKR7ATv/UQmRf9y/WAVlGUpSoC0HPqwUiJc9iD3qxdRHSO7utLI3ESY6
+    73         F1nxtYFqjNzIHjSOs6FwdnzLHtfOY3cDEBB5Sg0eHftRxKIjrD5GJ3QoVsu2BE9i
+    74         lOatUZaLbsbqC/QT2srYykXLWdqG6dGwvK/QkvDbwEAyprmxS4Whi703Qu/QDwrU
+    75         st8Z5D6phTldNj9bBNIlyjWnVQK7N/LAGTRZoM2atj6/QS/blel8uZC3++1at51O
+    76         /KVLoXptcz3qAD+6K33FAu7FNlSCxg==
+    77         -----END CERTIFICATE-----
+    78       key: |
+    79         -----REDACTED-PRIVATE-KEY-----
+   109   hostname:
+   110     hostname: https://keycloak.localtest.me
+   111     admin: ""
+   112     adminUrl: https://keycloak.localtest.me
+   113     strict: false
+   114   additionalOptions:
+   115     - name: hostname-admin
+   116       value: https://keycloak.localtest.me
+   117     - name: hostname-admin-url
+   118       value: https://keycloak.localtest.me/
+   119   ingress:
+   120     enabled: false
+   121     className: ingress-nginx
+   122     annotations:
+   123       nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+   124       nginx.ingress.kubernetes.io/ssl-redirect: "true"
+   125   customIngress:
+   126     enabled: true
+   127     className: ingress-nginx
+   128     annotations:
+   129       nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+   130       nginx.ingress.kubernetes.io/ssl-redirect: "true"

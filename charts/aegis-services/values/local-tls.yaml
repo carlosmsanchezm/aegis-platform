@@ -9,11 +9,13 @@
 #     --namespace aegis-system --create-namespace
 
 ingress-nginx:
+  enabled: false
   controller:
     admissionWebhooks:
       timeoutSeconds: 30
 
 backstage:
+  enabled: false
   caBundle:
     create: true
 
@@ -42,22 +44,6 @@ platformApi:
   tls:
     enabled: true
     serveGrpc: true
-    # Local testing certificate chain: leaf served to clients followed by the embedded root CA.
-    # To rotate, create a root CA and sign a new leaf, e.g.:
-    #   openssl req -x509 -nodes -newkey rsa:4096 -days 3650 \
-    #     -keyout /tmp/aegis-root.key -out /tmp/aegis-root.pem \
-    #     -subj "/O=Aegis Dev/CN=Aegis Local Root CA" \
-    #     -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
-    #     -addext "keyUsage=critical,keyCertSign,cRLSign"
-    #   openssl req -new -nodes -newkey rsa:2048 \
-    #     -keyout /tmp/platform-api.key -out /tmp/platform-api.csr \
-    #     -subj "/O=Aegis Dev/CN=platform-api.localtest.me" \
-    #     -addext "subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me" \
-    #     -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
-    #     -addext "extendedKeyUsage=serverAuth"
-    #   openssl x509 -req -in /tmp/platform-api.csr -CA /tmp/aegis-root.pem -CAkey /tmp/aegis-root.key -CAcreateserial \
-    #     -out /tmp/platform-api.pem -days 825 -sha256 \
-    #     -extfile <(printf \"subjectAltName=DNS:platform-api.localtest.me,DNS:platform-api-grpc.localtest.me,DNS:proxy.localtest.me\\nkeyUsage=critical,digitalSignature,keyEncipherment\\nextendedKeyUsage=serverAuth\")
     cert: |
       -----BEGIN CERTIFICATE-----
       MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
@@ -117,8 +103,54 @@ platformApi:
       -----END CERTIFICATE-----
     key: |
       -----REDACTED-PRIVATE-KEY-----
+
+  auth:
+    oidc:
+      skipTlsVerify: false
+      caBundle:
+        create: true
+        secretName: aegis-platform-api-oidc-ca
+        key: ca.crt
+        fileName: ca.crt
+        mountPath: /etc/aegis-platform-api/oidc
+        data: |
+          -----BEGIN CERTIFICATE-----
+          MIIDIjCCAgqgAwIBAgIJAOdlWF4QK7cdMA0GCSqGSIb3DQEBCwUAMB4xHDAaBgNV
+          BAMME0FlZ2lzIExvY2FsIFJvb3QgQ0EwHhcNMjUxMDI3MjI1NTEwWhcNMzAxMDI2
+          MjI1NTEwWjAeMRwwGgYDVQQDDBNBZWdpcyBMb2NhbCBSb290IENBMIIBIjANBgkq
+          hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrYo0p4zwNNZQd7OFeRKZGGtDePhAleu
+          AUBaxstOyy9eJyCOge38xdHnL730+0Imm69sXubek/Np+L3M8wpoQK3NrJU9XL+3
+          A51Pt5gJrZqjzCVU8+bvEj7nHAJwoLDMXcaVtzVR0spc9fp61tbQLiszzoQ6egXJ
+          cculV2njeIN8iaoAgr3Fxzmjra9aaR4IFVq8UwEGztW3mqNvkSVOx6G2nzBBX7eT
+          deJcK3mcvGd6xp3AW0VthF9t1QjvX2BNIrFZraegT9K2sfR+l9bW9LZ1wCjQFuJR
+          CmAS/geYS7hCKHisa/YXFGL0kNSzcpAjHrfZzrgwOeFsrZVLPAudoQIDAQABo2Mw
+          YTAdBgNVHQ4EFgQUTs43RzMxzkN3MLSdEdo3l7xITx8wHwYDVR0jBBgwFoAUTs43
+          RzMxzkN3MLSdEdo3l7xITx8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+          AYYwDQYJKoZIhvcNAQELBQADggEBAHo96vpGI7os8pYqe/lM7uBSFc40a9SbjFj8
+          M20Zgm1/UL6w3lJsfnQzDmDDtdO7J4kQR8TVuEkbMw039D1yu7Z5P4u7tefxZHwf
+          AkEUFZI0lc8D+iApYQen+VppI9GZcAStVu2MqhAhNyVZK37CHDSlgGxwwL6NsV9g
+          DE+t1TnpH6wbqXU1+FpSVHzKPWgyjq+XMF8EDTSmh5+qBETfHSaX5EGOk1c+6SdR
+          qvbpoMnc963JWRVjqqelLbsU8562E8FE3YJrUJnEBmSl1POv19c/Ev1rPX6HmBzt
+          M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
+          -----END CERTIFICATE-----
   env:
+    AEGIS_PLATFORM_API_ENDPOINT: "remote.aegis-platform.tech:443"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
+    PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
+    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
+    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AWS_REGION: "us-east-1"
+    AWS_DEFAULT_REGION: "us-east-1"
+  envFromSecret:
+    AWS_ACCESS_KEY_ID: aws-access-key-id
+    AWS_SECRET_ACCESS_KEY: aws-secret-access-key
+  secrets:
+    aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
+    aws-secret-access-key: "yxaIgPw06f56DRCWQE6Oea4U30c1aC5e25SRhbqw"
   httpIngress:
     enabled: true
     className: "ingress-nginx"
@@ -205,12 +237,17 @@ proxy:
       -----REDACTED-PRIVATE-KEY-----
 
 keycloak:
+  ingress:
+    enabled: false
   enabled: true
   forceRender: true
   createNamespace: false
   operator: {}
   http:
     httpEnabled: false
+  networkPolicy:
+    enabled: false
+    http: []
   admin:
     secret:
       create: true

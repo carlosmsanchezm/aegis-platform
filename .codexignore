@@ -1,0 +1,104 @@
+# Dependencies and build artifacts
+node_modules/
+dist/
+build/
+.git/
+vendor/
+.yarn/
+.pnp.*
+*.tsbuildinfo
+
+# Test files
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+__tests__/
+__mocks__/
+test/
+tests/
+coverage/
+
+# Documentation (but keep important config docs)
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+LICENSE
+docs/
+documentation/
+
+# CI/CD and DevOps
+.github/
+.gitlab/
+.circleci/
+.travis.yml
+.drone.yml
+Jenkinsfile
+azure-pipelines.yml
+
+# Docker and container files (but keep docker-compose for reference)
+Dockerfile
+Dockerfile.*
+.dockerignore
+
+# Pulumi state and cache (not needed for reading code)
+.pulumi/
+
+# Scripts and tooling
+scripts/
+tools/
+.husky/
+.vscode/
+.idea/
+*.code-workspace
+
+# Examples and samples
+examples/
+example/
+samples/
+demo/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.cache/
+.turbo/
+
+# Lock files
+*.lock
+yarn.lock
+package-lock.json
+pnpm-lock.yaml
+go.sum
+
+# Assets (images, fonts, etc)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.pdf
+assets/
+static/
+
+# Config files NOT needed for integration
+.editorconfig
+.prettierrc
+.prettierignore
+.eslintignore
+jest.config.*
+vitest.config.*
+.mocharc.*
+.nycrc
+
+# Database migrations and seeds (if they exist)
+migrations/
+seeds/
+
+# Misc
+.env.example
+.env.local
+.env.*.local

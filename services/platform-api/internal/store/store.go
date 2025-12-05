@@ -49,6 +49,7 @@ type Store interface {
 	// catalog
 	PutProject(*aegis.Project)
 	GetProject(id string) *aegis.Project
+	ListProjects() []*aegis.Project
 
 	PutBudget(*aegis.Budget)
 	GetBudget(projectID string) *aegis.Budget

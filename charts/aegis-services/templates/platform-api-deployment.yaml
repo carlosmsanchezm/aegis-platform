@@ -24,6 +24,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      hostAliases:
+      - ip: "10.96.91.6"
+        hostnames:
+        - "keycloak.aegis-platform.tech"
       {{- $serveGrpc := true }}
       {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
       {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}
@@ -39,6 +43,16 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- $platformEnv := .Values.platformApi.env | default dict }}
+      {{- $oidcAuth := .Values.platformApi.auth | default dict }}
+      {{- $oidc := $oidcAuth.oidc | default dict }}
+      {{- $oidcCASecret := include "aegis-services.platformApi.oidcCASecretName" . }}
+      {{- $hasOIDCCA := gt (len (trim $oidcCASecret)) 0 }}
+      {{- $oidcCAMountPath := include "aegis-services.platformApi.oidcCAMountPath" . }}
+      {{- $oidcCAFileName := include "aegis-services.platformApi.oidcCAFileName" . }}
+      {{- $oidcCAKey := include "aegis-services.platformApi.oidcCAKey" . }}
+      {{- $pulumi := .Values.platformApi.pulumi | default dict }}
+      {{- $pulumiGh := $pulumi.githubTokenSecret | default dict }}
       containers:
         - name: platform-api
           image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
@@ -59,21 +73,50 @@ spec:
               value: {{ .Values.platformApi.kubeConfigsDir | quote }}
             - name: AEGIS_NAMESPACE
               value: {{ .Values.platformApi.targetNamespace | quote }}
+            {{- with $pulumi.backendUrl }}
+            - name: PULUMI_BACKEND_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $pulumi.secretsProvider }}
+            - name: PULUMI_SECRETS_PROVIDER
+              value: {{ $pulumi.secretsProvider | quote }}
+            {{- end }}
+            {{- if $pulumi.configPassphrase }}
+            - name: PULUMI_CONFIG_PASSPHRASE
+              value: {{ $pulumi.configPassphrase | quote }}
+            {{- end }}
+            {{- if and $pulumiGh.name $pulumiGh.key }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pulumiGh.name }}
+                  key: {{ $pulumiGh.key }}
+            {{- end }}
             {{- if and .Values.proxy.enabled (not (hasKey .Values.platformApi.env "AEGIS_PROXY_BASE_URL")) }}
             # Automatically set proxy base URL to internal service DNS
             - name: AEGIS_PROXY_BASE_URL
               value: "http://{{ include "aegis-services.proxy.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.proxy.service.port }}"
             {{- end }}
-            {{- range $key, $value := .Values.platformApi.env }}
+            {{- range $key, $value := $platformEnv }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
             {{- range $key, $value := .Values.platformApi.envFromSecret }}
+            {{- if not (hasKey $platformEnv $key) }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
+            {{- end }}
+            {{- end }}
+            {{- if and $hasOIDCCA (not (hasKey $platformEnv "OIDC_CA_BUNDLE")) }}
+            - name: OIDC_CA_BUNDLE
+              value: {{ printf "%s/%s" $oidcCAMountPath $oidcCAFileName | quote }}
+            {{- end }}
+            {{- if and $oidc.skipTlsVerify (not (hasKey $platformEnv "OIDC_SKIP_TLS_VERIFY")) }}
+            - name: OIDC_SKIP_TLS_VERIFY
+              value: "true"
             {{- end }}
             {{- if .Values.proxy.enabled }}
             # Reference the same JWT secret that the proxy uses
@@ -93,17 +136,22 @@ spec:
               value: "/etc/aegis-platform-api/tls/ca.crt"
             {{- end }}
             {{- end }}
-          {{- if or .Values.platformApi.volumeMounts (and .Values.platformApi.tls.enabled $serveGrpc) }}
           volumeMounts:
             {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: platform-api-tls
               mountPath: /etc/aegis-platform-api/tls
               readOnly: true
             {{- end }}
+            {{- if $hasOIDCCA }}
+            - name: platform-api-oidc-ca
+              mountPath: {{ $oidcCAMountPath }}
+              readOnly: true
+            {{- end }}
+            - name: platform-api-pulumi-backend
+              mountPath: /tmp/pulumi-backend
             {{- with .Values.platformApi.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           {{- with .Values.platformApi.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -120,17 +168,25 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.platformApi.volumes (and .Values.platformApi.tls.enabled $serveGrpc) }}
       volumes:
         {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
         - name: platform-api-tls
           secret:
             secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}
         {{- end }}
+        {{- if $hasOIDCCA }}
+        - name: platform-api-oidc-ca
+          secret:
+            secretName: {{ $oidcCASecret }}
+            items:
+              - key: {{ $oidcCAKey }}
+                path: {{ $oidcCAFileName }}
+        {{- end }}
+        - name: platform-api-pulumi-backend
+          emptyDir: {}
         {{- with .Values.platformApi.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- end }}
       {{- with .Values.platformApi.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

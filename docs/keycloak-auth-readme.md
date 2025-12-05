@@ -69,6 +69,38 @@ TOKEN=$(./scripts/keycloak-token.sh)
 
 When `KEYCLOAK_USERNAME` / `KEYCLOAK_PASSWORD` are omitted the script falls back to the client-credentials grant (for clients with service accounts enabled). The resulting bearer token is exported to the smoke-test scripts via `Authorization: Bearer …`.
 
+### 2.5 JWKS TLS Trust Chain (2025-11 Update)
+
+The Platform API now honours the Keycloak CA bundle that Helm mounts at `/etc/aegis-platform-api/oidc/ca.crt`. The new configuration surface looks like this:
+
+| Source | Variable | Effect |
+|--------|----------|--------|
+| Secret mount | `OIDC_CA_BUNDLE=/etc/aegis-platform-api/oidc/ca.crt` | Points to the PEM bundle that contains the “Aegis Local Root CA” (or any custom CA you supply). |
+| Optional env | `OIDC_SKIP_TLS_VERIFY` | Forces `InsecureSkipVerify=true` for short-lived debugging. Keep unset in normal operation. |
+
+At startup the middleware logs the active settings:
+
+```
+{"msg":"OIDC auth configuration loaded","jwks_url":"https://aegis-services-keycloak.../certs","ca_bundle":"/etc/aegis-platform-api/oidc/ca.crt","skip_tls_verify":false}
+```
+
+Under the hood `buildJWKSHTTPClient` constructs an `http.Transport` with a `tls.Config` whose `RootCAs` combine the system trust store and the mounted bundle. That ensures:
+
+- Public CAs remain trusted (system store is preserved).
+- Self-signed or lab certificates that ship with the Keycloak secret are honoured.
+- TLS verification still runs (no `InsecureSkipVerify`) so hostname mismatches are surfaced.
+
+If the bundle cannot be read or contains no certificates the service logs a warning and refuses to fall back silently, preventing hard-to-debug trust failures.
+
+### 2.6 Current Operational Status
+
+The November 2025 validation confirmed the following behaviours end to end:
+
+- Keycloak issues RS256 client-credential tokens for the `backstage` confidential client.
+- Platform API successfully fetches and caches JWKS using the CA bundle above.
+- `grpcurl --authority platform-api-grpc.localtest.me` with the freshly-minted token lists all services (`aegis.v1.AegisPlatform`, `grpc.reflection.v1*`), proving signature verification passes.
+- Residual `token_parse` warnings in logs stem from other callers presenting stale tokens (bad `kid`); restart or reauthenticate those clients to quiet the noise.
+
 ---
 
 ## 3. Transport Security Layers

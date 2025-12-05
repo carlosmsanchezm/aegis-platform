@@ -2,6 +2,7 @@
   "id": "d0a0fff1-7121-4616-a976-c319a3633308",
   "realm": "aegis",
   "displayName": "Aegis",
+  "displayNameHtml": "",
   "notBefore": 0,
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
@@ -67,6 +68,15 @@
         "attributes": {}
       },
       {
+        "id": "workspace-admin-role",
+        "name": "workspace-admin",
+        "description": "Workspace administrator",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "d0a0fff1-7121-4616-a976-c319a3633308",
+        "attributes": {}
+      },
+      {
         "id": "706213d5-ed68-4677-af4f-af60d3b2d976",
         "name": "default-roles-aegis",
         "description": "${role_default-roles}",
@@ -83,15 +93,6 @@
             ]
           }
         },
-        "clientRole": false,
-        "containerId": "d0a0fff1-7121-4616-a976-c319a3633308",
-        "attributes": {}
-      },
-      {
-        "id": "workspace-admin-role",
-        "name": "workspace-admin",
-        "description": "Workspace administrator",
-        "composite": false,
         "clientRole": false,
         "containerId": "d0a0fff1-7121-4616-a976-c319a3633308",
         "attributes": {}
@@ -313,6 +314,7 @@
       "security-admin-console": [],
       "admin-cli": [],
       "backstage": [],
+      "spoke-agent": [],
       "vscode-extension": [],
       "account-console": [],
       "broker": [
@@ -471,125 +473,67 @@
   "webAuthnPolicyPasswordlessExtraOrigins": [],
   "users": [
     {
-      "id": "846afd21-cf59-4e57-bdde-a917e989b4fe",
-      "username": "cloud@test.com",
-      "firstName": "aws",
-      "lastName": "aws",
-      "email": "cloud@test.com",
-      "emailVerified": true,
-      "createdTimestamp": 1761761469797,
-      "enabled": true,
-      "totp": false,
-      "credentials": [
-        {
-          "id": "56964a97-7b14-4f56-a151-e83ad432d6e1",
-          "type": "password",
-          "userLabel": "My password",
-          "createdDate": 1761770760723,
-          "secretData": "{\"value\":\"otWp7cU4aGSwJ0tpmzPM0XnvhQbULKR4CDz0ovyl0rU=\",\"salt\":\"S8c4Ku6LLYEig2N0mDYYFw==\",\"additionalParameters\":{}}",
-          "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\",\"additionalParameters\":{\"hashLength\":[\"32\"],\"memory\":[\"7168\"],\"type\":[\"id\"],\"version\":[\"1.3\"],\"parallelism\":[\"1\"]}}"
-        }
-      ],
-      "disableableCredentialTypes": [],
-      "requiredActions": [],
-      "realmRoles": [
-        "offline_access",
-        "default-roles-aegis",
-        "workspace-admin"
-      ],
-      "notBefore": 0,
-      "groups": []
-    },
-    {
-      "id": "00aa1293-1b3e-4d14-9df4-7a051d5f00e2",
+      "id": "5d92db16-b8b2-4477-b80b-f257b2dc6f8d",
       "username": "cms553@cornell.edu",
       "firstName": "CARLOS",
       "lastName": "SANCHEZ",
       "email": "cms553@cornell.edu",
       "emailVerified": true,
-      "createdTimestamp": 1761761433021,
+      "createdTimestamp": 1762282924806,
       "enabled": true,
       "totp": false,
       "credentials": [
         {
-          "id": "abcdb058-63e1-4dd4-8453-3e0502dfe64c",
+          "id": "15fb9e1f-5973-44ba-ae0f-55206610b9c6",
           "type": "password",
           "userLabel": "My password",
-          "createdDate": 1761766031489,
-          "secretData": "{\"value\":\"dQbAsssZUm1eDhMEByZcR3/N+6zLgwVxN0B/Qac1gz4=\",\"salt\":\"5AS3IqRsPwQKaaGLX8wA0w==\",\"additionalParameters\":{}}",
+          "createdDate": 1762282936325,
+          "secretData": "{\"value\":\"HRLKLpm3dnOsCHJkfPwz7oYp85LGgy2CvUSS/wx+0js=\",\"salt\":\"+6PESi0nFZdmiflF6TlRDA==\",\"additionalParameters\":{}}",
           "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\",\"additionalParameters\":{\"hashLength\":[\"32\"],\"memory\":[\"7168\"],\"type\":[\"id\"],\"version\":[\"1.3\"],\"parallelism\":[\"1\"]}}"
         }
       ],
       "disableableCredentialTypes": [],
       "requiredActions": [],
       "realmRoles": [
-        "offline_access",
-        "default-roles-aegis",
-        "workspace-admin"
-      ],
-      "notBefore": 0,
-      "groups": []
-    },
-    {
-      "id": "895c77ed-bdb0-4496-95f6-66e16aada55e",
-      "username": "local@test.com",
-      "firstName": "local",
-      "lastName": "local",
-      "email": "local@test.com",
-      "emailVerified": true,
-      "createdTimestamp": 1761771872259,
-      "enabled": true,
-      "totp": true,
-      "credentials": [
-        {
-          "id": "544e6b61-bdf5-4bf8-9767-bc13de913337",
-          "type": "password",
-          "userLabel": "My password",
-          "createdDate": 1761771882587,
-          "secretData": "{\"value\":\"VdearE3GQWuZy8VGdp3Jk+q9Z34Eg4i/d6m4qoK+qro=\",\"salt\":\"E4Ha2fkMzhRPt+OrFgneZA==\",\"additionalParameters\":{}}",
-          "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\",\"additionalParameters\":{\"hashLength\":[\"32\"],\"memory\":[\"7168\"],\"type\":[\"id\"],\"version\":[\"1.3\"],\"parallelism\":[\"1\"]}}"
-        },
-        {
-          "id": "daee586d-7197-4801-b272-85609c237dc1",
-          "type": "otp",
-          "userLabel": "iphone",
-          "createdDate": 1761771942811,
-          "secretData": "{\"value\":\"9zeEAjIO9t0AMvuixt5m\"}",
-          "credentialData": "{\"subType\":\"totp\",\"digits\":6,\"counter\":0,\"period\":30,\"algorithm\":\"HmacSHA1\"}"
-        }
-      ],
-      "disableableCredentialTypes": [],
-      "requiredActions": [],
-      "realmRoles": [
-        "offline_access",
+        "workspace-admin",
         "default-roles-aegis"
       ],
       "notBefore": 0,
       "groups": []
     },
     {
-      "id": "automation-user-id",
-      "username": "automation@test.com",
-      "firstName": "automation",
-      "lastName": "user",
-      "email": "automation@test.com",
-      "emailVerified": true,
-      "createdTimestamp": 0,
+      "id": "dd6e3dc6-e730-4dd3-9e39-8678d3e3ee6f",
+      "username": "service-account-backstage",
+      "emailVerified": false,
+      "createdTimestamp": 1762239093737,
       "enabled": true,
       "totp": false,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Automation123!",
-          "temporary": false
-        }
-      ],
+      "serviceAccountClientId": "backstage",
       "disableableCredentialTypes": [],
-      "requiredActions": [],
+      "requiredActions": [
+        "CONFIGURE_TOTP"
+      ],
       "realmRoles": [
-        "offline_access",
-        "default-roles-aegis",
-        "workspace-admin"
+        "default-roles-aegis"
+      ],
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "3188966f-81e1-450f-b186-4a0da216e3cd",
+      "username": "service-account-spoke-agent",
+      "emailVerified": false,
+      "createdTimestamp": 1764703630785,
+      "enabled": true,
+      "totp": false,
+      "serviceAccountClientId": "spoke-agent",
+      "disableableCredentialTypes": [],
+      "requiredActions": [
+        "CONFIGURE_TOTP"
+      ],
+      "realmRoles": [
+        "workspace-admin",
+        "default-roles-aegis"
       ],
       "notBefore": 0,
       "groups": []
@@ -774,6 +718,7 @@
       "clientAuthenticatorType": "client-secret",
       "secret": "${BACKSTAGE_CLIENT_SECRET}",
       "redirectUris": [
+        "http://localhost:3000/*",
         "http://localhost:7008/*",
         "https://backstage.localtest.me/*"
       ],
@@ -787,7 +732,7 @@
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
-      "serviceAccountsEnabled": false,
+      "serviceAccountsEnabled": true,
       "publicClient": false,
       "frontchannelLogout": false,
       "protocol": "openid-connect",
@@ -804,12 +749,31 @@
       "authenticationFlowBindingOverrides": {},
       "fullScopeAllowed": true,
       "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [
+        {
+          "id": "9d0beaa9-e808-4585-a1ab-06c25391a9a5",
+          "name": "backstage-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "backstage",
+            "id.token.claim": "false",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ],
       "defaultClientScopes": [
+        "service_account",
         "web-origins",
         "acr",
-        "offline_access",
         "profile",
         "roles",
+        "offline_access",
+        "aegis-platform",
         "basic",
         "email"
       ],
@@ -973,6 +937,67 @@
         "offline_access",
         "organization",
         "microprofile-jwt"
+      ]
+    },
+    {
+      "id": "7dfadec8-65a1-4428-8162-cf7bd3517469",
+      "clientId": "spoke-agent",
+      "name": "spoke-agent",
+      "description": "",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB",
+      "redirectUris": [
+        "/*"
+      ],
+      "webOrigins": [
+        "/*"
+      ],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "client.secret.creation.time": "1764703630",
+        "backchannel.logout.session.required": "true",
+        "standard.token.exchange.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "service_account",
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "aegis-platform",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "aegis-platform",
+        "organization",
+        "microprofile-jwt",
+        "platform"
       ]
     },
     {
@@ -1494,9 +1519,25 @@
           "protocolMapper": "oidc-audience-resolve-mapper",
           "consentRequired": false,
           "config": {
+            "included.client.audience": "backstage",
             "lightweight.claim": "false",
             "access.token.claim": "true",
             "introspection.token.claim": "false"
+          }
+        },
+        {
+          "id": "a03dfd19-fc5b-4d6d-a18c-d48985625c6c",
+          "name": "aegis-platform",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "false",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "false",
+            "access.token.claim": "true",
+            "included.custom.audience": "aegis-platform",
+            "userinfo.token.claim": "false"
           }
         }
       ]
@@ -1845,14 +1886,14 @@
         "subComponents": {},
         "config": {
           "allowed-protocol-mapper-types": [
-            "saml-user-attribute-mapper",
             "oidc-usermodel-attribute-mapper",
-            "oidc-sha256-pairwise-sub-mapper",
-            "oidc-address-mapper",
-            "oidc-full-name-mapper",
             "oidc-usermodel-property-mapper",
             "saml-user-property-mapper",
-            "saml-role-list-mapper"
+            "oidc-full-name-mapper",
+            "oidc-sha256-pairwise-sub-mapper",
+            "saml-user-attribute-mapper",
+            "saml-role-list-mapper",
+            "oidc-address-mapper"
           ]
         }
       },
@@ -1911,14 +1952,14 @@
         "subComponents": {},
         "config": {
           "allowed-protocol-mapper-types": [
-            "saml-role-list-mapper",
-            "oidc-full-name-mapper",
-            "saml-user-property-mapper",
-            "oidc-usermodel-property-mapper",
-            "oidc-address-mapper",
-            "oidc-sha256-pairwise-sub-mapper",
             "saml-user-attribute-mapper",
-            "oidc-usermodel-attribute-mapper"
+            "oidc-full-name-mapper",
+            "oidc-usermodel-property-mapper",
+            "oidc-usermodel-attribute-mapper",
+            "oidc-address-mapper",
+            "saml-role-list-mapper",
+            "oidc-sha256-pairwise-sub-mapper",
+            "saml-user-property-mapper"
           ]
         }
       }
@@ -1930,12 +1971,6 @@
         "providerId": "rsa-generated",
         "subComponents": {},
         "config": {
-          "privateKey": [
-            "MIIEowIBAAKCAQEAtWXEXPKewwc/c402xBROVHZ/i15ErHoT6HtGACoO2vPct3TpHZ1Y+PHPkhoAU5LUSIKJXBTkRV8olufzqegu/2mhCnIg2at6GZU+JBtl8nboNB36RN8u5D0CWr2V+ROJCc7ol9KxZzFOTufv/RuJoD+hGTjEc+qtB2fIZJFhbnkE7LHtDib7vz49vfgrVQJ3Gdfv5+sITtfp4gUwbZegtnxYsi5HZkSs5/d2ODlmbMQxXL7aHjtO8gFSUVqFz7D5BE+KyPmzskVxwiSfgfKEgBz91Wban34osOaCCyzUt9XOcX5cBuo5hQFuEfZgN8y7D4wPFraYCHTkdM8zQbpcgQIDAQABAoIBAE1IbcgR4B0ETf67h70zT4oBsGZew9Bd9HRkbNbuFEUph3wr1ZO18W2ijEZZSJFSqZm476+pAPYjTCY67V+Smc9cn+1U4XULbypOINr+R0ltapGlwfYsxgwciA/D3Qzwyz5ABm2EqOtnoM7SVzdVT6XT5h1aR6yBK7XPfBuIquOG+K6C5CFBNKcVgje2OwBbty1ALNDRyAFySkL7ykHtd0PWLE1fktkta7ZQv/88Z/dYiXskIUTxsgBfkVbmdYbh8D8Udfn46edTT1UH5p1eyZ6VcbzYdz63VZUTr0e1wQ4cP2g0eZXnTYq6UPNstY6N6O4UyGU0HbqGcastn8W1BicCgYEA6KWLJTfkNL7/iq4Ikj4ybBqcluMKZg/X6I4WS625jpy1aElB0qy6kUMEFbvwqJOvQ9+7xoRCd8O/px/+0l39TK2vg4BYMxiJ7srXM7EoTY4cUoscMGWXLdIagANLwyamVjqKptkLfD4hfNT/QnpSJm32Yek1A6R9HxQUZ3lCUecCgYEAx5s+r7Q3A9KR++Gr/d1S5ErPRKMr+4zl4vo35DTf5efLlhcFo9SdyhCc5Wp/fpByyIO0PKcrpgzh36apomfkTVQ4lpWY7SGUwlviTbLu8ajgz1tOgEvzKYjVqL5jZIjhabJZILDblfwVYl3oDpYxHPC2RVuQeFMBIonaQiaYYVcCgYAY7yUqqALdZFsfEef5RJFC5NdDlLHYnnoVgqUBF217y2/l7XQQkFKunvAhJDN23d06+Q+3BxXYoDI6R0OYaFptjW/yOB872rVt0m+eKq6XIVQHxMEQrtK1Jn+QmMnV8J6DP2L83uZMOpx8NJfnGBUV6VMuyz/TVB3U5uII9QYWoQKBgCrFVkJaEGvORB+/9JW6RhfK++zONg952oyvZyiMN+nQqGwp1LiNR55TvvrdviIFm8Lhjc5tV8oF+qRs1u6I6n+za0jBF3rAdlrLS4uwqsi3kix8eS6+l4Uv3/B/k1aoifyXDcgWfYb+9CoWyzHM9wsnfTcRbryJtLWM6mrAUGiTAoGBAJg4/a0soEWdOMvCSAqB/k3ChkGJ5n6epuA1CsarA4UuSv2967I0SJ4vlQJtsfs5/OCONEBq32VNJ0xcKb0eu5IxFKBaZC7iQGn8GP1ixYuMuScfX0txn2IAwL7opEb8NAcFq1+BBn8QVlNnv5sHHict1vVKIQW4WheEXK+Rm44K"
-          ],
-          "certificate": [
-            "MIICmTCCAYECBgGaMW2mSzANBgkqhkiG9w0BAQsFADAQMQ4wDAYDVQQDDAVhZWdpczAeFw0yNTEwMjkxOTIyNDBaFw0zNTEwMjkxOTI0MjBaMBAxDjAMBgNVBAMMBWFlZ2lzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtWXEXPKewwc/c402xBROVHZ/i15ErHoT6HtGACoO2vPct3TpHZ1Y+PHPkhoAU5LUSIKJXBTkRV8olufzqegu/2mhCnIg2at6GZU+JBtl8nboNB36RN8u5D0CWr2V+ROJCc7ol9KxZzFOTufv/RuJoD+hGTjEc+qtB2fIZJFhbnkE7LHtDib7vz49vfgrVQJ3Gdfv5+sITtfp4gUwbZegtnxYsi5HZkSs5/d2ODlmbMQxXL7aHjtO8gFSUVqFz7D5BE+KyPmzskVxwiSfgfKEgBz91Wban34osOaCCyzUt9XOcX5cBuo5hQFuEfZgN8y7D4wPFraYCHTkdM8zQbpcgQIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCY5MACu04L0FRtmczDMwoxRg985rfU7VhusYAsAK+HSGtxchv42WO85HPZiuqN4Ik0QXdSzQRhstjsneymr9zVXtM9kTp4/vJgKWj/OEYSNYS3vXZtzVuuic5ay2zfurybIbmQ8EeECtjbTOb/Me+XqIpVA/YwxjzevTZeTA+0NZpp1H77oPsUY7LQtDF029Bc1HQi52o5qPAGcvrDzp0RadlHEPniW1/5dkP4HtXrnE1mHzijzZrsprZlWOApIYyw9blVl1KkKh3kHeBXsnCCz7UB9Ks3Y9igZ0o1wWly0t3ZnW/Zr/0nZQo/KLQGgXUIH9B7Ur5wD0DMtskxr3Or"
-          ],
           "priority": [
             "100"
           ]
@@ -1947,12 +1982,6 @@
         "providerId": "rsa-enc-generated",
         "subComponents": {},
         "config": {
-          "privateKey": [
-            "MIIEpQIBAAKCAQEAw4rzifEr8VQ82Fi3VIHFnbix7wzNeEmoUg8QajJG0BVGWleukSwnUFn2SK4GEZMgOXK40LDJuWmUHp+V+wUjfdRUPK7XF6ej/pvPVTSXVVhBsMn09l2rMrFme8CKcWQHWTmDD699+LGwiDl+tCE3sm+81Z52p4rn5XGAYL2upMQ3+lAiXCGSqw0V40QNyI8WfzXEtTUAbUoovpE8jC1bD32iSBtfV4orhNnbPCYBYctbt1U78Vsu/dv81WV+yQCshAjeWDjUlhKG3xC5KxmnPaHRyUeZ5XBVs8Nmu/+Wx7wKArUrZshZ0qIVCZS2QmipPLiBJhbP7ilep8vgcNd2lQIDAQABAoIBAC8R8utk4FLMmAPtIR5oyajchYp5brlyo5+zLBygIx8iS+fh3O3prsH/EdOvflr7K0Hg7X+g2sI02bigajI9a6x1sNxVqwWw7z9SAs/sI7Sh1NhJWRv38sa2YOjPsZO3hDRUbYnYUO7NWSUFkAwsxdNAZfiXF1Ff1NAMqR5AcrqK7IGimVMYQqq0Xq8ecN2jAxSI5klhYtI9ATSlSVHPUeamtNoUBxmGjfOYYYOheLo244UfVmdP+IH7M1IbpQCx5bhQS+pMUuTeqslHZPlwEMOsT3HRkGaaWApPUhl0+LXmUVbpc66dYSQEmH1xt4iYjWtflHMqoB1jUqboz7K2pmECgYEA4+V6FBrEShAJxkG+4Y3tvOE9J7aa8V9asifYLG78uW6i9UbCahZdOf6z2iS1NlTGz9/L3cYH3z8rzM5K+6djDnKPwoBjjRYMvvXjhGFpXXeXlZNkuuYIY+XXYEPdebRGSp1vACZBOtYe62myrICMVICy7UI0JNKlvI4cYTeaTfUCgYEA26gYKbFaROkIqvzPR5hoFHWDLZ315hYUkXR0adBNVp0I8sMsjHs02LnfQDhcu/sMTJZTK/3Xiy/PdQBj2KYBOyBK4p+lUvhBNhuyodfPVgquSu07VeCOyWImUuVgDheRr/nOpfZ+QbgEPVP731/OEy9XkuFMy5pKxH6jE8HJgiECgYEAivyr/FDqv4SSgYAdSvBFOnlf07WRP335EUgtlcPGi8zGw7H45bxn9PO6emMCxXTkn2iMq9+Xc3bSXqC9qEbIqcoClQu6KxR0h43syRKjsOY743Q17apXGZ3WQZaCHzRr3huv07aA98IYr1gSKRRpASxQc1R5+q8hdyJwenXvvHUCgYEAtf9gDeOJ9MDU0r/nit3HlvQK/Zf872hqIF7KOgZCnjo8+NAoMDnBfrT7On24sHSBK0/+l9uaZRP3I21wTUi2imPmSEGYvNc/SPLIHnruqs7svN41JKGMDWYKdPLilKqIprMnurEyyYcL1Diq39jEqXa3a9bLR4OO4aI/wpX1PaECgYEAs4j0pdlpL6vUwOAvpwGptoRuw8UJBfOAW8uDpNhj0/008tm6ubU1sCLtUVvEirbQkqQgL5jgKylg+zGhldKhEp1EuyL0oG0HhXeHTdp+PoFIIOZcrBt/JBARv8iZ0a/gY0OqdyI/jN3IcurWiZsTzjXXZNC525xe33Smgj6UUHo="
-          ],
-          "certificate": [
-            "MIICmTCCAYECBgGaMW2mmTANBgkqhkiG9w0BAQsFADAQMQ4wDAYDVQQDDAVhZWdpczAeFw0yNTEwMjkxOTIyNDFaFw0zNTEwMjkxOTI0MjFaMBAxDjAMBgNVBAMMBWFlZ2lzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw4rzifEr8VQ82Fi3VIHFnbix7wzNeEmoUg8QajJG0BVGWleukSwnUFn2SK4GEZMgOXK40LDJuWmUHp+V+wUjfdRUPK7XF6ej/pvPVTSXVVhBsMn09l2rMrFme8CKcWQHWTmDD699+LGwiDl+tCE3sm+81Z52p4rn5XGAYL2upMQ3+lAiXCGSqw0V40QNyI8WfzXEtTUAbUoovpE8jC1bD32iSBtfV4orhNnbPCYBYctbt1U78Vsu/dv81WV+yQCshAjeWDjUlhKG3xC5KxmnPaHRyUeZ5XBVs8Nmu/+Wx7wKArUrZshZ0qIVCZS2QmipPLiBJhbP7ilep8vgcNd2lQIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQB8X4zN8bpGtNg4/ndWkOi25FlQNo0fezk4lwyln0+UG4HIijcrDcD3xRO2X2JtxS9cNOw5xFHofcw5jGYDLE1TcFSdvnqAEzENdILv1kNcpBfppWEK8XT4lIl+/FAIkf3osTp2kmTXfwFq7VStptF8m94i2akTU4dVKZ7S7xCRhNOVSDr1QugP2JU7AWxHZkpXR0pRameDvFkLBygdEcqigC3FRVF+qXgBmOSicc4wkeCUUW0b6F/OniFZIaUWDJCQhpP808GA05EyPXXyk0Z9dziSmgIh2lkiQv9DMLlbuKpnGc6c7+psPGbfntPngmM3Mix3eqB9z9F6rRAcg5+u"
-          ],
           "priority": [
             "100"
           ],
@@ -1967,12 +1996,6 @@
         "providerId": "hmac-generated",
         "subComponents": {},
         "config": {
-          "kid": [
-            "05b34fad-3106-4409-9a8c-3163c8c1ba6c"
-          ],
-          "secret": [
-            "keGSwyhRCLBUNxnUrVtVqHdrccXoe4XueJTeqAkQV7npr0FQDCjfATnHZIZWVV0NP1XihBRgz4AR-v3RS5-JAddZcvfJAW9QicJauk4qez2Q-kl5xnytUHBMWIo-rnzyvHidKyVhRkQ7WZx_I4TeZuiUdPAdLata6Kz2snbLaVk"
-          ],
           "priority": [
             "100"
           ],
@@ -1987,12 +2010,6 @@
         "providerId": "aes-generated",
         "subComponents": {},
         "config": {
-          "kid": [
-            "bab8cc7b-90af-4741-867c-52d4338e7073"
-          ],
-          "secret": [
-            "IGqSaUcFooo7QMbruAGLcg"
-          ],
           "priority": [
             "100"
           ]
@@ -2653,17 +2670,20 @@
   "firstBrokerLoginFlow": "first broker login",
   "attributes": {
     "cibaBackchannelTokenDeliveryMode": "poll",
-    "cibaExpiresIn": "120",
     "cibaAuthRequestedUserHint": "login_hint",
-    "oauth2DeviceCodeLifespan": "600",
     "clientOfflineSessionMaxLifespan": "0",
     "oauth2DevicePollingInterval": "5",
     "clientSessionIdleTimeout": "0",
-    "parRequestUriLifespan": "60",
-    "clientSessionMaxLifespan": "0",
     "clientOfflineSessionIdleTimeout": "0",
     "cibaInterval": "5",
-    "realmReusableOtpCode": "false"
+    "realmReusableOtpCode": "false",
+    "cibaExpiresIn": "120",
+    "oauth2DeviceCodeLifespan": "600",
+    "saml.signature.algorithm": "",
+    "parRequestUriLifespan": "60",
+    "clientSessionMaxLifespan": "0",
+    "frontendUrl": "https://keycloak.aegis-platform.tech/",
+    "acr.loa.map": "{}"
   },
   "keycloakVersion": "26.2.10.redhat-00002",
   "userManagedAccessAllowed": false,

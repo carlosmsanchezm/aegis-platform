@@ -59,6 +59,7 @@ type AWSInfraSpec struct {
 	Mode               AWSProvisionMode `json:"mode,omitempty"`
 	RoleARN            string           `json:"roleArn,omitempty"`
 	ExternalID         string           `json:"externalId,omitempty"`
+	SubnetIDs          []string         `json:"subnetIds,omitempty"`
 	VpcID              string           `json:"vpcId,omitempty"`
 	ClusterName        string           `json:"clusterName,omitempty"`
 	Version            string           `json:"version,omitempty"`
@@ -104,8 +105,20 @@ type ClusterOutput struct {
 
 // ObservabilityOutput holds optional telemetry endpoints for a cluster.
 type ObservabilityOutput struct {
-	OtelEndpoint string `json:"otelEndpoint,omitempty"`
-	MetricsURL   string `json:"metricsUrl,omitempty"`
+	Namespace                string `json:"namespace,omitempty"`
+	PrometheusService        string `json:"prometheusService,omitempty"`
+	PrometheusPort           int32  `json:"prometheusPort,omitempty"`
+	AlertmanagerService      string `json:"alertmanagerService,omitempty"`
+	AlertmanagerPort         int32  `json:"alertmanagerPort,omitempty"`
+	AlertmanagerConfigSecret string `json:"alertmanagerConfigSecret,omitempty"`
+	MetricsServerService     string `json:"metricsServerService,omitempty"`
+	MetricsServerPort        int32  `json:"metricsServerPort,omitempty"`
+	LokiNamespace            string `json:"lokiNamespace,omitempty"`
+	LokiService              string `json:"lokiService,omitempty"`
+	LokiPort                 int32  `json:"lokiPort,omitempty"`
+	LokiAuthSecret           string `json:"lokiAuthSecret,omitempty"`
+	OtelEndpoint             string `json:"otelEndpoint,omitempty"`
+	MetricsURL               string `json:"metricsUrl,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -182,6 +195,10 @@ func (in *ProjectInfraSpec) DeepCopy() *ProjectInfraSpec {
 
 func (in *AWSInfraSpec) DeepCopyInto(out *AWSInfraSpec) {
 	*out = *in
+	if in.SubnetIDs != nil {
+		out.SubnetIDs = make([]string, len(in.SubnetIDs))
+		copy(out.SubnetIDs, in.SubnetIDs)
+	}
 	if in.NodePools != nil {
 		out.NodePools = make([]NodePool, len(in.NodePools))
 		for i := range in.NodePools {
@@ -193,6 +210,10 @@ func (in *AWSInfraSpec) DeepCopyInto(out *AWSInfraSpec) {
 		for i := range in.AdditionalClusters {
 			in.AdditionalClusters[i].DeepCopyInto(&out.AdditionalClusters[i])
 		}
+	}
+	if in.SubnetIDs != nil {
+		out.SubnetIDs = make([]string, len(in.SubnetIDs))
+		copy(out.SubnetIDs, in.SubnetIDs)
 	}
 	if in.Imports != nil {
 		out.Imports = make([]AWSImportSpec, len(in.Imports))

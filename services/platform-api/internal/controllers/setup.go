@@ -1,10 +1,13 @@
 package controllers
 
 import (
+	"os"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
@@ -27,6 +30,9 @@ func SetupWithManager(mgr ctrl.Manager, cfg Config) error {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	mgrOpts := controller.Options{
+		MaxConcurrentReconciles: 5,
 	}
 	secretName := cfg.KubeconfigSecretName
 	if secretName == "" {
@@ -53,8 +59,10 @@ func SetupWithManager(mgr ctrl.Manager, cfg Config) error {
 		Store:                     cfg.Store,
 		KubeconfigSecretName:      secretName,
 		KubeconfigSecretNamespace: secretNamespace,
+		LocalLocks:                map[string]*sync.Mutex{},
+		HolderIdentity:            hostname(),
 	}
-	if err := projectInfra.SetupWithManager(mgr); err != nil {
+	if err := projectInfra.SetupWithManager(mgr, mgrOpts); err != nil {
 		return err
 	}
 
@@ -79,4 +87,11 @@ func SetupWithManager(mgr ctrl.Manager, cfg Config) error {
 	}
 
 	return nil
+}
+
+func hostname() string {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "platform-api"
 }

@@ -8,6 +8,7 @@ tempo:
   multitenancyEnabled: false
   reportingEnabled: false
   retention: 48h
+  searchEnabled: true
   receivers:
     otlp:
       protocols:

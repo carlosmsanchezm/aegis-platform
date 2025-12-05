@@ -520,6 +520,7 @@ func installTracing(ctx *pulumi.Context, clusterKey string, kubeProvider *kubern
 			"multitenancyEnabled": pulumi.Bool(false),
 			"reportingEnabled":    pulumi.Bool(false),
 			"retention":           pulumi.String(retention),
+			"searchEnabled":       pulumi.Bool(true),
 			"receivers": pulumi.Map{
 				"otlp": pulumi.Map{
 					"protocols": pulumi.Map{

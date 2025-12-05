@@ -507,7 +507,7 @@ func installLogging(ctx *pulumi.Context, clusterKey string, kubeProvider *kubern
     kube_url https://kubernetes.default.svc:443
     kube_ca_file /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
     kube_token_file /var/run/secrets/kubernetes.io/serviceaccount/token
-    tls.verify Off
+    tls.verify On
 `
 	fluentFilters := fmt.Sprintf(`[FILTER]
     Name kubernetes

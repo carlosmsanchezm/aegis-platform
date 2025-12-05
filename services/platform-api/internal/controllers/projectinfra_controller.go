@@ -671,9 +671,27 @@ func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *in
 	lease := &coordinationv1.Lease{}
 	err := r.Get(ctx, types.NamespacedName{Name: leaseName, Namespace: leaseNS}, lease)
 	now := metav1.NowMicro()
-	leaseDuration := int32(60)
+	leaseDuration := int32(15 * 60) // 15 minutes
+
+	// Keepalive/renewal loop to hold the lease while reconcile is running.
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				_ = r.renewLease(context.Background(), leaseName, leaseNS, holder, leaseDuration)
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	release := func() {
+		close(stop)
 		// Best-effort delete only if we hold the lease.
 		r.releaseLease(ctx, leaseName, leaseNS, holder)
 		unlockLocal()
@@ -694,11 +712,13 @@ func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *in
 		}
 		if createErr := r.Create(ctx, newLease); createErr != nil {
 			unlockLocal()
+			close(stop)
 			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, client.IgnoreNotFound(createErr)
 		}
 		return release, ctrl.Result{}, nil
 	} else if err != nil {
 		unlockLocal()
+		close(stop)
 		return nil, ctrl.Result{}, err
 	}
 

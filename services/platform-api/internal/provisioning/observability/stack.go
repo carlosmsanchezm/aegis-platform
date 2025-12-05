@@ -15,11 +15,11 @@ import (
 )
 
 const (
-<<<<<<< HEAD
 	envObservabilityChart          = "AEGIS_OBSERVABILITY_CHART"
 	envObservabilityChartVersion   = "AEGIS_OBSERVABILITY_CHART_VERSION"
 	envObservabilityRepo           = "AEGIS_OBSERVABILITY_REPO"
 	envObservabilityValuesFile     = "AEGIS_OBSERVABILITY_VALUES_FILE"
+	envObservabilityEnabled        = "AEGIS_OBSERVABILITY_ENABLED"
 	envMetricsServerChart          = "AEGIS_METRICS_SERVER_CHART"
 	envMetricsServerVersion        = "AEGIS_METRICS_SERVER_CHART_VERSION"
 	envMetricsServerRepo           = "AEGIS_METRICS_SERVER_REPO"
@@ -47,25 +47,6 @@ const (
 	maxObservabilityNameLength     = 40
 	maxLoggingNameLength           = 40
 	defaultHelmTimeout             = 15 * time.Minute
-=======
-	envObservabilityChart         = "AEGIS_OBSERVABILITY_CHART"
-	envObservabilityChartVersion  = "AEGIS_OBSERVABILITY_CHART_VERSION"
-	envObservabilityRepo          = "AEGIS_OBSERVABILITY_REPO"
-	envObservabilityValuesFile    = "AEGIS_OBSERVABILITY_VALUES_FILE"
-	envObservabilityEnabled       = "AEGIS_OBSERVABILITY_ENABLED"
-	envMetricsServerChart         = "AEGIS_METRICS_SERVER_CHART"
-	envMetricsServerVersion       = "AEGIS_METRICS_SERVER_CHART_VERSION"
-	envMetricsServerRepo          = "AEGIS_METRICS_SERVER_REPO"
-	envMetricsServerValuesFile    = "AEGIS_METRICS_SERVER_VALUES_FILE"
-	defaultObservabilityNamespace = "aegis-observability"
-	defaultObservabilityRelease   = "aegis-obsv"
-	defaultObservabilityBaseName  = "aegis-obsv"
-	defaultMetricsRelease         = "aegis-metrics"
-	defaultPrometheusPort         = 9090
-	defaultAlertmanagerPort       = 9093
-	maxObservabilityNameLength    = 40
-	defaultHelmTimeout            = 15 * time.Minute
->>>>>>> origin/integration/wire-frontend-backend-2025-11-03
 )
 
 // HelmConfig describes a helm release configuration.

@@ -221,12 +221,12 @@ func adjustGpuInstanceType(spec *infraapi.AWSInfraSpec, gpuType string) {
 	case "G5", "SMALL":
 		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
 	case "H100":
-		// Request the smallest available GPU-capable family by default to avoid vCPU quota exhaustion.
-		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
+		// Smallest H100-backed instance to honor the requested accelerator.
+		spec.NodePools[idx].InstanceType = "p5.2xlarge"
 	case "A100":
 		spec.NodePools[idx].InstanceType = "p4d.24xlarge"
 	case "A10G":
-		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
+		spec.NodePools[idx].InstanceType = "g5.xlarge"
 	case "NONE":
 		spec.NodePools[idx].InstanceType = "m6i.large"
 	}

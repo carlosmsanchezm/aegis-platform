@@ -736,6 +736,7 @@ func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *in
 
 	if existingHolder != "" && existingHolder != holder && !expired {
 		unlockLocal()
+		close(stop)
 		return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -802,6 +803,47 @@ func (r *ProjectInfraReconciler) releaseLease(ctx context.Context, name, namespa
 		return
 	}
 	_ = r.Delete(ctx, lease)
+}
+
+// renewLease refreshes the lease if we hold it, or if it is expired/unheld. Best-effort; ignores not found.
+func (r *ProjectInfraReconciler) renewLease(ctx context.Context, name, namespace, holder string, leaseDuration int32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+
+	expired := true
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	}
+
+	// Only renew if we hold it or it is expired/unheld.
+	if existingHolder != "" && existingHolder != holder && !expired {
+		return nil
+	}
+
+	now := metav1.NowMicro()
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if lease.Spec.AcquireTime == nil {
+		lease.Spec.AcquireTime = &now
+	}
+	lease.Spec.RenewTime = &now
+
+	return r.Update(ctx, lease)
 }
 
 func (r *ProjectInfraReconciler) lockLocal(key string) func() {

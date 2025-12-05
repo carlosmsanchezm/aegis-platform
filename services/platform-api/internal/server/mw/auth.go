@@ -199,9 +199,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		jwt.WithLeeway(30 * time.Second),
 		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
 	}
-	if len(aud) > 0 {
-		parserOpts = append(parserOpts, jwt.WithAudience(aud...))
-	}
 
 	t, err := jwt.ParseWithClaims(token, claims, func(tok *jwt.Token) (interface{}, error) {
 		kid, _ := tok.Header["kid"].(string)
@@ -227,6 +224,26 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 	identity := buildIdentity(claims)
 	if kid, ok := t.Header["kid"].(string); ok {
 		identity.KeyID = strings.TrimSpace(kid)
+	}
+
+	if len(aud) > 0 {
+		validAud := false
+		for _, expected := range aud {
+			for _, tokenAud := range claims.Audience {
+				if strings.TrimSpace(tokenAud) == strings.TrimSpace(expected) {
+					validAud = true
+					break
+				}
+			}
+			if validAud {
+				break
+			}
+		}
+		if !validAud {
+			a.logFailure(meta, "audience_mismatch", errors.New("token audience not accepted"))
+			metricAuthFailures.WithLabelValues("audience_mismatch").Inc()
+			return nil, status.Error(codes.PermissionDenied, "token audience not accepted")
+		}
 	}
 
 	if identity.Subject == "" {

@@ -254,3 +254,42 @@ global:
   # Use image pull secrets for private registries
   imagePullSecrets:
     - name: ecr-registry-secret
+
+#################################################################
+# Keycloak Configuration - Cloud
+#################################################################
+keycloak:
+  enabled: true
+  createNamespace: false
+  namespace: null
+  forceRender: true
+  http:
+    httpEnabled: false
+  ingress:
+    enabled: false
+  customIngress:
+    enabled: false
+  hostname:
+    hostname: https://keycloak.placeholder.invalid:8443
+    admin: https://keycloak.placeholder.invalid:8443
+    strict: false
+  admin:
+    secret:
+      name: keycloak-admin-secret
+      create: false
+  database:
+    secret:
+      name: keycloak-db-secret
+      create: false
+  postgres:
+    storage:
+      className: gp2
+  realm:
+    client:
+      secret:
+        name: keycloak-backstage-client-secret
+        create: false
+  tls:
+    secret:
+      name: keycloak-tls
+      create: false

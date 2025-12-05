@@ -107,18 +107,19 @@ func (s *Server) ensureUniqueInfraName(ctx context.Context, infra *infraapi.Proj
 		return status.Errorf(codes.Internal, "lookup existing job %q: %v", infra.Name, err)
 	}
 
-	// If a previous job exists and failed, attempt cleanup to avoid clutter.
+	// If a previous job failed or is being deleted, allow a retry with a unique name.
 	if strings.EqualFold(existing.Status.Phase, "Error") || existing.DeletionTimestamp != nil {
 		_ = s.infraClient.Delete(ctx, &existing)
+		if infra.Annotations == nil {
+			infra.Annotations = map[string]string{}
+		}
+		infra.Name = uniqueInfraName(infra.Name)
+		infra.Annotations["aegis.yourorg.dev/jobBase"] = existing.Name
+		return nil
 	}
 
-	// Always generate a unique name to allow retries/parallel attempts within the same project.
-	if infra.Annotations == nil {
-		infra.Annotations = map[string]string{}
-	}
-	infra.Name = uniqueInfraName(infra.Name)
-	infra.Annotations["aegis.yourorg.dev/jobBase"] = existing.Name
-	return nil
+	// Otherwise, a job for this cluster/project is already running or succeeded; fail fast.
+	return status.Errorf(codes.AlreadyExists, "project infra %q already exists (phase=%s)", existing.Name, existing.Status.Phase)
 }
 
 func uniqueInfraName(base string) string {

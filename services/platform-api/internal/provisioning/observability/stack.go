@@ -625,7 +625,7 @@ func installTracing(ctx *pulumi.Context, clusterKey string, kubeProvider *kubern
 				"protocol":      pulumi.String("TCP"),
 			},
 		},
-		"alternateConfig": pulumi.Map{
+		"config": pulumi.Map{
 			"exporters": pulumi.Map{
 				"otlp": pulumi.Map{
 					"endpoint": pulumi.Sprintf("%s:%d", tempoFullname, tempoGrpc),

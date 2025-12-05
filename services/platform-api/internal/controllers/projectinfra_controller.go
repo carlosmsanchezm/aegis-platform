@@ -755,44 +755,6 @@ func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *in
 	return release, ctrl.Result{}, nil
 }
 
-func (r *ProjectInfraReconciler) renewLease(ctx context.Context, name, namespace, holder string, durationSeconds int32) error {
-	lease := &coordinationv1.Lease{}
-	key := types.NamespacedName{Name: name, Namespace: namespace}
-	now := metav1.NowMicro()
-	if err := r.Get(ctx, key, lease); err != nil {
-		if apierrors.IsNotFound(err) {
-			newLease := &coordinationv1.Lease{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name,
-					Namespace: namespace,
-				},
-				Spec: coordinationv1.LeaseSpec{
-					HolderIdentity:       ptr.To(holder),
-					LeaseDurationSeconds: ptr.To(durationSeconds),
-					AcquireTime:          &now,
-					RenewTime:            &now,
-				},
-			}
-			return client.IgnoreNotFound(r.Create(ctx, newLease))
-		}
-		return err
-	}
-	currentHolder := ""
-	if lease.Spec.HolderIdentity != nil {
-		currentHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
-	}
-	if currentHolder != "" && currentHolder != holder {
-		return nil
-	}
-	lease.Spec.HolderIdentity = ptr.To(holder)
-	lease.Spec.LeaseDurationSeconds = ptr.To(durationSeconds)
-	if lease.Spec.AcquireTime == nil {
-		lease.Spec.AcquireTime = &now
-	}
-	lease.Spec.RenewTime = &now
-	return client.IgnoreNotFound(r.Update(ctx, lease))
-}
-
 func (r *ProjectInfraReconciler) releaseLease(ctx context.Context, name, namespace, holder string) {
 	lease := &coordinationv1.Lease{}
 	key := types.NamespacedName{Name: name, Namespace: namespace}

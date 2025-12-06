@@ -291,13 +291,16 @@ func (s *Server) clusterViews(ctx context.Context, allowed map[string]struct{}, 
 	_ = ctx
 	infos := s.store.ListClusterInfos()
 	now := time.Now()
+	if allowed != nil && len(allowed) == 0 {
+		return []clusterView{}, nil
+	}
 	out := make([]clusterView, 0, len(infos))
 	for _, ci := range infos {
 		if ci == nil {
 			continue
 		}
 		projectID := clusterProject(ci)
-		if len(allowed) > 0 {
+		if allowed != nil {
 			if _, ok := allowed[strings.ToLower(projectID)]; !ok {
 				continue
 			}

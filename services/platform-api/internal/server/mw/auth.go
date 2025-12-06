@@ -200,7 +200,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
 	}
 
-
 	t, err := jwt.ParseWithClaims(token, claims, func(tok *jwt.Token) (interface{}, error) {
 		kid, _ := tok.Header["kid"].(string)
 		key, keyErr := a.keys.getKey(ctx, kid)
@@ -224,7 +223,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 	if len(aud) > 0 {
 		ok := false
 		for _, expected := range aud {
-			if claims.VerifyAudience(expected, true) {
+			if claims.Audience.VerifyAudience(expected, true) {
 				ok = true
 				break
 			}

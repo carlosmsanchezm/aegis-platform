@@ -22,7 +22,7 @@ Follow these rules on every task in this repository.
    - Record the final workflow URL and status in your summary.
 
 4. Git etiquette
-   - Create branches named `aegis-ci/<JiraKey>-<slug>` and reference the ticket in commits and PRs.
+   - Create branches named `<JiraKey>` (e.g., MVP-42) and reference the ticket in commits and PRs.
    - Push the branch and open a PR with validation evidence and noted risks.
 
 5. Safety

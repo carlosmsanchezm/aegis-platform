@@ -246,7 +246,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		if !validAud {
 			a.logFailure(meta, "audience_mismatch", errors.New("token audience not accepted"))
 			metricAuthFailures.WithLabelValues("audience_mismatch").Inc()
-			return nil, status.Error(codes.PermissionDenied, "token audience not accepted")
+			return nil, status.Error(codes.Unauthenticated, "token audience not accepted")
 		}
 	}
 

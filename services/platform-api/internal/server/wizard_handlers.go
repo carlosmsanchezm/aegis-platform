@@ -459,6 +459,8 @@ func httpStatusFromErr(err error) int {
 		return http.StatusUnauthorized
 	case codes.AlreadyExists:
 		return http.StatusConflict
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests
 	case codes.FailedPrecondition:
 		return http.StatusPreconditionFailed
 	default:

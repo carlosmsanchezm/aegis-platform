@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,6 +49,19 @@ import (
 
 type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
+}
+
+func kubeClientProviderConfigured(p kubeClientProvider) bool {
+	if p == nil {
+		return false
+	}
+	v := reflect.ValueOf(p)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return !v.IsNil()
+	default:
+		return true
+	}
 }
 
 type Server struct {
@@ -666,7 +680,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		}
 	}
 
-	if s.kubeClients == nil {
+	if !kubeClientProviderConfigured(s.kubeClients) {
 		err := status.Error(codes.Internal, "kubernetes client manager not configured")
 		s.log.Error("submit workload failed", zap.Error(err))
 		return nil, err

@@ -199,9 +199,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		jwt.WithLeeway(30 * time.Second),
 		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
 	}
-	if len(aud) > 0 {
-		parserOpts = append(parserOpts, jwt.WithAudience(aud[0]))
-	}
 
 
 	t, err := jwt.ParseWithClaims(token, claims, func(tok *jwt.Token) (interface{}, error) {
@@ -223,6 +220,20 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		a.logFailure(meta, "token_invalid", errors.New("token not valid"))
 		metricAuthFailures.WithLabelValues("token_invalid").Inc()
 		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
+	}
+	if len(aud) > 0 {
+		ok := false
+		for _, expected := range aud {
+			if claims.VerifyAudience(expected, true) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			a.logFailure(meta, "audience_mismatch", fmt.Errorf("audience not in %v", aud))
+			metricAuthFailures.WithLabelValues("audience_mismatch").Inc()
+			return nil, status.Error(codes.Unauthenticated, "invalid bearer token audience")
+		}
 	}
 
 	identity := buildIdentity(claims)

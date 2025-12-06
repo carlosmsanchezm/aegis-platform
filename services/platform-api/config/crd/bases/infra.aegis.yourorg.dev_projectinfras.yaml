@@ -249,7 +249,7 @@ spec:
                           metricsServerPort:
                             type: integer
                             format: int32
-                          lokiNamespace:
+q                          lokiNamespace:
                             type: string
                           lokiService:
                             type: string
@@ -262,21 +262,6 @@ spec:
                             type: string
                           metricsUrl:
                             type: string
-                          tracingNamespace:
-                            type: string
-                          tempoService:
-                            type: string
-                          tempoPort:
-                            type: integer
-                            format: int32
-                          otelService:
-                            type: string
-                          otelGrpcPort:
-                            type: integer
-                            format: int32
-                          otelHttpPort:
-                            type: integer
-                            format: int32
                 costHintUsdPerHour:
                   type: number
                   format: double

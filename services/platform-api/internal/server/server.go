@@ -34,6 +34,7 @@ import (
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	"github.com/yourorg/aegis/services/platform-api/internal/authz"
+	"github.com/yourorg/aegis/services/platform-api/internal/aws/observability"
 	"github.com/yourorg/aegis/services/platform-api/internal/config"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
@@ -67,7 +68,14 @@ type Server struct {
 	infraClient          client.Client
 	infraNamespace       string
 	clusterProfiles      map[string]*clusterProfileTemplate
+	awsFetcherFactory    awsFetcherFactory
 }
+
+type awsSignalsFetcher interface {
+	Fetch(ctx context.Context, in observability.FetchInput) (*observability.Signals, error)
+}
+
+type awsFetcherFactory func(ctx context.Context, region string, creds projectAWSCredentials) (awsSignalsFetcher, error)
 
 type proxyClaims struct {
 	Sub     string `json:"sub"`
@@ -199,6 +207,13 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	if profiles == nil {
 		profiles = map[string]*clusterProfileTemplate{}
 	}
+	awsFactory := func(ctx context.Context, region string, creds projectAWSCredentials) (awsSignalsFetcher, error) {
+		return observability.NewFetcher(ctx, observability.AWSConfigInput{
+			Region:     region,
+			RoleARN:    creds.RoleARN,
+			ExternalID: creds.ExternalID,
+		})
+	}
 	return &Server{
 		log:                  log,
 		store:                st,
@@ -215,6 +230,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		infraClient:          infraClient,
 		infraNamespace:       infraNamespace,
 		clusterProfiles:      profiles,
+		awsFetcherFactory:    awsFactory,
 	}
 }
 

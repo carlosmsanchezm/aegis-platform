@@ -125,10 +125,10 @@ Call: `mcp__gpt5__advise` with this payload
 
 1. **Git operations:**
    ```bash
-   git checkout -b aegis-ci/<JIRA_KEY>-<slug>
+   git checkout -b <JIRA_KEY>
    git add <changed-files>
    git commit -m "<JIRA_KEY>: <summary>"
-   git push -u origin aegis-ci/<JIRA_KEY>-<slug>
+   git push -u origin <JIRA_KEY>
    ```
 
 2. **Open PR:**
@@ -188,7 +188,7 @@ Call: `mcp__gpt5__advise` with this payload
 
 ## 4. Git Etiquette
 
-- **Branch naming**: `aegis-ci/<JIRA_KEY>-<descriptive-slug>`
+- **Branch naming**: `<JIRA_KEY>` (e.g., MVP-42)
 - **Commit messages**: Always start with `<JIRA_KEY>:`
 - **PR title**: `<JIRA_KEY>: <concise description>`
 - **PR body**: Include summary, validation status, risks, evidence location

@@ -220,20 +220,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		metricAuthFailures.WithLabelValues("token_invalid").Inc()
 		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
 	}
-	if len(aud) > 0 {
-		ok := false
-		for _, expected := range aud {
-			if claims.Audience.VerifyAudience(expected, true) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			a.logFailure(meta, "audience_mismatch", fmt.Errorf("audience not in %v", aud))
-			metricAuthFailures.WithLabelValues("audience_mismatch").Inc()
-			return nil, status.Error(codes.Unauthenticated, "invalid bearer token audience")
-		}
-	}
 
 	identity := buildIdentity(claims)
 	if kid, ok := t.Header["kid"].(string); ok {
@@ -256,7 +242,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, token string, meta Req
 		if !validAud {
 			a.logFailure(meta, "audience_mismatch", errors.New("token audience not accepted"))
 			metricAuthFailures.WithLabelValues("audience_mismatch").Inc()
-			return nil, status.Error(codes.PermissionDenied, "token audience not accepted")
+			return nil, status.Error(codes.Unauthenticated, "token audience not accepted")
 		}
 	}
 

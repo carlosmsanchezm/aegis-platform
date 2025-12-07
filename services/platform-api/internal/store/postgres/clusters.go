@@ -177,3 +177,19 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	}
 	return out
 }
+
+func (s *PostgresStore) SetClusterProjectID(clusterID, projectID string) {
+	if clusterID == "" || projectID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Upsert the project label for the cluster
+	_, err := s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+		clusterID, "aegis.yourorg.dev/projectId", projectID)
+	if err != nil {
+		s.logExecError("set_cluster_project", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+	}
+}

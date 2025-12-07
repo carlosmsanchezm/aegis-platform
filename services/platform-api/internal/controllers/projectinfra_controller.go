@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
@@ -90,6 +91,9 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// Ensure the project exists in the store for the workspace wizard to list.
+	r.syncProjectToStore(infra)
+
 	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
 	// the ProjectInfra to retry, so keep the object idle in error state.
 	if strings.EqualFold(infra.Status.Phase, "Error") {
@@ -494,9 +498,16 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 		return fmt.Errorf("cluster ID required")
 	}
 
+	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+
+	// Update the store's cluster<->project mapping so the workspace wizard can find clusters for projects.
+	if r.Store != nil && projectID != "" {
+		r.Store.SetClusterProjectID(clusterID, projectID)
+	}
+
 	spec := infraapi.AegisClusterSpec{
 		ClusterID: clusterID,
-		ProjectID: infra.Spec.ProjectID,
+		ProjectID: projectID,
 		Provider:  infra.Spec.Provider,
 		Region:    output.Region,
 	}
@@ -865,4 +876,37 @@ func (r *ProjectInfraReconciler) holderIdentity() string {
 		return h
 	}
 	return "aegis-platform-api"
+}
+
+// syncProjectToStore ensures the project referenced by the ProjectInfra exists in the store.
+// This is required for the workspace wizard to list available projects.
+func (r *ProjectInfraReconciler) syncProjectToStore(infra *infraapi.ProjectInfra) {
+	if r.Store == nil {
+		return
+	}
+	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+	if projectID == "" {
+		return
+	}
+	// Only create if missing - don't overwrite existing project data.
+	if existing := r.Store.GetProject(projectID); existing != nil {
+		return
+	}
+	annotations := make(map[string]string)
+	if infra.Spec.Aws != nil {
+		if infra.Spec.Aws.AccountID != "" {
+			annotations["aegis.yourorg.dev/aws-account-id"] = infra.Spec.Aws.AccountID
+		}
+		if infra.Spec.Aws.RoleARN != "" {
+			annotations["aegis.yourorg.dev/aws-role-arn"] = infra.Spec.Aws.RoleARN
+		}
+		if infra.Spec.Aws.ExternalID != "" {
+			annotations["aegis.yourorg.dev/aws-external-id"] = infra.Spec.Aws.ExternalID
+		}
+	}
+	r.Store.PutProject(&aegis.Project{
+		Id:          projectID,
+		DisplayName: projectID,
+		Annotations: annotations,
+	})
 }

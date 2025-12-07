@@ -32,13 +32,15 @@ func (s *Server) GetAwsClusterSignals(ctx context.Context, req *aegis.GetAwsSign
 	if clusterID == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
-	if info := s.findClusterInfo(clusterID); info != nil {
-		if pid := strings.TrimSpace(info.Labels["aegis.yourorg.dev/projectId"]); pid != "" && !strings.EqualFold(pid, projectID) {
-			return nil, status.Errorf(codes.PermissionDenied, "cluster %q belongs to project %q", clusterID, pid)
-		}
-		if region == "" && strings.TrimSpace(info.Region) != "" {
-			region = strings.TrimSpace(info.Region)
-		}
+	info := s.findClusterInfo(clusterID)
+	if info == nil {
+		return nil, status.Errorf(codes.NotFound, "cluster %q not found", clusterID)
+	}
+	if pid := strings.TrimSpace(info.Labels["aegis.yourorg.dev/projectId"]); pid != "" && !strings.EqualFold(pid, projectID) {
+		return nil, status.Errorf(codes.PermissionDenied, "cluster %q belongs to project %q", clusterID, pid)
+	}
+	if region == "" && strings.TrimSpace(info.Region) != "" {
+		region = strings.TrimSpace(info.Region)
 	}
 	if region == "" {
 		return nil, status.Error(codes.InvalidArgument, "region is required")

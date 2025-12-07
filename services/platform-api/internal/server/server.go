@@ -1012,7 +1012,7 @@ func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.C
 	w.UiStatus = fallback
 	w.Message = w.GetMessage()
 
-	if s.kubeClients == nil || w.GetClusterId() == "" {
+	if !kubeClientProviderConfigured(s.kubeClients) || w.GetClusterId() == "" {
 		return
 	}
 

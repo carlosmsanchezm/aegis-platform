@@ -321,6 +321,7 @@ keycloak:
     client:
       id: backstage
       name: Backstage
+      serviceAccountsEnabled: true
       redirectUris:
         - http://localhost:7008/*
         - https://backstage.localtest.me/*

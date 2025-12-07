@@ -23,6 +23,85 @@ The platform now installs a minimal metrics + logging stack into every provision
 
 Backend/UI proxies should build URLs as `http://<service>.<namespace>.svc:<port>` using these values. No public exposure.
 
+## Platform API observability endpoints
+- `POST /api/metrics/query` – proxy to Prometheus `query_range`. Body:
+  ```json
+  {
+    "projectId": "demo",
+    "clusterId": "aegis-use1-dev",
+    "query": "rate(container_cpu_usage_seconds_total[5m])",
+    "start": "2024-12-01T12:00:00Z",
+    "end": "2024-12-01T12:10:00Z",
+    "stepSeconds": 30
+  }
+  ```
+  Response:
+  ```json
+  {
+    "series": [
+      {
+        "labels": {"pod": "platform-api-123"},
+        "samples": [
+          {"timestamp": "2024-12-01T12:00:00Z", "value": 0.12},
+          {"timestamp": "2024-12-01T12:00:30Z", "value": 0.10}
+        ]
+      }
+    ]
+  }
+  ```
+
+- `POST /api/logs/query` – proxy to Loki `query_range`. Body:
+  ```json
+  {
+    "projectId": "demo",
+    "clusterId": "aegis-use1-dev",
+    "namespace": "platform-api",
+    "pod": "platform-api-7f9c5b9c8f-abcde",
+    "substring": "error",
+    "start": "2024-12-01T12:00:00Z",
+    "end": "2024-12-01T12:10:00Z",
+    "limit": 200,
+    "cursor": ""
+  }
+  ```
+  Response:
+  ```json
+  {
+    "entries": [
+      {
+        "timestamp": "2024-12-01T12:03:21.123456Z",
+        "namespace": "platform-api",
+        "pod": "platform-api-7f9c5b9c8f-abcde",
+        "container": "platform-api",
+        "message": "handler failed: 500 ...",
+        "labels": {
+          "cluster": "aegis-use1-dev",
+          "namespace": "platform-api",
+          "pod": "platform-api-7f9c5b9c8f-abcde",
+          "container": "platform-api"
+        }
+      }
+    ],
+    "nextCursor": "2024-12-01T12:03:21.123456Z"
+  }
+  ```
+
+- `GET /api/traces/{traceId}?projectId=<pid>&clusterId=<cid>` – proxy to Tempo trace lookup. Responds with the Tempo JSON payload.
+
+- `GET /api/alerts?projectId=<pid>&clusterId=<cid>` – proxy to Alertmanager `api/v2/alerts`. Responds with normalized alert list:
+  ```json
+  {
+    "alerts": [
+      {
+        "state": "firing",
+        "labels": {"alertname": "KubePodCrashLooping"},
+        "annotations": {"summary": "Pod crash looping"},
+        "startsAt": "2024-12-01T12:05:00Z"
+      }
+    ]
+  }
+  ```
+
 ### Log query contract
 The backend should proxy to Loki’s HTTP API using the outputs above.
 

@@ -206,7 +206,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			req.Image = override
 		}
 		if override, ok := req.Parameters["flavor"]; ok && strings.TrimSpace(req.Flavor) == "" {
-			flavor = strings.TrimSpace(override)
+			if trimmed := strings.TrimSpace(override); trimmed != "" {
+				flavor = trimmed
+			}
 		}
 	}
 

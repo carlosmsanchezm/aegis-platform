@@ -1788,6 +1788,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
 	registerWorkspaceWizardRoutes(mux, svc)
+	registerObservabilityRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -249,7 +249,7 @@ spec:
                           metricsServerPort:
                             type: integer
                             format: int32
-q                          lokiNamespace:
+                          lokiNamespace:
                             type: string
                           lokiService:
                             type: string

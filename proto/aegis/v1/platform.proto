@@ -229,6 +229,94 @@ message ListProjectsResponse {
   repeated Project items = 1;
 }
 
+message CloudWatchMetricSample {
+  string name = 1;
+  double value = 2;
+  string unit = 3;
+  int32 period_seconds = 4;
+  string statistic = 5;
+  bool found = 6;
+}
+
+message ControlPlaneLogEntry {
+  string timestamp = 1;
+  string stream = 2;
+  string message = 3;
+}
+
+message ControlPlaneSignals {
+  string status = 1;
+  string status_message = 2;
+  bool logging_enabled = 3;
+  string log_group = 4;
+  CloudWatchMetricSample api_server_latency_p99 = 5;
+  CloudWatchMetricSample api_server_5xx_rate = 6;
+  repeated ControlPlaneLogEntry log_samples = 7;
+  repeated string missing = 8;
+}
+
+message ScalingEvent {
+  string description = 1;
+  string status = 2;
+  string time = 3;
+}
+
+message NodegroupSignal {
+  string name = 1;
+  string status = 2;
+  int32 desired = 3;
+  int32 current = 4;
+  int32 ready = 5;
+  string asg_name = 6;
+  repeated string issues = 7;
+  repeated ScalingEvent scaling_events = 8;
+}
+
+message TargetGroupHealth {
+  string arn = 1;
+  string name = 2;
+  int32 healthy = 3;
+  int32 unhealthy = 4;
+}
+
+message LoadBalancerAccessLog {
+  bool enabled = 1;
+  string bucket = 2;
+  string prefix = 3;
+}
+
+message LoadBalancerSignal {
+  string arn = 1;
+  string name = 2;
+  string type = 3;
+  string scheme = 4;
+  string state = 5;
+  double request_count = 6;
+  double target_4xx = 7;
+  double target_5xx = 8;
+  CloudWatchMetricSample latency_p99 = 9;
+  int32 healthy_targets = 10;
+  int32 unhealthy_targets = 11;
+  repeated TargetGroupHealth target_groups = 12;
+  LoadBalancerAccessLog access_logs = 13;
+}
+
+message GetAwsSignalsRequest {
+  string project_id = 1;
+  string cluster_id = 2;
+  string region = 3;
+  int64 lookback_minutes = 4;
+}
+
+message GetAwsSignalsResponse {
+  string cluster_id = 1;
+  string region = 2;
+  ControlPlaneSignals control_plane = 3;
+  repeated NodegroupSignal nodegroups = 4;
+  repeated LoadBalancerSignal load_balancers = 5;
+  repeated string warnings = 6;
+}
+
 // Service
 service AegisPlatform {
   rpc CreateProject(CreateProjectRequest) returns (Project) {
@@ -362,6 +450,11 @@ service AegisPlatform {
     option (google.api.http) = {
       post: "/api/v1/clusters/heartbeat"
       body: "*"
+    };
+  }
+  rpc GetAwsClusterSignals(GetAwsSignalsRequest) returns (GetAwsSignalsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/clusters/{cluster_id}/aws/signals"
     };
   }
 }

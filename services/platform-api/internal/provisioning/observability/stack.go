@@ -15,57 +15,38 @@ import (
 )
 
 const (
-	envObservabilityChart           = "AEGIS_OBSERVABILITY_CHART"
-	envObservabilityChartVersion    = "AEGIS_OBSERVABILITY_CHART_VERSION"
-	envObservabilityRepo            = "AEGIS_OBSERVABILITY_REPO"
-	envObservabilityValuesFile      = "AEGIS_OBSERVABILITY_VALUES_FILE"
-	envObservabilityEnabled         = "AEGIS_OBSERVABILITY_ENABLED"
-	envMetricsServerChart           = "AEGIS_METRICS_SERVER_CHART"
-	envMetricsServerVersion         = "AEGIS_METRICS_SERVER_CHART_VERSION"
-	envMetricsServerRepo            = "AEGIS_METRICS_SERVER_REPO"
-	envMetricsServerValuesFile      = "AEGIS_METRICS_SERVER_VALUES_FILE"
-	envLoggingLokiChart             = "AEGIS_LOGGING_LOKI_CHART"
-	envLoggingLokiChartVersion      = "AEGIS_LOGGING_LOKI_CHART_VERSION"
-	envLoggingLokiRepo              = "AEGIS_LOGGING_LOKI_REPO"
-	envLoggingLokiValuesFile        = "AEGIS_LOGGING_LOKI_VALUES_FILE"
-	envLoggingFluentBitChart        = "AEGIS_LOGGING_FLUENT_BIT_CHART"
-	envLoggingFluentBitVersion      = "AEGIS_LOGGING_FLUENT_BIT_CHART_VERSION"
-	envLoggingFluentBitRepo         = "AEGIS_LOGGING_FLUENT_BIT_REPO"
-	envLoggingFluentBitValuesFile   = "AEGIS_LOGGING_FLUENT_BIT_VALUES_FILE"
-	envTracingTempoChart            = "AEGIS_TRACING_TEMPO_CHART"
-	envTracingTempoChartVersion     = "AEGIS_TRACING_TEMPO_CHART_VERSION"
-	envTracingTempoRepo             = "AEGIS_TRACING_TEMPO_REPO"
-	envTracingTempoValuesFile       = "AEGIS_TRACING_TEMPO_VALUES_FILE"
-	envTracingCollectorChart        = "AEGIS_TRACING_COLLECTOR_CHART"
-	envTracingCollectorChartVersion = "AEGIS_TRACING_COLLECTOR_CHART_VERSION"
-	envTracingCollectorRepo         = "AEGIS_TRACING_COLLECTOR_REPO"
-	envTracingCollectorValuesFile   = "AEGIS_TRACING_COLLECTOR_VALUES_FILE"
-	defaultObservabilityNamespace   = "aegis-observability"
-	defaultObservabilityRelease     = "aegis-obsv"
-	defaultObservabilityBaseName    = "aegis-obsv"
-	defaultMetricsRelease           = "aegis-metrics"
-	defaultLoggingNamespace         = "aegis-logging"
-	defaultLoggingBaseName          = "aegis-logging"
-	defaultLoggingLokiRelease       = "aegis-loki"
-	defaultLoggingFluentBitRelease  = "aegis-fluentbit"
-	defaultTracingNamespace         = "aegis-tracing"
-	defaultTracingBaseName          = "aegis-tracing"
-	defaultTempoRelease             = "aegis-tempo"
-	defaultCollectorRelease         = "aegis-otel"
-	defaultLokiPort                 = 3100
-	defaultTempoPort                = 3200
-	defaultTempoGrpcPort            = 4317
-	defaultTempoHttpPort            = 4318
-	defaultCollectorGrpcPort        = 4317
-	defaultCollectorHttpPort        = 4318
-	defaultLokiRetention            = "168h"
-	defaultTempoRetention           = "48h"
-	defaultPrometheusPort           = 9090
-	defaultAlertmanagerPort         = 9093
-	maxObservabilityNameLength      = 40
-	maxLoggingNameLength            = 40
-	maxTracingNameLength            = 40
-	defaultHelmTimeout              = 15 * time.Minute
+	envObservabilityChart          = "AEGIS_OBSERVABILITY_CHART"
+	envObservabilityChartVersion   = "AEGIS_OBSERVABILITY_CHART_VERSION"
+	envObservabilityRepo           = "AEGIS_OBSERVABILITY_REPO"
+	envObservabilityValuesFile     = "AEGIS_OBSERVABILITY_VALUES_FILE"
+	envObservabilityEnabled        = "AEGIS_OBSERVABILITY_ENABLED"
+	envMetricsServerChart          = "AEGIS_METRICS_SERVER_CHART"
+	envMetricsServerVersion        = "AEGIS_METRICS_SERVER_CHART_VERSION"
+	envMetricsServerRepo           = "AEGIS_METRICS_SERVER_REPO"
+	envMetricsServerValuesFile     = "AEGIS_METRICS_SERVER_VALUES_FILE"
+	envLoggingLokiChart            = "AEGIS_LOGGING_LOKI_CHART"
+	envLoggingLokiChartVersion     = "AEGIS_LOGGING_LOKI_CHART_VERSION"
+	envLoggingLokiRepo             = "AEGIS_LOGGING_LOKI_REPO"
+	envLoggingLokiValuesFile       = "AEGIS_LOGGING_LOKI_VALUES_FILE"
+	envLoggingFluentBitChart       = "AEGIS_LOGGING_FLUENT_BIT_CHART"
+	envLoggingFluentBitVersion     = "AEGIS_LOGGING_FLUENT_BIT_CHART_VERSION"
+	envLoggingFluentBitRepo        = "AEGIS_LOGGING_FLUENT_BIT_REPO"
+	envLoggingFluentBitValuesFile  = "AEGIS_LOGGING_FLUENT_BIT_VALUES_FILE"
+	defaultObservabilityNamespace  = "aegis-observability"
+	defaultObservabilityRelease    = "aegis-obsv"
+	defaultObservabilityBaseName   = "aegis-obsv"
+	defaultMetricsRelease          = "aegis-metrics"
+	defaultLoggingNamespace        = "aegis-logging"
+	defaultLoggingBaseName         = "aegis-logging"
+	defaultLoggingLokiRelease      = "aegis-loki"
+	defaultLoggingFluentBitRelease = "aegis-fluentbit"
+	defaultLokiPort                = 3100
+	defaultLokiRetention           = "168h"
+	defaultPrometheusPort          = 9090
+	defaultAlertmanagerPort        = 9093
+	maxObservabilityNameLength     = 40
+	maxLoggingNameLength           = 40
+	defaultHelmTimeout             = 15 * time.Minute
 )
 
 // HelmConfig describes a helm release configuration.
@@ -85,7 +66,6 @@ type Config struct {
 	Stack            HelmConfig
 	MetricsServer    HelmConfig
 	Logging          LoggingConfig
-	Tracing          TracingConfig
 	Namespace        string
 	BaseName         string
 	PrometheusPort   int
@@ -102,21 +82,6 @@ type LoggingConfig struct {
 	LokiPort        int
 	RetentionPeriod string
 	Enable          bool
-}
-
-// TracingConfig captures Tempo + OTEL Collector settings.
-type TracingConfig struct {
-	Tempo             HelmConfig
-	Collector         HelmConfig
-	Namespace         string
-	BaseName          string
-	TempoPort         int
-	TempoGrpcPort     int
-	TempoHttpPort     int
-	CollectorGrpcPort int
-	CollectorHttpPort int
-	RetentionPeriod   string
-	Enable            bool
 }
 
 // Installer allows swapping observability implementations.
@@ -197,32 +162,6 @@ func ResolveFromEnv(repoRoot string) Config {
 		fluentValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "fluent-bit-values.yaml")
 	}
 
-	tempoChart := strings.TrimSpace(os.Getenv(envTracingTempoChart))
-	if tempoChart == "" {
-		tempoChart = "tempo"
-	}
-	tempoRepo := strings.TrimSpace(os.Getenv(envTracingTempoRepo))
-	if tempoRepo == "" {
-		tempoRepo = "https://grafana.github.io/helm-charts"
-	}
-	tempoValues := strings.TrimSpace(os.Getenv(envTracingTempoValuesFile))
-	if tempoValues == "" {
-		tempoValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "tempo-values.yaml")
-	}
-
-	collectorChart := strings.TrimSpace(os.Getenv(envTracingCollectorChart))
-	if collectorChart == "" {
-		collectorChart = "opentelemetry-collector"
-	}
-	collectorRepo := strings.TrimSpace(os.Getenv(envTracingCollectorRepo))
-	if collectorRepo == "" {
-		collectorRepo = "https://open-telemetry.github.io/opentelemetry-helm-charts"
-	}
-	collectorValues := strings.TrimSpace(os.Getenv(envTracingCollectorValuesFile))
-	if collectorValues == "" {
-		collectorValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "otel-collector-values.yaml")
-	}
-
 	timeout := defaultHelmTimeout
 	return Config{
 		Namespace:        defaultObservabilityNamespace,
@@ -273,37 +212,6 @@ func ResolveFromEnv(repoRoot string) Config {
 				ValuesFile:       fluentValues,
 				Namespace:        defaultLoggingNamespace,
 				ReleaseName:      defaultLoggingFluentBitRelease,
-				Timeout:          timeout,
-				EnableDependency: true,
-			},
-		},
-		Tracing: TracingConfig{
-			Namespace:         defaultTracingNamespace,
-			BaseName:          defaultTracingBaseName,
-			TempoPort:         defaultTempoPort,
-			TempoGrpcPort:     defaultTempoGrpcPort,
-			TempoHttpPort:     defaultTempoHttpPort,
-			CollectorGrpcPort: defaultCollectorGrpcPort,
-			CollectorHttpPort: defaultCollectorHttpPort,
-			RetentionPeriod:   defaultTempoRetention,
-			Enable:            true,
-			Tempo: HelmConfig{
-				ChartPath:        tempoChart,
-				Repository:       tempoRepo,
-				Version:          strings.TrimSpace(os.Getenv(envTracingTempoChartVersion)),
-				ValuesFile:       tempoValues,
-				Namespace:        defaultTracingNamespace,
-				ReleaseName:      defaultTempoRelease,
-				Timeout:          timeout,
-				EnableDependency: true,
-			},
-			Collector: HelmConfig{
-				ChartPath:        collectorChart,
-				Repository:       collectorRepo,
-				Version:          strings.TrimSpace(os.Getenv(envTracingCollectorChartVersion)),
-				ValuesFile:       collectorValues,
-				Namespace:        defaultTracingNamespace,
-				ReleaseName:      defaultCollectorRelease,
 				Timeout:          timeout,
 				EnableDependency: true,
 			},
@@ -439,11 +347,6 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		return nil, err
 	}
 
-	tracingOutputs, err := installTracing(ctx, clusterKey, kubeProvider, cfg, depends)
-	if err != nil {
-		return nil, err
-	}
-
 	outputs := pulumi.Map{
 		"namespace":                pulumi.String(namespace),
 		"prometheusService":        pulumi.String(stackFullname + "-prometheus"),
@@ -457,284 +360,7 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 	for k, v := range loggingOutputs {
 		outputs[k] = v
 	}
-	for k, v := range tracingOutputs {
-		outputs[k] = v
-	}
 	return outputs, nil
-}
-
-func installTracing(ctx *pulumi.Context, clusterKey string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
-	if cfg.Tracing.Enable && kubeProvider == nil {
-		return nil, fmt.Errorf("kubernetes provider is required for tracing installs")
-	}
-	if !cfg.Tracing.Enable {
-		return pulumi.Map{}, nil
-	}
-
-	namespace := strings.TrimSpace(cfg.Tracing.Namespace)
-	if namespace == "" {
-		namespace = defaultTracingNamespace
-	}
-	baseName := strings.TrimSpace(cfg.Tracing.BaseName)
-	if baseName == "" {
-		baseName = defaultTracingBaseName
-	}
-
-	tempoPort := cfg.Tracing.TempoPort
-	if tempoPort == 0 {
-		tempoPort = defaultTempoPort
-	}
-	tempoGrpc := cfg.Tracing.TempoGrpcPort
-	if tempoGrpc == 0 {
-		tempoGrpc = defaultTempoGrpcPort
-	}
-	tempoHttp := cfg.Tracing.TempoHttpPort
-	if tempoHttp == 0 {
-		tempoHttp = defaultTempoHttpPort
-	}
-	collectorGrpc := cfg.Tracing.CollectorGrpcPort
-	if collectorGrpc == 0 {
-		collectorGrpc = defaultCollectorGrpcPort
-	}
-	collectorHttp := cfg.Tracing.CollectorHttpPort
-	if collectorHttp == 0 {
-		collectorHttp = defaultCollectorHttpPort
-	}
-	retention := strings.TrimSpace(cfg.Tracing.RetentionPeriod)
-	if retention == "" {
-		retention = defaultTempoRetention
-	}
-
-	tempoReleaseName := pulumiResourceName(cfg.Tracing.Tempo.ReleaseName+"-"+clusterKey, 53)
-	tempoFullname := pulumiResourceName(baseName+"-"+clusterKey+"-tempo", maxTracingNameLength)
-	tempoTimeout := cfg.Tracing.Tempo.Timeout
-	if tempoTimeout == 0 {
-		tempoTimeout = defaultHelmTimeout
-	}
-
-	tempoValues := pulumi.Map{
-		"fullnameOverride": pulumi.String(tempoFullname),
-		"replicas":         pulumi.Int(1),
-		"tempo": pulumi.Map{
-			"memBallastSizeMbs":   pulumi.Int(0),
-			"multitenancyEnabled": pulumi.Bool(false),
-			"reportingEnabled":    pulumi.Bool(false),
-			"retention":           pulumi.String(retention),
-			"receivers": pulumi.Map{
-				"otlp": pulumi.Map{
-					"protocols": pulumi.Map{
-						"grpc": pulumi.Map{
-							"endpoint": pulumi.Sprintf("0.0.0.0:%d", tempoGrpc),
-						},
-						"http": pulumi.Map{
-							"endpoint": pulumi.Sprintf("0.0.0.0:%d", tempoHttp),
-						},
-					},
-				},
-			},
-			"server": pulumi.Map{
-				"http_listen_port": pulumi.Int(tempoPort),
-			},
-		},
-		"service": pulumi.Map{
-			"type": pulumi.String("ClusterIP"),
-		},
-		"persistence": pulumi.Map{
-			"enabled": pulumi.Bool(false),
-		},
-		"tempoQuery": pulumi.Map{
-			"enabled": pulumi.Bool(false),
-		},
-		"serviceMonitor": pulumi.Map{
-			"enabled": pulumi.Bool(false),
-		},
-	}
-
-	tempoArgs := &helm.ReleaseArgs{
-		Name:            pulumi.StringPtr(tempoReleaseName),
-		Namespace:       pulumi.StringPtr(namespace),
-		Chart:           pulumi.String(cfg.Tracing.Tempo.ChartPath),
-		Values:          tempoValues,
-		Timeout:         pulumi.IntPtr(int(tempoTimeout.Seconds())),
-		CreateNamespace: pulumi.BoolPtr(true),
-	}
-	if cfg.Tracing.Tempo.Repository != "" {
-		opts := helm.RepositoryOptsArgs{Repo: pulumi.StringPtr(cfg.Tracing.Tempo.Repository)}
-		tempoArgs.RepositoryOpts = opts.ToRepositoryOptsPtrOutput()
-	}
-	if cfg.Tracing.Tempo.Version != "" {
-		tempoArgs.Version = pulumi.StringPtr(cfg.Tracing.Tempo.Version)
-	}
-	if cfg.Tracing.Tempo.ValuesFile != "" {
-		tempoArgs.ValueYamlFiles = pulumi.AssetOrArchiveArray{
-			pulumi.NewFileAsset(cfg.Tracing.Tempo.ValuesFile),
-		}
-	}
-	if cfg.Tracing.Tempo.EnableDependency {
-		tempoArgs.DependencyUpdate = pulumi.BoolPtr(true)
-	}
-
-	tempoRelease, err := helm.NewRelease(ctx, pulumiResourceName(clusterKey+"-tempo", 53), tempoArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
-	if err != nil {
-		return nil, err
-	}
-
-	collectorReleaseName := pulumiResourceName(cfg.Tracing.Collector.ReleaseName+"-"+clusterKey, 53)
-	collectorFullname := pulumiResourceName(baseName+"-"+clusterKey+"-otel", maxTracingNameLength)
-	collectorTimeout := cfg.Tracing.Collector.Timeout
-	if collectorTimeout == 0 {
-		collectorTimeout = defaultHelmTimeout
-	}
-
-	collectorValues := pulumi.Map{
-		"mode":             pulumi.String("deployment"),
-		"fullnameOverride": pulumi.String(collectorFullname),
-		"service": pulumi.Map{
-			"type": pulumi.String("ClusterIP"),
-		},
-		"ports": pulumi.Map{
-			"otlp": pulumi.Map{
-				"enabled":       pulumi.Bool(true),
-				"servicePort":   pulumi.Int(collectorGrpc),
-				"containerPort": pulumi.Int(collectorGrpc),
-				"protocol":      pulumi.String("TCP"),
-				"appProtocol":   pulumi.String("grpc"),
-			},
-			"otlp-http": pulumi.Map{
-				"enabled":       pulumi.Bool(true),
-				"servicePort":   pulumi.Int(collectorHttp),
-				"containerPort": pulumi.Int(collectorHttp),
-				"protocol":      pulumi.String("TCP"),
-			},
-			"jaeger-compact": pulumi.Map{
-				"enabled": pulumi.Bool(false),
-			},
-			"jaeger-thrift": pulumi.Map{
-				"enabled": pulumi.Bool(false),
-			},
-			"jaeger-grpc": pulumi.Map{
-				"enabled": pulumi.Bool(false),
-			},
-			"zipkin": pulumi.Map{
-				"enabled": pulumi.Bool(false),
-			},
-			"metrics": pulumi.Map{
-				"enabled":       pulumi.Bool(true),
-				"servicePort":   pulumi.Int(8888),
-				"containerPort": pulumi.Int(8888),
-				"protocol":      pulumi.String("TCP"),
-			},
-		},
-		"config": pulumi.Map{
-			"exporters": pulumi.Map{
-				"otlp": pulumi.Map{
-					"endpoint": pulumi.Sprintf("%s:%d", tempoFullname, tempoGrpc),
-					"tls": pulumi.Map{
-						"insecure": pulumi.Bool(true),
-					},
-				},
-			},
-			"extensions": pulumi.Map{
-				"health_check": pulumi.Map{
-					"endpoint": pulumi.Sprintf("${env:MY_POD_IP}:%d", 13133),
-				},
-			},
-			"processors": pulumi.Map{
-				"batch": pulumi.Map{},
-				"memory_limiter": pulumi.Map{
-					"check_interval":         pulumi.String("5s"),
-					"limit_percentage":       pulumi.Int(80),
-					"spike_limit_percentage": pulumi.Int(25),
-				},
-			},
-			"receivers": pulumi.Map{
-				"otlp": pulumi.Map{
-					"protocols": pulumi.Map{
-						"grpc": pulumi.Map{
-							"endpoint": pulumi.Sprintf("${env:MY_POD_IP}:%d", collectorGrpc),
-						},
-						"http": pulumi.Map{
-							"endpoint": pulumi.Sprintf("${env:MY_POD_IP}:%d", collectorHttp),
-						},
-					},
-				},
-			},
-			"service": pulumi.Map{
-				"extensions": pulumi.Array{
-					pulumi.String("health_check"),
-				},
-				"pipelines": pulumi.Map{
-					"traces": pulumi.Map{
-						"receivers": pulumi.Array{
-							pulumi.String("otlp"),
-						},
-						"processors": pulumi.Array{
-							pulumi.String("memory_limiter"),
-							pulumi.String("batch"),
-						},
-						"exporters": pulumi.Array{
-							pulumi.String("otlp"),
-						},
-					},
-				},
-				"telemetry": pulumi.Map{
-					"metrics": pulumi.Map{
-						"readers": pulumi.Array{
-							pulumi.Map{
-								"pull": pulumi.Map{
-									"exporter": pulumi.Map{
-										"prometheus": pulumi.Map{
-											"host": pulumi.String("${env:MY_POD_IP}"),
-											"port": pulumi.Int(8888),
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	collectorArgs := &helm.ReleaseArgs{
-		Name:            pulumi.StringPtr(collectorReleaseName),
-		Namespace:       pulumi.StringPtr(namespace),
-		Chart:           pulumi.String(cfg.Tracing.Collector.ChartPath),
-		Values:          collectorValues,
-		Timeout:         pulumi.IntPtr(int(collectorTimeout.Seconds())),
-		CreateNamespace: pulumi.BoolPtr(true),
-	}
-	if cfg.Tracing.Collector.Repository != "" {
-		opts := helm.RepositoryOptsArgs{Repo: pulumi.StringPtr(cfg.Tracing.Collector.Repository)}
-		collectorArgs.RepositoryOpts = opts.ToRepositoryOptsPtrOutput()
-	}
-	if cfg.Tracing.Collector.Version != "" {
-		collectorArgs.Version = pulumi.StringPtr(cfg.Tracing.Collector.Version)
-	}
-	if cfg.Tracing.Collector.ValuesFile != "" {
-		collectorArgs.ValueYamlFiles = pulumi.AssetOrArchiveArray{
-			pulumi.NewFileAsset(cfg.Tracing.Collector.ValuesFile),
-		}
-	}
-	if cfg.Tracing.Collector.EnableDependency {
-		collectorArgs.DependencyUpdate = pulumi.BoolPtr(true)
-	}
-
-	collectorDeps := append([]pulumi.Resource{}, depends...)
-	collectorDeps = append(collectorDeps, tempoRelease)
-	if _, err := helm.NewRelease(ctx, pulumiResourceName(clusterKey+"-otel-collector", 53), collectorArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(collectorDeps)); err != nil {
-		return nil, err
-	}
-
-	return pulumi.Map{
-		"tracingNamespace": pulumi.String(namespace),
-		"tempoService":     pulumi.String(tempoFullname),
-		"tempoPort":        pulumi.Int(tempoPort),
-		"otelService":      pulumi.String(collectorFullname),
-		"otelGrpcPort":     pulumi.Int(collectorGrpc),
-		"otelHttpPort":     pulumi.Int(collectorHttp),
-	}, nil
 }
 
 func installLogging(ctx *pulumi.Context, clusterKey string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
@@ -881,7 +507,7 @@ func installLogging(ctx *pulumi.Context, clusterKey string, kubeProvider *kubern
     kube_url https://kubernetes.default.svc:443
     kube_ca_file /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
     kube_token_file /var/run/secrets/kubernetes.io/serviceaccount/token
-    tls.verify On
+    tls.verify Off
 `
 	fluentFilters := fmt.Sprintf(`[FILTER]
     Name kubernetes

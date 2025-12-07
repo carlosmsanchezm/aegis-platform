@@ -38,10 +38,11 @@ RUN apk add --no-cache curl tar && \
 
 # Optionally copy and extract pre-downloaded Pulumi plugins to avoid runtime downloads/rate limits.
 # If the bundle is missing, skip and fall back to on-demand plugin download.
-RUN mkdir -p /root/.pulumi
-COPY services/platform-api/pulumi-plugins/pulumi-plugins-bundle.tar.gz /tmp/pulumi-plugins-bundle.tar.gz 2>/dev/null || true
-RUN if [ -f /tmp/pulumi-plugins-bundle.tar.gz ]; then \
-      tar -xzf /tmp/pulumi-plugins-bundle.tar.gz -C /root/.pulumi && rm /tmp/pulumi-plugins-bundle.tar.gz; \
+RUN --mount=type=bind,source=.,target=/context,readonly \
+    mkdir -p /root/.pulumi && \
+    if [ -f /context/services/platform-api/pulumi-plugins/pulumi-plugins-bundle.tar.gz ]; then \
+      cp /context/services/platform-api/pulumi-plugins/pulumi-plugins-bundle.tar.gz /tmp/pulumi-plugins-bundle.tar.gz && \
+      tar -xzf /tmp/pulumi-plugins-bundle.tar.gz -C /root/.pulumi; \
     else \
       echo "Pulumi plugin bundle not found; plugins will be fetched at runtime"; \
     fi

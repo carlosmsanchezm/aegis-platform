@@ -183,10 +183,16 @@ log "Deploying local stack with TLS"
 wait_for_helm_release "aegis-services" "aegis-system" || exit 1
 wait_for_helm_release "aegis-spoke" "aegis-system" || exit 1
 # Reset Keycloak realm import so Helm applies updated realm configuration
+# This is important because Keycloak only imports realms on initial creation, not on updates
+log "Forcing Keycloak realm reimport to pick up configuration changes"
 kubectl delete keycloakrealmimports.k8s.keycloak.org/aegis-services-keycloak-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret/aegis-services-keycloak-aegis-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete job.batch/aegis-services-keycloak-realm -n keycloak --ignore-not-found >/dev/null 2>&1 || true
 make deploy-local-tls
+# Wait for realm import to complete
+log "Waiting for Keycloak realm import to complete"
+sleep 10
+kubectl wait --for=condition=complete job -l app.kubernetes.io/component=realm -n keycloak --timeout=120s >/dev/null 2>&1 || true
 
 ensure_automation_user
 ensure_backstage_direct_access
@@ -212,9 +218,7 @@ if (( ${#TLS_ARGS[@]} )); then
       KEYCLOAK_REALM="aegis" \
       KEYCLOAK_CLIENT_ID="backstage" \
       KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
-      KEYCLOAK_USERNAME="cloud@test.com" \
-      KEYCLOAK_PASSWORD="password" \
-      KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
+      KEYCLOAK_INSECURE=1 \
       ./scripts/test-all-local.sh "${TLS_ARGS[@]}"
 else
   run_test_all_local "tls" \
@@ -232,9 +236,7 @@ else
       KEYCLOAK_REALM="aegis" \
       KEYCLOAK_CLIENT_ID="backstage" \
       KEYCLOAK_CLIENT_SECRET="local-backstage-client-secret" \
-      KEYCLOAK_USERNAME="cloud@test.com" \
-      KEYCLOAK_PASSWORD="password" \
-      KEYCLOAK_CA_CERT="$HOME/keycloak.localtest.me.crt" \
+      KEYCLOAK_INSECURE=1 \
       ./scripts/test-all-local.sh
 fi
 

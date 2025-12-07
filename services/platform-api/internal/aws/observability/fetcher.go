@@ -449,7 +449,7 @@ func (f *Fetcher) describeAutoScalingGroups(ctx context.Context, names []string)
 		}
 		for idx := range resp.AutoScalingGroups {
 			group := resp.AutoScalingGroups[idx]
-			out[aws.ToString(group.AutoScalingGroupName)] = &group
+			out[aws.ToString(group.AutoScalingGroupName)] = &resp.AutoScalingGroups[idx]
 		}
 	}
 	return out, warnings

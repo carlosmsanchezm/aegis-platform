@@ -3022,6 +3022,830 @@ func (x *ListProjectsResponse) GetItems() []*Project {
 	return nil
 }
 
+type CloudWatchMetricSample struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         float64                `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
+	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
+	PeriodSeconds int32                  `protobuf:"varint,4,opt,name=period_seconds,json=periodSeconds,proto3" json:"period_seconds,omitempty"`
+	Statistic     string                 `protobuf:"bytes,5,opt,name=statistic,proto3" json:"statistic,omitempty"`
+	Found         bool                   `protobuf:"varint,6,opt,name=found,proto3" json:"found,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudWatchMetricSample) Reset() {
+	*x = CloudWatchMetricSample{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudWatchMetricSample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudWatchMetricSample) ProtoMessage() {}
+
+func (x *CloudWatchMetricSample) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudWatchMetricSample.ProtoReflect.Descriptor instead.
+func (*CloudWatchMetricSample) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *CloudWatchMetricSample) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CloudWatchMetricSample) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+func (x *CloudWatchMetricSample) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *CloudWatchMetricSample) GetPeriodSeconds() int32 {
+	if x != nil {
+		return x.PeriodSeconds
+	}
+	return 0
+}
+
+func (x *CloudWatchMetricSample) GetStatistic() string {
+	if x != nil {
+		return x.Statistic
+	}
+	return ""
+}
+
+func (x *CloudWatchMetricSample) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+type ControlPlaneLogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Timestamp     string                 `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Stream        string                 `protobuf:"bytes,2,opt,name=stream,proto3" json:"stream,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ControlPlaneLogEntry) Reset() {
+	*x = ControlPlaneLogEntry{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlPlaneLogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlPlaneLogEntry) ProtoMessage() {}
+
+func (x *ControlPlaneLogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlPlaneLogEntry.ProtoReflect.Descriptor instead.
+func (*ControlPlaneLogEntry) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *ControlPlaneLogEntry) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *ControlPlaneLogEntry) GetStream() string {
+	if x != nil {
+		return x.Stream
+	}
+	return ""
+}
+
+func (x *ControlPlaneLogEntry) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ControlPlaneSignals struct {
+	state               protoimpl.MessageState  `protogen:"open.v1"`
+	Status              string                  `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	StatusMessage       string                  `protobuf:"bytes,2,opt,name=status_message,json=statusMessage,proto3" json:"status_message,omitempty"`
+	LoggingEnabled      bool                    `protobuf:"varint,3,opt,name=logging_enabled,json=loggingEnabled,proto3" json:"logging_enabled,omitempty"`
+	LogGroup            string                  `protobuf:"bytes,4,opt,name=log_group,json=logGroup,proto3" json:"log_group,omitempty"`
+	ApiServerLatencyP99 *CloudWatchMetricSample `protobuf:"bytes,5,opt,name=api_server_latency_p99,json=apiServerLatencyP99,proto3" json:"api_server_latency_p99,omitempty"`
+	ApiServer_5XxRate   *CloudWatchMetricSample `protobuf:"bytes,6,opt,name=api_server_5xx_rate,json=apiServer5xxRate,proto3" json:"api_server_5xx_rate,omitempty"`
+	LogSamples          []*ControlPlaneLogEntry `protobuf:"bytes,7,rep,name=log_samples,json=logSamples,proto3" json:"log_samples,omitempty"`
+	Missing             []string                `protobuf:"bytes,8,rep,name=missing,proto3" json:"missing,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ControlPlaneSignals) Reset() {
+	*x = ControlPlaneSignals{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlPlaneSignals) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlPlaneSignals) ProtoMessage() {}
+
+func (x *ControlPlaneSignals) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlPlaneSignals.ProtoReflect.Descriptor instead.
+func (*ControlPlaneSignals) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *ControlPlaneSignals) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ControlPlaneSignals) GetStatusMessage() string {
+	if x != nil {
+		return x.StatusMessage
+	}
+	return ""
+}
+
+func (x *ControlPlaneSignals) GetLoggingEnabled() bool {
+	if x != nil {
+		return x.LoggingEnabled
+	}
+	return false
+}
+
+func (x *ControlPlaneSignals) GetLogGroup() string {
+	if x != nil {
+		return x.LogGroup
+	}
+	return ""
+}
+
+func (x *ControlPlaneSignals) GetApiServerLatencyP99() *CloudWatchMetricSample {
+	if x != nil {
+		return x.ApiServerLatencyP99
+	}
+	return nil
+}
+
+func (x *ControlPlaneSignals) GetApiServer_5XxRate() *CloudWatchMetricSample {
+	if x != nil {
+		return x.ApiServer_5XxRate
+	}
+	return nil
+}
+
+func (x *ControlPlaneSignals) GetLogSamples() []*ControlPlaneLogEntry {
+	if x != nil {
+		return x.LogSamples
+	}
+	return nil
+}
+
+func (x *ControlPlaneSignals) GetMissing() []string {
+	if x != nil {
+		return x.Missing
+	}
+	return nil
+}
+
+type ScalingEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Description   string                 `protobuf:"bytes,1,opt,name=description,proto3" json:"description,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Time          string                 `protobuf:"bytes,3,opt,name=time,proto3" json:"time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScalingEvent) Reset() {
+	*x = ScalingEvent{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScalingEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScalingEvent) ProtoMessage() {}
+
+func (x *ScalingEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScalingEvent.ProtoReflect.Descriptor instead.
+func (*ScalingEvent) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ScalingEvent) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ScalingEvent) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ScalingEvent) GetTime() string {
+	if x != nil {
+		return x.Time
+	}
+	return ""
+}
+
+type NodegroupSignal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Desired       int32                  `protobuf:"varint,3,opt,name=desired,proto3" json:"desired,omitempty"`
+	Current       int32                  `protobuf:"varint,4,opt,name=current,proto3" json:"current,omitempty"`
+	Ready         int32                  `protobuf:"varint,5,opt,name=ready,proto3" json:"ready,omitempty"`
+	AsgName       string                 `protobuf:"bytes,6,opt,name=asg_name,json=asgName,proto3" json:"asg_name,omitempty"`
+	Issues        []string               `protobuf:"bytes,7,rep,name=issues,proto3" json:"issues,omitempty"`
+	ScalingEvents []*ScalingEvent        `protobuf:"bytes,8,rep,name=scaling_events,json=scalingEvents,proto3" json:"scaling_events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodegroupSignal) Reset() {
+	*x = NodegroupSignal{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodegroupSignal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodegroupSignal) ProtoMessage() {}
+
+func (x *NodegroupSignal) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodegroupSignal.ProtoReflect.Descriptor instead.
+func (*NodegroupSignal) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *NodegroupSignal) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NodegroupSignal) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *NodegroupSignal) GetDesired() int32 {
+	if x != nil {
+		return x.Desired
+	}
+	return 0
+}
+
+func (x *NodegroupSignal) GetCurrent() int32 {
+	if x != nil {
+		return x.Current
+	}
+	return 0
+}
+
+func (x *NodegroupSignal) GetReady() int32 {
+	if x != nil {
+		return x.Ready
+	}
+	return 0
+}
+
+func (x *NodegroupSignal) GetAsgName() string {
+	if x != nil {
+		return x.AsgName
+	}
+	return ""
+}
+
+func (x *NodegroupSignal) GetIssues() []string {
+	if x != nil {
+		return x.Issues
+	}
+	return nil
+}
+
+func (x *NodegroupSignal) GetScalingEvents() []*ScalingEvent {
+	if x != nil {
+		return x.ScalingEvents
+	}
+	return nil
+}
+
+type TargetGroupHealth struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Arn           string                 `protobuf:"bytes,1,opt,name=arn,proto3" json:"arn,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Healthy       int32                  `protobuf:"varint,3,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	Unhealthy     int32                  `protobuf:"varint,4,opt,name=unhealthy,proto3" json:"unhealthy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TargetGroupHealth) Reset() {
+	*x = TargetGroupHealth{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TargetGroupHealth) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TargetGroupHealth) ProtoMessage() {}
+
+func (x *TargetGroupHealth) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TargetGroupHealth.ProtoReflect.Descriptor instead.
+func (*TargetGroupHealth) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *TargetGroupHealth) GetArn() string {
+	if x != nil {
+		return x.Arn
+	}
+	return ""
+}
+
+func (x *TargetGroupHealth) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TargetGroupHealth) GetHealthy() int32 {
+	if x != nil {
+		return x.Healthy
+	}
+	return 0
+}
+
+func (x *TargetGroupHealth) GetUnhealthy() int32 {
+	if x != nil {
+		return x.Unhealthy
+	}
+	return 0
+}
+
+type LoadBalancerAccessLog struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Bucket        string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	Prefix        string                 `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoadBalancerAccessLog) Reset() {
+	*x = LoadBalancerAccessLog{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoadBalancerAccessLog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoadBalancerAccessLog) ProtoMessage() {}
+
+func (x *LoadBalancerAccessLog) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoadBalancerAccessLog.ProtoReflect.Descriptor instead.
+func (*LoadBalancerAccessLog) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *LoadBalancerAccessLog) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *LoadBalancerAccessLog) GetBucket() string {
+	if x != nil {
+		return x.Bucket
+	}
+	return ""
+}
+
+func (x *LoadBalancerAccessLog) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+type LoadBalancerSignal struct {
+	state            protoimpl.MessageState  `protogen:"open.v1"`
+	Arn              string                  `protobuf:"bytes,1,opt,name=arn,proto3" json:"arn,omitempty"`
+	Name             string                  `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Type             string                  `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Scheme           string                  `protobuf:"bytes,4,opt,name=scheme,proto3" json:"scheme,omitempty"`
+	State            string                  `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	RequestCount     float64                 `protobuf:"fixed64,6,opt,name=request_count,json=requestCount,proto3" json:"request_count,omitempty"`
+	Target_4Xx       float64                 `protobuf:"fixed64,7,opt,name=target_4xx,json=target4xx,proto3" json:"target_4xx,omitempty"`
+	Target_5Xx       float64                 `protobuf:"fixed64,8,opt,name=target_5xx,json=target5xx,proto3" json:"target_5xx,omitempty"`
+	LatencyP99       *CloudWatchMetricSample `protobuf:"bytes,9,opt,name=latency_p99,json=latencyP99,proto3" json:"latency_p99,omitempty"`
+	HealthyTargets   int32                   `protobuf:"varint,10,opt,name=healthy_targets,json=healthyTargets,proto3" json:"healthy_targets,omitempty"`
+	UnhealthyTargets int32                   `protobuf:"varint,11,opt,name=unhealthy_targets,json=unhealthyTargets,proto3" json:"unhealthy_targets,omitempty"`
+	TargetGroups     []*TargetGroupHealth    `protobuf:"bytes,12,rep,name=target_groups,json=targetGroups,proto3" json:"target_groups,omitempty"`
+	AccessLogs       *LoadBalancerAccessLog  `protobuf:"bytes,13,opt,name=access_logs,json=accessLogs,proto3" json:"access_logs,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *LoadBalancerSignal) Reset() {
+	*x = LoadBalancerSignal{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoadBalancerSignal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoadBalancerSignal) ProtoMessage() {}
+
+func (x *LoadBalancerSignal) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoadBalancerSignal.ProtoReflect.Descriptor instead.
+func (*LoadBalancerSignal) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *LoadBalancerSignal) GetArn() string {
+	if x != nil {
+		return x.Arn
+	}
+	return ""
+}
+
+func (x *LoadBalancerSignal) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *LoadBalancerSignal) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *LoadBalancerSignal) GetScheme() string {
+	if x != nil {
+		return x.Scheme
+	}
+	return ""
+}
+
+func (x *LoadBalancerSignal) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *LoadBalancerSignal) GetRequestCount() float64 {
+	if x != nil {
+		return x.RequestCount
+	}
+	return 0
+}
+
+func (x *LoadBalancerSignal) GetTarget_4Xx() float64 {
+	if x != nil {
+		return x.Target_4Xx
+	}
+	return 0
+}
+
+func (x *LoadBalancerSignal) GetTarget_5Xx() float64 {
+	if x != nil {
+		return x.Target_5Xx
+	}
+	return 0
+}
+
+func (x *LoadBalancerSignal) GetLatencyP99() *CloudWatchMetricSample {
+	if x != nil {
+		return x.LatencyP99
+	}
+	return nil
+}
+
+func (x *LoadBalancerSignal) GetHealthyTargets() int32 {
+	if x != nil {
+		return x.HealthyTargets
+	}
+	return 0
+}
+
+func (x *LoadBalancerSignal) GetUnhealthyTargets() int32 {
+	if x != nil {
+		return x.UnhealthyTargets
+	}
+	return 0
+}
+
+func (x *LoadBalancerSignal) GetTargetGroups() []*TargetGroupHealth {
+	if x != nil {
+		return x.TargetGroups
+	}
+	return nil
+}
+
+func (x *LoadBalancerSignal) GetAccessLogs() *LoadBalancerAccessLog {
+	if x != nil {
+		return x.AccessLogs
+	}
+	return nil
+}
+
+type GetAwsSignalsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId       string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ClusterId       string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Region          string                 `protobuf:"bytes,3,opt,name=region,proto3" json:"region,omitempty"`
+	LookbackMinutes int64                  `protobuf:"varint,4,opt,name=lookback_minutes,json=lookbackMinutes,proto3" json:"lookback_minutes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GetAwsSignalsRequest) Reset() {
+	*x = GetAwsSignalsRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAwsSignalsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAwsSignalsRequest) ProtoMessage() {}
+
+func (x *GetAwsSignalsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAwsSignalsRequest.ProtoReflect.Descriptor instead.
+func (*GetAwsSignalsRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *GetAwsSignalsRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *GetAwsSignalsRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *GetAwsSignalsRequest) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *GetAwsSignalsRequest) GetLookbackMinutes() int64 {
+	if x != nil {
+		return x.LookbackMinutes
+	}
+	return 0
+}
+
+type GetAwsSignalsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Region        string                 `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
+	ControlPlane  *ControlPlaneSignals   `protobuf:"bytes,3,opt,name=control_plane,json=controlPlane,proto3" json:"control_plane,omitempty"`
+	Nodegroups    []*NodegroupSignal     `protobuf:"bytes,4,rep,name=nodegroups,proto3" json:"nodegroups,omitempty"`
+	LoadBalancers []*LoadBalancerSignal  `protobuf:"bytes,5,rep,name=load_balancers,json=loadBalancers,proto3" json:"load_balancers,omitempty"`
+	Warnings      []string               `protobuf:"bytes,6,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAwsSignalsResponse) Reset() {
+	*x = GetAwsSignalsResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAwsSignalsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAwsSignalsResponse) ProtoMessage() {}
+
+func (x *GetAwsSignalsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAwsSignalsResponse.ProtoReflect.Descriptor instead.
+func (*GetAwsSignalsResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *GetAwsSignalsResponse) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *GetAwsSignalsResponse) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *GetAwsSignalsResponse) GetControlPlane() *ControlPlaneSignals {
+	if x != nil {
+		return x.ControlPlane
+	}
+	return nil
+}
+
+func (x *GetAwsSignalsResponse) GetNodegroups() []*NodegroupSignal {
+	if x != nil {
+		return x.Nodegroups
+	}
+	return nil
+}
+
+func (x *GetAwsSignalsResponse) GetLoadBalancers() []*LoadBalancerSignal {
+	if x != nil {
+		return x.LoadBalancers
+	}
+	return nil
+}
+
+func (x *GetAwsSignalsResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
 var File_aegis_v1_platform_proto protoreflect.FileDescriptor
 
 const file_aegis_v1_platform_proto_rawDesc = "" +
@@ -3266,7 +4090,86 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x15\n" +
 	"\x13ListProjectsRequest\"?\n" +
 	"\x14ListProjectsResponse\x12'\n" +
-	"\x05items\x18\x01 \x03(\v2\x11.aegis.v1.ProjectR\x05items2\x8a\x15\n" +
+	"\x05items\x18\x01 \x03(\v2\x11.aegis.v1.ProjectR\x05items\"\xb1\x01\n" +
+	"\x16CloudWatchMetricSample\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value\x12\x12\n" +
+	"\x04unit\x18\x03 \x01(\tR\x04unit\x12%\n" +
+	"\x0eperiod_seconds\x18\x04 \x01(\x05R\rperiodSeconds\x12\x1c\n" +
+	"\tstatistic\x18\x05 \x01(\tR\tstatistic\x12\x14\n" +
+	"\x05found\x18\x06 \x01(\bR\x05found\"f\n" +
+	"\x14ControlPlaneLogEntry\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\tR\ttimestamp\x12\x16\n" +
+	"\x06stream\x18\x02 \x01(\tR\x06stream\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x9d\x03\n" +
+	"\x13ControlPlaneSignals\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12%\n" +
+	"\x0estatus_message\x18\x02 \x01(\tR\rstatusMessage\x12'\n" +
+	"\x0flogging_enabled\x18\x03 \x01(\bR\x0eloggingEnabled\x12\x1b\n" +
+	"\tlog_group\x18\x04 \x01(\tR\blogGroup\x12U\n" +
+	"\x16api_server_latency_p99\x18\x05 \x01(\v2 .aegis.v1.CloudWatchMetricSampleR\x13apiServerLatencyP99\x12O\n" +
+	"\x13api_server_5xx_rate\x18\x06 \x01(\v2 .aegis.v1.CloudWatchMetricSampleR\x10apiServer5xxRate\x12?\n" +
+	"\vlog_samples\x18\a \x03(\v2\x1e.aegis.v1.ControlPlaneLogEntryR\n" +
+	"logSamples\x12\x18\n" +
+	"\amissing\x18\b \x03(\tR\amissing\"\\\n" +
+	"\fScalingEvent\x12 \n" +
+	"\vdescription\x18\x01 \x01(\tR\vdescription\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x12\n" +
+	"\x04time\x18\x03 \x01(\tR\x04time\"\xf9\x01\n" +
+	"\x0fNodegroupSignal\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
+	"\adesired\x18\x03 \x01(\x05R\adesired\x12\x18\n" +
+	"\acurrent\x18\x04 \x01(\x05R\acurrent\x12\x14\n" +
+	"\x05ready\x18\x05 \x01(\x05R\x05ready\x12\x19\n" +
+	"\basg_name\x18\x06 \x01(\tR\aasgName\x12\x16\n" +
+	"\x06issues\x18\a \x03(\tR\x06issues\x12=\n" +
+	"\x0escaling_events\x18\b \x03(\v2\x16.aegis.v1.ScalingEventR\rscalingEvents\"q\n" +
+	"\x11TargetGroupHealth\x12\x10\n" +
+	"\x03arn\x18\x01 \x01(\tR\x03arn\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\ahealthy\x18\x03 \x01(\x05R\ahealthy\x12\x1c\n" +
+	"\tunhealthy\x18\x04 \x01(\x05R\tunhealthy\"a\n" +
+	"\x15LoadBalancerAccessLog\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x16\n" +
+	"\x06bucket\x18\x02 \x01(\tR\x06bucket\x12\x16\n" +
+	"\x06prefix\x18\x03 \x01(\tR\x06prefix\"\xfc\x03\n" +
+	"\x12LoadBalancerSignal\x12\x10\n" +
+	"\x03arn\x18\x01 \x01(\tR\x03arn\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12\x16\n" +
+	"\x06scheme\x18\x04 \x01(\tR\x06scheme\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state\x12#\n" +
+	"\rrequest_count\x18\x06 \x01(\x01R\frequestCount\x12\x1d\n" +
+	"\n" +
+	"target_4xx\x18\a \x01(\x01R\ttarget4xx\x12\x1d\n" +
+	"\n" +
+	"target_5xx\x18\b \x01(\x01R\ttarget5xx\x12A\n" +
+	"\vlatency_p99\x18\t \x01(\v2 .aegis.v1.CloudWatchMetricSampleR\n" +
+	"latencyP99\x12'\n" +
+	"\x0fhealthy_targets\x18\n" +
+	" \x01(\x05R\x0ehealthyTargets\x12+\n" +
+	"\x11unhealthy_targets\x18\v \x01(\x05R\x10unhealthyTargets\x12@\n" +
+	"\rtarget_groups\x18\f \x03(\v2\x1b.aegis.v1.TargetGroupHealthR\ftargetGroups\x12@\n" +
+	"\vaccess_logs\x18\r \x01(\v2\x1f.aegis.v1.LoadBalancerAccessLogR\n" +
+	"accessLogs\"\x97\x01\n" +
+	"\x14GetAwsSignalsRequest\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x02 \x01(\tR\tclusterId\x12\x16\n" +
+	"\x06region\x18\x03 \x01(\tR\x06region\x12)\n" +
+	"\x10lookback_minutes\x18\x04 \x01(\x03R\x0flookbackMinutes\"\xae\x02\n" +
+	"\x15GetAwsSignalsResponse\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x16\n" +
+	"\x06region\x18\x02 \x01(\tR\x06region\x12B\n" +
+	"\rcontrol_plane\x18\x03 \x01(\v2\x1d.aegis.v1.ControlPlaneSignalsR\fcontrolPlane\x129\n" +
+	"\n" +
+	"nodegroups\x18\x04 \x03(\v2\x19.aegis.v1.NodegroupSignalR\n" +
+	"nodegroups\x12C\n" +
+	"\x0eload_balancers\x18\x05 \x03(\v2\x1c.aegis.v1.LoadBalancerSignalR\rloadBalancers\x12\x1a\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings2\xad\x16\n" +
 	"\rAegisPlatform\x12_\n" +
 	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/api/v1/projects\x12g\n" +
 	"\fListProjects\x12\x1d.aegis.v1.ListProjectsRequest\x1a\x1e.aegis.v1.ListProjectsResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/projects\x12x\n" +
@@ -3289,7 +4192,8 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\rStartWorkload\x12\x1e.aegis.v1.StartWorkloadRequest\x1a\x1f.aegis.v1.StartWorkloadResponse\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/api/v1/workloads/{id}/start\x12q\n" +
 	"\vAckWorkload\x12\x1c.aegis.v1.AckWorkloadRequest\x1a\x1d.aegis.v1.AckWorkloadResponse\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/api/v1/workloads/{id}/ack\x12|\n" +
 	"\x0fRegisterCluster\x12 .aegis.v1.ClusterRegisterRequest\x1a!.aegis.v1.ClusterRegisterResponse\"$\x82\xd3\xe4\x93\x02\x1e:\x01*\"\x19/api/v1/clusters/register\x12m\n" +
-	"\tHeartbeat\x12\x1a.aegis.v1.ClusterHeartbeat\x1a\x1d.aegis.v1.ClusterHeartbeatAck\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/api/v1/clusters/heartbeatB\x8f\x01\n" +
+	"\tHeartbeat\x12\x1a.aegis.v1.ClusterHeartbeat\x1a\x1d.aegis.v1.ClusterHeartbeatAck\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/api/v1/clusters/heartbeat\x12\xa0\x01\n" +
+	"\x14GetAwsClusterSignals\x12\x1e.aegis.v1.GetAwsSignalsRequest\x1a\x1f.aegis.v1.GetAwsSignalsResponse\"G\x82\xd3\xe4\x93\x02A\x12?/api/v1/projects/{project_id}/clusters/{cluster_id}/aws/signalsB\x8f\x01\n" +
 	"\fcom.aegis.v1B\rPlatformProtoP\x01Z/github.com/yourorg/aegis/proto/aegis/v1;aegisv1\xa2\x02\x03AXX\xaa\x02\bAegis.V1\xca\x02\bAegis\\V1\xe2\x02\x14Aegis\\V1\\GPBMetadata\xea\x02\tAegis::V1b\x06proto3"
 
 var (
@@ -3304,7 +4208,7 @@ func file_aegis_v1_platform_proto_rawDescGZIP() []byte {
 	return file_aegis_v1_platform_proto_rawDescData
 }
 
-var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Project)(nil),                               // 0: aegis.v1.Project
 	(*ProjectAwsCredentials)(nil),                 // 1: aegis.v1.ProjectAwsCredentials
@@ -3356,21 +4260,31 @@ var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Job)(nil),                                   // 47: aegis.v1.Job
 	(*ListProjectsRequest)(nil),                   // 48: aegis.v1.ListProjectsRequest
 	(*ListProjectsResponse)(nil),                  // 49: aegis.v1.ListProjectsResponse
-	nil,                                           // 50: aegis.v1.Project.AnnotationsEntry
-	nil,                                           // 51: aegis.v1.WorkspaceSpec.EnvEntry
-	nil,                                           // 52: aegis.v1.ClusterRegisterRequest.LabelsEntry
-	nil,                                           // 53: aegis.v1.ClusterProfileReference.ParametersEntry
-	(*emptypb.Empty)(nil),                         // 54: google.protobuf.Empty
+	(*CloudWatchMetricSample)(nil),                // 50: aegis.v1.CloudWatchMetricSample
+	(*ControlPlaneLogEntry)(nil),                  // 51: aegis.v1.ControlPlaneLogEntry
+	(*ControlPlaneSignals)(nil),                   // 52: aegis.v1.ControlPlaneSignals
+	(*ScalingEvent)(nil),                          // 53: aegis.v1.ScalingEvent
+	(*NodegroupSignal)(nil),                       // 54: aegis.v1.NodegroupSignal
+	(*TargetGroupHealth)(nil),                     // 55: aegis.v1.TargetGroupHealth
+	(*LoadBalancerAccessLog)(nil),                 // 56: aegis.v1.LoadBalancerAccessLog
+	(*LoadBalancerSignal)(nil),                    // 57: aegis.v1.LoadBalancerSignal
+	(*GetAwsSignalsRequest)(nil),                  // 58: aegis.v1.GetAwsSignalsRequest
+	(*GetAwsSignalsResponse)(nil),                 // 59: aegis.v1.GetAwsSignalsResponse
+	nil,                                           // 60: aegis.v1.Project.AnnotationsEntry
+	nil,                                           // 61: aegis.v1.WorkspaceSpec.EnvEntry
+	nil,                                           // 62: aegis.v1.ClusterRegisterRequest.LabelsEntry
+	nil,                                           // 63: aegis.v1.ClusterProfileReference.ParametersEntry
+	(*emptypb.Empty)(nil),                         // 64: google.protobuf.Empty
 }
 var file_aegis_v1_platform_proto_depIdxs = []int32{
 	2,  // 0: aegis.v1.Project.policy:type_name -> aegis.v1.PolicyDomain
-	50, // 1: aegis.v1.Project.annotations:type_name -> aegis.v1.Project.AnnotationsEntry
+	60, // 1: aegis.v1.Project.annotations:type_name -> aegis.v1.Project.AnnotationsEntry
 	1,  // 2: aegis.v1.Project.aws:type_name -> aegis.v1.ProjectAwsCredentials
-	51, // 3: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
+	61, // 3: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
 	6,  // 4: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
 	7,  // 5: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
 	8,  // 6: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
-	52, // 7: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
+	62, // 7: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
 	4,  // 8: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
 	0,  // 9: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
 	3,  // 10: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
@@ -3388,60 +4302,72 @@ var file_aegis_v1_platform_proto_depIdxs = []int32{
 	38, // 22: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
 	6,  // 23: aegis.v1.CreateWorkspaceRequest.workspace:type_name -> aegis.v1.WorkspaceSpec
 	9,  // 24: aegis.v1.CreateWorkspaceResponse.workload:type_name -> aegis.v1.Workload
-	53, // 25: aegis.v1.ClusterProfileReference.parameters:type_name -> aegis.v1.ClusterProfileReference.ParametersEntry
+	63, // 25: aegis.v1.ClusterProfileReference.parameters:type_name -> aegis.v1.ClusterProfileReference.ParametersEntry
 	42, // 26: aegis.v1.CreateClusterRequest.profile:type_name -> aegis.v1.ClusterProfileReference
 	47, // 27: aegis.v1.CreateClusterResponse.job:type_name -> aegis.v1.Job
 	47, // 28: aegis.v1.GetClusterJobStatusResponse.job:type_name -> aegis.v1.Job
 	0,  // 29: aegis.v1.ListProjectsResponse.items:type_name -> aegis.v1.Project
-	20, // 30: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
-	48, // 31: aegis.v1.AegisPlatform.ListProjects:input_type -> aegis.v1.ListProjectsRequest
-	21, // 32: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
-	34, // 33: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
-	37, // 34: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
-	22, // 35: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
-	23, // 36: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
-	24, // 37: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
-	25, // 38: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
-	26, // 39: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
-	40, // 40: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
-	43, // 41: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
-	45, // 42: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
-	10, // 43: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
-	12, // 44: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
-	14, // 45: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
-	15, // 46: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
-	28, // 47: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
-	32, // 48: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
-	30, // 49: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
-	16, // 50: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
-	18, // 51: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
-	0,  // 52: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
-	49, // 53: aegis.v1.AegisPlatform.ListProjects:output_type -> aegis.v1.ListProjectsResponse
-	3,  // 54: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
-	36, // 55: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
-	39, // 56: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
-	4,  // 57: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
-	5,  // 58: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
-	9,  // 59: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
-	9,  // 60: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
-	27, // 61: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
-	41, // 62: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
-	44, // 63: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
-	46, // 64: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
-	11, // 65: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
-	13, // 66: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
-	13, // 67: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
-	54, // 68: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
-	29, // 69: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
-	33, // 70: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
-	31, // 71: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
-	17, // 72: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
-	19, // 73: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
-	52, // [52:74] is the sub-list for method output_type
-	30, // [30:52] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	50, // 30: aegis.v1.ControlPlaneSignals.api_server_latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
+	50, // 31: aegis.v1.ControlPlaneSignals.api_server_5xx_rate:type_name -> aegis.v1.CloudWatchMetricSample
+	51, // 32: aegis.v1.ControlPlaneSignals.log_samples:type_name -> aegis.v1.ControlPlaneLogEntry
+	53, // 33: aegis.v1.NodegroupSignal.scaling_events:type_name -> aegis.v1.ScalingEvent
+	50, // 34: aegis.v1.LoadBalancerSignal.latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
+	55, // 35: aegis.v1.LoadBalancerSignal.target_groups:type_name -> aegis.v1.TargetGroupHealth
+	56, // 36: aegis.v1.LoadBalancerSignal.access_logs:type_name -> aegis.v1.LoadBalancerAccessLog
+	52, // 37: aegis.v1.GetAwsSignalsResponse.control_plane:type_name -> aegis.v1.ControlPlaneSignals
+	54, // 38: aegis.v1.GetAwsSignalsResponse.nodegroups:type_name -> aegis.v1.NodegroupSignal
+	57, // 39: aegis.v1.GetAwsSignalsResponse.load_balancers:type_name -> aegis.v1.LoadBalancerSignal
+	20, // 40: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
+	48, // 41: aegis.v1.AegisPlatform.ListProjects:input_type -> aegis.v1.ListProjectsRequest
+	21, // 42: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
+	34, // 43: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
+	37, // 44: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
+	22, // 45: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
+	23, // 46: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
+	24, // 47: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
+	25, // 48: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
+	26, // 49: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
+	40, // 50: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
+	43, // 51: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
+	45, // 52: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
+	10, // 53: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
+	12, // 54: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
+	14, // 55: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
+	15, // 56: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
+	28, // 57: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
+	32, // 58: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
+	30, // 59: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
+	16, // 60: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
+	18, // 61: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
+	58, // 62: aegis.v1.AegisPlatform.GetAwsClusterSignals:input_type -> aegis.v1.GetAwsSignalsRequest
+	0,  // 63: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
+	49, // 64: aegis.v1.AegisPlatform.ListProjects:output_type -> aegis.v1.ListProjectsResponse
+	3,  // 65: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
+	36, // 66: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
+	39, // 67: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
+	4,  // 68: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
+	5,  // 69: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
+	9,  // 70: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
+	9,  // 71: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
+	27, // 72: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
+	41, // 73: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
+	44, // 74: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
+	46, // 75: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
+	11, // 76: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
+	13, // 77: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
+	13, // 78: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
+	64, // 79: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
+	29, // 80: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
+	33, // 81: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
+	31, // 82: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
+	17, // 83: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
+	19, // 84: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
+	59, // 85: aegis.v1.AegisPlatform.GetAwsClusterSignals:output_type -> aegis.v1.GetAwsSignalsResponse
+	63, // [63:86] is the sub-list for method output_type
+	40, // [40:63] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_aegis_v1_platform_proto_init() }
@@ -3459,7 +4385,7 @@ func file_aegis_v1_platform_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aegis_v1_platform_proto_rawDesc), len(file_aegis_v1_platform_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   54,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

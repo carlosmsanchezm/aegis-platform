@@ -673,6 +673,8 @@ func lbNamespace(lbType elbtypes.LoadBalancerTypeEnum) string {
 	switch lbType {
 	case elbtypes.LoadBalancerTypeEnumNetwork:
 		return "AWS/NetworkELB"
+	case elbtypes.LoadBalancerTypeEnumGateway:
+		return "AWS/GatewayELB"
 	default:
 		return "AWS/ApplicationELB"
 	}

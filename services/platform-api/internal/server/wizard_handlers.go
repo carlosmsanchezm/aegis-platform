@@ -169,7 +169,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.FailedPrecondition, "cluster %s has no available flavors", clusterID))
 		return
 	}
-	s.ensureFlavorDefaults(flavor)
+	if s.autoBootstrap {
+		s.ensureFlavorDefaults(flavor)
+	}
 
 	queue := strings.TrimSpace(req.Queue)
 	if queue == "" {
@@ -178,7 +180,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			queue = fmt.Sprintf("%s-workspaces", projectID)
 		}
 	}
-	s.ensureWorkspaceQueue(projectID, queue, flavor)
+	if s.autoBootstrap {
+		s.ensureWorkspaceQueue(projectID, queue, flavor)
+	}
 
 	env := map[string]string{
 		"WORKSPACE_NAME": name,

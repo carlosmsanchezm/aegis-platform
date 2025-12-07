@@ -98,4 +98,5 @@ type Store interface {
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
 	ListClusterInfos() []*ClusterInfo
+	SetClusterProjectID(clusterID, projectID string)
 }

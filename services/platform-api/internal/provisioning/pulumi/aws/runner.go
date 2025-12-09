@@ -40,7 +40,9 @@ const (
 	projectNamePrefix          = "aegis-platform"
 	defaultStackPrefix         = "aegis"
 	defaultHelmNamespace       = "aegis-system"
+	defaultWorkloadsNamespace  = "aegis-workloads"
 	defaultSpokeReleaseName    = "aegis-spoke"
+	envAegisWorkloadsNamespace = "AEGIS_WORKLOADS_NAMESPACE"
 	envPulumiBackendURL        = "PULUMI_BACKEND_URL"
 	envAegisSpokeChart         = "AEGIS_SPOKE_CHART"
 	envAegisSpokeChartVersion  = "AEGIS_SPOKE_CHART_VERSION"
@@ -481,6 +483,13 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				}
 			}
 
+			// Install Cluster Autoscaler to enable automatic node scaling.
+			// This is essential for on-demand GPU provisioning - when a workspace
+			// requests GPU resources, the autoscaler will scale up the GPU node group.
+			if err := r.installClusterAutoscaler(ctx, clusterDef.ClusterID, cluster.Name, input.Region, kubeProvider, append(nodeGroups, cluster)); err != nil {
+				return err
+			}
+
 			var observabilityOutputs pulumi.Map
 			if input.EnableObservability && input.Observability.Enable {
 				obs, err := installer.Install(ctx, clusterDef.ClusterID, kubeProvider, input.Observability, append(nodeGroups, cluster))
@@ -494,6 +503,13 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
 					return err
 				}
+			}
+
+			// Create the workloads namespace where workspace pods will be scheduled.
+			// This must exist before the hub can create Workspace CRs in this cluster.
+			// Namespace is project-scoped for multi-tenant isolation.
+			if _, err := r.createWorkloadsNamespace(ctx, input.ProjectID, clusterDef.ClusterID, kubeProvider, append(nodeGroups, cluster)); err != nil {
+				return err
 			}
 
 			key := clusterDef.ClusterID
@@ -843,6 +859,51 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	return nil
 }
 
+// createWorkloadsNamespace creates the namespace where workspace pods will be scheduled.
+// This namespace is required for the hub's platform-api to create Workspace CRs in spoke clusters.
+// For multi-tenancy, namespaces are project-scoped: aegis-workloads-{projectId}
+func (r *Runner) createWorkloadsNamespace(ctx *pulumi.Context, projectID, clusterID string, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) (*kubecorev1.Namespace, error) {
+	nsName := WorkloadsNamespaceForProject(projectID)
+	resourceName := fmt.Sprintf("%s-workloads-ns", sanitize(clusterID))
+
+	ns, err := kubecorev1.NewNamespace(ctx, resourceName, &kubecorev1.NamespaceArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name: pulumi.String(nsName),
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/name":       pulumi.String("aegis-workloads"),
+				"app.kubernetes.io/component":  pulumi.String("workloads"),
+				"app.kubernetes.io/managed-by": pulumi.String("aegis-platform"),
+				"aegis.yourorg.dev/cluster-id": pulumi.String(clusterID),
+				"aegis.yourorg.dev/project-id": pulumi.String(projectID),
+			},
+			Annotations: pulumi.StringMap{
+				"aegis.yourorg.dev/purpose": pulumi.String("Namespace for aegis workspace pods"),
+			},
+		},
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return nil, fmt.Errorf("create workloads namespace %q: %w", nsName, err)
+	}
+	return ns, nil
+}
+
+// WorkloadsNamespaceForProject returns the namespace name for a project's workspace pods.
+// Pattern: aegis-workloads-{projectId} for multi-tenant isolation.
+// Can be overridden globally via AEGIS_WORKLOADS_NAMESPACE for single-tenant deployments.
+// This function is exported so the platform-api server can use the same logic.
+func WorkloadsNamespaceForProject(projectID string) string {
+	// Allow global override for single-tenant or dev deployments
+	if ns := strings.TrimSpace(os.Getenv(envAegisWorkloadsNamespace)); ns != "" {
+		return ns
+	}
+	// Multi-tenant pattern: project-scoped namespaces
+	sanitizedProject := sanitize(projectID)
+	if sanitizedProject == "" {
+		sanitizedProject = "default"
+	}
+	return fmt.Sprintf("%s-%s", defaultWorkloadsNamespace, sanitizedProject)
+}
+
 func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string, nodePools []infraapi.NodePool, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
 	key := sanitize(clusterID)
 	if key == "" {
@@ -915,6 +976,87 @@ func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string
 	if err != nil {
 		return fmt.Errorf("install nvidia device plugin: %w", err)
 	}
+	return nil
+}
+
+// installClusterAutoscaler deploys the Kubernetes Cluster Autoscaler to enable automatic
+// node scaling based on pending pod resource requests. This is essential for on-demand
+// GPU node provisioning - when a workspace requests GPU resources, the autoscaler will
+// scale up the appropriate node group.
+func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string, clusterName pulumi.StringInput, region string, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("%s-cluster-autoscaler", key), 53)
+
+	// Cluster Autoscaler needs the cluster name to discover ASGs
+	values := pulumi.Map{
+		"autoDiscovery": pulumi.Map{
+			"clusterName": clusterName,
+		},
+		"awsRegion": pulumi.String(region),
+		// Scale down settings for cost optimization
+		"extraArgs": pulumi.Map{
+			"scale-down-enabled":            pulumi.Bool(true),
+			"scale-down-delay-after-add":    pulumi.String("5m"),
+			"scale-down-unneeded-time":      pulumi.String("5m"),
+			"scale-down-utilization-threshold": pulumi.String("0.5"),
+			"skip-nodes-with-local-storage": pulumi.Bool(false),
+			"skip-nodes-with-system-pods":   pulumi.Bool(false),
+			"balance-similar-node-groups":   pulumi.Bool(true),
+			"expander":                      pulumi.String("least-waste"),
+		},
+		// Resource requests for the autoscaler pod
+		"resources": pulumi.Map{
+			"requests": pulumi.Map{
+				"cpu":    pulumi.String("100m"),
+				"memory": pulumi.String("300Mi"),
+			},
+			"limits": pulumi.Map{
+				"cpu":    pulumi.String("100m"),
+				"memory": pulumi.String("300Mi"),
+			},
+		},
+		// Run on system nodes, not GPU nodes
+		"nodeSelector": pulumi.Map{
+			"kubernetes.io/os": pulumi.String("linux"),
+		},
+		"tolerations": pulumi.Array{
+			pulumi.Map{
+				"key":      pulumi.String("CriticalAddonsOnly"),
+				"operator": pulumi.String("Exists"),
+			},
+		},
+		// RBAC is required for the autoscaler to modify ASGs
+		"rbac": pulumi.Map{
+			"create": pulumi.Bool(true),
+			"serviceAccount": pulumi.Map{
+				"create": pulumi.Bool(true),
+				"name":   pulumi.String("cluster-autoscaler"),
+				// In production, use IRSA instead of node IAM role
+				"annotations": pulumi.Map{},
+			},
+		},
+	}
+
+	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
+		Name:      pulumi.StringPtr("cluster-autoscaler"),
+		Namespace: pulumi.StringPtr("kube-system"),
+		Chart:     pulumi.String("cluster-autoscaler"),
+		RepositoryOpts: &helm.RepositoryOptsArgs{
+			Repo: pulumi.StringPtr("https://kubernetes.github.io/autoscaler"),
+		},
+		Version: pulumi.StringPtr("9.37.0"),
+		Values:  values,
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return fmt.Errorf("install cluster autoscaler: %w", err)
+	}
+
+	r.log.Info("cluster autoscaler installed",
+		zap.String("cluster_id", clusterID),
+		zap.String("region", region))
 	return nil
 }
 

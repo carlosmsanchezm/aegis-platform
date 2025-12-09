@@ -27,10 +27,10 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 
 	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, provider, region, created_at, updated_at)
 VALUES ($1, $2, $3, now(), now())
-ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
-		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
-		return
-	}
+ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, deleted_at=NULL, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
+			s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
+			return
+		}
 
 	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
 	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
@@ -70,8 +70,8 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric and last heartbeat timestamp
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now() WHERE id=$2`,
+	// Update TTFG metric and last heartbeat timestamp; clear soft delete if present.
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$2`,
 		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
 		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
 		return
@@ -104,7 +104,6 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	// Only return non-deleted clusters (soft delete support)
 	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
@@ -207,13 +206,7 @@ func (s *PostgresStore) DeleteCluster(clusterID string) {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	// Soft delete: set deleted_at timestamp instead of removing the record.
-	// This preserves audit trail for compliance (FedRAMP, NIST 800-53).
-	// The cluster and its labels/flavors remain in the database for historical queries.
-	_, err := s.pool.Exec(ctx,
-		`UPDATE clusters SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
-		clusterID)
-	if err != nil {
-		s.logExecError("soft_delete_cluster", err, zap.String("cluster_id", clusterID))
+	if _, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, clusterID); err != nil {
+		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
 	}
 }

@@ -2274,18 +2274,22 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 	switch normalized {
 	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
 		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
+		// g4dn.xlarge has 4 vCPUs but only ~3.92 allocatable after k8s overhead
+		// Request 3 CPU to ensure pod fits on node
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          16,
-			CpuCoresRequest:    "4",
-			MemoryRequest:      "16Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10-1gpu", "a10g-1gpu", "gpu-large":
 		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
+		// g5.xlarge has 4 vCPUs (~3.92 allocatable), 16GB RAM, 24GB GPU memory
+		// For larger workloads, use g5.2xlarge (8 vCPU) or g5.4xlarge (16 vCPU)
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2293,8 +2297,8 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
-			CpuCoresRequest:    "8",
-			MemoryRequest:      "32Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10g-mig-1g", "a10-mig-1g":

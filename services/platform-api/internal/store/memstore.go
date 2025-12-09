@@ -457,6 +457,14 @@ func (s *MemStore) ListClusterInfos() []*ClusterInfo {
 	return s.cstate.list()
 }
 
+func (s *MemStore) SetClusterProjectID(clusterID, projectID string) {
+	s.cstate.setProjectID(clusterID, projectID)
+}
+
+func (s *MemStore) DeleteCluster(clusterID string) {
+	s.cstate.delete(clusterID)
+}
+
 // LeaseWorkloads moves up to max workloads for the cluster from PLACED to RUNNING.
 func (s *MemStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 	if max <= 0 {

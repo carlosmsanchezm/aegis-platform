@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -70,23 +71,53 @@ func registerWorkspaceWizardRoutes(mux *runtime.ServeMux, srv *Server) {
 	if mux == nil || srv == nil {
 		return
 	}
-	mux.HandlePath(http.MethodGet, "/api/projects", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	// Register routes without /aegis prefix (direct access)
+	if err := mux.HandlePath(http.MethodGet, "/api/projects", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		srv.handleProjects(w, r)
-	})
-	mux.HandlePath(http.MethodGet, "/api/clusters", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	}); err != nil {
+		srv.log.Error("failed to register /api/projects route", zap.Error(err))
+	}
+	if err := mux.HandlePath(http.MethodGet, "/api/clusters", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		srv.handleClusters(w, r)
-	})
-	mux.HandlePath(http.MethodPost, "/api/workspaces", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	}); err != nil {
+		srv.log.Error("failed to register /api/clusters route", zap.Error(err))
+	}
+	if err := mux.HandlePath(http.MethodPost, "/api/workspaces", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		srv.handleCreateWorkspace(w, r)
-	})
+	}); err != nil {
+		srv.log.Error("failed to register /api/workspaces route", zap.Error(err))
+	}
+	// Register routes with /aegis prefix (for Backstage proxy compatibility)
+	if err := mux.HandlePath(http.MethodGet, "/aegis/api/projects", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		srv.handleProjects(w, r)
+	}); err != nil {
+		srv.log.Error("failed to register /aegis/api/projects route", zap.Error(err))
+	}
+	if err := mux.HandlePath(http.MethodGet, "/aegis/api/clusters", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		srv.handleClusters(w, r)
+	}); err != nil {
+		srv.log.Error("failed to register /aegis/api/clusters route", zap.Error(err))
+	}
+	if err := mux.HandlePath(http.MethodPost, "/aegis/api/workspaces", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		srv.handleCreateWorkspace(w, r)
+	}); err != nil {
+		srv.log.Error("failed to register /aegis/api/workspaces route", zap.Error(err))
+	}
+	srv.log.Info("workspace wizard routes registered", zap.Strings("routes", []string{
+		"/api/projects", "/api/clusters", "/api/workspaces",
+		"/aegis/api/projects", "/aegis/api/clusters", "/aegis/api/workspaces",
+	}))
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	s.log.Info("handleProjects called", zap.String("path", r.URL.Path), zap.String("method", r.Method))
 	views, err := s.projectViews(r.Context())
 	if err != nil {
+		s.log.Error("handleProjects error", zap.Error(err))
 		writeWizardError(w, err)
 		return
 	}
+	s.log.Info("handleProjects success", zap.Int("project_count", len(views)))
 	writeJSON(w, http.StatusOK, map[string]any{"projects": views})
 }
 
@@ -169,7 +200,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.FailedPrecondition, "cluster %s has no available flavors", clusterID))
 		return
 	}
-	s.ensureFlavorDefaults(flavor)
+	if s.autoBootstrap {
+		s.ensureFlavorDefaults(flavor)
+	}
 
 	queue := strings.TrimSpace(req.Queue)
 	if queue == "" {
@@ -178,7 +211,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			queue = fmt.Sprintf("%s-workspaces", projectID)
 		}
 	}
-	s.ensureWorkspaceQueue(projectID, queue, flavor)
+	if s.autoBootstrap {
+		s.ensureWorkspaceQueue(projectID, queue, flavor)
+	}
 
 	env := map[string]string{
 		"WORKSPACE_NAME": name,
@@ -202,7 +237,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			req.Image = override
 		}
 		if override, ok := req.Parameters["flavor"]; ok && strings.TrimSpace(req.Flavor) == "" {
-			flavor = strings.TrimSpace(override)
+			if trimmed := strings.TrimSpace(override); trimmed != "" {
+				flavor = trimmed
+			}
 		}
 	}
 
@@ -382,7 +419,18 @@ func clusterProject(ci *store.ClusterInfo) string {
 			}
 		}
 	}
-	if parts := strings.Split(strings.TrimSpace(ci.ID), "-"); len(parts) > 1 && parts[0] != "" {
+	// Extract project ID from cluster ID format: {projectId}-{region}-{clusterId}
+	// e.g., "db-1-us-east-1-atlas-train-govcloud" -> "db-1"
+	// Look for common AWS region patterns to find the boundary
+	id := strings.TrimSpace(ci.ID)
+	regionPatterns := []string{"-us-east-", "-us-west-", "-eu-west-", "-eu-central-", "-ap-", "-sa-east-", "-ca-central-", "-me-south-", "-af-south-"}
+	for _, pattern := range regionPatterns {
+		if idx := strings.Index(id, pattern); idx > 0 {
+			return id[:idx]
+		}
+	}
+	// Fallback: take first part before hyphen
+	if parts := strings.Split(id, "-"); len(parts) > 1 && parts[0] != "" {
 		return parts[0]
 	}
 	return ""
@@ -459,6 +507,8 @@ func httpStatusFromErr(err error) int {
 		return http.StatusUnauthorized
 	case codes.AlreadyExists:
 		return http.StatusConflict
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests
 	case codes.FailedPrecondition:
 		return http.StatusPreconditionFailed
 	default:

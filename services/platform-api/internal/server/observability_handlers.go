@@ -268,8 +268,13 @@ func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 
 	httpClient, promURL, err := s.resolveServiceEndpoint(ctx, clusterID, pickNamespace(obs.Namespace, obs.Namespace), obs.PrometheusService, obs.PrometheusPort)
 	if err != nil || promURL == "" {
-		writeWizardError(w, status.Error(codes.FailedPrecondition, "prometheus endpoint not available for cluster"))
-		return
+		if url := strings.TrimSpace(obs.MetricsURL); url != "" {
+			httpClient = s.httpClient()
+			promURL = url
+		} else {
+			writeWizardError(w, status.Error(codes.FailedPrecondition, "prometheus endpoint not available for cluster"))
+			return
+		}
 	}
 
 	step := time.Duration(req.StepSec) * time.Second

@@ -32,7 +32,8 @@ ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.regio
 		return
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, req.GetClusterId()); err != nil {
+	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
 		s.logExecError("cluster_register_delete_labels", err, zap.String("cluster_id", req.GetClusterId()))
 		return
 	}

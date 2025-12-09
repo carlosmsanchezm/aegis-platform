@@ -115,11 +115,33 @@ platform-api-docker-push:
 build-platform:
 	@echo "Building platform-api image $(PLATFORM_API_IMAGE)"
 	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE)
+	@$(MAKE) kind-load-platform
+
+.PHONY: kind-load-platform
+kind-load-platform:
+	@if kind get clusters 2>/dev/null | grep -q desktop; then \
+		echo "Loading $(PLATFORM_API_IMAGE) into kind cluster 'desktop'..."; \
+		kind load docker-image $(PLATFORM_API_IMAGE) --name desktop; \
+		echo "Image loaded into kind cluster"; \
+	else \
+		echo "No kind cluster named 'desktop' found, skipping kind load"; \
+	fi
 
 .PHONY: build-agent
 build-agent:
 	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
 	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
+	@$(MAKE) kind-load-agent
+
+.PHONY: kind-load-agent
+kind-load-agent:
+	@if kind get clusters 2>/dev/null | grep -q desktop; then \
+		echo "Loading $(K8S_AGENT_IMAGE) into kind cluster 'desktop'..."; \
+		kind load docker-image $(K8S_AGENT_IMAGE) --name desktop; \
+		echo "Image loaded into kind cluster"; \
+	else \
+		echo "No kind cluster named 'desktop' found, skipping kind load"; \
+	fi
 
 .PHONY: build-workspace
 build-workspace:
@@ -154,7 +176,9 @@ setup-local:
 
 roll-platform-api:
 	@echo "Rolling platform-api deployment to $(PLATFORM_API_IMAGE)"
+	@$(MAKE) kind-load-platform
 	@kubectl set image deployment/aegis-services-platform-api platform-api=$(PLATFORM_API_IMAGE) -n aegis-system
+	@kubectl rollout restart deployment/aegis-services-platform-api -n aegis-system
 	@echo "Waiting for rollout to complete..."
 	@kubectl rollout status deployment/aegis-services-platform-api -n aegis-system
 
@@ -378,11 +402,15 @@ port-forward:
 	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 >/dev/null 2>&1 &
 	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 >/dev/null 2>&1 &
 	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service $(PF_KEYCLOAK_HTTPS_PORT):8443 >/dev/null 2>&1 &
+	@# AWS relay tunnel port-forwards (for remote spoke clusters to reach local platform-api)
+	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api 8081:8081 >/dev/null 2>&1 &
+	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 8443:8443 >/dev/null 2>&1 &
 	@sleep 1
 	@echo "Port-forwarding started:"
 	@echo "  Platform API: http://localhost:$(PF_PLATFORM_HTTP_PORT) (HTTP) / localhost:$(PF_PLATFORM_GRPC_PORT) (gRPC)"
 	@echo "  Proxy: http://localhost:$(PF_PROXY_HTTP_PORT)"
 	@echo "  Keycloak: https://localhost:$(PF_KEYCLOAK_HTTPS_PORT)"
+	@echo "  AWS Relay: localhost:8081 (gRPC) / localhost:8443 (Keycloak)"
 	@echo ""
 	@echo "Use 'make stop-port-forward' or 'pkill -f \"kubectl.*port-forward\"' to stop all port-forwards."
 

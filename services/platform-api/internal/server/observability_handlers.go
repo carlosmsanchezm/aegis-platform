@@ -614,7 +614,7 @@ func buildLokiQuery(clusterID, namespace, pod, substring string, includeEvents b
 	}
 	labelSelector := "{" + strings.Join(parts, ",") + "}"
 	if sub := strings.TrimSpace(substring); sub != "" {
-		return fmt.Sprintf(`%s |= "%s"`, labelSelector, sub)
+		return fmt.Sprintf(`%s |= %s`, labelSelector, strconv.Quote(sub))
 	}
 	return labelSelector
 }

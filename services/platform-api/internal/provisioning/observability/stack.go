@@ -32,6 +32,12 @@ const (
 	envLoggingFluentBitVersion     = "AEGIS_LOGGING_FLUENT_BIT_CHART_VERSION"
 	envLoggingFluentBitRepo        = "AEGIS_LOGGING_FLUENT_BIT_REPO"
 	envLoggingFluentBitValuesFile  = "AEGIS_LOGGING_FLUENT_BIT_VALUES_FILE"
+	envLoggingEnabled              = "AEGIS_LOGGING_ENABLED"
+	envTracingEnabled              = "AEGIS_TRACING_ENABLED"
+	envTracingTempoChart           = "AEGIS_TRACING_TEMPO_CHART"
+	envTracingTempoChartVersion    = "AEGIS_TRACING_TEMPO_CHART_VERSION"
+	envTracingTempoRepo            = "AEGIS_TRACING_TEMPO_REPO"
+	envTracingTempoValuesFile      = "AEGIS_TRACING_TEMPO_VALUES_FILE"
 	defaultObservabilityNamespace  = "aegis-observability"
 	defaultObservabilityRelease    = "aegis-obsv"
 	defaultObservabilityBaseName   = "aegis-obsv"
@@ -44,6 +50,10 @@ const (
 	defaultLokiRetention           = "168h"
 	defaultPrometheusPort          = 9090
 	defaultAlertmanagerPort        = 9093
+	defaultTracingNamespace        = "aegis-tracing"
+	defaultTracingBaseName         = "aegis-tracing"
+	defaultTempoRelease            = "aegis-tempo"
+	defaultTempoPort               = 3200
 	maxObservabilityNameLength     = 40
 	maxLoggingNameLength           = 40
 	defaultHelmTimeout             = 15 * time.Minute
@@ -66,6 +76,7 @@ type Config struct {
 	Stack            HelmConfig
 	MetricsServer    HelmConfig
 	Logging          LoggingConfig
+	Tracing          TracingConfig
 	Namespace        string
 	BaseName         string
 	PrometheusPort   int
@@ -82,6 +93,15 @@ type LoggingConfig struct {
 	LokiPort        int
 	RetentionPeriod string
 	Enable          bool
+}
+
+// TracingConfig captures Tempo settings.
+type TracingConfig struct {
+	Tempo     HelmConfig
+	Namespace string
+	BaseName  string
+	TempoPort int
+	Enable    bool
 }
 
 // Installer allows swapping observability implementations.
@@ -103,6 +123,12 @@ func ResolveFromEnv(repoRoot string) Config {
 	}
 
 	enabled := strings.EqualFold(strings.TrimSpace(os.Getenv(envObservabilityEnabled)), "true")
+
+	loggingEnv := strings.TrimSpace(os.Getenv(envLoggingEnabled))
+	loggingEnabled := enabled && (loggingEnv == "" || strings.EqualFold(loggingEnv, "true"))
+
+	tracingEnv := strings.TrimSpace(os.Getenv(envTracingEnabled))
+	tracingEnabled := enabled && (tracingEnv == "" || strings.EqualFold(tracingEnv, "true"))
 
 	stackChart := strings.TrimSpace(os.Getenv(envObservabilityChart))
 	if stackChart == "" {
@@ -162,6 +188,22 @@ func ResolveFromEnv(repoRoot string) Config {
 		fluentValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "fluent-bit-values.yaml")
 	}
 
+	tempoChart := strings.TrimSpace(os.Getenv(envTracingTempoChart))
+	if tempoChart == "" {
+		tempoChart = "tempo"
+	}
+	tempoRepo := strings.TrimSpace(os.Getenv(envTracingTempoRepo))
+	if tempoRepo == "" {
+		tempoRepo = "https://grafana.github.io/helm-charts"
+	}
+	tempoValues := strings.TrimSpace(os.Getenv(envTracingTempoValuesFile))
+	if tempoValues == "" {
+		tempoValues = filepath.Join(repoRoot, "services", "platform-api", "config", "observability", "tempo-values.yaml")
+		if !fileExists(tempoValues) {
+			tempoValues = ""
+		}
+	}
+
 	timeout := defaultHelmTimeout
 	return Config{
 		Namespace:        defaultObservabilityNamespace,
@@ -194,7 +236,7 @@ func ResolveFromEnv(repoRoot string) Config {
 			BaseName:        defaultLoggingBaseName,
 			LokiPort:        defaultLokiPort,
 			RetentionPeriod: defaultLokiRetention,
-			Enable:          true,
+			Enable:          loggingEnabled,
 			Loki: HelmConfig{
 				ChartPath:        lokiChart,
 				Repository:       lokiRepo,
@@ -212,6 +254,22 @@ func ResolveFromEnv(repoRoot string) Config {
 				ValuesFile:       fluentValues,
 				Namespace:        defaultLoggingNamespace,
 				ReleaseName:      defaultLoggingFluentBitRelease,
+				Timeout:          timeout,
+				EnableDependency: true,
+			},
+		},
+		Tracing: TracingConfig{
+			Namespace: defaultTracingNamespace,
+			BaseName:  defaultTracingBaseName,
+			TempoPort: defaultTempoPort,
+			Enable:    tracingEnabled,
+			Tempo: HelmConfig{
+				ChartPath:        tempoChart,
+				Repository:       tempoRepo,
+				Version:          strings.TrimSpace(os.Getenv(envTracingTempoChartVersion)),
+				ValuesFile:       tempoValues,
+				Namespace:        defaultTracingNamespace,
+				ReleaseName:      defaultTempoRelease,
 				Timeout:          timeout,
 				EnableDependency: true,
 			},
@@ -347,6 +405,11 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		return nil, err
 	}
 
+	tracingOutputs, err := installTracing(ctx, clusterKey, kubeProvider, cfg, depends)
+	if err != nil {
+		return nil, err
+	}
+
 	outputs := pulumi.Map{
 		"namespace":                pulumi.String(namespace),
 		"prometheusService":        pulumi.String(stackFullname + "-prometheus"),
@@ -358,6 +421,9 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		"metricsServerPort":        pulumi.Int(443),
 	}
 	for k, v := range loggingOutputs {
+		outputs[k] = v
+	}
+	for k, v := range tracingOutputs {
 		outputs[k] = v
 	}
 	return outputs, nil
@@ -635,6 +701,81 @@ func installLogging(ctx *pulumi.Context, clusterKey string, kubeProvider *kubern
 		"lokiService":    pulumi.String(lokiFullname),
 		"lokiPort":       pulumi.Int(lokiPort),
 		"lokiAuthSecret": pulumi.String(""),
+	}, nil
+}
+
+func installTracing(ctx *pulumi.Context, clusterKey string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
+	if cfg.Tracing.Enable && kubeProvider == nil {
+		return nil, fmt.Errorf("kubernetes provider is required for tracing installs")
+	}
+	if !cfg.Tracing.Enable {
+		return pulumi.Map{}, nil
+	}
+
+	namespace := strings.TrimSpace(cfg.Tracing.Namespace)
+	if namespace == "" {
+		namespace = defaultTracingNamespace
+	}
+	baseName := strings.TrimSpace(cfg.Tracing.BaseName)
+	if baseName == "" {
+		baseName = defaultTracingBaseName
+	}
+	tempoPort := cfg.Tracing.TempoPort
+	if tempoPort == 0 {
+		tempoPort = defaultTempoPort
+	}
+
+	tempoReleaseName := pulumiResourceName(cfg.Tracing.Tempo.ReleaseName+"-"+clusterKey, 53)
+	tempoFullname := pulumiResourceName(baseName+"-"+clusterKey+"-tempo", maxLoggingNameLength)
+	tempoTimeout := cfg.Tracing.Tempo.Timeout
+	if tempoTimeout == 0 {
+		tempoTimeout = defaultHelmTimeout
+	}
+
+	tempoValues := pulumi.Map{
+		"fullnameOverride": pulumi.String(tempoFullname),
+		"service": pulumi.Map{
+			"type": pulumi.String("ClusterIP"),
+		},
+		"tempo": pulumi.Map{
+			"server": pulumi.Map{
+				"http_listen_port": pulumi.Int(tempoPort),
+			},
+		},
+	}
+
+	tempoArgs := &helm.ReleaseArgs{
+		Name:            pulumi.StringPtr(tempoReleaseName),
+		Namespace:       pulumi.StringPtr(namespace),
+		Chart:           pulumi.String(cfg.Tracing.Tempo.ChartPath),
+		Values:          tempoValues,
+		Timeout:         pulumi.IntPtr(int(tempoTimeout.Seconds())),
+		CreateNamespace: pulumi.BoolPtr(true),
+	}
+	if cfg.Tracing.Tempo.Repository != "" {
+		opts := helm.RepositoryOptsArgs{Repo: pulumi.StringPtr(cfg.Tracing.Tempo.Repository)}
+		tempoArgs.RepositoryOpts = opts.ToRepositoryOptsPtrOutput()
+	}
+	if cfg.Tracing.Tempo.Version != "" {
+		tempoArgs.Version = pulumi.StringPtr(cfg.Tracing.Tempo.Version)
+	}
+	if cfg.Tracing.Tempo.ValuesFile != "" {
+		tempoArgs.ValueYamlFiles = pulumi.AssetOrArchiveArray{
+			pulumi.NewFileAsset(cfg.Tracing.Tempo.ValuesFile),
+		}
+	}
+	if cfg.Tracing.Tempo.EnableDependency {
+		tempoArgs.DependencyUpdate = pulumi.BoolPtr(true)
+	}
+
+	if _, err := helm.NewRelease(ctx, pulumiResourceName(clusterKey+"-tempo", 53), tempoArgs, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends)); err != nil {
+		return nil, err
+	}
+
+	return pulumi.Map{
+		"tracingNamespace": pulumi.String(namespace),
+		"tempoService":     pulumi.String(tempoFullname),
+		"tempoPort":        pulumi.Int(tempoPort),
 	}, nil
 }
 

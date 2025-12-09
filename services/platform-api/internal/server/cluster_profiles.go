@@ -219,11 +219,14 @@ func adjustGpuInstanceType(spec *infraapi.AWSInfraSpec, gpuType string) {
 		return
 	}
 	switch strings.ToUpper(gpuType) {
-	case "G5", "SMALL":
+	case "T4", "G4DN", "SMALL":
+		// T4 GPU - most cost-effective option (~$0.50/hr for g4dn.xlarge)
 		spec.NodePools[idx].InstanceType = "g4dn.xlarge"
 	case "H100":
-		// Smallest H100-backed instance to honor the requested accelerator.
-		spec.NodePools[idx].InstanceType = "p5.2xlarge"
+		// H100 instances: p5.48xlarge is the only p5 size available.
+		// For cost-effective testing, use g5.xlarge (A10G) instead.
+		// p5.48xlarge has 8x H100 GPUs and costs ~$98/hr.
+		spec.NodePools[idx].InstanceType = "p5.48xlarge"
 	case "A100":
 		spec.NodePools[idx].InstanceType = "p4d.24xlarge"
 	case "A10G":

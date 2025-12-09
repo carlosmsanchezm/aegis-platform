@@ -86,8 +86,11 @@ platformApi:
     LOG_LEVEL: "debug"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
-    AEGIS_STORE_BACKEND: "memory"
+    AEGIS_STORE_BACKEND: "postgres"
+    # IMPORTANT: Issuer must match the "iss" claim in tokens (aegis-platform.tech per realm config)
+    # even though we access Keycloak locally via localtest.me or internal service
     OIDC_ISSUER_URL: "https://keycloak.aegis-platform.tech/realms/aegis"
+    # Use the service name that matches the TLS cert SAN (without -service suffix)
     OIDC_JWKS_URL: "https://aegis-services-keycloak.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs"
     OIDC_AUDIENCE: "backstage,aegis-platform"
     REQUIRE_PHISHING_RESISTANT_MFA: "false"
@@ -97,10 +100,11 @@ platformApi:
     AEGIS_INFRA_NAMESPACE: "aegis-system"
     AEGIS_KUBECONFIG_SECRET_NAME: "aegis-kubeconfigs"
     AEGIS_KUBECONFIG_SECRET_NAMESPACE: "aegis-system"
-    AEGIS_PLATFORM_API_ENDPOINT: "https://remote.aegis-platform.tech"
+    # AWS NLB relay endpoints (use values-aws-relay.yaml for spoke)
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-d12c6914e77129ce.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PLATFORM_API_CA_FILE: ""
     AEGIS_PLATFORM_API_GRPC_INSECURE: "true"
-    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [
         {
@@ -117,15 +121,45 @@ platformApi:
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
+    DB_HOST: "platform-postgres.aegis-system.svc.cluster.local"
+    DB_PORT: "5432"
+    DB_NAME: "aegis_platform"
+    DB_USER: "aegis_platform"
+    DB_SSLMODE: "disable"
+    PG_MAX_OPEN_CONNS: "10"
+    PG_MAX_IDLE_CONNS: "5"
+    PG_CONN_MAX_LIFETIME: "30m"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
+    DB_PASSWORD: db-password
   secrets:
     aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
     aws-secret-access-key: "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"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
     AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    db-password: "platform_local_pass"
+    authz-role-bindings.json: |
+      [
+        {
+          "clients": ["backstage", "vscode-extension"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
+  migrations:
+    enabled: true
+    image:
+      repository: migrate/migrate
+      tag: v4.16.2
+      pullPolicy: IfNotPresent
+    ttlSecondsAfterFinished: 300
+    args:
+      - "-path=/migrations"
+      - "-database=$(DATABASE_URL)"
+      - "up"
   tls:
     enabled: true
     serveGrpc: true

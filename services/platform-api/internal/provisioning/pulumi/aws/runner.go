@@ -589,6 +589,12 @@ func (r *Runner) createNodeRole(ctx *pulumi.Context, name string, tags pulumi.St
 			return nil, fmt.Errorf("attach policy %s: %w", policy, err)
 		}
 	}
+
+	// NOTE: Cluster Autoscaler requires additional IAM permissions that should be
+	// pre-provisioned by the platform team (not created by this runner).
+	// See docs/eks-prerequisites.md for the required IAM policy.
+	// For FedRAMP compliance, IAM changes should go through a separate approval process.
+
 	return role, nil
 }
 
@@ -714,6 +720,16 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 			MaxSize:     pulumi.Int(int(pool.MaxSize)),
 		}
 
+		// Add Cluster Autoscaler discovery tags to enable automatic scaling.
+		// These tags allow the autoscaler to identify and manage the ASGs.
+		ngTags := pulumi.StringMap{}
+		for k, v := range tags {
+			ngTags[k] = v
+		}
+		// Required tags for Cluster Autoscaler autodiscovery
+		ngTags["k8s.io/cluster-autoscaler/enabled"] = pulumi.String("true")
+		ngTags["k8s.io/cluster-autoscaler/"+clusterDef.ClusterID] = pulumi.String("owned")
+
 		ngArgs := &awseks.NodeGroupArgs{
 			ClusterName:   pulumi.StringInput(cluster.Name),
 			NodeRoleArn:   nodeRole.Arn,
@@ -724,7 +740,7 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 			},
 			ScalingConfig: scaling,
 			Taints:        convertTaints(pool.Taints),
-			Tags:          tags,
+			Tags:          ngTags,
 			LaunchTemplate: &awseks.NodeGroupLaunchTemplateArgs{
 				Id:      lt.ID().ToStringPtrOutput(),
 				Version: ltVersion,

@@ -2272,7 +2272,8 @@ func ensureQueueAllowsFlavor(q *aegis.Queue, flavor string) bool {
 func defaultFlavorForName(name string) *aegis.Flavor {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	switch normalized {
-	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4":
+	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
+		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
@@ -2283,7 +2284,8 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			MemoryRequest:      "16Gi",
 			PriceUsdPerGpuHour: 0,
 		}
-	case "a10-1gpu", "a10g-1gpu":
+	case "a10-1gpu", "a10g-1gpu", "gpu-large":
+		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2305,6 +2307,30 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			MemoryGib:          10,
 			CpuCoresRequest:    "8",
 			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-small":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "4Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-medium":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "4",
+			MemoryRequest:      "16Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-large":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			GpuCount:           0,
 			PriceUsdPerGpuHour: 0,
 		}
 	default:

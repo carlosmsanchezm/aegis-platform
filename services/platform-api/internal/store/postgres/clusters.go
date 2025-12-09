@@ -198,3 +198,40 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
 		s.logExecError("set_cluster_project", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
 	}
 }
+
+func (s *PostgresStore) DeleteCluster(clusterID string) {
+	if clusterID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		s.logExecError("delete_cluster_begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Delete associated labels
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster_labels", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	// Delete associated flavors
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_flavors WHERE cluster_id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster_flavors", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	// Delete the cluster record
+	if _, err := tx.Exec(ctx, `DELETE FROM clusters WHERE id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		s.logExecError("delete_cluster_commit", err, zap.String("cluster_id", clusterID))
+	}
+}

@@ -753,9 +753,19 @@ func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *in
 	}
 
 	if existingHolder != "" && existingHolder != holder && !expired {
-		unlockLocal()
-		close(stop)
-		return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		// Check if the holder pod still exists - if not, treat as expired
+		holderPodGone := r.isPodGone(ctx, existingHolder, leaseNS)
+		if !holderPodGone {
+			unlockLocal()
+			close(stop)
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// Holder pod is gone, we can take over the lease immediately
+		r.logger().Info("taking over stale lease from terminated pod",
+			zap.String("lease", leaseName),
+			zap.String("old_holder", existingHolder),
+			zap.String("new_holder", holder),
+		)
 	}
 
 	// Take over or renew the lease.
@@ -824,6 +834,22 @@ func (r *ProjectInfraReconciler) renewLease(ctx context.Context, name, namespace
 	lease.Spec.RenewTime = &now
 
 	return r.Update(ctx, lease)
+}
+
+// isPodGone checks if a pod with the given name no longer exists in the namespace.
+// This is used to detect stale leases held by terminated pods.
+func (r *ProjectInfraReconciler) isPodGone(ctx context.Context, podName, namespace string) bool {
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, pod)
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	if err != nil {
+		// On error, assume pod exists to be safe
+		return false
+	}
+	// Pod exists but might be terminating
+	return pod.DeletionTimestamp != nil
 }
 
 func (r *ProjectInfraReconciler) lockLocal(key string) func() {

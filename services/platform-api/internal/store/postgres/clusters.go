@@ -41,6 +41,10 @@ ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.regio
 		if k == "" {
 			continue
 		}
+		// projectId label is managed separately; avoid duplicate-key error on re-register
+		if k == "aegis.yourorg.dev/projectId" {
+			continue
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)`, req.GetClusterId(), k, v); err != nil {
 			s.logExecError("cluster_register_insert_label", err, zap.String("cluster_id", req.GetClusterId()), zap.String("label", k))
 			return

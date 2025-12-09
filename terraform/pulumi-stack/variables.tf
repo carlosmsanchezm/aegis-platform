@@ -10,6 +10,18 @@ variable "target_role_arn" {
   default     = "arn:aws:iam::567751785679:role/aegis-platform"
 }
 
+variable "pulumi_state_bucket" {
+  type        = string
+  description = "S3 bucket that stores Pulumi state."
+  default     = "aegis-pulumi-state-dev"
+}
+
+variable "pulumi_state_prefix" {
+  type        = string
+  description = "Prefix within the Pulumi state bucket (no leading slash)."
+  default     = "aegis/pulumi"
+}
+
 variable "iam_user_name" {
   type        = string
   description = "Optional override for the IAM user name that will hold the Pulumi access key."

@@ -32,12 +32,17 @@ ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.regio
 		return
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, req.GetClusterId()); err != nil {
+	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
 		s.logExecError("cluster_register_delete_labels", err, zap.String("cluster_id", req.GetClusterId()))
 		return
 	}
 	for k, v := range req.GetLabels() {
 		if k == "" {
+			continue
+		}
+		// projectId label is managed separately; avoid duplicate-key error on re-register
+		if k == "aegis.yourorg.dev/projectId" {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)`, req.GetClusterId(), k, v); err != nil {
@@ -176,4 +181,57 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+func (s *PostgresStore) SetClusterProjectID(clusterID, projectID string) {
+	if clusterID == "" || projectID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Upsert the project label for the cluster
+	_, err := s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+		clusterID, "aegis.yourorg.dev/projectId", projectID)
+	if err != nil {
+		s.logExecError("set_cluster_project", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+	}
+}
+
+func (s *PostgresStore) DeleteCluster(clusterID string) {
+	if clusterID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		s.logExecError("delete_cluster_begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Delete associated labels
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster_labels", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	// Delete associated flavors
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_flavors WHERE cluster_id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster_flavors", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	// Delete the cluster record
+	if _, err := tx.Exec(ctx, `DELETE FROM clusters WHERE id=$1`, clusterID); err != nil {
+		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		s.logExecError("delete_cluster_commit", err, zap.String("cluster_id", clusterID))
+	}
 }

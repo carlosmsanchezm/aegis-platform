@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,11 +45,26 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructuredapi "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
+	RestConfigFor(clusterID string) (*rest.Config, error)
+}
+
+func kubeClientProviderConfigured(p kubeClientProvider) bool {
+	if p == nil {
+		return false
+	}
+	v := reflect.ValueOf(p)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return !v.IsNil()
+	default:
+		return true
+	}
 }
 
 type Server struct {
@@ -682,7 +698,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		}
 	}
 
-	if s.kubeClients == nil {
+	if !kubeClientProviderConfigured(s.kubeClients) {
 		err := status.Error(codes.Internal, "kubernetes client manager not configured")
 		s.log.Error("submit workload failed", zap.Error(err))
 		return nil, err
@@ -1014,7 +1030,7 @@ func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.C
 	w.UiStatus = fallback
 	w.Message = w.GetMessage()
 
-	if s.kubeClients == nil || w.GetClusterId() == "" {
+	if !kubeClientProviderConfigured(s.kubeClients) || w.GetClusterId() == "" {
 		return
 	}
 
@@ -2258,18 +2274,24 @@ func ensureQueueAllowsFlavor(q *aegis.Queue, flavor string) bool {
 func defaultFlavorForName(name string) *aegis.Flavor {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	switch normalized {
-	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4":
+	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
+		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
+		// g4dn.xlarge has 4 vCPUs but only ~3.92 allocatable after k8s overhead
+		// Request 3 CPU to ensure pod fits on node
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          16,
-			CpuCoresRequest:    "4",
-			MemoryRequest:      "16Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
-	case "a10-1gpu", "a10g-1gpu":
+	case "a10-1gpu", "a10g-1gpu", "gpu-large":
+		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
+		// g5.xlarge has 4 vCPUs (~3.92 allocatable), 16GB RAM, 24GB GPU memory
+		// For larger workloads, use g5.2xlarge (8 vCPU) or g5.4xlarge (16 vCPU)
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2277,8 +2299,8 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
-			CpuCoresRequest:    "8",
-			MemoryRequest:      "32Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10g-mig-1g", "a10-mig-1g":
@@ -2291,6 +2313,30 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			MemoryGib:          10,
 			CpuCoresRequest:    "8",
 			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-small":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "4Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-medium":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "4",
+			MemoryRequest:      "16Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-large":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			GpuCount:           0,
 			PriceUsdPerGpuHour: 0,
 		}
 	default:

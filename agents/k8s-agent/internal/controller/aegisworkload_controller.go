@@ -465,10 +465,29 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 	}
 	defer func() { _ = zapLogger.Sync() }()
 
+	// Build labels map for cluster registration
+	labels := map[string]string{}
+	if projectID := os.Getenv("AEGIS_PROJECT_ID"); projectID != "" {
+		labels["aegis.yourorg.dev/projectId"] = projectID
+	}
+	if ilLevel := os.Getenv("AEGIS_IL_LEVEL"); ilLevel != "" {
+		labels["aegis.yourorg.dev/ilLevel"] = ilLevel
+	}
+	// Add any custom labels from environment (format: KEY1=VAL1,KEY2=VAL2)
+	if customLabels := os.Getenv("AEGIS_CLUSTER_LABELS"); customLabels != "" {
+		for _, pair := range strings.Split(customLabels, ",") {
+			if kv := strings.SplitN(strings.TrimSpace(pair), "=", 2); len(kv) == 2 {
+				labels[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+			}
+		}
+	}
+
 	registerReq := &aegisproto.ClusterRegisterRequest{
 		ClusterId: r.clusterID,
 		Provider:  os.Getenv("AEGIS_PROVIDER"),
 		Region:    os.Getenv("AEGIS_REGION"),
+		IlLevel:   os.Getenv("AEGIS_IL_LEVEL"),
+		Labels:    labels,
 	}
 
 	for {

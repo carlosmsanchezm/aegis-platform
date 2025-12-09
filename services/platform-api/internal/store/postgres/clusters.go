@@ -104,7 +104,8 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters`)
+	// Only return non-deleted clusters (soft delete support)
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -138,7 +139,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		clusters[id] = info
 	}
 
-	labelRows, err := s.pool.Query(ctx, `SELECT cluster_id, k, v FROM cluster_labels`)
+	labelRows, err := s.pool.Query(ctx, `SELECT cl.cluster_id, cl.k, cl.v FROM cluster_labels cl JOIN clusters c ON cl.cluster_id = c.id WHERE c.deleted_at IS NULL`)
 	if err == nil {
 		defer labelRows.Close()
 		for labelRows.Next() {
@@ -159,7 +160,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		s.logExecError("cluster_list_labels", err)
 	}
 
-	flavorRows, err := s.pool.Query(ctx, `SELECT cluster_id, flavor FROM cluster_flavors`)
+	flavorRows, err := s.pool.Query(ctx, `SELECT cf.cluster_id, cf.flavor FROM cluster_flavors cf JOIN clusters c ON cf.cluster_id = c.id WHERE c.deleted_at IS NULL`)
 	if err == nil {
 		defer flavorRows.Close()
 		for flavorRows.Next() {
@@ -206,32 +207,13 @@ func (s *PostgresStore) DeleteCluster(clusterID string) {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	// Soft delete: set deleted_at timestamp instead of removing the record.
+	// This preserves audit trail for compliance (FedRAMP, NIST 800-53).
+	// The cluster and its labels/flavors remain in the database for historical queries.
+	_, err := s.pool.Exec(ctx,
+		`UPDATE clusters SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+		clusterID)
 	if err != nil {
-		s.logExecError("delete_cluster_begin", err)
-		return
-	}
-	defer tx.Rollback(ctx)
-
-	// Delete associated labels
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, clusterID); err != nil {
-		s.logExecError("delete_cluster_labels", err, zap.String("cluster_id", clusterID))
-		return
-	}
-
-	// Delete associated flavors
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_flavors WHERE cluster_id=$1`, clusterID); err != nil {
-		s.logExecError("delete_cluster_flavors", err, zap.String("cluster_id", clusterID))
-		return
-	}
-
-	// Delete the cluster record
-	if _, err := tx.Exec(ctx, `DELETE FROM clusters WHERE id=$1`, clusterID); err != nil {
-		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
-		return
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		s.logExecError("delete_cluster_commit", err, zap.String("cluster_id", clusterID))
+		s.logExecError("soft_delete_cluster", err, zap.String("cluster_id", clusterID))
 	}
 }

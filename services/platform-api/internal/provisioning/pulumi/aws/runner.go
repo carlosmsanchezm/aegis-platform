@@ -753,10 +753,16 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 			instanceType = "m6i.large"
 		}
 		gpuPool := isGpuNodePool(pool)
+		// AWS EKS requires MaxSize >= 1 for node groups.
+		// Ensure MaxSize is at least 1 even if profile has 0.
+		maxSize := int(pool.MaxSize)
+		if maxSize < 1 {
+			maxSize = 5 // Default to 5 for autoscaling headroom
+		}
 		scaling := &awseks.NodeGroupScalingConfigArgs{
 			DesiredSize: pulumi.Int(int(pool.MinSize)),
 			MinSize:     pulumi.Int(int(pool.MinSize)),
-			MaxSize:     pulumi.Int(int(pool.MaxSize)),
+			MaxSize:     pulumi.Int(maxSize),
 		}
 
 		// Add Cluster Autoscaler discovery tags to enable automatic scaling.

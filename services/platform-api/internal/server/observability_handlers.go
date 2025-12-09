@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
@@ -141,8 +142,9 @@ func (s *Server) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, err)
 		return
 	}
-	lokiURL := serviceURL(obs.LokiService, pickNamespace(obs.LokiNamespace, obs.Namespace), obs.LokiPort)
-	if lokiURL == "" {
+
+	httpClient, lokiURL, err := s.resolveServiceEndpoint(ctx, clusterID, pickNamespace(obs.LokiNamespace, obs.Namespace), obs.LokiService, obs.LokiPort)
+	if err != nil || lokiURL == "" {
 		writeWizardError(w, status.Error(codes.FailedPrecondition, "loki endpoint not available for cluster"))
 		return
 	}
@@ -181,7 +183,7 @@ func (s *Server) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.Internal, "build loki request: %v", err))
 		return
 	}
-	resp, err := s.httpClient().Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		writeWizardError(w, status.Errorf(codes.Unavailable, "query loki: %v", err))
 		return
@@ -263,8 +265,9 @@ func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, err)
 		return
 	}
-	promURL := serviceURL(obs.PrometheusService, pickNamespace(obs.Namespace, obs.Namespace), obs.PrometheusPort)
-	if promURL == "" {
+
+	httpClient, promURL, err := s.resolveServiceEndpoint(ctx, clusterID, pickNamespace(obs.Namespace, obs.Namespace), obs.PrometheusService, obs.PrometheusPort)
+	if err != nil || promURL == "" {
 		writeWizardError(w, status.Error(codes.FailedPrecondition, "prometheus endpoint not available for cluster"))
 		return
 	}
@@ -297,7 +300,7 @@ func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.Internal, "build prometheus request: %v", err))
 		return
 	}
-	resp, err := s.httpClient().Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		writeWizardError(w, status.Errorf(codes.Unavailable, "query prometheus: %v", err))
 		return
@@ -376,8 +379,8 @@ func (s *Server) handleTraceLookup(w http.ResponseWriter, r *http.Request, trace
 		writeWizardError(w, err)
 		return
 	}
-	tempoURL := serviceURL(obs.TempoService, pickNamespace(obs.TracingNamespace, obs.Namespace), obs.TempoPort)
-	if tempoURL == "" {
+	httpClient, tempoURL, err := s.resolveServiceEndpoint(ctx, clusterID, pickNamespace(obs.TracingNamespace, obs.Namespace), obs.TempoService, obs.TempoPort)
+	if err != nil || tempoURL == "" {
 		writeWizardError(w, status.Error(codes.FailedPrecondition, "tempo endpoint not available for cluster"))
 		return
 	}
@@ -390,7 +393,7 @@ func (s *Server) handleTraceLookup(w http.ResponseWriter, r *http.Request, trace
 		writeWizardError(w, status.Errorf(codes.Internal, "build tempo request: %v", err))
 		return
 	}
-	resp, err := s.httpClient().Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		writeWizardError(w, status.Errorf(codes.Unavailable, "query tempo: %v", err))
 		return
@@ -429,8 +432,8 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, err)
 		return
 	}
-	alertURL := serviceURL(obs.AlertmanagerService, pickNamespace(obs.Namespace, obs.Namespace), obs.AlertmanagerPort)
-	if alertURL == "" {
+	httpClient, alertURL, err := s.resolveServiceEndpoint(ctx, clusterID, pickNamespace(obs.Namespace, obs.Namespace), obs.AlertmanagerService, obs.AlertmanagerPort)
+	if err != nil || alertURL == "" {
 		writeWizardError(w, status.Error(codes.FailedPrecondition, "alertmanager endpoint not available for cluster"))
 		return
 	}
@@ -448,7 +451,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.Internal, "build alertmanager request: %v", err))
 		return
 	}
-	resp, err := s.httpClient().Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		writeWizardError(w, status.Errorf(codes.Unavailable, "query alertmanager: %v", err))
 		return
@@ -531,6 +534,30 @@ func (s *Server) httpClient() *http.Client {
 	return &http.Client{Timeout: requestTimeout}
 }
 
+// resolveServiceEndpoint picks a reachable endpoint for a service within a target cluster.
+// It prefers a Kubernetes API service proxy (using the kubeconfig for the cluster) when available,
+// and falls back to in-cluster service DNS if no proxy config is present.
+func (s *Server) resolveServiceEndpoint(ctx context.Context, clusterID, namespace, service string, port int32) (*http.Client, string, error) {
+	_ = ctx // currently unused; reserved for future context-aware dialing
+	// Prefer proxy through the target cluster's API server if we have a rest.Config.
+	if s != nil && kubeClientProviderConfigured(s.kubeClients) {
+		if cfg, err := s.kubeClients.RestConfigFor(strings.TrimSpace(clusterID)); err == nil && cfg != nil {
+			if httpClient, err := rest.HTTPClientFor(cfg); err == nil && httpClient != nil {
+				if proxyURL := buildServiceProxyURL(cfg.Host, namespace, service, port); proxyURL != "" {
+					return httpClient, proxyURL, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to service DNS inside the same cluster/network.
+	fallback := serviceURL(service, namespace, port)
+	if fallback == "" {
+		return nil, "", status.Error(codes.FailedPrecondition, "service endpoint unavailable")
+	}
+	return s.httpClient(), fallback, nil
+}
+
 func serviceURL(service, namespace string, port int32) string {
 	service = strings.TrimSpace(service)
 	namespace = strings.TrimSpace(namespace)
@@ -538,6 +565,17 @@ func serviceURL(service, namespace string, port int32) string {
 		return ""
 	}
 	return fmt.Sprintf("http://%s.%s.svc:%d", service, namespace, port)
+}
+
+func buildServiceProxyURL(apiServer, namespace, service string, port int32) string {
+	apiServer = strings.TrimSpace(apiServer)
+	namespace = strings.TrimSpace(namespace)
+	service = strings.TrimSpace(service)
+	if apiServer == "" || namespace == "" || service == "" || port <= 0 {
+		return ""
+	}
+	trimmed := strings.TrimRight(apiServer, "/")
+	return fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s:%d/proxy", trimmed, namespace, service, port)
 }
 
 func pickNamespace(preferred, fallback string) string {
@@ -576,7 +614,7 @@ func buildLokiQuery(clusterID, namespace, pod, substring string, includeEvents b
 	}
 	labelSelector := "{" + strings.Join(parts, ",") + "}"
 	if sub := strings.TrimSpace(substring); sub != "" {
-		return fmt.Sprintf(`%s |= "%s"`, labelSelector, sub)
+		return fmt.Sprintf(`%s |= %s`, labelSelector, strconv.Quote(sub))
 	}
 	return labelSelector
 }

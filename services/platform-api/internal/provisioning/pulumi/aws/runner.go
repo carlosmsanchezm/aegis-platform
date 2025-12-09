@@ -590,10 +590,49 @@ func (r *Runner) createNodeRole(ctx *pulumi.Context, name string, tags pulumi.St
 		}
 	}
 
-	// NOTE: Cluster Autoscaler requires additional IAM permissions that should be
-	// pre-provisioned by the platform team (not created by this runner).
-	// See docs/eks-prerequisites.md for the required IAM policy.
-	// For FedRAMP compliance, IAM changes should go through a separate approval process.
+	// Cluster Autoscaler IAM policy - allows autoscaler to modify ASGs
+	// This is required for on-demand GPU node provisioning (Kubeflow pattern).
+	// TODO: For FedRAMP, consider migrating to IRSA with a dedicated service account.
+	autoscalerPolicy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:DescribeAutoScalingGroups",
+					"autoscaling:DescribeAutoScalingInstances",
+					"autoscaling:DescribeLaunchConfigurations",
+					"autoscaling:DescribeScalingActivities",
+					"autoscaling:DescribeTags",
+					"ec2:DescribeImages",
+					"ec2:DescribeInstanceTypes",
+					"ec2:DescribeLaunchTemplateVersions",
+					"ec2:GetInstanceTypesFromInstanceRequirements",
+					"eks:DescribeNodegroup"
+				],
+				"Resource": ["*"]
+			},
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:SetDesiredCapacity",
+					"autoscaling:TerminateInstanceInAutoScalingGroup"
+				],
+				"Resource": ["*"],
+				"Condition": {
+					"StringEquals": {
+						"autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true"
+					}
+				}
+			}
+		]
+	}`
+	if _, err := awsiam.NewRolePolicy(ctx, fmt.Sprintf("%s-autoscaler", name), &awsiam.RolePolicyArgs{
+		Role:   role.Name,
+		Policy: pulumi.String(autoscalerPolicy),
+	}, opts); err != nil {
+		return nil, fmt.Errorf("attach cluster autoscaler policy: %w", err)
+	}
 
 	return role, nil
 }

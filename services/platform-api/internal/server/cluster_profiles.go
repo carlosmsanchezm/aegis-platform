@@ -18,9 +18,12 @@ type clusterProfileTemplate struct {
 
 func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 	return map[string]*clusterProfileTemplate{
-		"eks-gpu-train": {
-			ID:       "eks-gpu-train",
-			Version:  "1.4.0",
+		// eks-train: Training cluster with system nodes and GPU ASG (MinSize=0).
+		// GPU ASG exists but has no running nodes until a workspace is requested.
+		// This follows the Kubeflow pattern: Cluster Autoscaler scales from 0 on-demand.
+		"eks-train": {
+			ID:       "eks-train",
+			Version:  "1.5.0",
 			Provider: "aws",
 			AWS: &infraapi.AWSInfraSpec{
 				Mode:        infraapi.AWSProvisionModeProvision,
@@ -31,19 +34,22 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 						Name:         "system",
 						InstanceType: "m6i.large",
 						MinSize:      1,
-						MaxSize:      2,
+						MaxSize:      3,
 						Labels: map[string]string{
 							"aegis.dev/purpose": "system",
 						},
 					},
 					{
+						// GPU ASG with MinSize=0: no nodes running until workspace requested.
+						// Cluster Autoscaler will scale up when it sees pending GPU pods.
 						Name:         "gpu",
 						InstanceType: "g4dn.xlarge",
 						MinSize:      0,
-						MaxSize:      1,
+						MaxSize:      5,
 						Labels: map[string]string{
-							"aegis.dev/purpose":   "training",
-							"aegis.io/gpu-flavor": "nvidia-tesla-t4",
+							"aegis.dev/purpose":     "training",
+							"aegis.io/gpu-flavor":   "nvidia-tesla-t4",
+							"aegis.dev/spotAllowed": "false",
 						},
 						Taints: []corev1.Taint{{
 							Key:    "nvidia.com/gpu",
@@ -56,7 +62,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 		},
 		"eks-general": {
 			ID:       "eks-general",
-			Version:  "2.1.0",
+			Version:  "2.2.0",
 			Provider: "aws",
 			AWS: &infraapi.AWSInfraSpec{
 				Mode:        infraapi.AWSProvisionModeProvision,
@@ -72,21 +78,12 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 							"aegis.dev/purpose": "general",
 						},
 					},
-					{
-						Name:         "analytics",
-						InstanceType: "r6i.large",
-						MinSize:      1,
-						MaxSize:      5,
-						Labels: map[string]string{
-							"aegis.dev/purpose": "analytics",
-						},
-					},
 				},
 			},
 		},
 		"eks-secure": {
 			ID:       "eks-secure",
-			Version:  "1.2.0",
+			Version:  "1.3.0",
 			Provider: "aws",
 			AWS: &infraapi.AWSInfraSpec{
 				Mode:        infraapi.AWSProvisionModeProvision,
@@ -103,13 +100,15 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 						},
 					},
 					{
+						// GPU ASG with MinSize=0 for secure workloads
 						Name:         "gpu",
 						InstanceType: "g4dn.xlarge",
-						MinSize:      1,
-						MaxSize:      3,
+						MinSize:      0,
+						MaxSize:      5,
 						Labels: map[string]string{
-							"aegis.dev/purpose":   "secure-gpu",
-							"aegis.io/gpu-flavor": "nvidia-tesla-t4",
+							"aegis.dev/purpose":     "secure-gpu",
+							"aegis.io/gpu-flavor":   "nvidia-tesla-t4",
+							"aegis.dev/spotAllowed": "false",
 						},
 						Taints: []corev1.Taint{{
 							Key:    "nvidia.com/gpu",

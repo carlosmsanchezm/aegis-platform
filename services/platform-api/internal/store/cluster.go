@@ -100,3 +100,12 @@ func (cs *clusterState) setProjectID(clusterID, projectID string) {
 	}
 	ci.Labels["aegis.yourorg.dev/projectId"] = projectID
 }
+
+func (cs *clusterState) delete(clusterID string) {
+	if clusterID == "" {
+		return
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	delete(cs.clusters, clusterID)
+}

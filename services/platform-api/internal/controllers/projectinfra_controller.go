@@ -331,6 +331,13 @@ func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.L
 		log.Error("failed to delete aegis clusters", zap.Error(err))
 		return ctrl.Result{}, err
 	}
+	// Remove clusters from the store so they no longer appear in the UI
+	if r.Store != nil {
+		for _, id := range clusterIDs {
+			r.Store.DeleteCluster(id)
+		}
+		log.Info("removed clusters from store", zap.Strings("cluster_ids", clusterIDs))
+	}
 	if infra.Spec.Aws != nil && r.Provisioner != nil {
 		log.Info("triggering aws destroy via pulumi",
 			zap.String("project", infra.Spec.ProjectID),

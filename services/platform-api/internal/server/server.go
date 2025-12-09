@@ -45,11 +45,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructuredapi "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
+	RestConfigFor(clusterID string) (*rest.Config, error)
 }
 
 func kubeClientProviderConfigured(p kubeClientProvider) bool {

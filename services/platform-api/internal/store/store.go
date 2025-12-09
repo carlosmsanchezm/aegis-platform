@@ -99,4 +99,5 @@ type Store interface {
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
 	ListClusterInfos() []*ClusterInfo
 	SetClusterProjectID(clusterID, projectID string)
+	DeleteCluster(clusterID string)
 }

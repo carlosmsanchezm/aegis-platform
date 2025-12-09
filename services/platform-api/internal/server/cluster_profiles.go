@@ -203,9 +203,11 @@ func adjustGpuPoolSize(spec *infraapi.AWSInfraSpec, count int) {
 	pool := spec.NodePools[idx]
 	val := int32(count)
 	pool.MinSize = val
-	if val == 0 {
-		pool.MaxSize = 0
-	} else if pool.MaxSize < val {
+	// Don't set MaxSize to 0 when count is 0 - this would prevent autoscaling.
+	// The Kubeflow pattern requires MinSize=0 but MaxSize>0 so the Cluster
+	// Autoscaler can scale up GPU nodes on-demand when workspaces are requested.
+	// Only increase MaxSize if the requested count exceeds current MaxSize.
+	if val > 0 && pool.MaxSize < val {
 		pool.MaxSize = val
 	}
 	spec.NodePools[idx] = pool

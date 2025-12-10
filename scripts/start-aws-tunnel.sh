@@ -163,7 +163,7 @@ k8sAgent:
     AEGIS_CP_GRPC_INSECURE: "false"
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
     AEGIS_CP_GRPC_SERVER_NAME: ""
-    AEGIS_FLAVORS: "cpu-small,t4-1gpu"
+    AEGIS_FLAVORS: "cpu-small,gpu-standard"
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
     # OIDC client credentials (Keycloak via AWS NLB)

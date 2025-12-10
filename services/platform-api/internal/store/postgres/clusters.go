@@ -27,17 +27,22 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 
 	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, provider, region, created_at, updated_at)
 VALUES ($1, $2, $3, now(), now())
-ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
-		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
-		return
-	}
+ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, deleted_at=NULL, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
+			s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
+			return
+		}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1`, req.GetClusterId()); err != nil {
+	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
+	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
 		s.logExecError("cluster_register_delete_labels", err, zap.String("cluster_id", req.GetClusterId()))
 		return
 	}
 	for k, v := range req.GetLabels() {
 		if k == "" {
+			continue
+		}
+		// projectId label is managed separately; avoid duplicate-key error on re-register
+		if k == "aegis.yourorg.dev/projectId" {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)`, req.GetClusterId(), k, v); err != nil {
@@ -65,8 +70,8 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric and last heartbeat timestamp
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now() WHERE id=$2`,
+	// Update TTFG metric and last heartbeat timestamp; clear soft delete if present.
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$2`,
 		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
 		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
 		return
@@ -99,7 +104,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters`)
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -176,4 +181,32 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+func (s *PostgresStore) SetClusterProjectID(clusterID, projectID string) {
+	if clusterID == "" || projectID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Upsert the project label for the cluster
+	_, err := s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+		clusterID, "aegis.yourorg.dev/projectId", projectID)
+	if err != nil {
+		s.logExecError("set_cluster_project", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+	}
+}
+
+func (s *PostgresStore) DeleteCluster(clusterID string) {
+	if clusterID == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	if _, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, clusterID); err != nil {
+		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
+	}
 }

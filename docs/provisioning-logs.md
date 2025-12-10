@@ -12,6 +12,7 @@ The platform-api exposes provisioning logs and phase timestamps for `ProjectInfr
 - `since` (optional): RFC3339 timestamp cursor. Only entries after this time are returned.
 - `limit` (optional): max entries to return (default 200, max 1000).
 - `stream` (optional, boolean): when `true`, the handler waits briefly for new lines before responding (useful for live tails).
+- Cursor format is `RFC3339Nano|sequence` where the sequence is an internal monotonic id to avoid skipping lines when multiple entries share the same timestamp. Older cursors that only send the timestamp still work but may drop lines if many share that exact timestamp; prefer the combined form returned in `nextCursor`.
 
 ### Response
 

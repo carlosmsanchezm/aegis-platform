@@ -69,7 +69,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 	s.logExecError("provisioning_log_insert", err, zap.String("job_id", entry.JobID))
 }
 
-func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, limit int) []store.ProvisioningLogEntry {
+func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []store.ProvisioningLogEntry {
 	if strings.TrimSpace(jobID) == "" {
 		return nil
 	}
@@ -82,11 +82,16 @@ func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, limi
 		limit = 1000
 	}
 
-	query := `SELECT job_id, COALESCE(project_id, ''), COALESCE(cluster_id, ''), COALESCE(phase, ''), COALESCE(entry_type, ''), message, created_at FROM provisioning_logs WHERE job_id=$1`
+	query := `SELECT job_id, COALESCE(project_id, ''), COALESCE(cluster_id, ''), COALESCE(phase, ''), COALESCE(entry_type, ''), message, created_at, id FROM provisioning_logs WHERE job_id=$1`
 	args := []any{jobID}
 	if !since.IsZero() {
-		query += " AND created_at > $" + strconv.Itoa(len(args)+1)
-		args = append(args, since)
+		if sinceSeq > 0 {
+			query += " AND (created_at > $" + strconv.Itoa(len(args)+1) + " OR (created_at = $" + strconv.Itoa(len(args)+1) + " AND id > $" + strconv.Itoa(len(args)+2) + "))"
+			args = append(args, since, sinceSeq)
+		} else {
+			query += " AND created_at > $" + strconv.Itoa(len(args)+1)
+			args = append(args, since)
+		}
 	}
 	query += " ORDER BY created_at ASC, id ASC LIMIT $" + strconv.Itoa(len(args)+1)
 	args = append(args, limit)
@@ -102,7 +107,7 @@ func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, limi
 	for rows.Next() {
 		var entry store.ProvisioningLogEntry
 		var projectID, clusterID, phase, entryType string
-		if scanErr := rows.Scan(&entry.JobID, &projectID, &clusterID, &phase, &entryType, &entry.Message, &entry.CreatedAt); scanErr != nil {
+		if scanErr := rows.Scan(&entry.JobID, &projectID, &clusterID, &phase, &entryType, &entry.Message, &entry.CreatedAt, &entry.Sequence); scanErr != nil {
 			s.logExecError("provisioning_log_scan", scanErr)
 			break
 		}

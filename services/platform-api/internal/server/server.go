@@ -2334,22 +2334,21 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 	switch normalized {
 	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
 		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
-		// g4dn.xlarge has 4 vCPUs but only ~3.92 allocatable after k8s overhead
-		// Request 3 CPU to ensure pod fits on node
+		// Conservative defaults: leave headroom for system pods, logging, and user's custom processes
+		// GPU does heavy compute; CPU/RAM just feed data - most ML work is GPU-bound
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          16,
-			CpuCoresRequest:    "3",
-			MemoryRequest:      "14Gi",
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "8Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10-1gpu", "a10g-1gpu", "gpu-large":
 		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
-		// g5.xlarge has 4 vCPUs (~3.92 allocatable), 16GB RAM, 24GB GPU memory
-		// For larger workloads, use g5.2xlarge (8 vCPU) or g5.4xlarge (16 vCPU)
+		// Conservative defaults: leave headroom for system pods and user customizations
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2357,8 +2356,21 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "8Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "gpu-heavy", "t4-heavy":
+		// gpu-heavy: for data-intensive preprocessing that needs more CPU/RAM
+		// Use when users need heavy data loading or CPU-side transforms
+		return &aegis.Flavor{
+			Name:               name,
+			Chip:               "nvidia-t4",
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          16,
 			CpuCoresRequest:    "3",
-			MemoryRequest:      "14Gi",
+			MemoryRequest:      "12Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10g-mig-1g", "a10-mig-1g":
@@ -2420,12 +2432,22 @@ func (s *Server) ensureFlavorDefaults(name string) {
 		return
 	}
 
-	if existing == nil || strings.TrimSpace(existing.GetResourceName()) == "" || (expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) {
+	// Update flavor if it doesn't exist, or if it exists but has missing/outdated values
+	needsUpdate := existing == nil ||
+		strings.TrimSpace(existing.GetResourceName()) == "" ||
+		(expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) ||
+		// Also update if CPU/memory values differ from expected defaults
+		(expected.GetCpuCoresRequest() != "" && existing.GetCpuCoresRequest() != expected.GetCpuCoresRequest()) ||
+		(expected.GetMemoryRequest() != "" && existing.GetMemoryRequest() != expected.GetMemoryRequest())
+
+	if needsUpdate {
 		s.store.PutFlavor(expected)
 		s.log.Info("autobootstrap: flavor ensured",
 			zap.String("flavor", trimmed),
 			zap.String("resource_name", expected.GetResourceName()),
 			zap.Int32("gpu_count", expected.GetGpuCount()),
+			zap.String("cpu_request", expected.GetCpuCoresRequest()),
+			zap.String("memory_request", expected.GetMemoryRequest()),
 		)
 	}
 }

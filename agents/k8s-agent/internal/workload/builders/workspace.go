@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -130,6 +131,16 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 		jobAnnotations["kueue.x-k8s.io/skip-admission"] = "true"
 	}
 
+	podSpec := corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		Containers:    []corev1.Container{container},
+	}
+
+	// Add node selector and tolerations for GPU workloads
+	if opts.Hints != nil && opts.Hints.GPUCount > 0 {
+		applyGPUScheduling(&podSpec, opts.Hints)
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        opts.JobName,
@@ -144,10 +155,7 @@ func BuildWorkspaceJob(opts WorkspaceOptions) *batchv1.Job {
 			TTLSecondsAfterFinished: opts.TTLSecondsAfterFinished,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers:    []corev1.Container{container},
-				},
+				Spec:       podSpec,
 			},
 		},
 	}
@@ -359,3 +367,48 @@ func fieldRef(path string) *corev1.EnvVarSource {
 func boolPtr(v bool) *bool { return &v }
 
 func int32Ptr(v int32) *int32 { return &v }
+
+// applyGPUScheduling adds node selector and tolerations for GPU workloads.
+// This ensures pods are scheduled onto nodes with the appropriate GPU hardware
+// and can tolerate the GPU taints.
+func applyGPUScheduling(pod *corev1.PodSpec, hints *GPUHints) {
+	if pod == nil || hints == nil || hints.GPUCount <= 0 {
+		return
+	}
+
+	resourceName := hints.ResourceName
+	if resourceName == "" {
+		resourceName = "nvidia.com/gpu"
+	}
+
+	// Determine the GPU flavor label based on resource name
+	flavorLabel := "nvidia-tesla-t4" // default for standard nvidia.com/gpu
+	taintKey := "nvidia.com/gpu"
+
+	if strings.Contains(resourceName, "mig-1g.10gb") {
+		flavorLabel = "nvidia-a10g-mig"
+		taintKey = "nvidia.com/mig-1g.10gb"
+	}
+
+	// Add node selector to target GPU nodes
+	if pod.NodeSelector == nil {
+		pod.NodeSelector = map[string]string{}
+	}
+	pod.NodeSelector["aegis.io/gpu-flavor"] = flavorLabel
+
+	// Add toleration for GPU taint
+	hasToleration := false
+	for _, tol := range pod.Tolerations {
+		if tol.Key == taintKey {
+			hasToleration = true
+			break
+		}
+	}
+	if !hasToleration {
+		pod.Tolerations = append(pod.Tolerations, corev1.Toleration{
+			Key:      taintKey,
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		})
+	}
+}

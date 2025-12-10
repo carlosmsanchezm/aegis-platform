@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -62,6 +63,26 @@ func (m *Manager) loadClient(clusterID string) (client.Client, error) {
 		return cli, nil
 	}
 
+	cfg, err := m.restConfigFor(clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	cli, err := client.New(cfg, client.Options{Scheme: m.scheme})
+	if err != nil {
+		return nil, fmt.Errorf("create kube client for %q: %w", clusterID, err)
+	}
+
+	m.clients[clusterID] = cli
+	return cli, nil
+}
+
+// RestConfigFor returns a REST config for the given cluster ID.
+func (m *Manager) RestConfigFor(clusterID string) (*rest.Config, error) {
+	return m.restConfigFor(clusterID)
+}
+
+func (m *Manager) restConfigFor(clusterID string) (*rest.Config, error) {
 	path, err := m.resolvePath(clusterID)
 	if err != nil {
 		return nil, err
@@ -77,14 +98,7 @@ func (m *Manager) loadClient(clusterID string) (client.Client, error) {
 		return nil, fmt.Errorf("load kubeconfig %q: %w", path, err)
 	}
 	cfg.UserAgent = "aegis-platform-api"
-
-	cli, err := client.New(cfg, client.Options{Scheme: m.scheme})
-	if err != nil {
-		return nil, fmt.Errorf("create kube client for %q: %w", clusterID, err)
-	}
-
-	m.clients[clusterID] = cli
-	return cli, nil
+	return cfg, nil
 }
 
 func (m *Manager) resolvePath(clusterID string) (string, error) {

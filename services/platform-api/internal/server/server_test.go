@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -36,6 +37,10 @@ type staticKubeClient struct {
 
 func (s staticKubeClient) ClientFor(clusterID string) (client.Client, error) {
 	return s.cli, nil
+}
+
+func (s staticKubeClient) RestConfigFor(clusterID string) (*rest.Config, error) {
+	return &rest.Config{}, nil
 }
 
 func newFakeWorkspaceClient(t *testing.T) client.Client {

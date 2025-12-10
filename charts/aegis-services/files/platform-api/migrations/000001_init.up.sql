@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS projects (
     policy_regions TEXT[] NULL,
     policy_data_level TEXT NULL,
     policy_deny_egress_by_default BOOLEAN NOT NULL DEFAULT FALSE,
+    annotations JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -47,13 +48,92 @@ CREATE TABLE IF NOT EXISTS workloads (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     queue TEXT NOT NULL DEFAULT '',
     cluster_id TEXT NULL,
-    cluster_name TEXT NULL,
-    flavor TEXT NULL,
     status TEXT NOT NULL,
-    exit_code INTEGER NULL,
+    ui_status TEXT NULL,
+    url TEXT NULL,
+    message TEXT NULL,
+    kind TEXT NOT NULL,
+    hints_resource_name TEXT NULL,
+    hints_gpu_count INTEGER NULL,
+    hints_cpu_request TEXT NULL,
+    hints_mem_request TEXT NULL,
+    workspace_json JSONB NULL,
+    training_json JSONB NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at TIMESTAMPTZ NULL,
-    finished_at TIMESTAMPTZ NULL
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    placed_at TIMESTAMPTZ NULL,
+    started_at TIMESTAMPTZ NULL
 );
 CREATE INDEX IF NOT EXISTS workloads_by_project ON workloads(project_id);
-CREATE INDEX IF NOT EXISTS workloads_by_cluster ON workloads(cluster_id);
+CREATE INDEX IF NOT EXISTS workloads_by_cluster_status ON workloads(cluster_id, status);
+
+CREATE TABLE IF NOT EXISTS workload_estimates (
+    workload_id TEXT PRIMARY KEY REFERENCES workloads(id) ON DELETE CASCADE,
+    estimate_usd DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS budget_usage (
+    project_id TEXT NOT NULL,
+    queue TEXT NOT NULL DEFAULT '',
+    period_start_utc DATE NOT NULL,
+    reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+    actual_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, queue, period_start_utc),
+    FOREIGN KEY (project_id, queue) REFERENCES budgets(project_id, queue) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS budget_usage_lookup ON budget_usage(project_id, queue);
+
+CREATE TABLE IF NOT EXISTS connection_sessions (
+    session_id TEXT PRIMARY KEY,
+    workload_id TEXT NOT NULL REFERENCES workloads(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    client TEXT NOT NULL,
+    jti TEXT NOT NULL UNIQUE,
+    token TEXT NOT NULL,
+    ssh_user TEXT NOT NULL,
+    ssh_host_alias TEXT NOT NULL,
+    internal_host TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    ssh_config TEXT NOT NULL,
+    proxy_url TEXT NOT NULL,
+    vscode_uri TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    one_time BOOLEAN NOT NULL DEFAULT TRUE,
+    used BOOLEAN NOT NULL DEFAULT FALSE,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sessions_by_workload ON connection_sessions(workload_id);
+CREATE INDEX IF NOT EXISTS sessions_by_expires ON connection_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS session_jtis (
+    jti TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES connection_sessions(session_id) ON DELETE CASCADE,
+    used BOOLEAN NOT NULL DEFAULT FALSE,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS clusters (
+    id TEXT PRIMARY KEY,
+    provider TEXT NULL,
+    region TEXT NULL,
+    ttf_gpu_seconds_p50 DOUBLE PRECISION NOT NULL DEFAULT 0,
+    last_heartbeat TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cluster_labels (
+    cluster_id TEXT NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    k TEXT NOT NULL,
+    v TEXT NOT NULL,
+    PRIMARY KEY (cluster_id, k)
+);
+
+CREATE TABLE IF NOT EXISTS cluster_flavors (
+    cluster_id TEXT NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    flavor TEXT NOT NULL,
+    PRIMARY KEY (cluster_id, flavor)
+);

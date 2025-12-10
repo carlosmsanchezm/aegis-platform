@@ -54,7 +54,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	runner := aws.NewRunner(logger)
+	runner := aws.NewRunner(logger, nil)
 	stack, programCfg, err := runner.NewStack(ctx, infra, awsSpec)
 	if err != nil {
 		logger.Error("failed to prepare pulumi stack", zap.Error(err))

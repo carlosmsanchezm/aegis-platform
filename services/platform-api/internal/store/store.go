@@ -42,6 +42,39 @@ type ConnectionSession struct {
 	UpdatedAt    time.Time
 }
 
+// ProvisioningLogEntry captures a single provisioning log line tied to a ProjectInfra job.
+type ProvisioningLogEntry struct {
+	JobID     string
+	ProjectID string
+	ClusterID string
+	Phase     string
+	Type      string
+	Message   string
+	CreatedAt time.Time
+}
+
+const (
+	LogTypeProgress = "progress"
+	LogTypeEvent    = "event"
+	LogTypeError    = "error"
+)
+
+// ProvisioningRun tracks coarse-grained lifecycle metadata for a ProjectInfra job.
+type ProvisioningRun struct {
+	JobID       string
+	ProjectID   string
+	ClusterID   string
+	Phase       string
+	StartedAt   time.Time
+	CompletedAt *time.Time
+	UpdatedAt   time.Time
+}
+
+// ProvisioningLogSink exposes the minimal interface required to persist provisioning log lines.
+type ProvisioningLogSink interface {
+	AppendProvisioningLog(entry ProvisioningLogEntry)
+}
+
 // Store defines the contract satisfied by all persistence backends used by the
 // platform API. Implementations must provide their own concurrency controls and
 // guarantee that multi-step operations documented as atomic remain so.
@@ -100,4 +133,10 @@ type Store interface {
 	ListClusterInfos() []*ClusterInfo
 	SetClusterProjectID(clusterID, projectID string)
 	DeleteCluster(clusterID string)
+
+	// provisioning logs
+	AppendProvisioningLog(entry ProvisioningLogEntry)
+	ListProvisioningLogs(jobID string, since time.Time, limit int) []ProvisioningLogEntry
+	UpsertProvisioningRun(run ProvisioningRun)
+	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
 }

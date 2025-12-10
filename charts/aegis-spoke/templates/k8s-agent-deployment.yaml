@@ -60,10 +60,14 @@ spec:
               memory: 64Mi
           env:
             {{- range $k, $v := .Values.k8sAgent.env }}
-            {{- if ne $k "AEGIS_PROXY_INGRESS_HOST" }}
+            {{- if and (ne $k "AEGIS_PROXY_INGRESS_HOST") (ne $k "AEGIS_PROXY_URL") }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
             {{- end }}
             - name: AEGIS_PROXY_INGRESS_HOST
               value: {{ .Values.proxy.ingress.hostname | quote }}
+            {{- if .Values.proxy.url }}
+            - name: AEGIS_PROXY_URL
+              value: {{ .Values.proxy.url | quote }}
+            {{- end }}

@@ -82,6 +82,7 @@ func registerWorkspaceWizardRoutes(mux *runtime.ServeMux, srv *Server) {
 	}); err != nil {
 		srv.log.Error("failed to register /api/clusters route", zap.Error(err))
 	}
+	// NOTE: /api/v1/clusters is handled by grpc-gateway (ListClusters RPC) - do not override
 	if err := mux.HandlePath(http.MethodPost, "/api/workspaces", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		srv.handleCreateWorkspace(w, r)
 	}); err != nil {

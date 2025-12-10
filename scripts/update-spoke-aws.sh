@@ -44,14 +44,38 @@ log_info "Region: $REGION"
 log_info "AWS Profile: $AWS_PROFILE"
 log_info "Cluster ID: $CLUSTER_ID"
 
-# Update kubeconfig
+# Role to assume for EKS access
+ROLE_ARN="arn:aws:iam::567751785679:role/aegis-platform"
+
+# Assume the role and export credentials
+log_info "Assuming role: $ROLE_ARN"
+ASSUME_ROLE_OUTPUT=$(aws sts assume-role \
+    --role-arn "$ROLE_ARN" \
+    --role-session-name "aegis-spoke-update-$(date +%s)" \
+    --profile "$AWS_PROFILE" \
+    --output json)
+
+if [ $? -ne 0 ]; then
+    log_error "Failed to assume role. Make sure your AWS profile has sts:AssumeRole permission."
+    exit 1
+fi
+
+# Export temporary credentials
+export AWS_ACCESS_KEY_ID=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.AccessKeyId')
+export AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SecretAccessKey')
+export AWS_SESSION_TOKEN=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SessionToken')
+
+# Unset profile to use the exported credentials
+unset AWS_PROFILE
+
+log_info "Successfully assumed role, using temporary credentials"
+
+# Update kubeconfig (without --role-arn since we already assumed the role)
 log_info "Updating kubeconfig for EKS cluster..."
 aws eks update-kubeconfig \
     --name "$CLUSTER_NAME" \
     --region "$REGION" \
-    --profile "$AWS_PROFILE" \
-    --alias "eks-$CLUSTER_NAME" \
-    --role-arn "arn:aws:iam::567751785679:role/aegis-platform"
+    --alias "eks-$CLUSTER_NAME"
 
 # Use the new context
 kubectl config use-context "eks-$CLUSTER_NAME"
@@ -76,6 +100,8 @@ fi
 log_info "Project ID: $PROJECT_ID"
 
 # Upgrade helm release
+# Use --reset-values to ignore stored release values (from original Pulumi deployment)
+# This ensures the new values files take precedence
 log_info "Upgrading aegis-spoke helm release..."
 helm upgrade aegis-spoke "${PROJECT_ROOT}/charts/aegis-spoke" \
     -n aegis-system \
@@ -85,6 +111,7 @@ helm upgrade aegis-spoke "${PROJECT_ROOT}/charts/aegis-spoke" \
     --set k8sAgent.env.AEGIS_REGION="$REGION" \
     --set k8sAgent.env.AEGIS_PROVIDER=aws \
     --set k8sAgent.env.AEGIS_PROJECT_ID="$PROJECT_ID" \
+    --reset-values \
     --wait \
     --timeout 5m
 

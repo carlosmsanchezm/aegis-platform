@@ -122,8 +122,34 @@ message RevokeConnectionSessionRequest {
 // Cluster handshake
 message ClusterRegisterRequest { string cluster_id = 1; string provider = 2; string region = 3; string il_level = 4; map<string,string> labels = 5; }
 message ClusterRegisterResponse { bool ok = 1; string message = 2; }
-message ClusterHeartbeat { string cluster_id = 1; double ttf_gpu_seconds_p50 = 2; repeated Flavor available_flavors = 3; }
+message ClusterHeartbeat {
+  string cluster_id = 1;
+  double ttf_gpu_seconds_p50 = 2;
+  repeated Flavor available_flavors = 3;
+  string proxy_url = 4; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+}
 message ClusterHeartbeatAck { bool ok = 1; }
+
+// Cluster listing
+message ListClustersRequest {
+  string project_id = 1;
+  string region = 2;
+}
+
+message ClusterSummary {
+  string id = 1;
+  string name = 2;
+  string project_id = 3;
+  string provider = 4;
+  string region = 5;
+  string phase = 6;
+  string created_at = 7;
+  string last_heartbeat = 8;
+}
+
+message ListClustersResponse {
+  repeated ClusterSummary items = 1;
+}
 
 // Requests
 message CreateProjectRequest { Project project = 1; }
@@ -390,6 +416,12 @@ service AegisPlatform {
     option (google.api.http) = {
       post: "/api/v1/clusters"
       body: "*"
+    };
+  }
+
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters"
     };
   }
 

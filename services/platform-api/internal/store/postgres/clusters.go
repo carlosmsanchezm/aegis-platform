@@ -28,9 +28,9 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, provider, region, created_at, updated_at)
 VALUES ($1, $2, $3, now(), now())
 ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, deleted_at=NULL, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
-			s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
-			return
-		}
+		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
+		return
+	}
 
 	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
 	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
@@ -70,10 +70,15 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric and last heartbeat timestamp; clear soft delete if present.
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$2`,
-		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
+	// Update TTFG metric and last heartbeat timestamp; do not resurrect soft-deleted clusters.
+	res, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), updated_at=now() WHERE id=$2 AND deleted_at IS NULL`,
+		hb.GetTtfGpuSecondsP50(), hb.GetClusterId())
+	if err != nil {
 		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
+		return
+	}
+	if rows := res.RowsAffected(); rows == 0 {
+		s.log.Debug("heartbeat ignored for soft-deleted cluster", zap.String("cluster_id", hb.GetClusterId()))
 		return
 	}
 

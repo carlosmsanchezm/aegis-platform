@@ -34,6 +34,7 @@ import (
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/observability"
+	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
 
 const (
@@ -69,15 +70,16 @@ var unsupportedControlPlaneAZs = map[string]map[string]bool{
 
 // Runner provisions AWS infrastructure via Pulumi Automation.
 type Runner struct {
-	log *zap.Logger
+	log  *zap.Logger
+	sink store.ProvisioningLogSink
 }
 
 // NewRunner returns a new automation-backed AWS runner.
-func NewRunner(log *zap.Logger) *Runner {
+func NewRunner(log *zap.Logger, sink store.ProvisioningLogSink) *Runner {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &Runner{log: log.Named("aws-provisioner")}
+	return &Runner{log: log.Named("aws-provisioner"), sink: sink}
 }
 
 // Provision reconciles AWS infrastructure described by the supplied ProjectInfra.
@@ -101,7 +103,15 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 	_ = stack.Cancel(ctx)
 	r.clearPulumiLock(programCfg.ProjectID, r.stackName(programCfg.ProjectID, programCfg.Region))
 
-	progressWriter := &logWriter{log: r.log}
+	jobID, clusterID := jobMetadata(infra)
+	progressWriter := &logWriter{
+		log:       r.log,
+		sink:      r.sink,
+		jobID:     jobID,
+		projectID: strings.TrimSpace(infra.Spec.ProjectID),
+		clusterID: clusterID,
+		phase:     "Provisioning",
+	}
 
 	if skip := strings.EqualFold(os.Getenv(envAegisPulumiSkipRefresh), "true"); !skip {
 		if _, err := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter)); err != nil {
@@ -177,7 +187,15 @@ func (r *Runner) Destroy(ctx context.Context, infra *infraapi.ProjectInfra, spec
 		return fmt.Errorf("set stack config: %w", err)
 	}
 
-	progressWriter := &logWriter{log: r.log}
+	jobID, clusterID := jobMetadata(infra)
+	progressWriter := &logWriter{
+		log:       r.log,
+		sink:      r.sink,
+		jobID:     jobID,
+		projectID: strings.TrimSpace(infra.Spec.ProjectID),
+		clusterID: clusterID,
+		phase:     "Destroy",
+	}
 	_ = stack.Cancel(ctx) // best-effort unlock before destroy
 	destroyRes, err := stack.Destroy(ctx, optdestroy.ProgressStreams(progressWriter))
 	if err != nil && isLockError(err) && r.retryAfterCancel(ctx, stack, func() error {
@@ -1053,14 +1071,14 @@ func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string,
 		"awsRegion": pulumi.String(region),
 		// Scale down settings for cost optimization
 		"extraArgs": pulumi.Map{
-			"scale-down-enabled":            pulumi.Bool(true),
-			"scale-down-delay-after-add":    pulumi.String("5m"),
-			"scale-down-unneeded-time":      pulumi.String("5m"),
+			"scale-down-enabled":               pulumi.Bool(true),
+			"scale-down-delay-after-add":       pulumi.String("5m"),
+			"scale-down-unneeded-time":         pulumi.String("5m"),
 			"scale-down-utilization-threshold": pulumi.String("0.5"),
-			"skip-nodes-with-local-storage": pulumi.Bool(false),
-			"skip-nodes-with-system-pods":   pulumi.Bool(false),
-			"balance-similar-node-groups":   pulumi.Bool(true),
-			"expander":                      pulumi.String("least-waste"),
+			"skip-nodes-with-local-storage":    pulumi.Bool(false),
+			"skip-nodes-with-system-pods":      pulumi.Bool(false),
+			"balance-similar-node-groups":      pulumi.Bool(true),
+			"expander":                         pulumi.String("least-waste"),
 		},
 		// Resource requests for the autoscaler pod
 		"resources": pulumi.Map{
@@ -1722,15 +1740,50 @@ func (r *Runner) retryAfterCancel(ctx context.Context, stack auto.Stack, fn func
 // Utility helpers
 
 type logWriter struct {
-	log *zap.Logger
+	log       *zap.Logger
+	sink      store.ProvisioningLogSink
+	jobID     string
+	projectID string
+	clusterID string
+	phase     string
 }
 
 func (w *logWriter) Write(p []byte) (int, error) {
 	msg := strings.TrimSpace(string(p))
 	if msg != "" {
-		w.log.Info("pulumi progress", zap.String("line", msg))
+		if w.log != nil {
+			w.log.Info("pulumi progress", zap.String("line", msg), zap.String("job", w.jobID))
+		}
+		if w.sink != nil && strings.TrimSpace(w.jobID) != "" {
+			entry := store.ProvisioningLogEntry{
+				JobID:     w.jobID,
+				ProjectID: w.projectID,
+				ClusterID: w.clusterID,
+				Phase:     w.phase,
+				Type:      store.LogTypeProgress,
+				Message:   msg,
+				CreatedAt: time.Now().UTC(),
+			}
+			w.sink.AppendProvisioningLog(entry)
+		}
 	}
 	return len(p), nil
+}
+
+func jobMetadata(infra *infraapi.ProjectInfra) (jobID, clusterID string) {
+	if infra == nil {
+		return "", ""
+	}
+	jobID = strings.TrimSpace(infra.Name)
+	if infra.Annotations != nil {
+		if ann := strings.TrimSpace(infra.Annotations["aegis.yourorg.dev/clusterId"]); ann != "" {
+			clusterID = ann
+		}
+	}
+	if clusterID == "" && infra.Spec.Aws != nil {
+		clusterID = strings.TrimSpace(infra.Spec.Aws.ClusterName)
+	}
+	return jobID, clusterID
 }
 
 func convertTaints(taints []corev1.Taint) awseks.NodeGroupTaintArray {

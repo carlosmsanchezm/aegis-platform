@@ -86,6 +86,9 @@ func TestGetAwsClusterSignalsSuccess(t *testing.T) {
 					Ready:            3,
 					AutoScalingGroup: "asg-1",
 					Issues:           []string{"issue"},
+					GPU:              true,
+					GPUFlavor:        "a10g",
+					InstanceType:     "g5.xlarge",
 					ScalingEvents: []observability.ScalingEvent{
 						{Description: "scale", Status: "Successful", Time: "2024-01-01T00:00:00Z"},
 					},
@@ -142,6 +145,9 @@ func TestGetAwsClusterSignalsSuccess(t *testing.T) {
 	require.Equal(t, "us-east-1", resp.GetRegion())
 	require.Len(t, resp.GetNodegroups(), 1)
 	require.Equal(t, int32(3), resp.GetNodegroups()[0].GetDesired())
+	require.True(t, resp.GetNodegroups()[0].GetGpu())
+	require.Equal(t, "a10g", resp.GetNodegroups()[0].GetGpuFlavor())
+	require.Equal(t, "g5.xlarge", resp.GetNodegroups()[0].GetInstanceType())
 	require.Equal(t, float64(10), resp.GetLoadBalancers()[0].GetRequestCount())
 	require.Equal(t, []string{"partial"}, resp.GetWarnings())
 }

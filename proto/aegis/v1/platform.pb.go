@@ -3336,6 +3336,9 @@ type NodegroupSignal struct {
 	AsgName       string                 `protobuf:"bytes,6,opt,name=asg_name,json=asgName,proto3" json:"asg_name,omitempty"`
 	Issues        []string               `protobuf:"bytes,7,rep,name=issues,proto3" json:"issues,omitempty"`
 	ScalingEvents []*ScalingEvent        `protobuf:"bytes,8,rep,name=scaling_events,json=scalingEvents,proto3" json:"scaling_events,omitempty"`
+	Gpu           bool                   `protobuf:"varint,9,opt,name=gpu,proto3" json:"gpu,omitempty"`
+	GpuFlavor     string                 `protobuf:"bytes,10,opt,name=gpu_flavor,json=gpuFlavor,proto3" json:"gpu_flavor,omitempty"`
+	InstanceType  string                 `protobuf:"bytes,11,opt,name=instance_type,json=instanceType,proto3" json:"instance_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3424,6 +3427,27 @@ func (x *NodegroupSignal) GetScalingEvents() []*ScalingEvent {
 		return x.ScalingEvents
 	}
 	return nil
+}
+
+func (x *NodegroupSignal) GetGpu() bool {
+	if x != nil {
+		return x.Gpu
+	}
+	return false
+}
+
+func (x *NodegroupSignal) GetGpuFlavor() string {
+	if x != nil {
+		return x.GpuFlavor
+	}
+	return ""
+}
+
+func (x *NodegroupSignal) GetInstanceType() string {
+	if x != nil {
+		return x.InstanceType
+	}
+	return ""
 }
 
 type TargetGroupHealth struct {
@@ -4115,7 +4139,7 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\fScalingEvent\x12 \n" +
 	"\vdescription\x18\x01 \x01(\tR\vdescription\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x12\n" +
-	"\x04time\x18\x03 \x01(\tR\x04time\"\xf9\x01\n" +
+	"\x04time\x18\x03 \x01(\tR\x04time\"\xcf\x02\n" +
 	"\x0fNodegroupSignal\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
@@ -4124,7 +4148,12 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05ready\x18\x05 \x01(\x05R\x05ready\x12\x19\n" +
 	"\basg_name\x18\x06 \x01(\tR\aasgName\x12\x16\n" +
 	"\x06issues\x18\a \x03(\tR\x06issues\x12=\n" +
-	"\x0escaling_events\x18\b \x03(\v2\x16.aegis.v1.ScalingEventR\rscalingEvents\"q\n" +
+	"\x0escaling_events\x18\b \x03(\v2\x16.aegis.v1.ScalingEventR\rscalingEvents\x12\x10\n" +
+	"\x03gpu\x18\t \x01(\bR\x03gpu\x12\x1d\n" +
+	"\n" +
+	"gpu_flavor\x18\n" +
+	" \x01(\tR\tgpuFlavor\x12#\n" +
+	"\rinstance_type\x18\v \x01(\tR\finstanceType\"q\n" +
 	"\x11TargetGroupHealth\x12\x10\n" +
 	"\x03arn\x18\x01 \x01(\tR\x03arn\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +

@@ -34,6 +34,10 @@ type MemStore struct {
 	sessions           map[string]*ConnectionSession
 	sessionsByWorkload map[string]map[string]struct{}
 	sessionJTIs        map[string]*jtiRecord
+
+	provisioningLogs map[string][]ProvisioningLogEntry
+	provisioningRuns map[string]*ProvisioningRun
+	provisioningSeq  int64
 }
 
 func NewMemStore() *MemStore {
@@ -51,6 +55,8 @@ func NewMemStore() *MemStore {
 		sessions:           map[string]*ConnectionSession{},
 		sessionsByWorkload: map[string]map[string]struct{}{},
 		sessionJTIs:        map[string]*jtiRecord{},
+		provisioningLogs:   map[string][]ProvisioningLogEntry{},
+		provisioningRuns:   map[string]*ProvisioningRun{},
 	}
 }
 
@@ -586,4 +592,110 @@ func (s *MemStore) resolveBudgetLocked(projectID, queue string) (*aegis.Budget, 
 		return b, budgetKey(projectID, "")
 	}
 	return nil, ""
+}
+
+// -------- provisioning logs --------
+
+func (s *MemStore) AppendProvisioningLog(entry ProvisioningLogEntry) {
+	if strings.TrimSpace(entry.JobID) == "" || strings.TrimSpace(entry.Message) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now()
+	}
+	s.provisioningSeq++
+	if entry.Sequence == 0 {
+		entry.Sequence = s.provisioningSeq
+	}
+	clone := entry
+	s.provisioningLogs[entry.JobID] = append(s.provisioningLogs[entry.JobID], clone)
+}
+
+func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []ProvisioningLogEntry {
+	if strings.TrimSpace(jobID) == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	source := s.provisioningLogs[jobID]
+	out := make([]ProvisioningLogEntry, 0, limit)
+	for _, entry := range source {
+		if !since.IsZero() {
+			if entry.CreatedAt.Before(since) {
+				continue
+			}
+			if entry.CreatedAt.Equal(since) {
+				if sinceSeq > 0 {
+					if entry.Sequence <= sinceSeq {
+						continue
+					}
+				} else {
+					// legacy cursor without sequence: mimic strict time cursor to avoid duplicates
+					continue
+				}
+			}
+		}
+		copy := entry
+		out = append(out, copy)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (s *MemStore) UpsertProvisioningRun(run ProvisioningRun) {
+	if strings.TrimSpace(run.JobID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	existing, found := s.provisioningRuns[run.JobID]
+	merged := run
+	if merged.StartedAt.IsZero() {
+		if found && existing != nil {
+			merged.StartedAt = existing.StartedAt
+		} else {
+			merged.StartedAt = now
+		}
+	}
+	if merged.Phase == "" && found && existing != nil {
+		merged.Phase = existing.Phase
+	}
+	if merged.ProjectID == "" && found && existing != nil {
+		merged.ProjectID = existing.ProjectID
+	}
+	if merged.ClusterID == "" && found && existing != nil {
+		merged.ClusterID = existing.ClusterID
+	}
+	merged.UpdatedAt = now
+	s.provisioningRuns[run.JobID] = &merged
+}
+
+func (s *MemStore) GetProvisioningRun(jobID string) (*ProvisioningRun, bool) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	run, ok := s.provisioningRuns[jobID]
+	if !ok || run == nil {
+		return nil, false
+	}
+	copy := *run
+	if run.CompletedAt != nil {
+		ts := *run.CompletedAt
+		copy.CompletedAt = &ts
+	}
+	return &copy, true
 }

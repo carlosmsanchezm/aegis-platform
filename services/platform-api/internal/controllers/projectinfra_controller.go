@@ -80,7 +80,7 @@ func (r *ProjectInfraReconciler) recordProvisioningStatus(infra *infraapi.Projec
 		if run.Phase == "" {
 			run.Phase = existing.Phase
 		}
-		if existing.CompletedAt != nil {
+		if completed {
 			run.CompletedAt = existing.CompletedAt
 		}
 	}

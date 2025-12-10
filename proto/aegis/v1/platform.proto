@@ -270,6 +270,9 @@ message NodegroupSignal {
   string asg_name = 6;
   repeated string issues = 7;
   repeated ScalingEvent scaling_events = 8;
+  bool gpu = 9;
+  string gpu_flavor = 10;
+  string instance_type = 11;
 }
 
 message TargetGroupHealth {

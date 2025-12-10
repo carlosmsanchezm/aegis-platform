@@ -678,9 +678,6 @@ func (s *MemStore) UpsertProvisioningRun(run ProvisioningRun) {
 	if merged.ClusterID == "" && found && existing != nil {
 		merged.ClusterID = existing.ClusterID
 	}
-	if merged.CompletedAt == nil && found && existing != nil {
-		merged.CompletedAt = existing.CompletedAt
-	}
 	merged.UpdatedAt = now
 	s.provisioningRuns[run.JobID] = &merged
 }

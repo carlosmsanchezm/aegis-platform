@@ -141,13 +141,14 @@ generate_helm_values() {
 # Auto-generated values for AWS relay-based connectivity
 # Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 #
-# NLB DNS: ${NLB_DNS}
-# Platform API: ${NLB_DNS}:8081
-# Keycloak: ${NLB_DNS}:8443
+# Architecture:
+#   - gRPC: NLB tunnel (${NLB_DNS}:8081) - Cloudflare doesn't handle gRPC streaming
+#   - Keycloak: Cloudflare (keycloak.aegis-platform.tech) - HTTPS works fine
+#   - Spoke Proxy: Disabled by default (enable with --with-proxy flag)
 #
 # Usage:
 #   helm upgrade aegis-spoke ./charts/aegis-spoke -n aegis-system \\
-#     -f charts/aegis-spoke/values.yaml \\
+#     --reset-values \\
 #     -f charts/aegis-spoke/values-aws-relay.yaml \\
 #     --set k8sAgent.env.AEGIS_CLUSTER_ID=<cluster-id> \\
 #     --set k8sAgent.env.AEGIS_REGION=us-east-1 \\
@@ -159,15 +160,17 @@ k8sAgent:
     tag: "dev"
   env:
     # gRPC to platform-api via AWS NLB (TCP passthrough, preserves HTTP/2)
+    # NOTE: Do NOT use Cloudflare for gRPC - it doesn't handle streaming properly
     AEGIS_CP_GRPC: "${NLB_DNS}:8081"
     AEGIS_CP_GRPC_INSECURE: "false"
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
     AEGIS_CP_GRPC_SERVER_NAME: ""
-    AEGIS_FLAVORS: "cpu-small,gpu-standard"
+    AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
-    # OIDC client credentials (Keycloak via AWS NLB)
-    AEGIS_CP_OIDC_TOKEN_URL: "https://${NLB_DNS}:8443/realms/aegis/protocol/openid-connect/token"
+    # OIDC via Cloudflare (HTTPS works fine through Cloudflare tunnels)
+    # NOTE: Do NOT use NLB for Keycloak - port 8443 tunnel often fails
+    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
     AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
@@ -177,8 +180,25 @@ k8sAgent:
     AEGIS_PLATFORM_CA_B64: ""
     AEGIS_CP_OIDC_CA_B64: ""
 
+# Spoke proxy configuration
+# Enable this when testing multi-cluster proxy architecture
 proxy:
   enabled: false
+  image:
+    repository: carlosmsanchez/aegis-proxy
+    pullPolicy: Always
+    tag: "dev"
+  service:
+    type: NodePort
+    port: 443
+  ingress:
+    enabled: false
+    # Set this to the spoke proxy's external URL for heartbeat reporting
+    # Example: "spoke-proxy.<node-ip>.nip.io" or proper DNS
+    hostname: ""
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+  tls:
+    terminateAtIngress: false
 EOF
 
     log_info "Helm values file generated"
@@ -191,9 +211,12 @@ print_instructions() {
     echo -e "${GREEN}AWS tunnel is now running!${NC}"
     echo "=============================================="
     echo ""
-    echo "Endpoints available in AWS VPC:"
-    echo "  Platform API (gRPC): ${NLB_DNS}:8081"
-    echo "  Keycloak (HTTPS):    ${NLB_DNS}:8443"
+    echo "Connectivity architecture:"
+    echo "  gRPC (platform-api): ${NLB_DNS}:8081  (via NLB tunnel)"
+    echo "  Keycloak (OIDC):     keycloak.aegis-platform.tech  (via Cloudflare)"
+    echo ""
+    echo "NOTE: Cloudflare doesn't handle gRPC streaming properly, so we use"
+    echo "      the NLB tunnel for gRPC. Keycloak works fine via Cloudflare."
     echo ""
     echo "To update the spoke agent in your AWS cluster, run:"
     echo ""
@@ -201,14 +224,15 @@ print_instructions() {
     echo ""
     echo "Or manually:"
     echo ""
-    echo "  aws eks update-kubeconfig --name <cluster-name> --region us-east-1 --profile aegis"
-    echo ""
-    echo "  helm upgrade aegis-spoke ./charts/aegis-spoke -n aegis-system \\"
-    echo "    -f charts/aegis-spoke/values.yaml \\"
+    echo "  KUBECONFIG=/tmp/remote-kubeconfig-aegis.yaml helm upgrade aegis-spoke \\"
+    echo "    ./charts/aegis-spoke -n aegis-system \\"
+    echo "    --reset-values \\"
     echo "    -f charts/aegis-spoke/values-aws-relay.yaml \\"
     echo "    --set k8sAgent.env.AEGIS_CLUSTER_ID=<cluster-id> \\"
     echo "    --set k8sAgent.env.AEGIS_REGION=us-east-1 \\"
     echo "    --set k8sAgent.env.AEGIS_PROVIDER=aws"
+    echo ""
+    echo "IMPORTANT: Always use --reset-values to avoid stale Cloudflare endpoints!"
     echo ""
     echo "To stop the tunnel, run:"
     echo "  ./scripts/stop-aws-tunnel.sh"

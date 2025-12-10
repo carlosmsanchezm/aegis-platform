@@ -483,10 +483,26 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				}
 			}
 
+			// Extract AWS account ID from the RoleARN (format: arn:aws:iam::ACCOUNT_ID:role/...)
+			accountID := extractAccountIDFromARN(input.RoleARN)
+
+			// Create OIDC provider for IRSA (IAM Roles for Service Accounts).
+			// This allows Kubernetes service accounts to assume IAM roles.
+			oidcProvider, err := r.createOIDCProvider(ctx, clusterDef.ClusterID, cluster, accountID, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			// Create IAM role for cluster autoscaler with IRSA trust policy.
+			autoscalerRoleArn, err := r.createClusterAutoscalerRole(ctx, clusterDef.ClusterID, oidcProvider, accountID, providerOpt)
+			if err != nil {
+				return err
+			}
+
 			// Install Cluster Autoscaler to enable automatic node scaling.
 			// This is essential for on-demand GPU provisioning - when a workspace
 			// requests GPU resources, the autoscaler will scale up the GPU node group.
-			if err := r.installClusterAutoscaler(ctx, clusterDef.ClusterID, cluster.Name, input.Region, kubeProvider, append(nodeGroups, cluster)); err != nil {
+			if err := r.installClusterAutoscaler(ctx, clusterDef.ClusterID, cluster.Name, input.Region, autoscalerRoleArn, kubeProvider, append(nodeGroups, cluster, oidcProvider)); err != nil {
 				return err
 			}
 
@@ -635,6 +651,129 @@ func (r *Runner) createNodeRole(ctx *pulumi.Context, name string, tags pulumi.St
 	}
 
 	return role, nil
+}
+
+// createOIDCProvider creates an IAM OIDC identity provider for EKS IRSA.
+// This allows Kubernetes service accounts to assume IAM roles via web identity federation.
+func (r *Runner) createOIDCProvider(ctx *pulumi.Context, clusterID string, cluster *awseks.Cluster, accountID string, opts pulumi.ResourceOption) (*awsiam.OpenIdConnectProvider, error) {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("%s-oidc", key), 53)
+
+	// Extract the OIDC issuer URL from the cluster and compute its thumbprint.
+	// The thumbprint is required by AWS IAM to verify the OIDC provider's certificate.
+	oidcURL := cluster.Identities.Index(pulumi.Int(0)).Oidcs().Index(pulumi.Int(0)).Issuer().Elem()
+
+	// AWS EKS OIDC issuers use Amazon's root CA, which has a well-known thumbprint.
+	// This is stable across all EKS clusters in a region.
+	// See: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc_verify-thumbprint.html
+	eksOIDCThumbprint := "9e99a48a9960b14926bb7f3b02e22da2b0ab7280"
+
+	provider, err := awsiam.NewOpenIdConnectProvider(ctx, name, &awsiam.OpenIdConnectProviderArgs{
+		Url: oidcURL,
+		ClientIdLists: pulumi.StringArray{
+			pulumi.String("sts.amazonaws.com"),
+		},
+		ThumbprintLists: pulumi.StringArray{
+			pulumi.String(eksOIDCThumbprint),
+		},
+	}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("create OIDC provider: %w", err)
+	}
+
+	r.log.Info("OIDC provider created for IRSA",
+		zap.String("cluster_id", clusterID))
+	return provider, nil
+}
+
+// createClusterAutoscalerRole creates an IAM role for the cluster autoscaler with IRSA trust policy.
+// The role allows the cluster-autoscaler service account to assume it via web identity federation.
+func (r *Runner) createClusterAutoscalerRole(ctx *pulumi.Context, clusterID string, oidcProvider *awsiam.OpenIdConnectProvider, accountID string, opts pulumi.ResourceOption) (pulumi.StringOutput, error) {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("cluster-autoscaler-%s", key), 53)
+
+	// Build the trust policy that allows the cluster-autoscaler service account
+	// to assume this role via OIDC web identity federation.
+	trustPolicy := oidcProvider.Url.ApplyT(func(url string) string {
+		// Remove https:// prefix for the OIDC provider identifier
+		oidcID := strings.TrimPrefix(url, "https://")
+		return fmt.Sprintf(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Effect": "Allow",
+				"Principal": {
+					"Federated": "arn:aws:iam::%s:oidc-provider/%s"
+				},
+				"Action": "sts:AssumeRoleWithWebIdentity",
+				"Condition": {
+					"StringEquals": {
+						"%s:sub": "system:serviceaccount:kube-system:cluster-autoscaler",
+						"%s:aud": "sts.amazonaws.com"
+					}
+				}
+			}]
+		}`, accountID, oidcID, oidcID, oidcID)
+	}).(pulumi.StringOutput)
+
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: trustPolicy,
+		Description:      pulumi.String("IAM role for EKS cluster autoscaler (IRSA)"),
+	}, opts)
+	if err != nil {
+		return pulumi.StringOutput{}, fmt.Errorf("create cluster autoscaler role: %w", err)
+	}
+
+	// Attach the cluster autoscaler policy
+	autoscalerPolicy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:DescribeAutoScalingGroups",
+					"autoscaling:DescribeAutoScalingInstances",
+					"autoscaling:DescribeLaunchConfigurations",
+					"autoscaling:DescribeScalingActivities",
+					"autoscaling:DescribeTags",
+					"ec2:DescribeImages",
+					"ec2:DescribeInstanceTypes",
+					"ec2:DescribeLaunchTemplateVersions",
+					"ec2:GetInstanceTypesFromInstanceRequirements",
+					"eks:DescribeNodegroup"
+				],
+				"Resource": ["*"]
+			},
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:SetDesiredCapacity",
+					"autoscaling:TerminateInstanceInAutoScalingGroup"
+				],
+				"Resource": ["*"],
+				"Condition": {
+					"StringEquals": {
+						"autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true"
+					}
+				}
+			}
+		]
+	}`
+	if _, err := awsiam.NewRolePolicy(ctx, fmt.Sprintf("%s-policy", name), &awsiam.RolePolicyArgs{
+		Role:   role.Name,
+		Policy: pulumi.String(autoscalerPolicy),
+	}, opts); err != nil {
+		return pulumi.StringOutput{}, fmt.Errorf("attach cluster autoscaler policy: %w", err)
+	}
+
+	r.log.Info("cluster autoscaler IRSA role created",
+		zap.String("cluster_id", clusterID))
+	return role.Arn, nil
 }
 
 func (r *Runner) createSecurityGroups(ctx *pulumi.Context, baseName, vpcID string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsec2.SecurityGroup, *awsec2.SecurityGroup, error) {
@@ -1044,7 +1183,7 @@ func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string
 // node scaling based on pending pod resource requests. This is essential for on-demand
 // GPU node provisioning - when a workspace requests GPU resources, the autoscaler will
 // scale up the appropriate node group.
-func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string, clusterName pulumi.StringInput, region string, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string, clusterName pulumi.StringInput, region string, roleArn pulumi.StringOutput, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
 	key := sanitize(clusterID)
 	if key == "" {
 		key = "aegis"
@@ -1090,13 +1229,16 @@ func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string,
 			},
 		},
 		// RBAC is required for the autoscaler to modify ASGs
+		// Use IRSA (IAM Roles for Service Accounts) for secure credential management
 		"rbac": pulumi.Map{
 			"create": pulumi.Bool(true),
 			"serviceAccount": pulumi.Map{
 				"create": pulumi.Bool(true),
 				"name":   pulumi.String("cluster-autoscaler"),
-				// In production, use IRSA instead of node IAM role
-				"annotations": pulumi.Map{},
+				// IRSA annotation allows the service account to assume the IAM role
+				"annotations": pulumi.Map{
+					"eks.amazonaws.com/role-arn": roleArn,
+				},
 			},
 		},
 	}
@@ -1813,6 +1955,16 @@ func sanitize(in string) string {
 		trimmed = strings.ReplaceAll(trimmed, "--", "-")
 	}
 	return strings.Trim(trimmed, "-")
+}
+
+// extractAccountIDFromARN extracts the AWS account ID from an IAM ARN.
+// ARN format: arn:aws:iam::ACCOUNT_ID:role/role-name
+func extractAccountIDFromARN(arn string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 5 {
+		return parts[4]
+	}
+	return ""
 }
 
 func pulumiResourceName(base string, max int) string {

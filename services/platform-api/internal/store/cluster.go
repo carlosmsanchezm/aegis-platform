@@ -16,6 +16,7 @@ type ClusterInfo struct {
 	AvailableFlavorSet map[string]bool
 	TTFGSecondsP50     float64
 	LastHeartbeat      time.Time
+	ProxyURL           string // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
 }
 
 type clusterState struct {
@@ -70,6 +71,25 @@ func (cs *clusterState) updateFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	ci.AvailableFlavorSet = newSet
 	ci.TTFGSecondsP50 = hb.GetTtfGpuSecondsP50()
 	ci.LastHeartbeat = time.Now()
+	// Update proxy URL if provided in heartbeat (spoke proxy)
+	if proxyURL := hb.GetProxyUrl(); proxyURL != "" {
+		ci.ProxyURL = proxyURL
+	}
+}
+
+func (cs *clusterState) get(clusterID string) *ClusterInfo {
+	if clusterID == "" {
+		return nil
+	}
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	ci, ok := cs.clusters[clusterID]
+	if !ok {
+		return nil
+	}
+	// Shallow copy to avoid external mutation
+	cpy := *ci
+	return &cpy
 }
 
 func (cs *clusterState) list() []*ClusterInfo {

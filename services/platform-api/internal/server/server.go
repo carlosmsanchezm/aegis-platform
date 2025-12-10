@@ -403,6 +403,7 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 		zap.String("cluster_id", hb.GetClusterId()),
 		zap.Float64("ttf_gpu_seconds_p50", hb.GetTtfGpuSecondsP50()),
 		zap.Strings("available_flavors", flavorNames),
+		zap.String("proxy_url", hb.GetProxyUrl()),
 	)
 	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
 }
@@ -1270,7 +1271,16 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	targetNS := s.namespaceForProject(w.GetProjectId())
 	internalHost := fmt.Sprintf("%s.%s%s", alias, targetNS, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
-	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
+
+	// Determine proxy URL: use spoke proxy if cluster reports one, otherwise use hub proxy
+	proxyBaseURL := s.proxyBaseURL
+	if clusterID := w.GetClusterId(); clusterID != "" {
+		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil && clusterInfo.ProxyURL != "" {
+			proxyBaseURL = clusterInfo.ProxyURL
+			s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+		}
+	}
+	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())
 
 	return &sessionContext{
 		workload:     w,

@@ -32,7 +32,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "system",
-						InstanceType: "m6i.large",
+						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for spoke, autoscaler, observability
 						MinSize:      1,
 						MaxSize:      3,
 						Labels: map[string]string{
@@ -71,7 +71,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "general",
-						InstanceType: "m6i.large",
+						InstanceType: "t3.small", // 2 vCPU, 2GB - cost-effective for general workloads
 						MinSize:      2,
 						MaxSize:      10,
 						Labels: map[string]string{
@@ -92,7 +92,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "control",
-						InstanceType: "m6i.large",
+						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for control plane components
 						MinSize:      3,
 						MaxSize:      6,
 						Labels: map[string]string{

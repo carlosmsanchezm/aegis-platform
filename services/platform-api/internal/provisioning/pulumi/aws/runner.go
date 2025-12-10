@@ -889,7 +889,7 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 		name = pulumiResourceName(sanitize(name), 30)
 		instanceType := normalizeInstanceType(pool.InstanceType)
 		if instanceType == "" {
-			instanceType = "m6i.large"
+			instanceType = "t3.small" // Default: 2 vCPU, 2GB - sufficient for most system workloads
 		}
 		gpuPool := isGpuNodePool(pool)
 		// AWS EKS requires MaxSize >= 1 for node groups.
@@ -1566,7 +1566,7 @@ func (r *Runner) buildClusterDefinitions(projectID, region string, spec *infraap
 func defaultNodePools() []infraapi.NodePool {
 	return []infraapi.NodePool{{
 		Name:         "default",
-		InstanceType: "m6i.large",
+		InstanceType: "t3.small", // 2 vCPU, 2GB - cost-effective default
 		MinSize:      1,
 		MaxSize:      3,
 	}}

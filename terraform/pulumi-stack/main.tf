@@ -21,6 +21,7 @@ locals {
   user_name                = var.iam_user_name != "" ? var.iam_user_name : "aegis-pulumi-provisioner"
   pulumi_state_bucket_arn  = "arn:aws:s3:::${var.pulumi_state_bucket}"
   pulumi_state_objects_arn = "arn:aws:s3:::${var.pulumi_state_bucket}/${var.pulumi_state_prefix}/*"
+  pulumi_meta_objects_arn  = "arn:aws:s3:::${var.pulumi_state_bucket}/.pulumi/*"
 }
 
 resource "aws_iam_user" "pulumi" {
@@ -84,6 +85,7 @@ data "aws_iam_policy_document" "pulumi" {
 
     resources = [
       local.pulumi_state_objects_arn,
+      local.pulumi_meta_objects_arn,
     ]
   }
 }

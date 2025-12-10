@@ -1,0 +1,14 @@
+version: "3"
+tunnels:
+  platform-api:
+    proto: http
+    addr: 8181
+    schemes:
+      - https
+    inspect: true
+  keycloak:
+    proto: http
+    addr: 8543
+    schemes:
+      - https
+    inspect: true

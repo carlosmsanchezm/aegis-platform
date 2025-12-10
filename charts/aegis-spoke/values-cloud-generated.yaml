@@ -12,7 +12,7 @@ k8sAgent:
     AEGIS_CP_GRPC: "aegis-platform-api.aegis-system.svc.cluster.local:8081"
     AEGIS_PROXY_INGRESS_HOST: "proxy.yourdomain.com"  # TODO: Update domain
     AEGIS_CLUSTER_ID: "aws-us-east-1-prod"
-    AEGIS_FLAVORS: "cpu-small,t4-1gpu"
+    AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
 proxy:

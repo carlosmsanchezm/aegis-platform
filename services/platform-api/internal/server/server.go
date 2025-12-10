@@ -39,17 +39,20 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/config"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/pulumi/aws"
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructuredapi "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
+	RestConfigFor(clusterID string) (*rest.Config, error)
 }
 
 func kubeClientProviderConfigured(p kubeClientProvider) bool {
@@ -63,6 +66,13 @@ func kubeClientProviderConfigured(p kubeClientProvider) bool {
 	default:
 		return true
 	}
+}
+
+func (s *Server) namespaceForProject(projectID string) string {
+	if ns := strings.TrimSpace(aws.WorkloadsNamespaceForProject(projectID)); ns != "" {
+		return ns
+	}
+	return s.targetNamespace
 }
 
 type Server struct {
@@ -710,11 +720,12 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 
 	var workspacePayload *unstructuredapi.Unstructured
 	var workloadPayload *aegisv1alpha1.AegisWorkload
+	targetNS := s.namespaceForProject(w.GetProjectId())
 
 	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
-		workspacePayload = buildWorkspaceCR(w, wk.Workspace, s.targetNamespace, reqFlavor, maxSecs)
+		workspacePayload = buildWorkspaceCR(w, wk.Workspace, targetNS, reqFlavor, maxSecs)
 	} else {
-		workloadPayload = buildAegisWorkloadCR(w, s.targetNamespace)
+		workloadPayload = buildAegisWorkloadCR(w, targetNS)
 		if maxSecs > 0 {
 			if workloadPayload.Annotations == nil {
 				workloadPayload.Annotations = map[string]string{}
@@ -729,7 +740,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				s.log.Error("failed to create workspace CR",
 					zap.String("workload_id", w.GetId()),
 					zap.String("cluster_id", chosen),
-					zap.String("namespace", s.targetNamespace),
+					zap.String("namespace", targetNS),
 					zap.Error(err),
 				)
 				return nil, status.Error(codes.Internal, "failed to create Workspace in target cluster")
@@ -737,13 +748,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			s.log.Info("workspace CR already exists",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		} else {
 			s.log.Info("workspace CR created",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		}
 	} else if workloadPayload != nil {
@@ -752,7 +763,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				s.log.Error("failed to create aegis workload CR",
 					zap.String("workload_id", w.GetId()),
 					zap.String("cluster_id", chosen),
-					zap.String("namespace", s.targetNamespace),
+					zap.String("namespace", targetNS),
 					zap.Error(err),
 				)
 				return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
@@ -760,13 +771,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			s.log.Info("aegis workload CR already exists",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		} else {
 			s.log.Info("aegis workload CR created",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		}
 	}
@@ -780,7 +791,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		zap.String("flavor", reqFlavor),
 		zap.String("cluster_id", w.GetClusterId()),
 		zap.String("status", w.GetStatus()),
-		zap.String("namespace", s.targetNamespace),
+		zap.String("namespace", targetNS),
 	)
 	return w, nil
 }
@@ -1055,9 +1066,11 @@ func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.C
 	}
 
 	var jobList batchv1.JobList
-	if err := cli.List(ctx, &jobList, client.InNamespace(s.targetNamespace), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	if err := cli.List(ctx, &jobList, client.InNamespace(targetNS), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
 		s.log.Debug("skip ui enrichment; listing jobs failed",
 			zap.String("workload_id", w.GetId()),
+			zap.String("namespace", targetNS),
 			zap.Error(err),
 		)
 		return
@@ -1208,7 +1221,8 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 
 	port := selectWorkspacePort(wk.Workspace)
 	alias := buildHostAlias(w.GetId())
-	internalHost := fmt.Sprintf("%s.%s%s", alias, s.targetNamespace, svcClusterDomainSuffix)
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	internalHost := fmt.Sprintf("%s.%s%s", alias, targetNS, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
 	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
 
@@ -1802,6 +1816,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Error("failed to register grpc-gateway handlers", zap.Error(err))
 	}
 	registerWorkspaceWizardRoutes(mux, svc)
+	registerObservabilityRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2271,18 +2286,24 @@ func ensureQueueAllowsFlavor(q *aegis.Queue, flavor string) bool {
 func defaultFlavorForName(name string) *aegis.Flavor {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	switch normalized {
-	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4":
+	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
+		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
+		// g4dn.xlarge has 4 vCPUs but only ~3.92 allocatable after k8s overhead
+		// Request 3 CPU to ensure pod fits on node
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          16,
-			CpuCoresRequest:    "4",
-			MemoryRequest:      "16Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
-	case "a10-1gpu", "a10g-1gpu":
+	case "a10-1gpu", "a10g-1gpu", "gpu-large":
+		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
+		// g5.xlarge has 4 vCPUs (~3.92 allocatable), 16GB RAM, 24GB GPU memory
+		// For larger workloads, use g5.2xlarge (8 vCPU) or g5.4xlarge (16 vCPU)
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2290,8 +2311,8 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
-			CpuCoresRequest:    "8",
-			MemoryRequest:      "32Gi",
+			CpuCoresRequest:    "3",
+			MemoryRequest:      "14Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10g-mig-1g", "a10-mig-1g":
@@ -2304,6 +2325,30 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			MemoryGib:          10,
 			CpuCoresRequest:    "8",
 			MemoryRequest:      "32Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-small":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "4Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-medium":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "4",
+			MemoryRequest:      "16Gi",
+			GpuCount:           0,
+			PriceUsdPerGpuHour: 0,
+		}
+	case "cpu-large":
+		return &aegis.Flavor{
+			Name:               name,
+			CpuCoresRequest:    "8",
+			MemoryRequest:      "32Gi",
+			GpuCount:           0,
 			PriceUsdPerGpuHour: 0,
 		}
 	default:

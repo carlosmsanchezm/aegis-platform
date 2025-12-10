@@ -39,6 +39,7 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/config"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/pulumi/aws"
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
@@ -65,6 +66,13 @@ func kubeClientProviderConfigured(p kubeClientProvider) bool {
 	default:
 		return true
 	}
+}
+
+func (s *Server) namespaceForProject(projectID string) string {
+	if ns := strings.TrimSpace(aws.WorkloadsNamespaceForProject(projectID)); ns != "" {
+		return ns
+	}
+	return s.targetNamespace
 }
 
 type Server struct {
@@ -399,6 +407,52 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
 }
 
+func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersRequest) (*aegis.ListClustersResponse, error) {
+	_ = ctx // reserved for tracing/cancellation
+	infos := s.store.ListClusterInfos()
+	projectFilter := strings.TrimSpace(req.GetProjectId())
+	regionFilter := strings.TrimSpace(req.GetRegion())
+
+	items := make([]*aegis.ClusterSummary, 0, len(infos))
+	for _, ci := range infos {
+		// Filter by project if specified
+		if projectFilter != "" {
+			clusterProject := ci.Labels["aegis.yourorg.dev/projectId"]
+			if clusterProject != projectFilter {
+				continue
+			}
+		}
+		// Filter by region if specified
+		if regionFilter != "" && ci.Region != regionFilter {
+			continue
+		}
+
+		phase := "Ready"
+		if ci.LastHeartbeat.IsZero() {
+			phase = "Pending"
+		} else if time.Since(ci.LastHeartbeat) > 5*time.Minute {
+			phase = "Unhealthy"
+		}
+
+		items = append(items, &aegis.ClusterSummary{
+			Id:            ci.ID,
+			Name:          ci.ID, // Use ID as name for now
+			ProjectId:     ci.Labels["aegis.yourorg.dev/projectId"],
+			Provider:      ci.Provider,
+			Region:        ci.Region,
+			Phase:         phase,
+			LastHeartbeat: ci.LastHeartbeat.Format(time.RFC3339),
+		})
+	}
+
+	s.log.Debug("list clusters",
+		zap.String("project_filter", projectFilter),
+		zap.String("region_filter", regionFilter),
+		zap.Int("count", len(items)),
+	)
+	return &aegis.ListClustersResponse{Items: items}, nil
+}
+
 func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
 	_ = ctx // reserved for future use (tracing, cancellation)
 	if !s.autoBootstrap || w == nil {
@@ -712,11 +766,12 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 
 	var workspacePayload *unstructuredapi.Unstructured
 	var workloadPayload *aegisv1alpha1.AegisWorkload
+	targetNS := s.namespaceForProject(w.GetProjectId())
 
 	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
-		workspacePayload = buildWorkspaceCR(w, wk.Workspace, s.targetNamespace, reqFlavor, maxSecs)
+		workspacePayload = buildWorkspaceCR(w, wk.Workspace, targetNS, reqFlavor, maxSecs)
 	} else {
-		workloadPayload = buildAegisWorkloadCR(w, s.targetNamespace)
+		workloadPayload = buildAegisWorkloadCR(w, targetNS)
 		if maxSecs > 0 {
 			if workloadPayload.Annotations == nil {
 				workloadPayload.Annotations = map[string]string{}
@@ -731,7 +786,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				s.log.Error("failed to create workspace CR",
 					zap.String("workload_id", w.GetId()),
 					zap.String("cluster_id", chosen),
-					zap.String("namespace", s.targetNamespace),
+					zap.String("namespace", targetNS),
 					zap.Error(err),
 				)
 				return nil, status.Error(codes.Internal, "failed to create Workspace in target cluster")
@@ -739,13 +794,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			s.log.Info("workspace CR already exists",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		} else {
 			s.log.Info("workspace CR created",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		}
 	} else if workloadPayload != nil {
@@ -754,7 +809,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				s.log.Error("failed to create aegis workload CR",
 					zap.String("workload_id", w.GetId()),
 					zap.String("cluster_id", chosen),
-					zap.String("namespace", s.targetNamespace),
+					zap.String("namespace", targetNS),
 					zap.Error(err),
 				)
 				return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
@@ -762,13 +817,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			s.log.Info("aegis workload CR already exists",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		} else {
 			s.log.Info("aegis workload CR created",
 				zap.String("workload_id", w.GetId()),
 				zap.String("cluster_id", chosen),
-				zap.String("namespace", s.targetNamespace),
+				zap.String("namespace", targetNS),
 			)
 		}
 	}
@@ -782,7 +837,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		zap.String("flavor", reqFlavor),
 		zap.String("cluster_id", w.GetClusterId()),
 		zap.String("status", w.GetStatus()),
-		zap.String("namespace", s.targetNamespace),
+		zap.String("namespace", targetNS),
 	)
 	return w, nil
 }
@@ -1057,9 +1112,11 @@ func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.C
 	}
 
 	var jobList batchv1.JobList
-	if err := cli.List(ctx, &jobList, client.InNamespace(s.targetNamespace), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	if err := cli.List(ctx, &jobList, client.InNamespace(targetNS), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
 		s.log.Debug("skip ui enrichment; listing jobs failed",
 			zap.String("workload_id", w.GetId()),
+			zap.String("namespace", targetNS),
 			zap.Error(err),
 		)
 		return
@@ -1210,7 +1267,8 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 
 	port := selectWorkspacePort(wk.Workspace)
 	alias := buildHostAlias(w.GetId())
-	internalHost := fmt.Sprintf("%s.%s%s", alias, s.targetNamespace, svcClusterDomainSuffix)
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	internalHost := fmt.Sprintf("%s.%s%s", alias, targetNS, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
 	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
 

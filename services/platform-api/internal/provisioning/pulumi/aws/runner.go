@@ -503,6 +503,13 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 
 			// Extract AWS account ID from the RoleARN (format: arn:aws:iam::ACCOUNT_ID:role/...)
 			accountID := extractAccountIDFromARN(input.RoleARN)
+			if accountID == "" {
+				if ident, err := aws.GetCallerIdentity(ctx, nil, providerOpt); err == nil && ident != nil {
+					accountID = strings.TrimSpace(ident.AccountId)
+				} else {
+					return fmt.Errorf("resolve AWS account id for IRSA: %w", err)
+				}
+			}
 
 			// Create OIDC provider for IRSA (IAM Roles for Service Accounts).
 			// This allows Kubernetes service accounts to assume IAM roles.

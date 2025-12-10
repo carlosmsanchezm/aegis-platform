@@ -136,8 +136,8 @@ ON CONFLICT (job_id) DO UPDATE SET
     project_id = COALESCE(EXCLUDED.project_id, provisioning_runs.project_id),
     cluster_id = COALESCE(EXCLUDED.cluster_id, provisioning_runs.cluster_id),
     phase = COALESCE(EXCLUDED.phase, provisioning_runs.phase),
-    started_at = COALESCE(provisioning_runs.started_at, EXCLUDED.started_at),
-    completed_at = COALESCE(EXCLUDED.completed_at, provisioning_runs.completed_at),
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at,
     updated_at = now()
 `, run.JobID, nullableString(run.ProjectID), nullableString(run.ClusterID), nullableString(run.Phase), started, nullableTime(run.CompletedAt))
 	s.logExecError("provisioning_run_upsert", err, zap.String("job_id", run.JobID))

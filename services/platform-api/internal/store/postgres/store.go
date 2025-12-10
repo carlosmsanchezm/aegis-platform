@@ -61,12 +61,7 @@ func New(dsn string, log *zap.Logger) (*PostgresStore, error) {
 		timeout = defaultQueryTimeout
 	}
 
-	store := &PostgresStore{pool: pool, log: log, timeout: timeout}
-	if err := store.ensureProvisioningTables(context.Background()); err != nil {
-		return nil, fmt.Errorf("ensure provisioning tables: %w", err)
-	}
-
-	return store, nil
+	return &PostgresStore{pool: pool, log: log, timeout: timeout}, nil
 }
 
 // Close releases all pooled connections.

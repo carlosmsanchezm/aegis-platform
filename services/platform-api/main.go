@@ -76,7 +76,7 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to initialize controller manager", zap.Error(err))
 		}
-		provisioner := aws.NewRunner(logger)
+		provisioner := aws.NewRunner(logger, st)
 		controllerCfg := controllers.Config{
 			Logger:                    logger,
 			Store:                     st,

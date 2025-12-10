@@ -47,6 +47,91 @@ type ProjectInfraReconciler struct {
 	HolderIdentity            string
 }
 
+func (r *ProjectInfraReconciler) recordProvisioningStatus(infra *infraapi.ProjectInfra, phase string, completed bool) {
+	if r == nil || r.Store == nil || infra == nil {
+		return
+	}
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	start := time.Time{}
+	if !completed {
+		start = now
+	}
+	run := store.ProvisioningRun{
+		JobID:     jobID,
+		ProjectID: strings.TrimSpace(infra.Spec.ProjectID),
+		ClusterID: provisioningClusterID(infra),
+		Phase:     strings.TrimSpace(phase),
+		StartedAt: start,
+	}
+	if existing, ok := r.Store.GetProvisioningRun(jobID); ok && existing != nil {
+		if existing.StartedAt.After(time.Time{}) {
+			run.StartedAt = existing.StartedAt
+		}
+		if run.ProjectID == "" {
+			run.ProjectID = existing.ProjectID
+		}
+		if run.ClusterID == "" {
+			run.ClusterID = existing.ClusterID
+		}
+		if run.Phase == "" {
+			run.Phase = existing.Phase
+		}
+		if existing.CompletedAt != nil {
+			run.CompletedAt = existing.CompletedAt
+		}
+	}
+	if completed {
+		ts := now
+		run.CompletedAt = &ts
+	}
+	r.Store.UpsertProvisioningRun(run)
+}
+
+func (r *ProjectInfraReconciler) recordProvisioningLog(infra *infraapi.ProjectInfra, phase, logType, message string) {
+	if r == nil || r.Store == nil || infra == nil {
+		return
+	}
+	jobID := strings.TrimSpace(infra.Name)
+	msg := strings.TrimSpace(message)
+	if jobID == "" || msg == "" {
+		return
+	}
+	if strings.TrimSpace(logType) == "" {
+		logType = store.LogTypeEvent
+	}
+	entry := store.ProvisioningLogEntry{
+		JobID:     jobID,
+		ProjectID: strings.TrimSpace(infra.Spec.ProjectID),
+		ClusterID: provisioningClusterID(infra),
+		Phase:     strings.TrimSpace(phase),
+		Type:      strings.TrimSpace(logType),
+		Message:   msg,
+		CreatedAt: time.Now().UTC(),
+	}
+	r.Store.AppendProvisioningLog(entry)
+}
+
+func provisioningClusterID(infra *infraapi.ProjectInfra) string {
+	if infra == nil {
+		return ""
+	}
+	if infra.Annotations != nil {
+		if v := strings.TrimSpace(infra.Annotations["aegis.yourorg.dev/clusterId"]); v != "" {
+			return v
+		}
+	}
+	if infra.Spec.Aws != nil {
+		if v := strings.TrimSpace(infra.Spec.Aws.ClusterName); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // SetupWithManager registers the reconciler with the manager.
 func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -247,8 +332,13 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 		err := fmt.Errorf("aws provisioner not configured")
 		cond := newCondition(metav1.ConditionFalse, "ProvisionerUnavailable", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningStatus(infra, "Error", true)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
 		return ctrl.Result{}, err
 	}
+
+	r.recordProvisioningStatus(infra, "Provisioning", false)
+	r.recordProvisioningLog(infra, "Provisioning", store.LogTypeEvent, "pulumi provisioning started")
 
 	condProvisioning := newCondition(metav1.ConditionFalse, "Provisioning", "provisioning in progress")
 	_ = r.setStatus(ctx, infra, "Provisioning", &condProvisioning, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
@@ -257,6 +347,8 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	if err != nil {
 		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		r.recordProvisioningStatus(infra, "Error", true)
 		// Do not requeue automatically on failure; require an explicit relaunch.
 		return ctrl.Result{}, nil
 	}
@@ -270,12 +362,16 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 		err := fmt.Errorf("provisioner returned no kubeconfigs")
 		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		r.recordProvisioningStatus(infra, "Error", true)
 		return ctrl.Result{}, err
 	}
 
 	if err := r.writeKubeconfigs(ctx, kubeconfigData); err != nil {
 		cond := newCondition(metav1.ConditionFalse, "SecretSyncFailed", err.Error())
 		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		r.recordProvisioningStatus(infra, "Error", true)
 		return ctrl.Result{}, err
 	}
 
@@ -302,6 +398,8 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 		if err := r.ensureAegisCluster(ctx, infra, outputs[i]); err != nil {
 			cond := newCondition(metav1.ConditionFalse, "ClusterSpecSyncFailed", err.Error())
 			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			r.recordProvisioningLog(infra, "Error", "error", err.Error())
+			r.recordProvisioningStatus(infra, "Error", true)
 			return ctrl.Result{}, err
 		}
 	}
@@ -310,6 +408,8 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, result.CostHintUSDPerHour); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.recordProvisioningLog(infra, "Ready", store.LogTypeEvent, "pulumi provisioning completed")
+	r.recordProvisioningStatus(infra, "Ready", true)
 	log.Info("project infrastructure provisioned", zap.Int("clusters", len(outputs)))
 	return ctrl.Result{}, nil
 }

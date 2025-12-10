@@ -161,8 +161,8 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-// HeartbeatLoop continuously reports cluster health and advertised flavors.
-func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterID string, flavors []*aegis.Flavor) {
+// HeartbeatLoop continuously reports cluster health, advertised flavors, and spoke proxy URL.
+func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterID string, flavors []*aegis.Flavor, proxyURL string) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -173,7 +173,7 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 		}
 	}
 
-	logger.Info("starting heartbeat loop", zap.String("cluster_id", clusterID), zap.Int("flavor_count", len(flavors)), zap.Float64("ttfg_p50_sec", ttf))
+	logger.Info("starting heartbeat loop", zap.String("cluster_id", clusterID), zap.Int("flavor_count", len(flavors)), zap.Float64("ttfg_p50_sec", ttf), zap.String("proxy_url", proxyURL))
 
 	for {
 		select {
@@ -181,11 +181,12 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 			logger.Info("heartbeat loop context canceled", zap.String("cluster_id", clusterID))
 			return
 		case <-ticker.C:
-			logger.Debug("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)))
+			logger.Debug("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)), zap.String("proxy_url", proxyURL))
 			if _, err := c.api.Heartbeat(ctx, &aegis.ClusterHeartbeat{
 				ClusterId:        clusterID,
 				TtfGpuSecondsP50: ttf,
 				AvailableFlavors: flavors,
+				ProxyUrl:         proxyURL,
 			}); err != nil {
 				logger.Warn("heartbeat failed", zap.String("cluster_id", clusterID), zap.Error(err))
 				continue

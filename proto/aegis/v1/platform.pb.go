@@ -1417,6 +1417,7 @@ type ClusterHeartbeat struct {
 	ClusterId        string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	TtfGpuSecondsP50 float64                `protobuf:"fixed64,2,opt,name=ttf_gpu_seconds_p50,json=ttfGpuSecondsP50,proto3" json:"ttf_gpu_seconds_p50,omitempty"`
 	AvailableFlavors []*Flavor              `protobuf:"bytes,3,rep,name=available_flavors,json=availableFlavors,proto3" json:"available_flavors,omitempty"`
+	ProxyUrl         string                 `protobuf:"bytes,4,opt,name=proxy_url,json=proxyUrl,proto3" json:"proxy_url,omitempty"` // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1470,6 +1471,13 @@ func (x *ClusterHeartbeat) GetAvailableFlavors() []*Flavor {
 		return x.AvailableFlavors
 	}
 	return nil
+}
+
+func (x *ClusterHeartbeat) GetProxyUrl() string {
+	if x != nil {
+		return x.ProxyUrl
+	}
+	return ""
 }
 
 type ClusterHeartbeatAck struct {
@@ -4183,12 +4191,13 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"C\n" +
 	"\x17ClusterRegisterResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x9f\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xbc\x01\n" +
 	"\x10ClusterHeartbeat\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12-\n" +
 	"\x13ttf_gpu_seconds_p50\x18\x02 \x01(\x01R\x10ttfGpuSecondsP50\x12=\n" +
-	"\x11available_flavors\x18\x03 \x03(\v2\x10.aegis.v1.FlavorR\x10availableFlavors\"%\n" +
+	"\x11available_flavors\x18\x03 \x03(\v2\x10.aegis.v1.FlavorR\x10availableFlavors\x12\x1b\n" +
+	"\tproxy_url\x18\x04 \x01(\tR\bproxyUrl\"%\n" +
 	"\x13ClusterHeartbeatAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"L\n" +
 	"\x13ListClustersRequest\x12\x1d\n" +

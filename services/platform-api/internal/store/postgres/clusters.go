@@ -100,6 +100,40 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 }
 
+func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
+	if clusterID == "" {
+		return nil
+	}
+	// Note: proxy_url is not persisted to DB yet, so this returns basic info only.
+	// For proxy_url, rely on MemStore which is updated by heartbeats.
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	var (
+		id        string
+		provider  string
+		region    string
+		ttf       float64
+		heartbeat sql.NullTime
+	)
+	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &heartbeat)
+	if err != nil {
+		return nil
+	}
+	info := &store.ClusterInfo{
+		ID:                 id,
+		Provider:           provider,
+		Region:             region,
+		Labels:             map[string]string{},
+		AvailableFlavorSet: map[string]bool{},
+		TTFGSecondsP50:     ttf,
+	}
+	if heartbeat.Valid {
+		info.LastHeartbeat = heartbeat.Time.UTC()
+	}
+	return info
+}
+
 func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()

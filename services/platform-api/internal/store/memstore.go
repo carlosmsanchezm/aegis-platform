@@ -453,6 +453,9 @@ func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) 
 func (s *MemStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	s.cstate.updateFromHeartbeat(hb)
 }
+func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
+	return s.cstate.get(clusterID)
+}
 func (s *MemStore) ListClusterInfos() []*ClusterInfo {
 	return s.cstate.list()
 }

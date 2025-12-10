@@ -51,6 +51,7 @@ type ProvisioningLogEntry struct {
 	Type      string
 	Message   string
 	CreatedAt time.Time
+	Sequence  int64
 }
 
 const (
@@ -136,7 +137,7 @@ type Store interface {
 
 	// provisioning logs
 	AppendProvisioningLog(entry ProvisioningLogEntry)
-	ListProvisioningLogs(jobID string, since time.Time, limit int) []ProvisioningLogEntry
+	ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []ProvisioningLogEntry
 	UpsertProvisioningRun(run ProvisioningRun)
 	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
 }

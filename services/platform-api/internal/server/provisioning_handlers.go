@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -94,15 +95,17 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 	}
 
 	limit := parseLimit(r.URL.Query().Get("limit"), 200, 1000)
-	cursor := parseCursor(r.URL.Query().Get("since"))
+	cursorTS, cursorSeq := parseCursor(r.URL.Query().Get("since"))
 	stream := forceStream || parseBool(r.URL.Query().Get("stream"))
 
-	logs := s.store.ListProvisioningLogs(jobID, cursor, limit)
-	if stream && len(logs) == 0 && (run.CompletedAt == nil || cursor.Before(*run.CompletedAt)) {
-		logs = s.waitForLogs(ctx, jobID, cursor, limit)
+	logs := s.store.ListProvisioningLogs(jobID, cursorTS, cursorSeq, limit)
+	if stream && len(logs) == 0 && (run.CompletedAt == nil || cursorTS.Before(*run.CompletedAt)) {
+		logs = s.waitForLogs(ctx, jobID, cursorTS, cursorSeq, limit)
 	}
 	if len(logs) > 0 {
-		cursor = logs[len(logs)-1].CreatedAt
+		last := logs[len(logs)-1]
+		cursorTS = last.CreatedAt
+		cursorSeq = last.Sequence
 	}
 
 	resp := provisioningLogsResponse{
@@ -127,22 +130,23 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 		})
 	}
 	if len(logs) > 0 {
-		resp.NextCursor = cursor.UTC().Format(time.RFC3339Nano)
+		resp.NextCursor = formatCursor(cursorTS, cursorSeq)
 	} else if run.CompletedAt != nil {
-		resp.NextCursor = run.CompletedAt.UTC().Format(time.RFC3339Nano)
+		resp.NextCursor = formatCursor(*run.CompletedAt, 0)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) waitForLogs(ctx context.Context, jobID string, since time.Time, limit int) []store.ProvisioningLogEntry {
+func (s *Server) waitForLogs(ctx context.Context, jobID string, since time.Time, sinceSeq int64, limit int) []store.ProvisioningLogEntry {
 	deadline := time.Now().Add(20 * time.Second)
 	cursor := since
+	cursorSeq := sinceSeq
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			return nil
 		}
-		entries := s.store.ListProvisioningLogs(jobID, cursor, limit)
+		entries := s.store.ListProvisioningLogs(jobID, cursor, cursorSeq, limit)
 		if len(entries) > 0 {
 			return entries
 		}
@@ -171,13 +175,32 @@ func parseLimit(raw string, def, max int) int {
 	return val
 }
 
-func parseCursor(raw string) time.Time {
-	if trimmed := strings.TrimSpace(raw); trimmed != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-			return parsed
+func parseCursor(raw string) (time.Time, int64) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, 0
+	}
+
+	var seqPart string
+	tsPart := trimmed
+	if strings.Contains(trimmed, "|") {
+		parts := strings.SplitN(trimmed, "|", 2)
+		tsPart = parts[0]
+		seqPart = parts[1]
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, tsPart)
+	if err != nil {
+		return time.Time{}, 0
+	}
+
+	var seq int64
+	if seqPart != "" {
+		if parsed, parseErr := strconv.ParseInt(seqPart, 10, 64); parseErr == nil {
+			seq = parsed
 		}
 	}
-	return time.Time{}
+	return ts, seq
 }
 
 func parseBool(raw string) bool {
@@ -187,4 +210,14 @@ func parseBool(raw string) bool {
 		}
 	}
 	return false
+}
+
+func formatCursor(ts time.Time, seq int64) string {
+	if ts.IsZero() {
+		return ""
+	}
+	if seq > 0 {
+		return fmt.Sprintf("%s|%d", ts.UTC().Format(time.RFC3339Nano), seq)
+	}
+	return ts.UTC().Format(time.RFC3339Nano)
 }

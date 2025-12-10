@@ -100,7 +100,9 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 
 	logs := s.store.ListProvisioningLogs(jobID, cursorTS, cursorSeq, limit)
 	if stream && len(logs) == 0 && (run.CompletedAt == nil || cursorTS.Before(*run.CompletedAt)) {
-		logs = s.waitForLogs(ctx, jobID, cursorTS, cursorSeq, limit)
+		if run.CompletedAt == nil {
+			logs = s.waitForLogs(ctx, jobID, cursorTS, cursorSeq, limit)
+		}
 	}
 	if len(logs) > 0 {
 		last := logs[len(logs)-1]

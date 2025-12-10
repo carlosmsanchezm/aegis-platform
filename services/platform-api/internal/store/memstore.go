@@ -37,6 +37,7 @@ type MemStore struct {
 
 	provisioningLogs map[string][]ProvisioningLogEntry
 	provisioningRuns map[string]*ProvisioningRun
+	provisioningSeq  int64
 }
 
 func NewMemStore() *MemStore {
@@ -604,11 +605,15 @@ func (s *MemStore) AppendProvisioningLog(entry ProvisioningLogEntry) {
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
+	s.provisioningSeq++
+	if entry.Sequence == 0 {
+		entry.Sequence = s.provisioningSeq
+	}
 	clone := entry
 	s.provisioningLogs[entry.JobID] = append(s.provisioningLogs[entry.JobID], clone)
 }
 
-func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, limit int) []ProvisioningLogEntry {
+func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []ProvisioningLogEntry {
 	if strings.TrimSpace(jobID) == "" {
 		return nil
 	}
@@ -623,8 +628,20 @@ func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, limit int
 	source := s.provisioningLogs[jobID]
 	out := make([]ProvisioningLogEntry, 0, limit)
 	for _, entry := range source {
-		if !since.IsZero() && !entry.CreatedAt.After(since) {
-			continue
+		if !since.IsZero() {
+			if entry.CreatedAt.Before(since) {
+				continue
+			}
+			if entry.CreatedAt.Equal(since) {
+				if sinceSeq > 0 {
+					if entry.Sequence <= sinceSeq {
+						continue
+					}
+				} else {
+					// legacy cursor without sequence: mimic strict time cursor to avoid duplicates
+					continue
+				}
+			}
 		}
 		copy := entry
 		out = append(out, copy)

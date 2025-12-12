@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -125,8 +126,9 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 		ttf       float64
 		proxyURL  sql.NullString
 		heartbeat sql.NullTime
+		createdAt time.Time
 	)
-	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat)
+	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt)
 	if err != nil {
 		return nil
 	}
@@ -137,6 +139,7 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 		Labels:             map[string]string{},
 		AvailableFlavorSet: map[string]bool{},
 		TTFGSecondsP50:     ttf,
+		CreatedAt:          createdAt.UTC(),
 	}
 	if heartbeat.Valid {
 		info.LastHeartbeat = heartbeat.Time.UTC()
@@ -151,7 +154,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -167,8 +170,9 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			ttf       float64
 			proxyURL  sql.NullString
 			heartbeat sql.NullTime
+			createdAt time.Time
 		)
-		if err := rows.Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat); err != nil {
+		if err := rows.Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
 			s.logExecError("cluster_list_scan", err)
 			return nil
 		}
@@ -179,6 +183,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			Labels:             map[string]string{},
 			AvailableFlavorSet: map[string]bool{},
 			TTFGSecondsP50:     ttf,
+			CreatedAt:          createdAt.UTC(),
 		}
 		if heartbeat.Valid {
 			info.LastHeartbeat = heartbeat.Time.UTC()

@@ -451,6 +451,16 @@ func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersReques
 			}
 		}
 
+		var lastHeartbeat string
+		if !ci.LastHeartbeat.IsZero() {
+			lastHeartbeat = ci.LastHeartbeat.UTC().Format(time.RFC3339)
+		}
+
+		var createdAt string
+		if !ci.CreatedAt.IsZero() {
+			createdAt = ci.CreatedAt.UTC().Format(time.RFC3339)
+		}
+
 		items = append(items, &aegis.ClusterSummary{
 			Id:            ci.ID,
 			Name:          clusterDisplayName(ci),
@@ -458,7 +468,8 @@ func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersReques
 			Provider:      ci.Provider,
 			Region:        ci.Region,
 			Phase:         phase,
-			LastHeartbeat: ci.LastHeartbeat.Format(time.RFC3339),
+			CreatedAt:     createdAt,
+			LastHeartbeat: lastHeartbeat,
 		})
 	}
 

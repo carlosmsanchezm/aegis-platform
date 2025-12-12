@@ -70,9 +70,9 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric and last heartbeat timestamp; clear soft delete if present.
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$2`,
-		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
+	// Update TTFG metric, proxy URL, and last heartbeat timestamp; clear soft delete if present.
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, proxy_url=$2, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$3`,
+		hb.GetTtfGpuSecondsP50(), nullableString(hb.GetProxyUrl()), hb.GetClusterId()); err != nil {
 		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
 		return
 	}
@@ -104,8 +104,6 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 	if clusterID == "" {
 		return nil
 	}
-	// Note: proxy_url is not persisted to DB yet, so this returns basic info only.
-	// For proxy_url, rely on MemStore which is updated by heartbeats.
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
@@ -115,8 +113,9 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 		region    string
 		ttf       float64
 		heartbeat sql.NullTime
+		proxyURL  sql.NullString
 	)
-	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &heartbeat)
+	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat, proxy_url FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &heartbeat, &proxyURL)
 	if err != nil {
 		return nil
 	}
@@ -131,6 +130,9 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 	if heartbeat.Valid {
 		info.LastHeartbeat = heartbeat.Time.UTC()
 	}
+	if proxyURL.Valid {
+		info.ProxyURL = proxyURL.String
+	}
 	return info
 }
 
@@ -138,7 +140,9 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
+	// Filter out clusters with stale heartbeats (> 5 minutes old).
+	// Clusters that have never sent a heartbeat (NULL) are included.
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat, proxy_url FROM clusters WHERE deleted_at IS NULL AND (last_heartbeat IS NULL OR last_heartbeat > NOW() - INTERVAL '5 minutes')`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -153,8 +157,9 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			region    string
 			ttf       float64
 			heartbeat sql.NullTime
+			proxyURL  sql.NullString
 		)
-		if err := rows.Scan(&id, &provider, &region, &ttf, &heartbeat); err != nil {
+		if err := rows.Scan(&id, &provider, &region, &ttf, &heartbeat, &proxyURL); err != nil {
 			s.logExecError("cluster_list_scan", err)
 			return nil
 		}
@@ -168,6 +173,9 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		}
 		if heartbeat.Valid {
 			info.LastHeartbeat = heartbeat.Time.UTC()
+		}
+		if proxyURL.Valid {
+			info.ProxyURL = proxyURL.String
 		}
 		clusters[id] = info
 	}
@@ -243,4 +251,23 @@ func (s *PostgresStore) DeleteCluster(clusterID string) {
 	if _, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, clusterID); err != nil {
 		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
 	}
+}
+
+// CleanupStaleClusters soft-deletes clusters that haven't sent a heartbeat in the specified duration.
+// This prevents stale clusters from accumulating in the database.
+func (s *PostgresStore) CleanupStaleClusters(staleThreshold string) int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Default to 1 hour if not specified
+	if staleThreshold == "" {
+		staleThreshold = "1 hour"
+	}
+
+	result, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now(), deleted_by='system', deletion_reason='stale heartbeat' WHERE deleted_at IS NULL AND last_heartbeat IS NOT NULL AND last_heartbeat < NOW() - $1::interval`, staleThreshold)
+	if err != nil {
+		s.logExecError("cleanup_stale_clusters", err)
+		return 0
+	}
+	return result.RowsAffected()
 }

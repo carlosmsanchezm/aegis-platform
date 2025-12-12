@@ -62,13 +62,14 @@ type logsResponse struct {
 }
 
 type metricsQueryRequest struct {
-	ProjectID string `json:"projectId"`
-	ClusterID string `json:"clusterId"`
-	Query     string `json:"query"`
-	Start     string `json:"start"`
-	End       string `json:"end"`
-	StepSec   int    `json:"stepSeconds"`
-	RangeSec  int    `json:"rangeSeconds"`
+	ProjectID  string `json:"projectId"`
+	ClusterID  string `json:"clusterId"`
+	Query      string `json:"query"`
+	Start      string `json:"start"`
+	End        string `json:"end"`
+	StepSec    int    `json:"stepSeconds"`
+	RangeSec   int    `json:"rangeSeconds"`
+	IncludeGPU bool   `json:"includeGpu"`
 }
 
 type metricSample struct {
@@ -82,7 +83,14 @@ type metricSeries struct {
 }
 
 type metricsResponse struct {
-	Series []metricSeries `json:"series"`
+	Series []metricSeries     `json:"series"`
+	GPU    *gpuMetricsPayload `json:"gpu,omitempty"`
+}
+
+type gpuMetricsPayload struct {
+	Utilization []metricSeries `json:"utilization,omitempty"`
+	Memory      []metricSeries `json:"memory,omitempty"`
+	Missing     []string       `json:"missing,omitempty"`
 }
 
 type traceResponse struct {
@@ -248,11 +256,12 @@ func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	clusterID := strings.TrimSpace(req.ClusterID)
+	query := strings.TrimSpace(req.Query)
 	if projectID == "" || clusterID == "" {
 		writeWizardError(w, status.Error(codes.InvalidArgument, "projectId and clusterId are required"))
 		return
 	}
-	if strings.TrimSpace(req.Query) == "" {
+	if query == "" && !req.IncludeGPU {
 		writeWizardError(w, status.Error(codes.InvalidArgument, "query is required"))
 		return
 	}
@@ -290,78 +299,17 @@ func (s *Server) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Error(codes.InvalidArgument, "end must be after start"))
 		return
 	}
-
-	params := url.Values{}
-	params.Set("query", req.Query)
-	params.Set("start", strconv.FormatFloat(float64(start.UnixNano())/1e9, 'f', -1, 64))
-	params.Set("end", strconv.FormatFloat(float64(end.UnixNano())/1e9, 'f', -1, 64))
-	params.Set("step", strconv.FormatFloat(step.Seconds(), 'f', -1, 64))
-
-	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fmt.Sprintf("%s/api/v1/query_range?%s", promURL, params.Encode()), nil)
-	if err != nil {
-		writeWizardError(w, status.Errorf(codes.Internal, "build prometheus request: %v", err))
-		return
-	}
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		writeWizardError(w, status.Errorf(codes.Unavailable, "query prometheus: %v", err))
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeWizardError(w, status.Errorf(codes.Internal, "prometheus returned status %d", resp.StatusCode))
-		return
-	}
-	var promResp struct {
-		Status string `json:"status"`
-		Data   struct {
-			ResultType string `json:"resultType"`
-			Result     []struct {
-				Metric map[string]string `json:"metric"`
-				Values [][]interface{}   `json:"values"`
-				Value  []interface{}     `json:"value"`
-				Scalar interface{}       `json:"scalar"`
-				Vector interface{}       `json:"vector"`
-				String interface{}       `json:"string"`
-				Hist   interface{}       `json:"histogram"`
-				Hist2  interface{}       `json:"histograms"`
-			} `json:"result"`
-		} `json:"data"`
-		ErrorType string `json:"errorType,omitempty"`
-		Error     string `json:"error,omitempty"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&promResp); err != nil {
-		writeWizardError(w, status.Errorf(codes.Internal, "decode prometheus response: %v", err))
-		return
-	}
-	if promResp.Error != "" {
-		writeWizardError(w, status.Errorf(codes.InvalidArgument, "prometheus error: %s", promResp.Error))
-		return
-	}
-	out := metricsResponse{}
-	for _, series := range promResp.Data.Result {
-		view := metricSeries{Labels: series.Metric}
-		for _, pair := range series.Values {
-			if len(pair) != 2 {
-				continue
-			}
-			ts, ok := parsePromTimestamp(pair[0])
-			if !ok {
-				continue
-			}
-			valFloat, ok := parsePromValue(pair[1])
-			if !ok {
-				continue
-			}
-			view.Samples = append(view.Samples, metricSample{
-				Timestamp: ts.UTC().Format(time.RFC3339Nano),
-				Value:     valFloat,
-			})
+	out := metricsResponse{Series: []metricSeries{}}
+	if query != "" {
+		series, err := s.fetchPrometheusSeries(ctx, httpClient, promURL, query, start, end, step)
+		if err != nil {
+			writeWizardError(w, err)
+			return
 		}
-		out.Series = append(out.Series, view)
+		out.Series = series
+	}
+	if req.IncludeGPU {
+		out.GPU = s.fetchGpuMetrics(ctx, httpClient, promURL, start, end, step)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -658,4 +606,171 @@ func parsePromValue(v interface{}) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func (s *Server) fetchPrometheusSeries(ctx context.Context, httpClient *http.Client, promURL, query string, start, end time.Time, step time.Duration) ([]metricSeries, error) {
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("start", strconv.FormatFloat(float64(start.UnixNano())/1e9, 'f', -1, 64))
+	params.Set("end", strconv.FormatFloat(float64(end.UnixNano())/1e9, 'f', -1, 64))
+	params.Set("step", strconv.FormatFloat(step.Seconds(), 'f', -1, 64))
+
+	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fmt.Sprintf("%s/api/v1/query_range?%s", promURL, params.Encode()), nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "build prometheus request: %v", err)
+	}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "query prometheus: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, status.Errorf(codes.Internal, "prometheus returned status %d", resp.StatusCode)
+	}
+	var promResp struct {
+		Status string `json:"status"`
+		Data   struct {
+			ResultType string `json:"resultType"`
+			Result     []struct {
+				Metric map[string]string `json:"metric"`
+				Values [][]interface{}   `json:"values"`
+				Value  []interface{}     `json:"value"`
+				Scalar interface{}       `json:"scalar"`
+				Vector interface{}       `json:"vector"`
+				String interface{}       `json:"string"`
+				Hist   interface{}       `json:"histogram"`
+				Hist2  interface{}       `json:"histograms"`
+			} `json:"result"`
+		} `json:"data"`
+		ErrorType string `json:"errorType,omitempty"`
+		Error     string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&promResp); err != nil {
+		return nil, status.Errorf(codes.Internal, "decode prometheus response: %v", err)
+	}
+	if promResp.Error != "" {
+		return nil, status.Errorf(codes.InvalidArgument, "prometheus error: %s", promResp.Error)
+	}
+	out := make([]metricSeries, 0, len(promResp.Data.Result))
+	for _, series := range promResp.Data.Result {
+		view := metricSeries{Labels: series.Metric}
+		for _, pair := range series.Values {
+			if len(pair) != 2 {
+				continue
+			}
+			ts, ok := parsePromTimestamp(pair[0])
+			if !ok {
+				continue
+			}
+			valFloat, ok := parsePromValue(pair[1])
+			if !ok {
+				continue
+			}
+			view.Samples = append(view.Samples, metricSample{
+				Timestamp: ts.UTC().Format(time.RFC3339Nano),
+				Value:     valFloat,
+			})
+		}
+		out = append(out, view)
+	}
+	return out, nil
+}
+
+type promQueryCandidate struct {
+	Query string
+	Scale float64
+}
+
+func (s *Server) tryPrometheusQueries(ctx context.Context, httpClient *http.Client, promURL string, start, end time.Time, step time.Duration, candidates []promQueryCandidate) ([]metricSeries, string, string) {
+	var lastWarn string
+	for _, cand := range candidates {
+		series, err := s.fetchPrometheusSeries(ctx, httpClient, promURL, cand.Query, start, end, step)
+		if err != nil {
+			lastWarn = err.Error()
+			continue
+		}
+		if len(series) == 0 {
+			lastWarn = fmt.Sprintf("no data for query %s", cand.Query)
+			continue
+		}
+		if cand.Scale != 0 && cand.Scale != 1 {
+			series = scaleMetricSeries(series, cand.Scale)
+		}
+		return series, cand.Query, ""
+	}
+	return nil, "", lastWarn
+}
+
+func (s *Server) fetchGpuMetrics(ctx context.Context, httpClient *http.Client, promURL string, start, end time.Time, step time.Duration) *gpuMetricsPayload {
+	payload := &gpuMetricsPayload{}
+	if httpClient == nil || promURL == "" {
+		payload.Missing = []string{"utilization", "memory"}
+		return payload
+	}
+
+	utilSeries, _, _ := s.tryPrometheusQueries(ctx, httpClient, promURL, start, end, step, []promQueryCandidate{
+		{Query: "DCGM_FI_DEV_GPU_UTIL"},
+		{Query: "nvidia_gpu_duty_cycle"},
+	})
+	if len(utilSeries) > 0 {
+		payload.Utilization = utilSeries
+	} else {
+		payload.Missing = append(payload.Missing, "utilization")
+	}
+
+	memorySeries, _, _ := s.tryPrometheusQueries(ctx, httpClient, promURL, start, end, step, []promQueryCandidate{
+		{Query: "DCGM_FI_DEV_FB_USED"},
+		{Query: "nvidia_gpu_memory_used_bytes", Scale: 1.0 / (1024 * 1024)},
+	})
+	if len(memorySeries) > 0 {
+		payload.Memory = memorySeries
+	} else {
+		payload.Missing = append(payload.Missing, "memory")
+	}
+
+	if len(payload.Missing) > 0 {
+		payload.Missing = dedupeStrings(payload.Missing)
+	}
+	return payload
+}
+
+func scaleMetricSeries(series []metricSeries, factor float64) []metricSeries {
+	if factor == 0 || factor == 1 {
+		return series
+	}
+	out := make([]metricSeries, 0, len(series))
+	for _, s := range series {
+		scaled := metricSeries{Labels: s.Labels, Samples: make([]metricSample, 0, len(s.Samples))}
+		for _, sample := range s.Samples {
+			scaled.Samples = append(scaled.Samples, metricSample{
+				Timestamp: sample.Timestamp,
+				Value:     sample.Value * factor,
+			})
+		}
+		out = append(out, scaled)
+	}
+	return out
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		key := strings.TrimSpace(item)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }

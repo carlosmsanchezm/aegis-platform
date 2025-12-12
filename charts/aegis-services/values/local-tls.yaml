@@ -137,7 +137,7 @@ platformApi:
     AEGIS_PLATFORM_API_ENDPOINT: "remote.aegis-platform.tech:443"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
-    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"

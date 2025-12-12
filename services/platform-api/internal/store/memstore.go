@@ -468,6 +468,11 @@ func (s *MemStore) DeleteCluster(clusterID string) {
 	s.cstate.delete(clusterID)
 }
 
+// CleanupStaleClusters is a no-op for memory store (no persistence).
+func (s *MemStore) CleanupStaleClusters(staleThreshold string) int64 {
+	return 0
+}
+
 // LeaseWorkloads moves up to max workloads for the cluster from PLACED to RUNNING.
 func (s *MemStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 	if max <= 0 {

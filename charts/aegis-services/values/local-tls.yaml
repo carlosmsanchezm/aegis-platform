@@ -134,7 +134,8 @@ platformApi:
           M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
           -----END CERTIFICATE-----
   env:
-    AEGIS_PLATFORM_API_ENDPOINT: "remote.aegis-platform.tech:443"
+    # Use NLB for gRPC (Cloudflare doesn't handle streaming properly)
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"

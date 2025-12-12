@@ -1,5 +1,5 @@
 # Auto-generated values for AWS relay-based connectivity
-# Generated at: 2025-12-10T20:25:00Z
+# Generated at: 2025-12-10T22:04:52Z
 #
 # Architecture:
 #   - gRPC: NLB tunnel (aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081) - Cloudflare doesn't handle gRPC streaming
@@ -43,7 +43,7 @@ k8sAgent:
 # Spoke proxy configuration
 # Enable this when testing multi-cluster proxy architecture
 proxy:
-  enabled: true
+  enabled: false
   image:
     repository: carlosmsanchez/aegis-proxy
     pullPolicy: Always
@@ -51,14 +51,11 @@ proxy:
   service:
     type: NodePort
     port: 443
-    nodePort: 31484
-  # Full URL for heartbeat reporting (supports NodePort with custom port)
-  url: "wss://spoke-proxy.107.22.50.137.nip.io:31484"
   ingress:
     enabled: false
-    # Hostname for ingress (no port - only used when ingress.enabled=true)
-    hostname: "spoke-proxy.107.22.50.137.nip.io"
+    # Set this to the spoke proxy's external URL for heartbeat reporting
+    # Example: "spoke-proxy.<node-ip>.nip.io" or proper DNS
+    hostname: ""
   jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
   tls:
     terminateAtIngress: false
-    # Certs provided via --set-file during helm install

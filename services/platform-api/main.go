@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,6 +46,21 @@ func main() {
 			logger.Fatal("failed to initialize postgres store", zap.Error(err))
 		}
 		logger.Info("using PostgreSQL store", zap.String("backend", "postgres"))
+
+		// Cleanup stale clusters on startup and periodically
+		staleThreshold := getenv("AEGIS_CLUSTER_STALE_THRESHOLD", "1 hour")
+		if cleaned := st.CleanupStaleClusters(staleThreshold); cleaned > 0 {
+			logger.Info("cleaned up stale clusters on startup", zap.Int64("count", cleaned))
+		}
+		go func() {
+			ticker := time.NewTicker(15 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				if cleaned := st.CleanupStaleClusters(staleThreshold); cleaned > 0 {
+					logger.Info("cleaned up stale clusters", zap.Int64("count", cleaned))
+				}
+			}
+		}()
 	} else {
 		st = store.NewMemStore()
 		logger.Info("using in-memory store", zap.String("backend", "memory"))

@@ -95,6 +95,7 @@ type AegisWorkloadReconciler struct {
 	proxyServiceName      string
 	proxyServicePort      int32
 	proxyIngressHost      string
+	proxyURL              string // Full URL for heartbeat reporting (e.g., wss://host:port)
 	sshBootstrapImage     string
 
 	workspaceEnvDefaults map[string]string
@@ -505,7 +506,32 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 	}
 
 	flavors := r.discoverFlavors()
-	r.cpClient.HeartbeatLoop(ctx, zapLogger, r.clusterID, flavors)
+	proxyURL := r.buildProxyURL()
+	r.cpClient.HeartbeatLoop(ctx, zapLogger, r.clusterID, flavors, proxyURL)
+}
+
+// buildProxyURL returns the spoke proxy URL for heartbeat reporting.
+// If AEGIS_PROXY_URL is set, it's used directly. Otherwise, constructs from AEGIS_PROXY_INGRESS_HOST.
+func (r *AegisWorkloadReconciler) buildProxyURL() string {
+	// Prefer explicit proxy URL if set (supports custom port for NodePort access)
+	if r.proxyURL != "" {
+		url := r.proxyURL
+		// Ensure scheme is present
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "wss://") && !strings.HasPrefix(url, "ws://") {
+			url = "wss://" + url
+		}
+		return url
+	}
+	// Fall back to constructing from ingress host
+	host := r.proxyIngressHost
+	if host == "" {
+		return ""
+	}
+	// If no scheme specified, default to wss://
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") && !strings.HasPrefix(host, "wss://") && !strings.HasPrefix(host, "ws://") {
+		host = "wss://" + host
+	}
+	return host
 }
 
 func (r *AegisWorkloadReconciler) discoverFlavors() []*aegisproto.Flavor {
@@ -1048,6 +1074,7 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.proxyServicePort = 8080
 	}
 	r.proxyIngressHost = envOrDefault("AEGIS_PROXY_INGRESS_HOST", "")
+	r.proxyURL = envOrDefault("AEGIS_PROXY_URL", "")
 	r.sshBootstrapImage = envOrDefault("AEGIS_SSH_BOOTSTRAP_IMAGE", "")
 	if r.kueueEnabled {
 		if ok, err := workdiscovery.DetectKueue(r.Config); err != nil {

@@ -7,6 +7,10 @@ metadata:
   labels:
     {{- include "aegis-spoke.labels" . | nindent 4 }}
     app.kubernetes.io/component: proxy
+  {{- with .Values.proxy.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.proxy.service.type }}
   selector:
@@ -17,4 +21,7 @@ spec:
       port: {{ .Values.proxy.service.port }}
       protocol: TCP
       targetPort: 8080
+      {{- if and (eq .Values.proxy.service.type "NodePort") .Values.proxy.service.nodePort }}
+      nodePort: {{ .Values.proxy.service.nodePort }}
+      {{- end }}
 {{- end }}

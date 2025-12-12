@@ -107,3 +107,13 @@ func envDuration(key string, def time.Duration) time.Duration {
 	}
 	return def
 }
+
+func nullableTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC()
+}

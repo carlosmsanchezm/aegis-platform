@@ -186,6 +186,7 @@ func (f *Fetcher) fetchNodegroups(ctx context.Context, clusterName string, start
 			Issues:        []string{},
 			ScalingEvents: []ScalingEvent{},
 		}
+		signal.GPU, signal.GPUFlavor, signal.InstanceType = classifyNodegroup(desc.Nodegroup)
 		if desc.Nodegroup.ScalingConfig != nil && desc.Nodegroup.ScalingConfig.DesiredSize != nil {
 			signal.Desired = int32(*desc.Nodegroup.ScalingConfig.DesiredSize)
 		}
@@ -465,6 +466,68 @@ func summarizeInstances(instances []astypes.Instance) (int32, int32) {
 		}
 	}
 	return current, ready
+}
+
+func classifyNodegroup(ng *ekstypes.Nodegroup) (bool, string, string) {
+	if ng == nil {
+		return false, "", ""
+	}
+	instanceType := firstInstanceType(ng.InstanceTypes)
+	gpu := isGpuInstanceType(instanceType)
+	flavor := ""
+	for k, v := range ng.Labels {
+		key := strings.ToLower(strings.TrimSpace(k))
+		val := strings.TrimSpace(v)
+		switch {
+		case strings.EqualFold(key, "aegis.io/gpu-flavor"):
+			if val != "" {
+				flavor = val
+			}
+			gpu = true
+		case strings.Contains(key, "gpu"), strings.Contains(strings.ToLower(val), "gpu"):
+			gpu = true
+			if flavor == "" && val != "" {
+				flavor = val
+			}
+		}
+	}
+	for _, t := range ng.Taints {
+		key := strings.ToLower(strings.TrimSpace(aws.ToString(t.Key)))
+		val := strings.ToLower(strings.TrimSpace(aws.ToString(t.Value)))
+		if strings.Contains(key, "gpu") || strings.Contains(val, "gpu") || strings.Contains(val, "mig") {
+			gpu = true
+		}
+	}
+	if strings.Contains(strings.ToLower(string(ng.AmiType)), "gpu") {
+		gpu = true
+	}
+	if flavor == "" && gpu {
+		flavor = instanceType
+	}
+	return gpu, flavor, instanceType
+}
+
+func firstInstanceType(types []string) string {
+	for _, t := range types {
+		if trimmed := strings.TrimSpace(t); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func isGpuInstanceType(instance string) bool {
+	inst := strings.ToLower(strings.TrimSpace(instance))
+	if inst == "" {
+		return false
+	}
+	prefixes := []string{"g4", "g5", "p2", "p3", "p4", "p5", "trn", "inf"}
+	for _, pre := range prefixes {
+		if strings.HasPrefix(inst, pre) {
+			return true
+		}
+	}
+	return strings.Contains(inst, "gpu")
 }
 
 func (f *Fetcher) scalingActivities(ctx context.Context, asgName string, start time.Time) ([]ScalingEvent, error) {

@@ -36,5 +36,5 @@ k8sAgent:
       M8TjWIYeV7NSWQFM4GaONGw5pAOAT2s9BSY5lAZ5gYgbOKSzl7Y=
       -----END CERTIFICATE-----
     AEGIS_PROXY_INGRESS_HOST: "proxy.localtest.me"
-    AEGIS_FLAVORS: "cpu-small,t4-1gpu"
+    AEGIS_FLAVORS: "cpu-small,gpu-standard"
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"

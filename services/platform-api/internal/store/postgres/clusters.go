@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -28,9 +30,9 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, provider, region, created_at, updated_at)
 VALUES ($1, $2, $3, now(), now())
 ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, deleted_at=NULL, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
-			s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
-			return
-		}
+		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
+		return
+	}
 
 	// Delete labels EXCEPT the projectId label (which is managed separately and should be preserved)
 	if _, err := tx.Exec(ctx, `DELETE FROM cluster_labels WHERE cluster_id=$1 AND k != 'aegis.yourorg.dev/projectId'`, req.GetClusterId()); err != nil {
@@ -70,10 +72,20 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric and last heartbeat timestamp; clear soft delete if present.
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET ttf_gpu_seconds_p50=$1, last_heartbeat=now(), deleted_at=NULL, updated_at=now() WHERE id=$2`,
-		hb.GetTtfGpuSecondsP50(), hb.GetClusterId()); err != nil {
+	// Update TTFG metric, proxy URL, and last heartbeat timestamp; do not resurrect soft-deleted clusters.
+	res, err := tx.Exec(ctx, `UPDATE clusters
+SET ttf_gpu_seconds_p50=$1,
+    proxy_url = CASE WHEN $3 <> '' THEN $3 ELSE proxy_url END,
+    last_heartbeat=now(),
+    updated_at=now()
+WHERE id=$2 AND deleted_at IS NULL`,
+		hb.GetTtfGpuSecondsP50(), hb.GetClusterId(), strings.TrimSpace(hb.GetProxyUrl()))
+	if err != nil {
 		s.logExecError("heartbeat_update_ttfg", err, zap.String("cluster_id", hb.GetClusterId()))
+		return
+	}
+	if rows := res.RowsAffected(); rows == 0 {
+		s.log.Debug("heartbeat ignored for soft-deleted cluster", zap.String("cluster_id", hb.GetClusterId()))
 		return
 	}
 
@@ -100,11 +112,49 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 }
 
+func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
+	if clusterID == "" {
+		return nil
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	var (
+		id        string
+		provider  string
+		region    string
+		ttf       float64
+		proxyURL  sql.NullString
+		heartbeat sql.NullTime
+		createdAt time.Time
+	)
+	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt)
+	if err != nil {
+		return nil
+	}
+	info := &store.ClusterInfo{
+		ID:                 id,
+		Provider:           provider,
+		Region:             region,
+		Labels:             map[string]string{},
+		AvailableFlavorSet: map[string]bool{},
+		TTFGSecondsP50:     ttf,
+		CreatedAt:          createdAt.UTC(),
+	}
+	if heartbeat.Valid {
+		info.LastHeartbeat = heartbeat.Time.UTC()
+	}
+	if proxyURL.Valid {
+		info.ProxyURL = proxyURL.String
+	}
+	return info
+}
+
 func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, last_heartbeat FROM clusters WHERE deleted_at IS NULL`)
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -118,9 +168,11 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			provider  string
 			region    string
 			ttf       float64
+			proxyURL  sql.NullString
 			heartbeat sql.NullTime
+			createdAt time.Time
 		)
-		if err := rows.Scan(&id, &provider, &region, &ttf, &heartbeat); err != nil {
+		if err := rows.Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
 			s.logExecError("cluster_list_scan", err)
 			return nil
 		}
@@ -131,14 +183,18 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			Labels:             map[string]string{},
 			AvailableFlavorSet: map[string]bool{},
 			TTFGSecondsP50:     ttf,
+			CreatedAt:          createdAt.UTC(),
 		}
 		if heartbeat.Valid {
 			info.LastHeartbeat = heartbeat.Time.UTC()
 		}
+		if proxyURL.Valid {
+			info.ProxyURL = proxyURL.String
+		}
 		clusters[id] = info
 	}
 
-	labelRows, err := s.pool.Query(ctx, `SELECT cluster_id, k, v FROM cluster_labels`)
+	labelRows, err := s.pool.Query(ctx, `SELECT cl.cluster_id, cl.k, cl.v FROM cluster_labels cl JOIN clusters c ON cl.cluster_id = c.id WHERE c.deleted_at IS NULL`)
 	if err == nil {
 		defer labelRows.Close()
 		for labelRows.Next() {
@@ -159,7 +215,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 		s.logExecError("cluster_list_labels", err)
 	}
 
-	flavorRows, err := s.pool.Query(ctx, `SELECT cluster_id, flavor FROM cluster_flavors`)
+	flavorRows, err := s.pool.Query(ctx, `SELECT cf.cluster_id, cf.flavor FROM cluster_flavors cf JOIN clusters c ON cf.cluster_id = c.id WHERE c.deleted_at IS NULL`)
 	if err == nil {
 		defer flavorRows.Close()
 		for flavorRows.Next() {

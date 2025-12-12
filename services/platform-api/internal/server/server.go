@@ -403,8 +403,82 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 		zap.String("cluster_id", hb.GetClusterId()),
 		zap.Float64("ttf_gpu_seconds_p50", hb.GetTtfGpuSecondsP50()),
 		zap.Strings("available_flavors", flavorNames),
+		zap.String("proxy_url", hb.GetProxyUrl()),
 	)
 	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
+}
+
+func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersRequest) (*aegis.ListClustersResponse, error) {
+	_, allowed, err := s.authorizedProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projectFilter := strings.TrimSpace(req.GetProjectId())
+	regionFilter := strings.TrimSpace(req.GetRegion())
+
+	if projectFilter != "" {
+		if _, ok := allowed[strings.ToLower(projectFilter)]; !ok && len(allowed) > 0 {
+			return nil, status.Error(codes.PermissionDenied, "project not accessible")
+		}
+	}
+
+	infos := s.store.ListClusterInfos()
+	now := time.Now()
+	items := make([]*aegis.ClusterSummary, 0, len(infos))
+	for _, ci := range infos {
+		if ci == nil {
+			continue
+		}
+		projectID := clusterProject(ci)
+		if len(allowed) > 0 {
+			if _, ok := allowed[strings.ToLower(projectID)]; !ok {
+				continue
+			}
+		}
+		if projectFilter != "" && !strings.EqualFold(projectID, projectFilter) {
+			continue
+		}
+		if regionFilter != "" && !strings.EqualFold(ci.Region, regionFilter) {
+			continue
+		}
+
+		phase := "Ready"
+		if !clusterReady(ci, now) {
+			if ci.LastHeartbeat.IsZero() {
+				phase = "Pending"
+			} else {
+				phase = "Unhealthy"
+			}
+		}
+
+		var lastHeartbeat string
+		if !ci.LastHeartbeat.IsZero() {
+			lastHeartbeat = ci.LastHeartbeat.UTC().Format(time.RFC3339)
+		}
+
+		var createdAt string
+		if !ci.CreatedAt.IsZero() {
+			createdAt = ci.CreatedAt.UTC().Format(time.RFC3339)
+		}
+
+		items = append(items, &aegis.ClusterSummary{
+			Id:            ci.ID,
+			Name:          clusterDisplayName(ci),
+			ProjectId:     projectID,
+			Provider:      ci.Provider,
+			Region:        ci.Region,
+			Phase:         phase,
+			CreatedAt:     createdAt,
+			LastHeartbeat: lastHeartbeat,
+		})
+	}
+
+	s.log.Debug("list clusters",
+		zap.String("project_filter", projectFilter),
+		zap.String("region_filter", regionFilter),
+		zap.Int("count", len(items)),
+	)
+	return &aegis.ListClustersResponse{Items: items}, nil
 }
 
 func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
@@ -1224,7 +1298,16 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	targetNS := s.namespaceForProject(w.GetProjectId())
 	internalHost := fmt.Sprintf("%s.%s%s", alias, targetNS, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
-	proxyURL := fmt.Sprintf("%s/proxy/%s", s.proxyBaseURL, w.GetId())
+
+	// Determine proxy URL: use spoke proxy if cluster reports one, otherwise use hub proxy
+	proxyBaseURL := s.proxyBaseURL
+	if clusterID := w.GetClusterId(); clusterID != "" {
+		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil && clusterInfo.ProxyURL != "" {
+			proxyBaseURL = clusterInfo.ProxyURL
+			s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+		}
+	}
+	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())
 
 	return &sessionContext{
 		workload:     w,
@@ -2289,22 +2372,21 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 	switch normalized {
 	case "t4-1gpu", "gpu-t4", "nvidia-tesla-t4", "t4", "gpu-standard":
 		// gpu-standard maps to T4 GPU (g4dn.xlarge on AWS)
-		// g4dn.xlarge has 4 vCPUs but only ~3.92 allocatable after k8s overhead
-		// Request 3 CPU to ensure pod fits on node
+		// Conservative defaults: leave headroom for system pods, logging, and user's custom processes
+		// GPU does heavy compute; CPU/RAM just feed data - most ML work is GPU-bound
 		return &aegis.Flavor{
 			Name:               name,
 			Chip:               "nvidia-t4",
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          16,
-			CpuCoresRequest:    "3",
-			MemoryRequest:      "14Gi",
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "8Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10-1gpu", "a10g-1gpu", "gpu-large":
 		// gpu-large maps to A10G GPU (g5.xlarge on AWS)
-		// g5.xlarge has 4 vCPUs (~3.92 allocatable), 16GB RAM, 24GB GPU memory
-		// For larger workloads, use g5.2xlarge (8 vCPU) or g5.4xlarge (16 vCPU)
+		// Conservative defaults: leave headroom for system pods and user customizations
 		return &aegis.Flavor{
 			Name: name,
 			Chip: "nvidia-a10g",
@@ -2312,8 +2394,21 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 			ResourceName:       "nvidia.com/gpu",
 			GpuCount:           1,
 			MemoryGib:          24,
+			CpuCoresRequest:    "2",
+			MemoryRequest:      "8Gi",
+			PriceUsdPerGpuHour: 0,
+		}
+	case "gpu-heavy", "t4-heavy":
+		// gpu-heavy: for data-intensive preprocessing that needs more CPU/RAM
+		// Use when users need heavy data loading or CPU-side transforms
+		return &aegis.Flavor{
+			Name:               name,
+			Chip:               "nvidia-t4",
+			ResourceName:       "nvidia.com/gpu",
+			GpuCount:           1,
+			MemoryGib:          16,
 			CpuCoresRequest:    "3",
-			MemoryRequest:      "14Gi",
+			MemoryRequest:      "12Gi",
 			PriceUsdPerGpuHour: 0,
 		}
 	case "a10g-mig-1g", "a10-mig-1g":
@@ -2375,12 +2470,22 @@ func (s *Server) ensureFlavorDefaults(name string) {
 		return
 	}
 
-	if existing == nil || strings.TrimSpace(existing.GetResourceName()) == "" || (expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) {
+	// Update flavor if it doesn't exist, or if it exists but has missing/outdated values
+	needsUpdate := existing == nil ||
+		strings.TrimSpace(existing.GetResourceName()) == "" ||
+		(expected.GetGpuCount() > 0 && existing.GetGpuCount() == 0) ||
+		// Also update if CPU/memory values differ from expected defaults
+		(expected.GetCpuCoresRequest() != "" && existing.GetCpuCoresRequest() != expected.GetCpuCoresRequest()) ||
+		(expected.GetMemoryRequest() != "" && existing.GetMemoryRequest() != expected.GetMemoryRequest())
+
+	if needsUpdate {
 		s.store.PutFlavor(expected)
 		s.log.Info("autobootstrap: flavor ensured",
 			zap.String("flavor", trimmed),
 			zap.String("resource_name", expected.GetResourceName()),
 			zap.Int32("gpu_count", expected.GetGpuCount()),
+			zap.String("cpu_request", expected.GetCpuCoresRequest()),
+			zap.String("memory_request", expected.GetMemoryRequest()),
 		)
 	}
 }

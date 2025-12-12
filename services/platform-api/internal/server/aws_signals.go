@@ -136,13 +136,16 @@ func convertControlPlane(cp observability.ControlPlaneSignals) *aegis.ControlPla
 
 func convertNodegroup(ng observability.NodegroupSignals) *aegis.NodegroupSignal {
 	out := &aegis.NodegroupSignal{
-		Name:    ng.Name,
-		Status:  ng.Status,
-		Desired: ng.Desired,
-		Current: ng.Current,
-		Ready:   ng.Ready,
-		AsgName: ng.AutoScalingGroup,
-		Issues:  ng.Issues,
+		Name:         ng.Name,
+		Status:       ng.Status,
+		Desired:      ng.Desired,
+		Current:      ng.Current,
+		Ready:        ng.Ready,
+		AsgName:      ng.AutoScalingGroup,
+		Issues:       ng.Issues,
+		Gpu:          ng.GPU,
+		GpuFlavor:    strings.TrimSpace(ng.GPUFlavor),
+		InstanceType: strings.TrimSpace(ng.InstanceType),
 	}
 	for _, evt := range ng.ScalingEvents {
 		out.ScalingEvents = append(out.ScalingEvents, &aegis.ScalingEvent{

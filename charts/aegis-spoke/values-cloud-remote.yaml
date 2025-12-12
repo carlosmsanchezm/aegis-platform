@@ -1,26 +1,56 @@
 # Remote cloud overlay for spoke agent using OIDC client credentials over TLS.
 # Apply on top of values.yaml (and any region-specific values) when pointing
 # the spoke at the remote platform-api and Keycloak endpoints.
+#
+# Architecture:
+#   - gRPC: NLB tunnel (Cloudflare doesn't handle gRPC streaming properly)
+#   - Keycloak: Cloudflare (HTTPS works fine)
+#   - Spoke Proxy: Enabled for multi-cluster workspace connectivity
 
 k8sAgent:
   image:
     pullPolicy: Always
     tag: "dev"
   env:
-    # gRPC to platform-api over TLS via Cloudflare Tunnel
-    AEGIS_CP_GRPC: "remote.aegis-platform.tech:443"
+    # gRPC to platform-api via AWS NLB (TCP passthrough, preserves HTTP/2)
+    # NOTE: Do NOT use Cloudflare for gRPC - it doesn't handle streaming properly
+    AEGIS_CP_GRPC: "aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081"
     AEGIS_CP_GRPC_INSECURE: "false"
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
-    AEGIS_CP_GRPC_SERVER_NAME: "remote.aegis-platform.tech"
+    AEGIS_CP_GRPC_SERVER_NAME: ""
     AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
-    # OIDC client credentials (Keycloak via Cloudflare Tunnel)
+    # OIDC via Cloudflare (HTTPS works fine through Cloudflare tunnels)
+    # NOTE: Do NOT use NLB for Keycloak - port 8443 tunnel often fails
     AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
     AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
     AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"
-    # CA bundles omitted because skip-verify is enabled for the tunnel path
+
+    # Skip CA verification (self-signed certs through tunnel)
     AEGIS_PLATFORM_CA_B64: ""
     AEGIS_CP_OIDC_CA_B64: ""
+
+# Spoke proxy configuration for multi-cluster workspace connectivity
+proxy:
+  enabled: true
+  image:
+    repository: carlosmsanchez/aegis-proxy
+    pullPolicy: Always
+    tag: "dev"
+  service:
+    type: NodePort
+    port: 443
+    nodePort: 31484
+  # Full URL for heartbeat reporting (supports NodePort with custom port)
+  url: "wss://spoke-proxy.107.22.50.137.nip.io:31484"
+  ingress:
+    enabled: false
+    # Hostname for ingress (no port - only used when ingress.enabled=true)
+    hostname: "spoke-proxy.107.22.50.137.nip.io"
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+  tls:
+    terminateAtIngress: false
+    # Certs provided via --set-file during helm install

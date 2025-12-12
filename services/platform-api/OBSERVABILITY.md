@@ -49,6 +49,43 @@ Backend/UI proxies should build URLs as `http://<service>.<namespace>.svc:<port>
     ]
   }
   ```
+  Optional GPU helper: set `includeGpu: true` to return GPU utilization and memory series (if a DCGM/NVIDIA exporter is scraped). `query` can be omitted when only GPU series are needed. Memory is returned in MiB when sourced from `nvidia_gpu_memory_used_bytes`.
+  ```json
+  {
+    "projectId": "demo",
+    "clusterId": "aegis-use1-dev",
+    "includeGpu": true,
+    "rangeSeconds": 900,
+    "stepSeconds": 30
+  }
+  ```
+  GPU block in the response:
+  ```json
+  {
+    "series": [],
+    "gpu": {
+      "utilization": [
+        {
+          "labels": {"gpu": "0", "hostname": "ip-1-2-3-4"},
+          "samples": [
+            {"timestamp": "2024-12-01T12:00:00Z", "value": 75.3},
+            {"timestamp": "2024-12-01T12:00:30Z", "value": 72.1}
+          ]
+        }
+      ],
+      "memory": [
+        {
+          "labels": {"gpu": "0", "hostname": "ip-1-2-3-4"},
+          "samples": [
+            {"timestamp": "2024-12-01T12:00:00Z", "value": 10240},
+            {"timestamp": "2024-12-01T12:00:30Z", "value": 10412}
+          ]
+        }
+      ],
+      "missing": []
+    }
+  }
+  ```
 
 - `POST /api/logs/query` – proxy to Loki `query_range`. Body:
   ```json
@@ -151,9 +188,15 @@ Sample response shape:
   ],
   "nextCursor": "<opaque Loki cursor>"
 }
-```
+  ```
 
 Pagination: propagate Loki `limit` and `cursor` (forward token from `query_range`). Supported filters: required `clusterId`; optional `namespace`, `pod`, `substring`; required `start`/`end` time window.
+
+### AWS/EKS GPU nodegroup signals
+`GetAwsSignalsResponse.nodegroups[]` now includes GPU indicators so UI cards can highlight GPU pools:
+- `gpu`: boolean flag marking GPU nodegroups (instance type, labels, or GPU AMI).
+- `gpu_flavor`: GPU flavor label when present (e.g., `aegis.io/gpu-flavor`).
+- `instance_type`: primary instance type detected for the nodegroup.
 
 ## Alert rules
 Baseline alerts are installed for:

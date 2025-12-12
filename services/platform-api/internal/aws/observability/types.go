@@ -65,6 +65,9 @@ type NodegroupSignals struct {
 	AutoScalingGroup string
 	Issues           []string
 	ScalingEvents    []ScalingEvent
+	GPU              bool
+	GPUFlavor        string
+	InstanceType     string
 }
 
 // ScalingEvent captures a short record of recent autoscaling activity.

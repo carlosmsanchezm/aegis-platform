@@ -431,40 +431,67 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 }
 
 func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersRequest) (*aegis.ListClustersResponse, error) {
-	_ = ctx // reserved for tracing/cancellation
-	infos := s.store.ListClusterInfos()
+	_, allowed, err := s.authorizedProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
 	projectFilter := strings.TrimSpace(req.GetProjectId())
 	regionFilter := strings.TrimSpace(req.GetRegion())
 
+	if projectFilter != "" {
+		if _, ok := allowed[strings.ToLower(projectFilter)]; !ok && len(allowed) > 0 {
+			return nil, status.Error(codes.PermissionDenied, "project not accessible")
+		}
+	}
+
+	infos := s.store.ListClusterInfos()
+	now := time.Now()
 	items := make([]*aegis.ClusterSummary, 0, len(infos))
 	for _, ci := range infos {
-		// Filter by project if specified
-		if projectFilter != "" {
-			clusterProject := ci.Labels["aegis.yourorg.dev/projectId"]
-			if clusterProject != projectFilter {
+		if ci == nil {
+			continue
+		}
+		projectID := clusterProject(ci)
+		if len(allowed) > 0 {
+			if _, ok := allowed[strings.ToLower(projectID)]; !ok {
 				continue
 			}
 		}
-		// Filter by region if specified
-		if regionFilter != "" && ci.Region != regionFilter {
+		if projectFilter != "" && !strings.EqualFold(projectID, projectFilter) {
+			continue
+		}
+		if regionFilter != "" && !strings.EqualFold(ci.Region, regionFilter) {
 			continue
 		}
 
 		phase := "Ready"
-		if ci.LastHeartbeat.IsZero() {
-			phase = "Pending"
-		} else if time.Since(ci.LastHeartbeat) > 5*time.Minute {
-			phase = "Unhealthy"
+		if !clusterReady(ci, now) {
+			if ci.LastHeartbeat.IsZero() {
+				phase = "Pending"
+			} else {
+				phase = "Unhealthy"
+			}
+		}
+
+		var lastHeartbeat string
+		if !ci.LastHeartbeat.IsZero() {
+			lastHeartbeat = ci.LastHeartbeat.UTC().Format(time.RFC3339)
+		}
+
+		var createdAt string
+		if !ci.CreatedAt.IsZero() {
+			createdAt = ci.CreatedAt.UTC().Format(time.RFC3339)
 		}
 
 		items = append(items, &aegis.ClusterSummary{
 			Id:            ci.ID,
-			Name:          ci.ID, // Use ID as name for now
-			ProjectId:     ci.Labels["aegis.yourorg.dev/projectId"],
+			Name:          clusterDisplayName(ci),
+			ProjectId:     projectID,
 			Provider:      ci.Provider,
 			Region:        ci.Region,
 			Phase:         phase,
-			LastHeartbeat: ci.LastHeartbeat.Format(time.RFC3339),
+			CreatedAt:     createdAt,
+			LastHeartbeat: lastHeartbeat,
 		})
 	}
 
@@ -1895,6 +1922,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	}
 	registerWorkspaceWizardRoutes(mux, svc)
 	registerObservabilityRoutes(mux, svc)
+	registerProvisioningRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

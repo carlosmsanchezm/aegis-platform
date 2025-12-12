@@ -17,6 +17,7 @@ type ClusterInfo struct {
 	TTFGSecondsP50     float64
 	LastHeartbeat      time.Time
 	ProxyURL           string // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+	CreatedAt          time.Time
 }
 
 type clusterState struct {
@@ -35,6 +36,7 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 	if !ok {
 		ci = &ClusterInfo{ID: req.ClusterId}
 		cs.clusters[req.ClusterId] = ci
+		ci.CreatedAt = time.Now()
 	}
 	ci.Provider = req.GetProvider()
 	ci.Region = req.GetRegion()
@@ -52,6 +54,7 @@ func (cs *clusterState) updateFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	if !ok {
 		ci = &ClusterInfo{ID: hb.ClusterId}
 		cs.clusters[hb.ClusterId] = ci
+		ci.CreatedAt = time.Now()
 	}
 	newSet := map[string]bool{}
 	for _, f := range hb.GetAvailableFlavors() {

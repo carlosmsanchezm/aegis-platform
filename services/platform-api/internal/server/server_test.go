@@ -43,6 +43,14 @@ func (s staticKubeClient) RestConfigFor(clusterID string) (*rest.Config, error) 
 	return &rest.Config{}, nil
 }
 
+func (s staticKubeClient) HasKubeconfig(clusterID string) bool {
+	return true // Test mock always has kubeconfig
+}
+
+func (s staticKubeClient) Dir() string {
+	return "/tmp/test-kubeconfigs"
+}
+
 func newFakeWorkspaceClient(t *testing.T) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()

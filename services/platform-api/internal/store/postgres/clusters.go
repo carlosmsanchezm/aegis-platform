@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"

@@ -106,6 +106,31 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`, clusterID, k, v); err
 	return nil
 }
 
+func (s *PostgresStore) GetClusterProjectID(clusterID string) (string, bool) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return "", false
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	var projectID string
+	err := s.pool.QueryRow(ctx, `SELECT cl.v
+FROM cluster_labels cl
+JOIN clusters c ON cl.cluster_id = c.id
+WHERE c.deleted_at IS NULL AND cl.cluster_id=$1 AND cl.k=$2`,
+		clusterID, "aegis.yourorg.dev/projectId",
+	).Scan(&projectID)
+	if err != nil {
+		return "", false
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return "", false
+	}
+	return projectID, true
+}
+
 func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) {
 	if req == nil || req.GetClusterId() == "" {
 		return

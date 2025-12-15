@@ -118,6 +118,7 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 	kubeconfigB64 := strings.TrimSpace(req.GetKubeconfig())
 	var kubeconfig []byte
 	kubeconfigSecretRef := ""
+	var rollbackKubeconfig func(context.Context) error
 	if kubeconfigB64 != "" && importMethod != "kubeconfig" {
 		warnings = append(warnings, "kubeconfig ignored unless import_method=kubeconfig")
 		kubeconfigB64 = ""
@@ -134,10 +135,17 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 			return nil, status.Error(codes.InvalidArgument, "kubeconfig must be base64 encoded")
 		}
 		kubeconfig = decoded
-		secretName := getenv("AEGIS_KUBECONFIG_SECRET_NAME", defaultImportKubeconfigSecretName)
-		secretNamespace := getenv("AEGIS_KUBECONFIG_SECRET_NAMESPACE", defaultImportKubeconfigSecretNamespace)
-		secretKey := fmt.Sprintf("%s.kubeconfig", clusterID)
-		kubeconfigSecretRef = fmt.Sprintf("%s/%s:%s", secretNamespace, secretName, secretKey)
+
+		if existingProjectID, ok := s.store.GetClusterProjectID(clusterID); ok && existingProjectID != "" && !strings.EqualFold(existingProjectID, projectID) {
+			return nil, status.Error(codes.PermissionDenied, "cluster_id is already associated with a different project")
+		}
+
+		ref, rollback, err := s.upsertClusterKubeconfigSecret(ctx, clusterID, kubeconfig)
+		if err != nil {
+			return nil, err
+		}
+		kubeconfigSecretRef = ref
+		rollbackKubeconfig = rollback
 	}
 
 	if err := s.store.UpsertClusterImport(store.ClusterImport{
@@ -151,16 +159,13 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		KubeconfigSecretRef: kubeconfigSecretRef,
 		AssumeRoleARN:       assumeRoleARN,
 	}); err != nil {
+		if rollbackKubeconfig != nil {
+			_ = rollbackKubeconfig(ctx)
+		}
 		if errors.Is(err, store.ErrClusterProjectConflict) {
 			return nil, status.Error(codes.PermissionDenied, "cluster_id is already associated with a different project")
 		}
 		return nil, status.Errorf(codes.Internal, "import cluster: %v", err)
-	}
-
-	if importMethod == "kubeconfig" {
-		if _, err := s.upsertClusterKubeconfigSecret(ctx, clusterID, kubeconfig); err != nil {
-			return nil, err
-		}
 	}
 
 	statusValue := "pending_agent"
@@ -192,15 +197,15 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 	}, nil
 }
 
-func (s *Server) upsertClusterKubeconfigSecret(ctx context.Context, clusterID string, kubeconfig []byte) (string, error) {
+func (s *Server) upsertClusterKubeconfigSecret(ctx context.Context, clusterID string, kubeconfig []byte) (string, func(context.Context) error, error) {
 	if s == nil || s.infraClient == nil {
-		return "", status.Error(codes.FailedPrecondition, "kubeconfig uploads are not configured")
+		return "", nil, status.Error(codes.FailedPrecondition, "kubeconfig uploads are not configured")
 	}
 	if strings.TrimSpace(clusterID) == "" {
-		return "", status.Error(codes.InvalidArgument, "cluster_id is required")
+		return "", nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 	if len(kubeconfig) == 0 {
-		return "", status.Error(codes.InvalidArgument, "kubeconfig payload required")
+		return "", nil, status.Error(codes.InvalidArgument, "kubeconfig payload required")
 	}
 
 	secretName := getenv("AEGIS_KUBECONFIG_SECRET_NAME", defaultImportKubeconfigSecretName)
@@ -208,11 +213,15 @@ func (s *Server) upsertClusterKubeconfigSecret(ctx context.Context, clusterID st
 	secretKey := fmt.Sprintf("%s.kubeconfig", clusterID)
 	ref := fmt.Sprintf("%s/%s:%s", secretNamespace, secretName, secretKey)
 
+	var before []byte
+	var hadBefore bool
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		secret := &corev1.Secret{}
 		key := types.NamespacedName{Name: secretName, Namespace: secretNamespace}
 		getErr := s.infraClient.Get(ctx, key, secret)
 		if apierrors.IsNotFound(getErr) {
+			before = nil
+			hadBefore = false
 			secret = &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: secretNamespace},
 				Type:       corev1.SecretTypeOpaque,
@@ -229,13 +238,47 @@ func (s *Server) upsertClusterKubeconfigSecret(ctx context.Context, clusterID st
 		if secret.Data == nil {
 			secret.Data = map[string][]byte{}
 		}
+		if v, ok := secret.Data[secretKey]; ok {
+			hadBefore = true
+			before = append([]byte(nil), v...)
+		} else {
+			hadBefore = false
+			before = nil
+		}
 		secret.Data[secretKey] = kubeconfig
 		return s.infraClient.Update(ctx, secret)
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "write kubeconfig secret %s: %v", ref, err)
+		return "", nil, status.Errorf(codes.Internal, "write kubeconfig secret %s: %v", ref, err)
 	}
-	return ref, nil
+
+	rollback := func(rollbackCtx context.Context) error {
+		if rollbackCtx == nil {
+			rollbackCtx = context.Background()
+		}
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			secret := &corev1.Secret{}
+			key := types.NamespacedName{Name: secretName, Namespace: secretNamespace}
+			getErr := s.infraClient.Get(rollbackCtx, key, secret)
+			if apierrors.IsNotFound(getErr) {
+				return nil
+			}
+			if getErr != nil {
+				return getErr
+			}
+			if secret.Data == nil {
+				secret.Data = map[string][]byte{}
+			}
+			if hadBefore {
+				secret.Data[secretKey] = before
+			} else {
+				delete(secret.Data, secretKey)
+			}
+			return s.infraClient.Update(rollbackCtx, secret)
+		})
+	}
+
+	return ref, rollback, nil
 }
 
 func (s *Server) buildAgentScriptURL(clusterID string) string {

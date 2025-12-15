@@ -506,6 +506,24 @@ func (s *MemStore) UpsertClusterImport(req ClusterImport) error {
 	ci.AssumeRoleARN = strings.TrimSpace(req.AssumeRoleARN)
 	return nil
 }
+func (s *MemStore) GetClusterProjectID(clusterID string) (string, bool) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return "", false
+	}
+	s.cstate.mu.RLock()
+	defer s.cstate.mu.RUnlock()
+
+	ci, ok := s.cstate.clusters[clusterID]
+	if !ok || ci == nil || ci.Labels == nil {
+		return "", false
+	}
+	projectID := strings.TrimSpace(ci.Labels["aegis.yourorg.dev/projectId"])
+	if projectID == "" {
+		return "", false
+	}
+	return projectID, true
+}
 func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
 	return s.cstate.get(clusterID)
 }

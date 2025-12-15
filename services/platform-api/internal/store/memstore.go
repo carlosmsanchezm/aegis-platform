@@ -459,6 +459,48 @@ func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) 
 func (s *MemStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	s.cstate.updateFromHeartbeat(hb)
 }
+func (s *MemStore) UpsertClusterImport(req ClusterImport) error {
+	clusterID := strings.TrimSpace(req.ClusterID)
+	if clusterID == "" {
+		return fmt.Errorf("cluster_id required")
+	}
+	s.cstate.mu.Lock()
+	defer s.cstate.mu.Unlock()
+
+	ci, ok := s.cstate.clusters[clusterID]
+	if !ok {
+		ci = &ClusterInfo{ID: clusterID, CreatedAt: time.Now()}
+		s.cstate.clusters[clusterID] = ci
+	}
+
+	if provider := strings.TrimSpace(req.Provider); provider != "" {
+		ci.Provider = provider
+	}
+	if region := strings.TrimSpace(req.Region); region != "" {
+		ci.Region = region
+	}
+	if ci.Labels == nil {
+		ci.Labels = map[string]string{}
+	}
+	for k, v := range req.Labels {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		ci.Labels[k] = v
+	}
+	if projectID := strings.TrimSpace(req.ProjectID); projectID != "" {
+		ci.Labels["aegis.yourorg.dev/projectId"] = projectID
+	}
+	if method := strings.TrimSpace(req.ImportMethod); method != "" {
+		ci.ImportMethod = method
+	}
+	if !req.ImportedAt.IsZero() {
+		ci.ImportedAt = req.ImportedAt
+	}
+	ci.KubeconfigSecretRef = strings.TrimSpace(req.KubeconfigSecretRef)
+	ci.AssumeRoleARN = strings.TrimSpace(req.AssumeRoleARN)
+	return nil
+}
 func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
 	return s.cstate.get(clusterID)
 }

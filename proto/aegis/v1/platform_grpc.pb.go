@@ -32,6 +32,7 @@ const (
 	AegisPlatform_ListWorkloads_FullMethodName                 = "/aegis.v1.AegisPlatform/ListWorkloads"
 	AegisPlatform_CreateWorkspace_FullMethodName               = "/aegis.v1.AegisPlatform/CreateWorkspace"
 	AegisPlatform_CreateCluster_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateCluster"
+	AegisPlatform_ImportCluster_FullMethodName                 = "/aegis.v1.AegisPlatform/ImportCluster"
 	AegisPlatform_ListClusters_FullMethodName                  = "/aegis.v1.AegisPlatform/ListClusters"
 	AegisPlatform_GetClusterJobStatus_FullMethodName           = "/aegis.v1.AegisPlatform/GetClusterJobStatus"
 	AegisPlatform_GetWorkspaceConnectionDetails_FullMethodName = "/aegis.v1.AegisPlatform/GetWorkspaceConnectionDetails"
@@ -64,6 +65,7 @@ type AegisPlatformClient interface {
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
 	CreateWorkspace(ctx context.Context, in *CreateWorkspaceRequest, opts ...grpc.CallOption) (*CreateWorkspaceResponse, error)
 	CreateCluster(ctx context.Context, in *CreateClusterRequest, opts ...grpc.CallOption) (*CreateClusterResponse, error)
+	ImportCluster(ctx context.Context, in *ImportClusterRequest, opts ...grpc.CallOption) (*ImportClusterResponse, error)
 	ListClusters(ctx context.Context, in *ListClustersRequest, opts ...grpc.CallOption) (*ListClustersResponse, error)
 	GetClusterJobStatus(ctx context.Context, in *GetClusterJobStatusRequest, opts ...grpc.CallOption) (*GetClusterJobStatusResponse, error)
 	GetWorkspaceConnectionDetails(ctx context.Context, in *GetWorkspaceConnectionDetailsRequest, opts ...grpc.CallOption) (*GetWorkspaceConnectionDetailsResponse, error)
@@ -200,6 +202,16 @@ func (c *aegisPlatformClient) CreateCluster(ctx context.Context, in *CreateClust
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateClusterResponse)
 	err := c.cc.Invoke(ctx, AegisPlatform_CreateCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) ImportCluster(ctx context.Context, in *ImportClusterRequest, opts ...grpc.CallOption) (*ImportClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportClusterResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_ImportCluster_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -344,6 +356,7 @@ type AegisPlatformServer interface {
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
 	CreateWorkspace(context.Context, *CreateWorkspaceRequest) (*CreateWorkspaceResponse, error)
 	CreateCluster(context.Context, *CreateClusterRequest) (*CreateClusterResponse, error)
+	ImportCluster(context.Context, *ImportClusterRequest) (*ImportClusterResponse, error)
 	ListClusters(context.Context, *ListClustersRequest) (*ListClustersResponse, error)
 	GetClusterJobStatus(context.Context, *GetClusterJobStatusRequest) (*GetClusterJobStatusResponse, error)
 	GetWorkspaceConnectionDetails(context.Context, *GetWorkspaceConnectionDetailsRequest) (*GetWorkspaceConnectionDetailsResponse, error)
@@ -401,6 +414,9 @@ func (UnimplementedAegisPlatformServer) CreateWorkspace(context.Context, *Create
 }
 func (UnimplementedAegisPlatformServer) CreateCluster(context.Context, *CreateClusterRequest) (*CreateClusterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateCluster not implemented")
+}
+func (UnimplementedAegisPlatformServer) ImportCluster(context.Context, *ImportClusterRequest) (*ImportClusterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImportCluster not implemented")
 }
 func (UnimplementedAegisPlatformServer) ListClusters(context.Context, *ListClustersRequest) (*ListClustersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListClusters not implemented")
@@ -675,6 +691,24 @@ func _AegisPlatform_CreateCluster_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_ImportCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ImportCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ImportCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ImportCluster(ctx, req.(*ImportClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_ListClusters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListClustersRequest)
 	if err := dec(in); err != nil {
@@ -945,6 +979,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateCluster",
 			Handler:    _AegisPlatform_CreateCluster_Handler,
+		},
+		{
+			MethodName: "ImportCluster",
+			Handler:    _AegisPlatform_ImportCluster_Handler,
 		},
 		{
 			MethodName: "ListClusters",

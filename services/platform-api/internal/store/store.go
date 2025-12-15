@@ -131,6 +131,7 @@ type Store interface {
 	// clusters
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
+	UpsertClusterImport(ClusterImport) error
 	GetClusterInfo(clusterID string) *ClusterInfo
 	ListClusterInfos() []*ClusterInfo
 	SetClusterProjectID(clusterID, projectID string)

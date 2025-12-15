@@ -1010,6 +1010,11 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "terminateWorkload"); err != nil {
 		return nil, err
 	}
+	if !strings.EqualFold(w.GetStatus(), statusRunning) &&
+		!strings.EqualFold(w.GetStatus(), statusSuspended) &&
+		!strings.EqualFold(w.GetStatus(), statusTerminated) {
+		return nil, status.Errorf(codes.FailedPrecondition, "workload %s not in a terminable state", workloadID)
+	}
 
 	if !kubeClientProviderConfigured(s.kubeClients) {
 		return nil, status.Error(codes.Internal, "kubernetes client manager not configured")

@@ -10,6 +10,10 @@ import (
 // ErrSessionNotFound is returned when a requested connection session cannot be located.
 var ErrSessionNotFound = errors.New("connection session not found")
 
+// ErrClusterProjectConflict is returned when an operation would change the
+// project ownership of an existing cluster.
+var ErrClusterProjectConflict = errors.New("cluster already associated with a different project")
+
 // BudgetUsageView exposes a consistent snapshot of reserved and actual spend
 // figures for the current UTC accounting period.
 type BudgetUsageView struct {
@@ -134,6 +138,8 @@ type Store interface {
 	// clusters
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
+	UpsertClusterImport(ClusterImport) error
+	GetClusterProjectID(clusterID string) (string, bool)
 	GetClusterInfo(clusterID string) *ClusterInfo
 	ListClusterInfos() []*ClusterInfo
 	SetClusterProjectID(clusterID, projectID string)

@@ -462,6 +462,71 @@ func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) 
 func (s *MemStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	s.cstate.updateFromHeartbeat(hb)
 }
+func (s *MemStore) UpsertClusterImport(req ClusterImport) error {
+	clusterID := strings.TrimSpace(req.ClusterID)
+	if clusterID == "" {
+		return fmt.Errorf("cluster_id required")
+	}
+	s.cstate.mu.Lock()
+	defer s.cstate.mu.Unlock()
+
+	ci, ok := s.cstate.clusters[clusterID]
+	if !ok {
+		ci = &ClusterInfo{ID: clusterID, CreatedAt: time.Now()}
+		s.cstate.clusters[clusterID] = ci
+	}
+
+	if provider := strings.TrimSpace(req.Provider); provider != "" {
+		ci.Provider = provider
+	}
+	if region := strings.TrimSpace(req.Region); region != "" {
+		ci.Region = region
+	}
+	if ci.Labels == nil {
+		ci.Labels = map[string]string{}
+	}
+
+	projectID := strings.TrimSpace(req.ProjectID)
+	if existingProjectID := strings.TrimSpace(ci.Labels["aegis.yourorg.dev/projectId"]); existingProjectID != "" && projectID != "" && existingProjectID != projectID {
+		return ErrClusterProjectConflict
+	}
+	for k, v := range req.Labels {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		ci.Labels[k] = v
+	}
+	if projectID != "" {
+		ci.Labels["aegis.yourorg.dev/projectId"] = projectID
+	}
+	if method := strings.TrimSpace(req.ImportMethod); method != "" {
+		ci.ImportMethod = method
+	}
+	if !req.ImportedAt.IsZero() {
+		ci.ImportedAt = req.ImportedAt
+	}
+	ci.KubeconfigSecretRef = strings.TrimSpace(req.KubeconfigSecretRef)
+	ci.AssumeRoleARN = strings.TrimSpace(req.AssumeRoleARN)
+	return nil
+}
+func (s *MemStore) GetClusterProjectID(clusterID string) (string, bool) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return "", false
+	}
+	s.cstate.mu.RLock()
+	defer s.cstate.mu.RUnlock()
+
+	ci, ok := s.cstate.clusters[clusterID]
+	if !ok || ci == nil || ci.Labels == nil {
+		return "", false
+	}
+	projectID := strings.TrimSpace(ci.Labels["aegis.yourorg.dev/projectId"])
+	if projectID == "" {
+		return "", false
+	}
+	return projectID, true
+}
 func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
 	return s.cstate.get(clusterID)
 }

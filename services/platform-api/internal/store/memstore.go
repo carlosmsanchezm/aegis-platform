@@ -664,6 +664,27 @@ func (s *MemStore) TerminateWorkload(id, reason string) (*aegis.Workload, error)
 	return w, nil
 }
 
+func (s *MemStore) RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+	if w.GetStatus() != statusTerminated {
+		return nil, fmt.Errorf("workload %s not in TERMINATED state", id)
+	}
+	if previousStatus != statusRunning && previousStatus != statusSuspended {
+		return nil, fmt.Errorf("invalid rollback target status %q for workload %s", previousStatus, id)
+	}
+
+	w.Status = previousStatus
+	w.TerminatedAtUtc = ""
+	w.TerminateReason = ""
+	return w, nil
+}
+
 // ---- Budget usage helpers ----
 
 func (s *MemStore) ReserveIfAllowed(projectID, queue string, estimateUSD float64) (allowed bool, policy string, reason string, view BudgetUsageView) {

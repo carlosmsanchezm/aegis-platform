@@ -108,6 +108,7 @@ type Store interface {
 	AckWorkload(id, nextStatus, url string) (*aegis.Workload, error)
 	ResumeWorkload(id string) (*aegis.Workload, error)
 	TerminateWorkload(id, reason string) (*aegis.Workload, error)
+	RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error)
 	MarkPlaced(id string)
 	GetPlacedAt(id string) (time.Time, bool)
 	ClearPlacedAt(id string)

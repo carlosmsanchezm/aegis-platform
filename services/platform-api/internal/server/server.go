@@ -1021,7 +1021,8 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "terminateWorkload"); err != nil {
 		return nil, err
 	}
-	alreadyTerminated := strings.EqualFold(w.GetStatus(), statusTerminated)
+	previousStatus := strings.TrimSpace(w.GetStatus())
+	alreadyTerminated := strings.EqualFold(previousStatus, statusTerminated)
 	if !strings.EqualFold(w.GetStatus(), statusRunning) &&
 		!strings.EqualFold(w.GetStatus(), statusSuspended) &&
 		!strings.EqualFold(w.GetStatus(), statusTerminated) {
@@ -1045,6 +1046,48 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	if err != nil {
 		s.log.Error("terminate workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	rollback := func(deleteErr error, msg string) (*aegis.Workload, error) {
+		if !alreadyTerminated {
+			if rbW, rbErr := s.store.RollbackTerminateWorkload(workloadID, previousStatus); rbErr != nil {
+				s.log.Error("terminate workload rollback failed", zap.String("workload_id", workloadID), zap.Error(rbErr), zap.Error(deleteErr))
+			} else {
+				s.log.Info("terminate workload rolled back", zap.String("workload_id", rbW.GetId()), zap.String("status", rbW.GetStatus()))
+			}
+		}
+		s.log.Error(msg, zap.String("workload_id", workloadID), zap.Error(deleteErr))
+		return nil, status.Error(codes.Internal, msg)
+	}
+
+	switch w.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		workspace := &unstructuredapi.Unstructured{}
+		workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+		workspace.SetKind("Workspace")
+		workspace.SetName(workloadID)
+		workspace.SetNamespace(targetNS)
+		if err := kubeClient.Delete(ctx, workspace); err != nil && !apierrors.IsNotFound(err) {
+			return rollback(err, "terminate workload failed: delete workspace")
+		}
+	default:
+		awNames := []string{workloadID, "aegis-" + workloadID}
+		seen := map[string]struct{}{}
+		for _, name := range awNames {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			aw := &aegisv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNS}}
+			if err := kubeClient.Delete(ctx, aw); err != nil && !apierrors.IsNotFound(err) {
+				return rollback(err, "terminate workload failed: delete workload resource")
+			}
+		}
 	}
 
 	if !alreadyTerminated {
@@ -1073,27 +1116,6 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 			mBudgetReserved.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ReservedUSD)
 			mBudgetActual.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ActualUSD)
 		}
-	}
-
-	targetNS := s.namespaceForProject(w.GetProjectId())
-	workspace := &unstructuredapi.Unstructured{}
-	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
-	workspace.SetKind("Workspace")
-	workspace.SetName(workloadID)
-	workspace.SetNamespace(targetNS)
-	if err := kubeClient.Delete(ctx, workspace); err != nil && !apierrors.IsNotFound(err) {
-		s.log.Error("terminate workload failed: delete workspace", zap.String("workload_id", workloadID), zap.Error(err))
-		return nil, status.Error(codes.Internal, "failed to delete workspace resource")
-	}
-
-	aw := &aegisv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: workloadID, Namespace: targetNS}}
-	if err := kubeClient.Delete(ctx, aw); err != nil && !apierrors.IsNotFound(err) {
-		s.log.Error("terminate workload failed: delete aegisworkload", zap.String("workload_id", workloadID), zap.Error(err))
-		return nil, status.Error(codes.Internal, "failed to delete workload resource")
-	}
-
-	if job, err := s.findWorkloadJob(ctx, kubeClient, targetNS, workloadID); err == nil && job != nil {
-		_ = kubeClient.Delete(ctx, job)
 	}
 
 	s.log.Info("workload terminated",

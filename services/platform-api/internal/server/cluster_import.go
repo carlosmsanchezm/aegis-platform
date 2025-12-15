@@ -46,6 +46,7 @@ var allowedImportProviders = map[string]struct{}{
 }
 
 var allowedImportMethods = map[string]struct{}{
+	"provisioned": {},
 	"kubeconfig":  {},
 	"assume_role": {},
 	"agent_only":  {},

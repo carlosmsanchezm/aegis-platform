@@ -690,6 +690,45 @@ func local_request_AegisPlatform_LeaseWorkload_0(ctx context.Context, marshaler 
 	return msg, metadata, err
 }
 
+func request_AegisPlatform_ListClusterWorkloadIDs_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListClusterWorkloadIDsRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["cluster_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "cluster_id")
+	}
+	protoReq.ClusterId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "cluster_id", err)
+	}
+	msg, err := client.ListClusterWorkloadIDs(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_ListClusterWorkloadIDs_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListClusterWorkloadIDsRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["cluster_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "cluster_id")
+	}
+	protoReq.ClusterId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "cluster_id", err)
+	}
+	msg, err := server.ListClusterWorkloadIDs(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 func request_AegisPlatform_StartWorkload_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq StartWorkloadRequest
@@ -1289,6 +1328,26 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_LeaseWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListClusterWorkloadIDs_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListClusterWorkloadIDs", runtime.WithHTTPPathPattern("/api/v1/clusters/{cluster_id}/workloads/ids"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_ListClusterWorkloadIDs_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_ListClusterWorkloadIDs_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodPost, pattern_AegisPlatform_StartWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -1752,6 +1811,23 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_LeaseWorkload_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_ListClusterWorkloadIDs_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/ListClusterWorkloadIDs", runtime.WithHTTPPathPattern("/api/v1/clusters/{cluster_id}/workloads/ids"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_ListClusterWorkloadIDs_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_ListClusterWorkloadIDs_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodPost, pattern_AegisPlatform_StartWorkload_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -1860,6 +1936,7 @@ var (
 	pattern_AegisPlatform_RenewConnectionSession_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "connection_sessions", "session_id", "renew"}, ""))
 	pattern_AegisPlatform_RevokeConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "connection_sessions", "session_id", "revoke"}, ""))
 	pattern_AegisPlatform_LeaseWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "workloads", "lease"}, ""))
+	pattern_AegisPlatform_ListClusterWorkloadIDs_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 2, 5}, []string{"api", "v1", "clusters", "cluster_id", "workloads", "ids"}, ""))
 	pattern_AegisPlatform_StartWorkload_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "start"}, ""))
 	pattern_AegisPlatform_AckWorkload_0                   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "ack"}, ""))
 	pattern_AegisPlatform_RegisterCluster_0               = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "clusters", "register"}, ""))
@@ -1887,6 +1964,7 @@ var (
 	forward_AegisPlatform_RenewConnectionSession_0        = runtime.ForwardResponseMessage
 	forward_AegisPlatform_RevokeConnectionSession_0       = runtime.ForwardResponseMessage
 	forward_AegisPlatform_LeaseWorkload_0                 = runtime.ForwardResponseMessage
+	forward_AegisPlatform_ListClusterWorkloadIDs_0        = runtime.ForwardResponseMessage
 	forward_AegisPlatform_StartWorkload_0                 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_AckWorkload_0                   = runtime.ForwardResponseMessage
 	forward_AegisPlatform_RegisterCluster_0               = runtime.ForwardResponseMessage

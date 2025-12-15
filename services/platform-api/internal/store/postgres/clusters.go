@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ func (s *PostgresStore) UpsertClusterImport(req store.ClusterImport) error {
 	if importMethod == "" {
 		return fmt.Errorf("import_method required")
 	}
+	projectID := strings.TrimSpace(req.ProjectID)
 
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
@@ -67,16 +69,29 @@ ON CONFLICT (id) DO UPDATE SET
 		return fmt.Errorf("upsert cluster %q: %w", clusterID, err)
 	}
 
+	if projectID != "" {
+		var stored string
+		err := tx.QueryRow(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v WHERE cluster_labels.v = EXCLUDED.v
+RETURNING v`, clusterID, "aegis.yourorg.dev/projectId", projectID).Scan(&stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w", store.ErrClusterProjectConflict)
+		}
+		if err != nil {
+			return fmt.Errorf("upsert cluster project label for %q: %w", clusterID, err)
+		}
+	}
+
 	labels := req.Labels
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	if projectID := strings.TrimSpace(req.ProjectID); projectID != "" {
-		labels["aegis.yourorg.dev/projectId"] = projectID
-	}
 
 	for k, v := range labels {
 		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		if k == "aegis.yourorg.dev/projectId" {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)

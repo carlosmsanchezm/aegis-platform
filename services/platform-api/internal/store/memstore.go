@@ -482,13 +482,18 @@ func (s *MemStore) UpsertClusterImport(req ClusterImport) error {
 	if ci.Labels == nil {
 		ci.Labels = map[string]string{}
 	}
+
+	projectID := strings.TrimSpace(req.ProjectID)
+	if existingProjectID := strings.TrimSpace(ci.Labels["aegis.yourorg.dev/projectId"]); existingProjectID != "" && projectID != "" && existingProjectID != projectID {
+		return ErrClusterProjectConflict
+	}
 	for k, v := range req.Labels {
 		if strings.TrimSpace(k) == "" {
 			continue
 		}
 		ci.Labels[k] = v
 	}
-	if projectID := strings.TrimSpace(req.ProjectID); projectID != "" {
+	if projectID != "" {
 		ci.Labels["aegis.yourorg.dev/projectId"] = projectID
 	}
 	if method := strings.TrimSpace(req.ImportMethod); method != "" {

@@ -34,6 +34,22 @@ func IsJobFailed(job *batchv1.Job) bool {
 	return false
 }
 
+// IsJobSuspended reports whether the Kubernetes Job is currently suspended.
+func IsJobSuspended(job *batchv1.Job) bool {
+	if job == nil {
+		return false
+	}
+	if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		return true
+	}
+	for _, cond := range job.Status.Conditions {
+		if cond.Type == batchv1.JobSuspended && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 // HasCondition queries an unstructured CR for a condition.
 func HasCondition(u *unstructured.Unstructured, condType string) bool {
 	if u == nil {

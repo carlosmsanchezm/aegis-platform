@@ -140,10 +140,14 @@ const (
 	PhaseAdmitted AegisWorkloadPhase = "Admitted"
 	// PhaseRunning represents actively executing workloads.
 	PhaseRunning AegisWorkloadPhase = "Running"
+	// PhaseSuspended marks workloads that have been policy-suspended (idle timeout, admin action, etc.).
+	PhaseSuspended AegisWorkloadPhase = "Suspended"
 	// PhaseSucceeded marks workloads that completed successfully.
 	PhaseSucceeded AegisWorkloadPhase = "Succeeded"
 	// PhaseFailed marks workloads that terminated unsuccessfully.
 	PhaseFailed AegisWorkloadPhase = "Failed"
+	// PhaseTerminated marks workloads that were intentionally terminated (e.g. user request).
+	PhaseTerminated AegisWorkloadPhase = "Terminated"
 )
 
 // AegisWorkloadStatus defines the observed state of AegisWorkload.

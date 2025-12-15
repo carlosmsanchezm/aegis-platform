@@ -980,6 +980,17 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 	updated, err := s.store.ResumeWorkload(workloadID)
 	if err != nil {
 		s.log.Error("resume workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
+		rollbackKey := client.ObjectKeyFromObject(orig)
+		current := &batchv1.Job{}
+		if getErr := kubeClient.Get(ctx, rollbackKey, current); getErr != nil {
+			s.log.Error("resume workload rollback failed: get job", zap.String("workload_id", workloadID), zap.Error(getErr))
+		} else {
+			rollback := orig.DeepCopy()
+			rollback.SetResourceVersion(current.GetResourceVersion())
+			if rbErr := kubeClient.Patch(ctx, rollback, client.MergeFrom(current)); rbErr != nil {
+				s.log.Error("resume workload rollback failed: restore job", zap.String("workload_id", workloadID), zap.Error(rbErr))
+			}
+		}
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 
@@ -1010,6 +1021,7 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "terminateWorkload"); err != nil {
 		return nil, err
 	}
+	alreadyTerminated := strings.EqualFold(w.GetStatus(), statusTerminated)
 	if !strings.EqualFold(w.GetStatus(), statusRunning) &&
 		!strings.EqualFold(w.GetStatus(), statusSuspended) &&
 		!strings.EqualFold(w.GetStatus(), statusTerminated) {
@@ -1027,6 +1039,40 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	if err != nil {
 		s.log.Error("terminate workload failed: kube client", zap.String("cluster_id", clusterID), zap.Error(err))
 		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+	}
+
+	updated, err := s.store.TerminateWorkload(workloadID, reason)
+	if err != nil {
+		s.log.Error("terminate workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
+	if !alreadyTerminated {
+		backend := "unknown"
+		switch updated.GetKind().(type) {
+		case *aegis.Workload_Workspace:
+			backend = "workspace"
+		case *aegis.Workload_Training:
+			backend = "trainer_v2"
+		}
+		mAcked.WithLabelValues(statusTerminated, backend).Inc()
+
+		if b, _ := s.store.ResolveBudget(updated.GetProjectId(), updated.GetQueue()); b != nil {
+			reqFlavor, _ := requiredFlavor(updated)
+			fl := s.store.GetFlavor(reqFlavor)
+			runtimeSecs := int64(0)
+			if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
+				runtimeSecs = int64(time.Since(t0).Seconds())
+				if runtimeSecs < 0 {
+					runtimeSecs = 0
+				}
+			}
+			actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
+			estUSD := s.store.PopEstimateUSD(updated.GetId())
+			usage := s.store.ReconcileOnAck(updated.GetProjectId(), updated.GetQueue(), estUSD, actualUSD)
+			mBudgetReserved.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ReservedUSD)
+			mBudgetActual.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ActualUSD)
+		}
 	}
 
 	targetNS := s.namespaceForProject(w.GetProjectId())
@@ -1048,38 +1094,6 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 
 	if job, err := s.findWorkloadJob(ctx, kubeClient, targetNS, workloadID); err == nil && job != nil {
 		_ = kubeClient.Delete(ctx, job)
-	}
-
-	updated, err := s.store.TerminateWorkload(workloadID, reason)
-	if err != nil {
-		s.log.Error("terminate workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
-		return nil, status.Error(codes.FailedPrecondition, err.Error())
-	}
-
-	backend := "unknown"
-	switch updated.GetKind().(type) {
-	case *aegis.Workload_Workspace:
-		backend = "workspace"
-	case *aegis.Workload_Training:
-		backend = "trainer_v2"
-	}
-	mAcked.WithLabelValues(statusTerminated, backend).Inc()
-
-	if b, _ := s.store.ResolveBudget(updated.GetProjectId(), updated.GetQueue()); b != nil {
-		reqFlavor, _ := requiredFlavor(updated)
-		fl := s.store.GetFlavor(reqFlavor)
-		runtimeSecs := int64(0)
-		if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
-			runtimeSecs = int64(time.Since(t0).Seconds())
-			if runtimeSecs < 0 {
-				runtimeSecs = 0
-			}
-		}
-		actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
-		estUSD := s.store.PopEstimateUSD(updated.GetId())
-		usage := s.store.ReconcileOnAck(updated.GetProjectId(), updated.GetQueue(), estUSD, actualUSD)
-		mBudgetReserved.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ReservedUSD)
-		mBudgetActual.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ActualUSD)
 	}
 
 	s.log.Info("workload terminated",

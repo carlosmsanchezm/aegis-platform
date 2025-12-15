@@ -210,6 +210,7 @@ if (( ${#TLS_ARGS[@]} )); then
       GRPC_CA="$TLS_CA_FILE" \
       AEGIS_GRPC_ADDR="platform-api-grpc.localtest.me:443" \
       AEGIS_PROXY_HOSTNAME="proxy.localtest.me" \
+      USE_EXISTING_CLUSTER="${USE_EXISTING_CLUSTER:-false}" \
       K8S_AGENT_E2E_IMAGE="$TLS_AGENT_IMAGE" \
       K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \
@@ -228,6 +229,7 @@ else
       GRPC_CA="$TLS_CA_FILE" \
       AEGIS_GRPC_ADDR="platform-api-grpc.localtest.me:443" \
       AEGIS_PROXY_HOSTNAME="proxy.localtest.me" \
+      USE_EXISTING_CLUSTER="${USE_EXISTING_CLUSTER:-false}" \
       K8S_AGENT_E2E_IMAGE="$TLS_AGENT_IMAGE" \
       K8S_AGENT_E2E_SKIP_BUILD=1 \
       RUN_E2E_PLATFORM="$TLS_RUN_E2E_PLATFORM" \

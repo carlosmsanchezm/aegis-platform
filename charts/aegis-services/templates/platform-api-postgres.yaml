@@ -1,5 +1,7 @@
 {{- $platform := .Values.platformApi | default dict -}}
 {{- $postgres := $platform.postgres | default dict -}}
+{{- $postgresImage := $postgres.image | default dict -}}
+{{- $postgresStorage := $postgres.storage | default dict -}}
 {{- $postgresEnabled := ternary $postgres.enabled true (hasKey $postgres "enabled") }}
 {{- if and ($platform.enabled | default false) $postgresEnabled }}
 apiVersion: v1
@@ -50,8 +52,8 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: "{{ default "postgres" $postgres.image.repository }}:{{ default "16-alpine" $postgres.image.tag }}"
-          imagePullPolicy: {{ default "IfNotPresent" $postgres.image.pullPolicy }}
+          image: "{{ default "postgres" $postgresImage.repository }}:{{ default "16-alpine" $postgresImage.tag }}"
+          imagePullPolicy: {{ default "IfNotPresent" $postgresImage.pullPolicy }}
           env:
             - name: POSTGRES_DB
               value: {{ default "aegis_platform" $postgres.dbName | quote }}
@@ -103,6 +105,5 @@ spec:
           - ReadWriteOnce
         resources:
           requests:
-            storage: {{ default "5Gi" $postgres.storage.size | quote }}
+            storage: {{ default "5Gi" $postgresStorage.size | quote }}
 {{- end }}
-

@@ -204,6 +204,14 @@ message LeaseWorkloadResponse {
   repeated Workload items = 1;
 }
 
+message ListClusterWorkloadIDsRequest {
+  string cluster_id = 1;
+}
+
+message ListClusterWorkloadIDsResponse {
+  repeated string workload_ids = 1;
+}
+
 message AckWorkloadRequest {
   string id = 1;
   string status = 2;
@@ -501,6 +509,11 @@ service AegisPlatform {
     option (google.api.http) = {
       post: "/api/v1/workloads/lease"
       body: "*"
+    };
+  }
+  rpc ListClusterWorkloadIDs(ListClusterWorkloadIDsRequest) returns (ListClusterWorkloadIDsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/{cluster_id}/workloads/ids"
     };
   }
   rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse) {

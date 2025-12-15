@@ -511,6 +511,55 @@ WHERE id=$1`, id, statusTerminated, reason)
 	return w, nil
 }
 
+func (s *PostgresStore) RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error) {
+	if id == "" {
+		return nil, fmt.Errorf("workload id required")
+	}
+	if previousStatus != statusRunning && previousStatus != statusSuspended {
+		return nil, fmt.Errorf("invalid rollback target status %q for workload %s", previousStatus, id)
+	}
+
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `SELECT status FROM workloads WHERE id=$1 FOR UPDATE`, id)
+	var status string
+	if err := row.Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("workload %s not found", id)
+		}
+		return nil, err
+	}
+	if status != statusTerminated {
+		return nil, fmt.Errorf("workload %s not in TERMINATED state", id)
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE workloads
+SET status=$2,
+    terminated_at = NULL,
+    terminate_reason = NULL,
+    updated_at = now()
+WHERE id=$1`, id, previousStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	w, err := s.getWorkloadTx(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 func (s *PostgresStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 	if clusterID == "" || max <= 0 {
 		return nil

@@ -59,6 +59,20 @@ func (s *failingStore) TerminateWorkload(id, reason string) (*aegis.Workload, er
 	return s.MemStore.TerminateWorkload(id, reason)
 }
 
+type deleteFailingClient struct {
+	client.Client
+	failWorkspaceDelete bool
+}
+
+func (c deleteFailingClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if c.failWorkspaceDelete {
+		if u, ok := obj.(*unstructured.Unstructured); ok && u.GetKind() == "Workspace" {
+			return errors.New("simulated kube delete failure")
+		}
+	}
+	return c.Client.Delete(ctx, obj, opts...)
+}
+
 func (s staticKubeClient) ClientFor(clusterID string) (client.Client, error) {
 	return s.cli, nil
 }
@@ -249,6 +263,47 @@ func TestTerminateWorkload_PreconditionDoesNotDeleteResources(t *testing.T) {
 
 	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != "SUCCEEDED" {
 		t.Fatalf("expected workload status to remain SUCCEEDED, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_DeleteFailureRollsBackStore(t *testing.T) {
+	st := store.NewMemStore()
+	srv := newTestServerWithStore(t, st)
+
+	cli := deleteFailingClient{Client: newFakeWorkspaceClient(t), failWorkspaceDelete: true}
+	srv.kubeClients = staticKubeClient{cli: cli}
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusRunning
+	srv.store.PutWorkload(w)
+
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	_, err := srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected Internal, got %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusRunning || still.GetTerminatedAtUtc() != "" {
+		t.Fatalf("expected workload status to rollback to RUNNING with no terminated_at, got %v", still)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
 	}
 }
 

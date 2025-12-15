@@ -40,6 +40,7 @@ const (
 	AegisPlatform_RenewConnectionSession_FullMethodName        = "/aegis.v1.AegisPlatform/RenewConnectionSession"
 	AegisPlatform_RevokeConnectionSession_FullMethodName       = "/aegis.v1.AegisPlatform/RevokeConnectionSession"
 	AegisPlatform_LeaseWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/LeaseWorkload"
+	AegisPlatform_ListClusterWorkloadIDs_FullMethodName        = "/aegis.v1.AegisPlatform/ListClusterWorkloadIDs"
 	AegisPlatform_StartWorkload_FullMethodName                 = "/aegis.v1.AegisPlatform/StartWorkload"
 	AegisPlatform_AckWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/AckWorkload"
 	AegisPlatform_RegisterCluster_FullMethodName               = "/aegis.v1.AegisPlatform/RegisterCluster"
@@ -73,6 +74,7 @@ type AegisPlatformClient interface {
 	RenewConnectionSession(ctx context.Context, in *RenewConnectionSessionRequest, opts ...grpc.CallOption) (*ConnectionSession, error)
 	RevokeConnectionSession(ctx context.Context, in *RevokeConnectionSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	LeaseWorkload(ctx context.Context, in *LeaseWorkloadRequest, opts ...grpc.CallOption) (*LeaseWorkloadResponse, error)
+	ListClusterWorkloadIDs(ctx context.Context, in *ListClusterWorkloadIDsRequest, opts ...grpc.CallOption) (*ListClusterWorkloadIDsResponse, error)
 	StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error)
 	AckWorkload(ctx context.Context, in *AckWorkloadRequest, opts ...grpc.CallOption) (*AckWorkloadResponse, error)
 	RegisterCluster(ctx context.Context, in *ClusterRegisterRequest, opts ...grpc.CallOption) (*ClusterRegisterResponse, error)
@@ -288,6 +290,16 @@ func (c *aegisPlatformClient) LeaseWorkload(ctx context.Context, in *LeaseWorklo
 	return out, nil
 }
 
+func (c *aegisPlatformClient) ListClusterWorkloadIDs(ctx context.Context, in *ListClusterWorkloadIDsRequest, opts ...grpc.CallOption) (*ListClusterWorkloadIDsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListClusterWorkloadIDsResponse)
+	err := c.cc.Invoke(ctx, AegisPlatform_ListClusterWorkloadIDs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aegisPlatformClient) StartWorkload(ctx context.Context, in *StartWorkloadRequest, opts ...grpc.CallOption) (*StartWorkloadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StartWorkloadResponse)
@@ -364,6 +376,7 @@ type AegisPlatformServer interface {
 	RenewConnectionSession(context.Context, *RenewConnectionSessionRequest) (*ConnectionSession, error)
 	RevokeConnectionSession(context.Context, *RevokeConnectionSessionRequest) (*emptypb.Empty, error)
 	LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error)
+	ListClusterWorkloadIDs(context.Context, *ListClusterWorkloadIDsRequest) (*ListClusterWorkloadIDsResponse, error)
 	StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error)
 	AckWorkload(context.Context, *AckWorkloadRequest) (*AckWorkloadResponse, error)
 	RegisterCluster(context.Context, *ClusterRegisterRequest) (*ClusterRegisterResponse, error)
@@ -438,6 +451,9 @@ func (UnimplementedAegisPlatformServer) RevokeConnectionSession(context.Context,
 }
 func (UnimplementedAegisPlatformServer) LeaseWorkload(context.Context, *LeaseWorkloadRequest) (*LeaseWorkloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method LeaseWorkload not implemented")
+}
+func (UnimplementedAegisPlatformServer) ListClusterWorkloadIDs(context.Context, *ListClusterWorkloadIDsRequest) (*ListClusterWorkloadIDsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListClusterWorkloadIDs not implemented")
 }
 func (UnimplementedAegisPlatformServer) StartWorkload(context.Context, *StartWorkloadRequest) (*StartWorkloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartWorkload not implemented")
@@ -835,6 +851,24 @@ func _AegisPlatform_LeaseWorkload_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AegisPlatform_ListClusterWorkloadIDs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListClusterWorkloadIDsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ListClusterWorkloadIDs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ListClusterWorkloadIDs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ListClusterWorkloadIDs(ctx, req.(*ListClusterWorkloadIDsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AegisPlatform_StartWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StartWorkloadRequest)
 	if err := dec(in); err != nil {
@@ -1011,6 +1045,10 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LeaseWorkload",
 			Handler:    _AegisPlatform_LeaseWorkload_Handler,
+		},
+		{
+			MethodName: "ListClusterWorkloadIDs",
+			Handler:    _AegisPlatform_ListClusterWorkloadIDs_Handler,
 		},
 		{
 			MethodName: "StartWorkload",

@@ -23,6 +23,12 @@ k8sAgent:
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
+    # Workload garbage collection (prevents orphaned Workspace CRDs from recreating Jobs)
+    AEGIS_WORKLOAD_GC_ENABLED: "true"
+    AEGIS_WORKLOAD_GC_INTERVAL: "30s"
+    AEGIS_WORKLOAD_GC_MAX_DELETIONS: "25"
+    AEGIS_WORKLOAD_GC_DRY_RUN: "false"
+
     # Geographic metadata for workload placement
     AEGIS_REGION: "us-east-1"  # AWS region where this cluster is deployed (us-east-1, us-west-2, eu-west-1, etc.)
     AEGIS_PROVIDER: "aws"      # Cloud provider (aws, gcp, azure, on-prem, etc.)

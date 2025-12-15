@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +39,26 @@ type staticKubeClient struct {
 	cli client.Client
 }
 
+type failingStore struct {
+	*store.MemStore
+	failResume    bool
+	failTerminate bool
+}
+
+func (s *failingStore) ResumeWorkload(id string) (*aegis.Workload, error) {
+	if s.failResume {
+		return nil, errors.New("simulated store failure")
+	}
+	return s.MemStore.ResumeWorkload(id)
+}
+
+func (s *failingStore) TerminateWorkload(id, reason string) (*aegis.Workload, error) {
+	if s.failTerminate {
+		return nil, errors.New("simulated store failure")
+	}
+	return s.MemStore.TerminateWorkload(id, reason)
+}
+
 func (s staticKubeClient) ClientFor(clusterID string) (client.Client, error) {
 	return s.cli, nil
 }
@@ -67,13 +88,17 @@ func newFakeWorkspaceClient(t *testing.T) client.Client {
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	return newTestServerWithStore(t, store.NewMemStore())
+}
+
+func newTestServerWithStore(t *testing.T, st store.Store) *Server {
+	t.Helper()
 	t.Setenv("AEGIS_PROXY_BASE_URL", "https://proxy.test")
 	t.Setenv("AEGIS_PROXY_EXPECTED_AUDIENCE", "aegis-proxy")
 	t.Setenv("AEGIS_PROXY_JWT_SECRET", "super-secret-key")
 	t.Setenv("AEGIS_PROXY_TOKEN_TTL_SECONDS", "600")
 
 	logger := zap.NewNop()
-	st := store.NewMemStore()
 
 	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay(), nil, "")
 	srv.kubeClients = staticKubeClient{cli: newFakeWorkspaceClient(t)}
@@ -103,6 +128,60 @@ func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Wo
 				Env:         env,
 			},
 		},
+	}
+}
+
+func TestResumeWorkload_RollbackJobWhenStoreUpdateFails(t *testing.T) {
+	fs := &failingStore{MemStore: store.NewMemStore(), failResume: true}
+	srv := newTestServerWithStore(t, fs)
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusSuspended
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+
+	suspend := true
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+			Annotations: map[string]string{
+				annotationSuspendReason: "idle_timeout",
+			},
+		},
+		Spec: batchv1.JobSpec{Suspend: &suspend},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.ResumeWorkload(contextWithSubject("alice@example.com"), &aegis.ResumeWorkloadRequest{Id: w.GetId()})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+	if gotJob.Spec.Suspend == nil || *gotJob.Spec.Suspend != true {
+		t.Fatalf("expected job to remain suspended, suspend=%v", gotJob.Spec.Suspend)
+	}
+	if gotJob.Annotations == nil || gotJob.Annotations[annotationSuspendReason] == "" {
+		t.Fatalf("expected suspend reason annotation to remain, annotations=%v", gotJob.Annotations)
+	}
+	if _, ok := gotJob.Annotations[annotationResumedAt]; ok {
+		t.Fatalf("expected resumed-at annotation to be rolled back, annotations=%v", gotJob.Annotations)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusSuspended {
+		t.Fatalf("expected workload status to remain SUSPENDED, got %v", still)
 	}
 }
 
@@ -170,6 +249,71 @@ func TestTerminateWorkload_PreconditionDoesNotDeleteResources(t *testing.T) {
 
 	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != "SUCCEEDED" {
 		t.Fatalf("expected workload status to remain SUCCEEDED, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_StoreFailureDoesNotDeleteResources(t *testing.T) {
+	fs := &failingStore{MemStore: store.NewMemStore(), failTerminate: true}
+	srv := newTestServerWithStore(t, fs)
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusRunning
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	aw := &agentv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: w.GetId(), Namespace: targetNS}}
+	if err := cli.Create(context.Background(), aw); err != nil {
+		t.Fatalf("failed to create aegisworkload: %v", err)
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+		},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{Id: w.GetId()})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
+	}
+
+	gotAW := &agentv1alpha1.AegisWorkload{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotAW); err != nil {
+		t.Fatalf("expected aegisworkload to remain, got error: %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusRunning {
+		t.Fatalf("expected workload status to remain RUNNING, got %v", still)
 	}
 }
 

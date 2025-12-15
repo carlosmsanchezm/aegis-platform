@@ -151,6 +151,40 @@ message ListClustersResponse {
   repeated ClusterSummary items = 1;
 }
 
+// Cluster import
+message ImportClusterRequest {
+  string cluster_id = 1;
+  string project_id = 2;
+  string provider = 3;
+  string region = 4;
+  string name = 5;
+  map<string, string> labels = 6;
+  // provisioned | kubeconfig | assume_role | agent_only
+  string import_method = 7;
+  // Base64 encoded kubeconfig when using import_method=kubeconfig.
+  string kubeconfig = 8;
+  // Required when using import_method=assume_role.
+  string assume_role_arn = 9;
+}
+
+message K8sAgentHelmValues {
+  map<string, string> env = 1;
+}
+
+message HelmValues {
+  K8sAgentHelmValues k8s_agent = 1;
+}
+
+message ImportClusterResponse {
+  string cluster_id = 1;
+  // pending_agent | active
+  string status = 2;
+  HelmValues helm_values = 3;
+  string install_command = 4;
+  string agent_script_url = 5;
+  repeated string warnings = 6;
+}
+
 // Requests
 message CreateProjectRequest { Project project = 1; }
 message UpsertBudgetRequest { Budget budget = 1; }
@@ -423,6 +457,13 @@ service AegisPlatform {
   rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse) {
     option (google.api.http) = {
       post: "/api/v1/clusters"
+      body: "*"
+    };
+  }
+
+  rpc ImportCluster(ImportClusterRequest) returns (ImportClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/import"
       body: "*"
     };
   }

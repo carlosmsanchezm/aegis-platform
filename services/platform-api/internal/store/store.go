@@ -110,6 +110,7 @@ type Store interface {
 	SetEstimateUSD(id string, usd float64)
 	PopEstimateUSD(id string) float64
 	LeaseWorkloads(clusterID string, max int) []*aegis.Workload
+	ListClusterWorkloadIDs(clusterID string) ([]string, error)
 
 	// budgets usage
 	ReserveIfAllowed(projectID, queue string, estimateUSD float64) (bool, string, string, BudgetUsageView)

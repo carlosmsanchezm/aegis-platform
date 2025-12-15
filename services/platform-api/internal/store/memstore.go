@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -499,6 +500,29 @@ func (s *MemStore) LeaseWorkloads(clusterID string, max int) []*aegis.Workload {
 		}
 	}
 	return leased
+}
+
+func (s *MemStore) ListClusterWorkloadIDs(clusterID string) ([]string, error) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return nil, fmt.Errorf("cluster id required")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ids := make([]string, 0, len(s.workloads))
+	for id, w := range s.workloads {
+		if w == nil {
+			continue
+		}
+		if w.GetClusterId() != clusterID {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // AckWorkload updates the workload status if currently RUNNING and stamps optional URL.

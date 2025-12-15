@@ -53,6 +53,8 @@ import (
 type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
 	RestConfigFor(clusterID string) (*rest.Config, error)
+	HasKubeconfig(clusterID string) bool
+	Dir() string
 }
 
 func kubeClientProviderConfigured(p kubeClientProvider) bool {
@@ -383,9 +385,29 @@ func (s *Server) RegisterCluster(ctx context.Context, r *aegis.ClusterRegisterRe
 		s.log.Warn("register cluster failed", zap.Error(err))
 		return nil, err
 	}
+
+	// Validate kubeconfig availability for workload submission
+	var warning string
+	if kubeClientProviderConfigured(s.kubeClients) {
+		if !s.kubeClients.HasKubeconfig(r.GetClusterId()) {
+			warning = fmt.Sprintf("no kubeconfig found for cluster %q in %q - workload submission will fail until kubeconfig is added with matching key name",
+				r.GetClusterId(), s.kubeClients.Dir())
+			s.log.Warn("cluster registered without kubeconfig",
+				zap.String("cluster_id", r.GetClusterId()),
+				zap.String("kubeconfigs_dir", s.kubeClients.Dir()),
+				zap.String("expected_key", r.GetClusterId()),
+			)
+		}
+	}
+
 	s.store.UpsertClusterFromRegister(r)
 	s.log.Info("cluster registered", zap.String("cluster_id", r.GetClusterId()), zap.String("provider", r.GetProvider()), zap.String("region", r.GetRegion()), zap.Int("label_count", len(r.GetLabels())))
-	return &aegis.ClusterRegisterResponse{Ok: true, Message: "registered"}, nil
+
+	resp := &aegis.ClusterRegisterResponse{Ok: true, Message: "registered"}
+	if warning != "" {
+		resp.Message = "registered with warning: " + warning
+	}
+	return resp, nil
 }
 
 func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*aegis.ClusterHeartbeatAck, error) {

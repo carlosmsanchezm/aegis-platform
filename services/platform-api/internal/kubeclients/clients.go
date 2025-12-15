@@ -101,6 +101,21 @@ func (m *Manager) restConfigFor(clusterID string) (*rest.Config, error) {
 	return cfg, nil
 }
 
+// HasKubeconfig checks if a kubeconfig file exists for the given cluster ID.
+// This is a lightweight check that doesn't load or validate the kubeconfig.
+func (m *Manager) HasKubeconfig(clusterID string) bool {
+	if clusterID == "" || m.dir == "" {
+		return false
+	}
+	_, err := m.resolvePath(clusterID)
+	return err == nil
+}
+
+// Dir returns the kubeconfigs directory path.
+func (m *Manager) Dir() string {
+	return m.dir
+}
+
 func (m *Manager) resolvePath(clusterID string) (string, error) {
 	if m.dir == "" {
 		return "", fmt.Errorf("kubeconfigs directory not configured")

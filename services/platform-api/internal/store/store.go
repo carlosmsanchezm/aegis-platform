@@ -135,6 +135,9 @@ type Store interface {
 	ListClusterInfos() []*ClusterInfo
 	SetClusterProjectID(clusterID, projectID string)
 	DeleteCluster(clusterID string)
+	// CleanupStaleClusters soft-deletes clusters with heartbeats older than the threshold.
+	// Returns the number of clusters cleaned up.
+	CleanupStaleClusters(staleThreshold string) int64
 
 	// provisioning logs
 	AppendProvisioningLog(entry ProvisioningLogEntry)

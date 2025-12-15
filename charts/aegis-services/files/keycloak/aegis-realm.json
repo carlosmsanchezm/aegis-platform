@@ -1064,13 +1064,13 @@
         "profile",
         "roles",
         "basic",
-        "email"
+        "email",
+        "aegis-platform"
       ],
       "optionalClientScopes": [
         "address",
         "phone",
         "offline_access",
-        "aegis-platform",
         "organization",
         "microprofile-jwt",
         "platform"

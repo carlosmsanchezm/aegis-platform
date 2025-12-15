@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -152,6 +153,38 @@ func (s *PostgresStore) ListWorkloads(projectID string) []*aegis.Workload {
 		items = append(items, w)
 	}
 	return items
+}
+
+func (s *PostgresStore) ListClusterWorkloadIDs(clusterID string) ([]string, error) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return nil, fmt.Errorf("cluster id required")
+	}
+
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	rows, err := s.pool.Query(ctx, `SELECT id FROM workloads WHERE cluster_id=$1 ORDER BY id`, clusterID)
+	if err != nil {
+		s.logExecError("list_cluster_workload_ids_query", err, zap.String("cluster_id", clusterID))
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			s.logExecError("list_cluster_workload_ids_scan", scanErr, zap.String("cluster_id", clusterID))
+			return nil, scanErr
+		}
+		ids = append(ids, id)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		s.logExecError("list_cluster_workload_ids_rows", rowsErr, zap.String("cluster_id", clusterID))
+		return nil, rowsErr
+	}
+	return ids, nil
 }
 
 func (s *PostgresStore) MarkPlaced(id string) {

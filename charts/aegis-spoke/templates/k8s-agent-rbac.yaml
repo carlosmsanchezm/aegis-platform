@@ -30,7 +30,7 @@ rules:
   verbs: ["create","delete","get","list","patch","update","watch"]
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get","list","watch"]
+  verbs: ["create","delete","get","list","patch","update","watch"]
 - apiGroups: ["aegis.yourorg.dev"]
   resources: ["aegisworkloads"]
   verbs: ["create","delete","get","list","patch","update","watch"]

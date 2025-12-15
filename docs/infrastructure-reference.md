@@ -299,6 +299,42 @@ kubectl exec -n aegis-system deploy/aegis-services-platform-api -- \
    - `ListClusters` API reads from database + cluster cache
    - Returns clusters to UI
 
+### Workload Garbage Collection (Orphan Workspace Cleanup)
+
+When a workload is deleted from the hub database, the corresponding `Workspace` CRD on the spoke cluster can remain. The spoke `aegis-spoke-k8s-agent` runs a periodic garbage collection loop to detect and delete these orphaned Workspaces (preventing stray Jobs from triggering GPU autoscaling).
+
+**Flow (runs every 30 seconds by default):**
+1. Spoke calls `ListClusterWorkloadIDs` on platform-api
+2. Spoke lists local `Workspace` CRDs and reads the `aegis.workload/id` label
+3. Spoke deletes Workspaces whose workload ID is missing from the hub response
+
+Deleting the `Workspace` CRD should cascade to `AegisWorkload` and the underlying Kubernetes `Job`.
+
+#### GC Configuration (Spoke Agent)
+
+Set these on the `aegis-spoke-k8s-agent` Deployment:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AEGIS_WORKLOAD_GC_ENABLED` | `true` | Enable/disable the workload GC loop |
+| `AEGIS_WORKLOAD_GC_INTERVAL` | `30s` | How often to sync with hub (`time.ParseDuration`) |
+| `AEGIS_WORKLOAD_GC_MAX_DELETIONS` | `25` | Safety limit: max Workspaces deleted per run |
+| `AEGIS_WORKLOAD_GC_DRY_RUN` | `false` | Log would-delete actions without deleting |
+
+#### Troubleshooting Orphaned Workspaces
+
+```bash
+# List Workspaces on the spoke (look for ones with aegis.workload/id labels)
+kubectl --kubeconfig=/tmp/eks-kubeconfig.yaml get workspace -A -L aegis.workload/id
+
+# Check GC activity in the spoke agent logs
+kubectl --kubeconfig=/tmp/eks-kubeconfig.yaml logs -n aegis-system deploy/aegis-spoke-k8s-agent --tail=200 | grep -i "workload gc\\|orphan"
+
+# (Optional) Confirm the hub view of workload IDs for a cluster via the HTTP gateway
+# Requires platform-api HTTP port-forward (8080) to be available.
+curl -sS http://localhost:8080/api/v1/clusters/<cluster-id>/workloads/ids
+```
+
 ### Troubleshooting Decision Tree
 
 ```

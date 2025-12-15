@@ -103,6 +103,34 @@ func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Wo
 	}
 }
 
+func TestListClusterWorkloadIDs(t *testing.T) {
+	srv := newTestServer(t)
+	srv.store.PutWorkload(stubWorkspace("w-123", true, nil))
+	srv.store.PutWorkload(stubWorkspace("w-456", false, nil))
+	srv.store.PutWorkload(&aegis.Workload{Id: "w-other", ProjectId: "proj-1", Queue: "queue-a", ClusterId: "cluster-2", Status: statusRunning})
+
+	resp, err := srv.ListClusterWorkloadIDs(context.Background(), &aegis.ListClusterWorkloadIDsRequest{ClusterId: "cluster-1"})
+	if err != nil {
+		t.Fatalf("ListClusterWorkloadIDs returned error: %v", err)
+	}
+	got := resp.GetWorkloadIds()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 workload IDs, got %v", got)
+	}
+	if got[0] != "w-123" || got[1] != "w-456" {
+		t.Fatalf("unexpected workload IDs: %v", got)
+	}
+}
+
+func TestListClusterWorkloadIDs_RequiresClusterID(t *testing.T) {
+	srv := newTestServer(t)
+
+	_, err := srv.ListClusterWorkloadIDs(context.Background(), &aegis.ListClusterWorkloadIDsRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+}
+
 func TestApplyWorkspaceDefaults(t *testing.T) {
 	srv := newTestServer(t)
 	ws := &aegis.WorkspaceSpec{

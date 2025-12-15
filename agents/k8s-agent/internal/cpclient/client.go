@@ -204,6 +204,17 @@ func (c *Client) Lease(ctx context.Context, clusterID string, max int32) ([]*aeg
 	return resp.GetItems(), nil
 }
 
+func (c *Client) ListClusterWorkloadIDs(ctx context.Context, clusterID string) ([]string, error) {
+	if strings.TrimSpace(clusterID) == "" {
+		return nil, fmt.Errorf("cluster id required")
+	}
+	resp, err := c.api.ListClusterWorkloadIDs(ctx, &aegis.ListClusterWorkloadIDsRequest{ClusterId: clusterID})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetWorkloadIds(), nil
+}
+
 func (c *Client) Ack(ctx context.Context, id, status, backend, url string) error {
 	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status, Backend: backend, Url: url})
 	return err

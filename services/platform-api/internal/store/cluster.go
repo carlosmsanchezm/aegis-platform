@@ -9,15 +9,33 @@ import (
 
 // ClusterInfo represents the latest known snapshot of a cluster.
 type ClusterInfo struct {
-	ID                 string
-	Provider           string
-	Region             string
-	Labels             map[string]string
-	AvailableFlavorSet map[string]bool
-	TTFGSecondsP50     float64
-	LastHeartbeat      time.Time
-	ProxyURL           string // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
-	CreatedAt          time.Time
+	ID                  string
+	Provider            string
+	Region              string
+	Labels              map[string]string
+	AvailableFlavorSet  map[string]bool
+	TTFGSecondsP50      float64
+	LastHeartbeat       time.Time
+	ProxyURL            string // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+	CreatedAt           time.Time
+	ImportMethod        string
+	ImportedAt          time.Time
+	KubeconfigSecretRef string
+	AssumeRoleARN       string
+}
+
+// ClusterImport captures the metadata required to register an existing cluster
+// in the control plane before the spoke agent is installed.
+type ClusterImport struct {
+	ClusterID           string
+	ProjectID           string
+	Provider            string
+	Region              string
+	Labels              map[string]string
+	ImportMethod        string
+	ImportedAt          time.Time
+	KubeconfigSecretRef string
+	AssumeRoleARN       string
 }
 
 type clusterState struct {
@@ -38,10 +56,18 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 		cs.clusters[req.ClusterId] = ci
 		ci.CreatedAt = time.Now()
 	}
+	if ci.ImportMethod == "" {
+		ci.ImportMethod = "provisioned"
+	}
 	ci.Provider = req.GetProvider()
 	ci.Region = req.GetRegion()
-	ci.Labels = map[string]string{}
+	if ci.Labels == nil {
+		ci.Labels = map[string]string{}
+	}
 	for k, v := range req.GetLabels() {
+		if k == "" {
+			continue
+		}
 		ci.Labels[k] = v
 	}
 	// Do not touch flavors/TTFG here; those arrive in heartbeat.

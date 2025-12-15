@@ -22,9 +22,12 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	batchv1 "k8s.io/api/batch/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -100,6 +103,73 @@ func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Wo
 				Env:         env,
 			},
 		},
+	}
+}
+
+func TestTerminateWorkload_PreconditionDoesNotDeleteResources(t *testing.T) {
+	srv := newTestServer(t)
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = "SUCCEEDED"
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	aw := &agentv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: w.GetId(), Namespace: targetNS}}
+	if err := cli.Create(context.Background(), aw); err != nil {
+		t.Fatalf("failed to create aegisworkload: %v", err)
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+		},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
+	}
+
+	gotAW := &agentv1alpha1.AegisWorkload{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotAW); err != nil {
+		t.Fatalf("expected aegisworkload to remain, got error: %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != "SUCCEEDED" {
+		t.Fatalf("expected workload status to remain SUCCEEDED, got %v", still)
 	}
 }
 

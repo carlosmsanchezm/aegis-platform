@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	statusPlaced  = "PLACED"
-	statusRunning = "RUNNING"
+	statusPlaced     = "PLACED"
+	statusRunning    = "RUNNING"
+	statusSuspended  = "SUSPENDED"
+	statusTerminated = "TERMINATED"
 )
 
 type MemStore struct {
@@ -537,9 +539,63 @@ func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 	w.Status = nextStatus
+	if strings.EqualFold(nextStatus, statusSuspended) {
+		now := time.Now().UTC()
+		w.SuspendedAtUtc = now.Format(time.RFC3339Nano)
+		if w.SuspendReason == "" {
+			w.SuspendReason = "idle_timeout"
+		}
+	}
 	if url != "" {
 		w.Url = url
 	}
+	return w, nil
+}
+
+func (s *MemStore) ResumeWorkload(id string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+	if w.GetStatus() != statusSuspended {
+		return nil, fmt.Errorf("workload %s not in SUSPENDED state", id)
+	}
+
+	w.Status = statusRunning
+	w.ResumeCount++
+	return w, nil
+}
+
+func (s *MemStore) TerminateWorkload(id, reason string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+
+	switch w.GetStatus() {
+	case statusRunning, statusSuspended:
+		// ok
+	case statusTerminated:
+		if w.TerminateReason == "" && reason != "" {
+			w.TerminateReason = reason
+		}
+		if w.TerminatedAtUtc == "" {
+			w.TerminatedAtUtc = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		return w, nil
+	default:
+		return nil, fmt.Errorf("workload %s not in a terminable state", id)
+	}
+
+	w.Status = statusTerminated
+	w.TerminatedAtUtc = time.Now().UTC().Format(time.RFC3339Nano)
+	w.TerminateReason = reason
 	return w, nil
 }
 

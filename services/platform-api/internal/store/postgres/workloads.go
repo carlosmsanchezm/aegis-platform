@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	statusPlaced  = "PLACED"
-	statusRunning = "RUNNING"
+	statusPlaced     = "PLACED"
+	statusRunning    = "RUNNING"
+	statusSuspended  = "SUSPENDED"
+	statusTerminated = "TERMINATED"
 )
 
 var (
@@ -369,7 +371,131 @@ func (s *PostgresStore) AckWorkload(id, nextStatus, url string) (*aegis.Workload
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE workloads SET status=$2, url = NULLIF($3, ''), updated_at = now() WHERE id=$1`, id, nextStatus, url)
+	if strings.EqualFold(nextStatus, statusSuspended) {
+		_, err = tx.Exec(ctx, `UPDATE workloads
+SET status=$2,
+    url = NULLIF($3, ''),
+    suspended_at = now(),
+    suspend_reason = $4,
+    updated_at = now()
+WHERE id=$1`, id, nextStatus, url, "idle_timeout")
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE workloads SET status=$2, url = NULLIF($3, ''), updated_at = now() WHERE id=$1`, id, nextStatus, url)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	w, err := s.getWorkloadTx(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (s *PostgresStore) ResumeWorkload(id string) (*aegis.Workload, error) {
+	if id == "" {
+		return nil, fmt.Errorf("workload id required")
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `SELECT status, resume_count FROM workloads WHERE id=$1 FOR UPDATE`, id)
+	var (
+		status      string
+		resumeCount int32
+	)
+	if err := row.Scan(&status, &resumeCount); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("workload %s not found", id)
+		}
+		return nil, err
+	}
+	if status != statusSuspended {
+		return nil, fmt.Errorf("workload %s not in SUSPENDED state", id)
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE workloads SET status=$2, resume_count=$3, updated_at=now() WHERE id=$1`,
+		id,
+		statusRunning,
+		resumeCount+1,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	w, err := s.getWorkloadTx(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (s *PostgresStore) TerminateWorkload(id, reason string) (*aegis.Workload, error) {
+	if id == "" {
+		return nil, fmt.Errorf("workload id required")
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `SELECT status FROM workloads WHERE id=$1 FOR UPDATE`, id)
+	var status string
+	if err := row.Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("workload %s not found", id)
+		}
+		return nil, err
+	}
+
+	switch status {
+	case statusRunning, statusSuspended:
+		// ok
+	case statusTerminated:
+		if reason != "" {
+			_, _ = tx.Exec(ctx, `UPDATE workloads
+SET terminate_reason = COALESCE(NULLIF(terminate_reason, ''), NULLIF($2, '')),
+    terminated_at = COALESCE(terminated_at, now()),
+    updated_at = now()
+WHERE id=$1`, id, reason)
+		}
+		w, err := s.getWorkloadTx(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return w, nil
+	default:
+		return nil, fmt.Errorf("workload %s not in a terminable state", id)
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE workloads
+SET status=$2,
+    terminated_at = now(),
+    terminate_reason = NULLIF($3, ''),
+    updated_at = now()
+WHERE id=$1`, id, statusTerminated, reason)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +589,9 @@ func (s *PostgresStore) getWorkloadTx(ctx context.Context, tx pgx.Tx, id string)
 func workloadSelect(clause string) string {
 	base := `SELECT id, project_id, queue, cluster_id, status, ui_status, url, message, kind,
         hints_resource_name, hints_gpu_count, hints_cpu_request, hints_mem_request,
-        workspace_json, training_json
+        workspace_json, training_json,
+        suspended_at, suspend_reason, resume_count,
+        terminated_at, terminate_reason
         FROM workloads`
 	if clause != "" {
 		base += " " + clause
@@ -473,23 +601,49 @@ func workloadSelect(clause string) string {
 
 func (s *PostgresStore) scanWorkload(row rowScanner) (*aegis.Workload, error) {
 	var (
-		id        string
-		projectID string
-		queue     string
-		cluster   sql.NullString
-		status    string
-		uiStatus  sql.NullString
-		url       sql.NullString
-		message   sql.NullString
-		kind      string
-		hintsRes  sql.NullString
-		hintsGPU  sql.NullInt32
-		hintsCPU  sql.NullString
-		hintsMem  sql.NullString
-		workspace []byte
-		training  []byte
+		id              string
+		projectID       string
+		queue           string
+		cluster         sql.NullString
+		status          string
+		uiStatus        sql.NullString
+		url             sql.NullString
+		message         sql.NullString
+		kind            string
+		hintsRes        sql.NullString
+		hintsGPU        sql.NullInt32
+		hintsCPU        sql.NullString
+		hintsMem        sql.NullString
+		workspace       []byte
+		training        []byte
+		suspendedAt     sql.NullTime
+		suspendReason   sql.NullString
+		resumeCount     sql.NullInt32
+		terminatedAt    sql.NullTime
+		terminateReason sql.NullString
 	)
-	if err := row.Scan(&id, &projectID, &queue, &cluster, &status, &uiStatus, &url, &message, &kind, &hintsRes, &hintsGPU, &hintsCPU, &hintsMem, &workspace, &training); err != nil {
+	if err := row.Scan(
+		&id,
+		&projectID,
+		&queue,
+		&cluster,
+		&status,
+		&uiStatus,
+		&url,
+		&message,
+		&kind,
+		&hintsRes,
+		&hintsGPU,
+		&hintsCPU,
+		&hintsMem,
+		&workspace,
+		&training,
+		&suspendedAt,
+		&suspendReason,
+		&resumeCount,
+		&terminatedAt,
+		&terminateReason,
+	); err != nil {
 		return nil, err
 	}
 
@@ -510,6 +664,21 @@ func (s *PostgresStore) scanWorkload(row rowScanner) (*aegis.Workload, error) {
 	}
 	if message.Valid {
 		w.Message = message.String
+	}
+	if suspendedAt.Valid {
+		w.SuspendedAtUtc = suspendedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	if suspendReason.Valid {
+		w.SuspendReason = suspendReason.String
+	}
+	if resumeCount.Valid {
+		w.ResumeCount = int32(resumeCount.Int32)
+	}
+	if terminatedAt.Valid {
+		w.TerminatedAtUtc = terminatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	if terminateReason.Valid {
+		w.TerminateReason = terminateReason.String
 	}
 
 	if hintsRes.Valid || hintsGPU.Valid || hintsCPU.Valid || hintsMem.Valid {

@@ -335,6 +335,39 @@ kubectl --kubeconfig=/tmp/eks-kubeconfig.yaml logs -n aegis-system deploy/aegis-
 curl -sS http://localhost:8080/api/v1/clusters/<cluster-id>/workloads/ids
 ```
 
+### Workspace Session Management
+
+Workspaces use a session-style lifecycle so that policy timeouts suspend execution instead of marking the workload as failed.
+
+**State diagram**
+
+```
+RUNNING  --(idle timeout)-->  SUSPENDED  --(resume)-->  RUNNING
+RUNNING  --(terminate)-->     TERMINATED
+SUSPENDED --(terminate)-->    TERMINATED
+```
+
+**Compliance mapping**
+
+- NIST 800-171 R3 3.1.10 / FedRAMP HIGH AC-11: session lock after inactivity → `SUSPENDED`
+- NIST 800-171 R3 3.1.11 / FedRAMP HIGH AC-12: session termination → `TERMINATED`
+
+**Implementation notes**
+
+- The spoke agent enforces `maxDurationSeconds` by setting the underlying Kubernetes `Job.spec.suspend=true` and annotating the Job with `aegis.yourorg.dev/suspend-reason=idle_timeout`.
+- Resuming clears the suspend annotation, sets `aegis.yourorg.dev/resumed-at=<RFC3339Nano>`, and sets `Job.spec.suspend=false`.
+- Terminating deletes the `Workspace`/`AegisWorkload` resources on the spoke and marks the hub workload `TERMINATED`.
+
+**Configuration**
+
+- `Workspace.spec.maxDurationSeconds` (or queue default) controls when an active session is suspended.
+- Database migration `0006_add_workload_session_management` adds `workloads.suspended_at`, `suspend_reason`, `resume_count`, `terminated_at`, and `terminate_reason`.
+
+**API**
+
+- `POST /api/v1/workloads/{id}/resume` (also available at `/v1/workloads/{id}/resume`)
+- `POST /api/v1/workloads/{id}/terminate` with body `{"reason":"user_requested"}` (also available at `/v1/workloads/{id}/terminate`)
+
 ### Troubleshooting Decision Tree
 
 ```

@@ -29,6 +29,8 @@ const (
 	AegisPlatform_UpsertQueue_FullMethodName                   = "/aegis.v1.AegisPlatform/UpsertQueue"
 	AegisPlatform_SubmitWorkload_FullMethodName                = "/aegis.v1.AegisPlatform/SubmitWorkload"
 	AegisPlatform_GetWorkload_FullMethodName                   = "/aegis.v1.AegisPlatform/GetWorkload"
+	AegisPlatform_ResumeWorkload_FullMethodName                = "/aegis.v1.AegisPlatform/ResumeWorkload"
+	AegisPlatform_TerminateWorkload_FullMethodName             = "/aegis.v1.AegisPlatform/TerminateWorkload"
 	AegisPlatform_ListWorkloads_FullMethodName                 = "/aegis.v1.AegisPlatform/ListWorkloads"
 	AegisPlatform_CreateWorkspace_FullMethodName               = "/aegis.v1.AegisPlatform/CreateWorkspace"
 	AegisPlatform_CreateCluster_FullMethodName                 = "/aegis.v1.AegisPlatform/CreateCluster"
@@ -62,6 +64,8 @@ type AegisPlatformClient interface {
 	UpsertQueue(ctx context.Context, in *UpsertQueueRequest, opts ...grpc.CallOption) (*Queue, error)
 	SubmitWorkload(ctx context.Context, in *SubmitWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	GetWorkload(ctx context.Context, in *GetWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
+	ResumeWorkload(ctx context.Context, in *ResumeWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
+	TerminateWorkload(ctx context.Context, in *TerminateWorkloadRequest, opts ...grpc.CallOption) (*Workload, error)
 	ListWorkloads(ctx context.Context, in *ListWorkloadsRequest, opts ...grpc.CallOption) (*ListWorkloadsResponse, error)
 	CreateWorkspace(ctx context.Context, in *CreateWorkspaceRequest, opts ...grpc.CallOption) (*CreateWorkspaceResponse, error)
 	CreateCluster(ctx context.Context, in *CreateClusterRequest, opts ...grpc.CallOption) (*CreateClusterResponse, error)
@@ -172,6 +176,26 @@ func (c *aegisPlatformClient) GetWorkload(ctx context.Context, in *GetWorkloadRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Workload)
 	err := c.cc.Invoke(ctx, AegisPlatform_GetWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) ResumeWorkload(ctx context.Context, in *ResumeWorkloadRequest, opts ...grpc.CallOption) (*Workload, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Workload)
+	err := c.cc.Invoke(ctx, AegisPlatform_ResumeWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aegisPlatformClient) TerminateWorkload(ctx context.Context, in *TerminateWorkloadRequest, opts ...grpc.CallOption) (*Workload, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Workload)
+	err := c.cc.Invoke(ctx, AegisPlatform_TerminateWorkload_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -353,6 +377,8 @@ type AegisPlatformServer interface {
 	UpsertQueue(context.Context, *UpsertQueueRequest) (*Queue, error)
 	SubmitWorkload(context.Context, *SubmitWorkloadRequest) (*Workload, error)
 	GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error)
+	ResumeWorkload(context.Context, *ResumeWorkloadRequest) (*Workload, error)
+	TerminateWorkload(context.Context, *TerminateWorkloadRequest) (*Workload, error)
 	ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error)
 	CreateWorkspace(context.Context, *CreateWorkspaceRequest) (*CreateWorkspaceResponse, error)
 	CreateCluster(context.Context, *CreateClusterRequest) (*CreateClusterResponse, error)
@@ -405,6 +431,12 @@ func (UnimplementedAegisPlatformServer) SubmitWorkload(context.Context, *SubmitW
 }
 func (UnimplementedAegisPlatformServer) GetWorkload(context.Context, *GetWorkloadRequest) (*Workload, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkload not implemented")
+}
+func (UnimplementedAegisPlatformServer) ResumeWorkload(context.Context, *ResumeWorkloadRequest) (*Workload, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResumeWorkload not implemented")
+}
+func (UnimplementedAegisPlatformServer) TerminateWorkload(context.Context, *TerminateWorkloadRequest) (*Workload, error) {
+	return nil, status.Error(codes.Unimplemented, "method TerminateWorkload not implemented")
 }
 func (UnimplementedAegisPlatformServer) ListWorkloads(context.Context, *ListWorkloadsRequest) (*ListWorkloadsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkloads not implemented")
@@ -633,6 +665,42 @@ func _AegisPlatform_GetWorkload_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AegisPlatformServer).GetWorkload(ctx, req.(*GetWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_ResumeWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).ResumeWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_ResumeWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).ResumeWorkload(ctx, req.(*ResumeWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AegisPlatform_TerminateWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TerminateWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AegisPlatformServer).TerminateWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AegisPlatform_TerminateWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AegisPlatformServer).TerminateWorkload(ctx, req.(*TerminateWorkloadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -967,6 +1035,14 @@ var AegisPlatform_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkload",
 			Handler:    _AegisPlatform_GetWorkload_Handler,
+		},
+		{
+			MethodName: "ResumeWorkload",
+			Handler:    _AegisPlatform_ResumeWorkload_Handler,
+		},
+		{
+			MethodName: "TerminateWorkload",
+			Handler:    _AegisPlatform_TerminateWorkload_Handler,
 		},
 		{
 			MethodName: "ListWorkloads",

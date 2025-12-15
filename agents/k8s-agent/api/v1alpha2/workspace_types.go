@@ -33,10 +33,14 @@ const (
 	WorkspacePhaseAdmitted WorkspacePhase = "Admitted"
 	// WorkspacePhaseRunning indicates the associated execution is active.
 	WorkspacePhaseRunning WorkspacePhase = "Running"
+	// WorkspacePhaseSuspended indicates the workspace execution has been suspended (session lock).
+	WorkspacePhaseSuspended WorkspacePhase = "Suspended"
 	// WorkspacePhaseSucceeded indicates execution completed successfully.
 	WorkspacePhaseSucceeded WorkspacePhase = "Succeeded"
 	// WorkspacePhaseFailed indicates execution terminated unsuccessfully.
 	WorkspacePhaseFailed WorkspacePhase = "Failed"
+	// WorkspacePhaseTerminated indicates the workspace was intentionally terminated (session termination).
+	WorkspacePhaseTerminated WorkspacePhase = "Terminated"
 )
 
 // WorkspaceSpec defines the desired state of a Workspace.

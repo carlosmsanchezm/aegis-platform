@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS workloads (
     training_json BYTEA NULL,
     placed_at TIMESTAMPTZ NULL,
     started_at TIMESTAMPTZ NULL,
+    suspended_at TIMESTAMPTZ NULL,
+    suspend_reason TEXT NULL,
+    resume_count INT NOT NULL DEFAULT 0,
+    terminated_at TIMESTAMPTZ NULL,
+    terminate_reason TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

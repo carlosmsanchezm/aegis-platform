@@ -124,8 +124,10 @@ type sessionContext struct {
 }
 
 const (
-	statusPlaced  = "PLACED"
-	statusRunning = "RUNNING"
+	statusPlaced     = "PLACED"
+	statusRunning    = "RUNNING"
+	statusSuspended  = "SUSPENDED"
+	statusTerminated = "TERMINATED"
 
 	heartbeatTTL = 45 * time.Second
 
@@ -133,6 +135,9 @@ const (
 
 	uiStatusQueuedByKueue = "QUEUED_BY_KUEUE"
 	uiStatusSubmitted     = "SUBMITTED"
+
+	annotationSuspendReason = "aegis.yourorg.dev/suspend-reason"
+	annotationResumedAt     = "aegis.yourorg.dev/resumed-at"
 
 	defaultProxyTokenTTLSeconds = 300
 	svcClusterDomainSuffix      = ".svc.cluster.local"
@@ -913,6 +918,199 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 	return w, nil
 }
 
+func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRequest) (*aegis.Workload, error) {
+	if req == nil || strings.TrimSpace(req.GetId()) == "" {
+		err := status.Error(codes.InvalidArgument, "workload id required")
+		s.log.Warn("resume workload failed", zap.Error(err))
+		return nil, err
+	}
+
+	workloadID := strings.TrimSpace(req.GetId())
+	w := s.store.GetWorkload(workloadID)
+	if w == nil {
+		err := status.Error(codes.NotFound, "workload not found")
+		s.log.Warn("resume workload failed", zap.Error(err), zap.String("workload_id", workloadID))
+		return nil, err
+	}
+	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "resumeWorkload"); err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(w.GetStatus(), statusSuspended) {
+		return nil, status.Errorf(codes.FailedPrecondition, "workload not in %s state", statusSuspended)
+	}
+
+	if !kubeClientProviderConfigured(s.kubeClients) {
+		return nil, status.Error(codes.Internal, "kubernetes client manager not configured")
+	}
+	clusterID := strings.TrimSpace(w.GetClusterId())
+	if clusterID == "" {
+		return nil, status.Error(codes.FailedPrecondition, "cluster_id required on workload")
+	}
+
+	kubeClient, err := s.kubeClients.ClientFor(clusterID)
+	if err != nil {
+		s.log.Error("resume workload failed: kube client", zap.String("cluster_id", clusterID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+	}
+
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	job, err := s.findWorkloadJob(ctx, kubeClient, targetNS, workloadID)
+	if err != nil {
+		s.log.Error("resume workload failed: list jobs", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to locate workload job")
+	}
+	if job == nil {
+		return nil, status.Error(codes.NotFound, "workload job not found")
+	}
+
+	orig := job.DeepCopy()
+	if job.Annotations == nil {
+		job.Annotations = map[string]string{}
+	}
+	delete(job.Annotations, annotationSuspendReason)
+	job.Annotations[annotationResumedAt] = time.Now().UTC().Format(time.RFC3339Nano)
+	suspend := false
+	job.Spec.Suspend = &suspend
+
+	if err := kubeClient.Patch(ctx, job, client.MergeFrom(orig)); err != nil {
+		s.log.Error("resume workload failed: update job", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to resume workload job")
+	}
+
+	updated, err := s.store.ResumeWorkload(workloadID)
+	if err != nil {
+		s.log.Error("resume workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
+	s.log.Info("workload resumed",
+		zap.String("workload_id", updated.GetId()),
+		zap.String("cluster_id", updated.GetClusterId()),
+		zap.Int32("resume_count", updated.GetResumeCount()),
+	)
+	return updated, nil
+}
+
+func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWorkloadRequest) (*aegis.Workload, error) {
+	if req == nil || strings.TrimSpace(req.GetId()) == "" {
+		err := status.Error(codes.InvalidArgument, "workload id required")
+		s.log.Warn("terminate workload failed", zap.Error(err))
+		return nil, err
+	}
+
+	workloadID := strings.TrimSpace(req.GetId())
+	reason := strings.TrimSpace(req.GetReason())
+
+	w := s.store.GetWorkload(workloadID)
+	if w == nil {
+		err := status.Error(codes.NotFound, "workload not found")
+		s.log.Warn("terminate workload failed", zap.Error(err), zap.String("workload_id", workloadID))
+		return nil, err
+	}
+	if err := s.authorize(ctx, w.GetProjectId(), w.GetQueue(), "terminateWorkload"); err != nil {
+		return nil, err
+	}
+
+	if !kubeClientProviderConfigured(s.kubeClients) {
+		return nil, status.Error(codes.Internal, "kubernetes client manager not configured")
+	}
+	clusterID := strings.TrimSpace(w.GetClusterId())
+	if clusterID == "" {
+		return nil, status.Error(codes.FailedPrecondition, "cluster_id required on workload")
+	}
+	kubeClient, err := s.kubeClients.ClientFor(clusterID)
+	if err != nil {
+		s.log.Error("terminate workload failed: kube client", zap.String("cluster_id", clusterID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+	}
+
+	targetNS := s.namespaceForProject(w.GetProjectId())
+	workspace := &unstructuredapi.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(workloadID)
+	workspace.SetNamespace(targetNS)
+	if err := kubeClient.Delete(ctx, workspace); err != nil && !apierrors.IsNotFound(err) {
+		s.log.Error("terminate workload failed: delete workspace", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to delete workspace resource")
+	}
+
+	aw := &aegisv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: workloadID, Namespace: targetNS}}
+	if err := kubeClient.Delete(ctx, aw); err != nil && !apierrors.IsNotFound(err) {
+		s.log.Error("terminate workload failed: delete aegisworkload", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.Internal, "failed to delete workload resource")
+	}
+
+	if job, err := s.findWorkloadJob(ctx, kubeClient, targetNS, workloadID); err == nil && job != nil {
+		_ = kubeClient.Delete(ctx, job)
+	}
+
+	updated, err := s.store.TerminateWorkload(workloadID, reason)
+	if err != nil {
+		s.log.Error("terminate workload failed: store update", zap.String("workload_id", workloadID), zap.Error(err))
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
+	backend := "unknown"
+	switch updated.GetKind().(type) {
+	case *aegis.Workload_Workspace:
+		backend = "workspace"
+	case *aegis.Workload_Training:
+		backend = "trainer_v2"
+	}
+	mAcked.WithLabelValues(statusTerminated, backend).Inc()
+
+	if b, _ := s.store.ResolveBudget(updated.GetProjectId(), updated.GetQueue()); b != nil {
+		reqFlavor, _ := requiredFlavor(updated)
+		fl := s.store.GetFlavor(reqFlavor)
+		runtimeSecs := int64(0)
+		if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
+			runtimeSecs = int64(time.Since(t0).Seconds())
+			if runtimeSecs < 0 {
+				runtimeSecs = 0
+			}
+		}
+		actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
+		estUSD := s.store.PopEstimateUSD(updated.GetId())
+		usage := s.store.ReconcileOnAck(updated.GetProjectId(), updated.GetQueue(), estUSD, actualUSD)
+		mBudgetReserved.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ReservedUSD)
+		mBudgetActual.WithLabelValues(updated.GetProjectId(), updated.GetQueue()).Set(usage.ActualUSD)
+	}
+
+	s.log.Info("workload terminated",
+		zap.String("workload_id", updated.GetId()),
+		zap.String("cluster_id", updated.GetClusterId()),
+		zap.String("reason", reason),
+	)
+	return updated, nil
+}
+
+func (s *Server) findWorkloadJob(ctx context.Context, cli client.Client, namespace, workloadID string) (*batchv1.Job, error) {
+	if cli == nil || strings.TrimSpace(namespace) == "" || strings.TrimSpace(workloadID) == "" {
+		return nil, nil
+	}
+
+	for _, labelValue := range []string{workloadID, "aegis-" + workloadID} {
+		var jobList batchv1.JobList
+		if err := cli.List(ctx, &jobList, client.InNamespace(namespace), client.MatchingLabels{labelWorkloadID: labelValue}); err != nil {
+			return nil, err
+		}
+		if len(jobList.Items) == 0 {
+			continue
+		}
+		latest := &jobList.Items[0]
+		for i := range jobList.Items {
+			item := &jobList.Items[i]
+			if item.GetCreationTimestamp().After(latest.GetCreationTimestamp().Time) {
+				latest = item
+			}
+		}
+		return latest.DeepCopy(), nil
+	}
+
+	return nil, nil
+}
+
 func (s *Server) GetWorkspaceConnectionDetails(ctx context.Context, req *aegis.GetWorkspaceConnectionDetailsRequest) (*aegis.GetWorkspaceConnectionDetailsResponse, error) {
 	workloadID := strings.TrimSpace(req.GetId())
 	if workloadID == "" {
@@ -1201,6 +1399,12 @@ func jobUiStatus(job *batchv1.Job, fallback string) (string, string) {
 	}
 
 	if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		if reason := strings.TrimSpace(job.GetAnnotations()[annotationSuspendReason]); reason != "" {
+			if message == "" {
+				message = fmt.Sprintf("Job suspended (%s)", reason)
+			}
+			return statusSuspended, message
+		}
 		if message == "" {
 			message = "Job is suspended"
 		}
@@ -1749,6 +1953,9 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		zap.String("backend", backend),
 		zap.String("url", updated.GetUrl()),
 	)
+	if strings.EqualFold(req.GetStatus(), statusSuspended) {
+		return &aegis.AckWorkloadResponse{Workload: updated}, nil
+	}
 	if b, _ := s.store.ResolveBudget(updated.GetProjectId(), updated.GetQueue()); b != nil {
 		reqFlavor, _ := requiredFlavor(updated)
 		fl := s.store.GetFlavor(reqFlavor)

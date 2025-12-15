@@ -1,5 +1,5 @@
 # Auto-generated values for AWS relay-based connectivity
-# Generated at: 2025-12-10T22:04:52Z
+# Generated at: 2025-12-14T20:01:46Z
 #
 # Architecture:
 #   - gRPC: NLB tunnel (aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081) - Cloudflare doesn't handle gRPC streaming

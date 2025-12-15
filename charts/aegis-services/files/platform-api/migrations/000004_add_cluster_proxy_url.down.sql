@@ -1,0 +1,2 @@
+ALTER TABLE clusters DROP COLUMN IF EXISTS proxy_url;
+

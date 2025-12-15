@@ -266,3 +266,22 @@ func (s *PostgresStore) DeleteCluster(clusterID string) {
 		s.logExecError("delete_cluster", err, zap.String("cluster_id", clusterID))
 	}
 }
+
+// CleanupStaleClusters soft-deletes clusters that haven't sent a heartbeat in the specified duration.
+// This prevents stale clusters from accumulating in the database.
+func (s *PostgresStore) CleanupStaleClusters(staleThreshold string) int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Default to 1 hour if not specified
+	if staleThreshold == "" {
+		staleThreshold = "1 hour"
+	}
+
+	result, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now(), deleted_by='system', deletion_reason='stale heartbeat' WHERE deleted_at IS NULL AND last_heartbeat IS NOT NULL AND last_heartbeat < NOW() - $1::interval`, staleThreshold)
+	if err != nil {
+		s.logExecError("cleanup_stale_clusters", err)
+		return 0
+	}
+	return result.RowsAffected()
+}

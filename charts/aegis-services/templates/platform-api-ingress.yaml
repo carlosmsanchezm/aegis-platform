@@ -1,4 +1,14 @@
 {{- if and .Values.platformApi.enabled .Values.platformApi.ingress.enabled }}
+{{- $platformTls := .Values.platformApi.tls | default dict -}}
+{{- $backendProtocol := "GRPC" -}}
+{{- if and ($platformTls.enabled | default false) ($platformTls.serveGrpc | default false) -}}
+{{- $backendProtocol = "GRPCS" -}}
+{{- end -}}
+{{- $annotations := dict -}}
+{{- with .Values.platformApi.ingress.annotations }}
+{{- $annotations = merge $annotations . -}}
+{{- end -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/backend-protocol" $backendProtocol -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -7,10 +17,8 @@ metadata:
   labels:
     {{- include "aegis-services.labels" . | nindent 4 }}
     app.kubernetes.io/component: platform-api
-  {{- with .Values.platformApi.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml $annotations | nindent 4 }}
 spec:
   {{- if .Values.platformApi.ingress.className }}
   ingressClassName: {{ .Values.platformApi.ingress.className }}

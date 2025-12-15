@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -115,6 +116,7 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 	}
 
 	kubeconfigB64 := strings.TrimSpace(req.GetKubeconfig())
+	var kubeconfig []byte
 	kubeconfigSecretRef := ""
 	if kubeconfigB64 != "" && importMethod != "kubeconfig" {
 		warnings = append(warnings, "kubeconfig ignored unless import_method=kubeconfig")
@@ -124,18 +126,20 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		if kubeconfigB64 == "" {
 			return nil, status.Error(codes.InvalidArgument, "kubeconfig is required when import_method=kubeconfig")
 		}
+		if s.infraClient == nil {
+			return nil, status.Error(codes.FailedPrecondition, "kubeconfig uploads are not configured")
+		}
 		decoded, err := base64.StdEncoding.DecodeString(kubeconfigB64)
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, "kubeconfig must be base64 encoded")
 		}
-		ref, err := s.upsertClusterKubeconfigSecret(ctx, clusterID, decoded)
-		if err != nil {
-			return nil, err
-		}
-		kubeconfigSecretRef = ref
+		kubeconfig = decoded
+		secretName := getenv("AEGIS_KUBECONFIG_SECRET_NAME", defaultImportKubeconfigSecretName)
+		secretNamespace := getenv("AEGIS_KUBECONFIG_SECRET_NAMESPACE", defaultImportKubeconfigSecretNamespace)
+		secretKey := fmt.Sprintf("%s.kubeconfig", clusterID)
+		kubeconfigSecretRef = fmt.Sprintf("%s/%s:%s", secretNamespace, secretName, secretKey)
 	}
 
-	labels[labelProjectID] = projectID
 	if err := s.store.UpsertClusterImport(store.ClusterImport{
 		ClusterID:           clusterID,
 		ProjectID:           projectID,
@@ -147,7 +151,16 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		KubeconfigSecretRef: kubeconfigSecretRef,
 		AssumeRoleARN:       assumeRoleARN,
 	}); err != nil {
+		if errors.Is(err, store.ErrClusterProjectConflict) {
+			return nil, status.Error(codes.PermissionDenied, "cluster_id is already associated with a different project")
+		}
 		return nil, status.Errorf(codes.Internal, "import cluster: %v", err)
+	}
+
+	if importMethod == "kubeconfig" {
+		if _, err := s.upsertClusterKubeconfigSecret(ctx, clusterID, kubeconfig); err != nil {
+			return nil, err
+		}
 	}
 
 	statusValue := "pending_agent"

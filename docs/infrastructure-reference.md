@@ -361,7 +361,7 @@ SUSPENDED --(terminate)-->    TERMINATED
 **Configuration**
 
 - `Workspace.spec.maxDurationSeconds` (or queue default) controls when an active session is suspended.
-- Database migration `0006_add_workload_session_management` adds `workloads.suspended_at`, `suspend_reason`, `resume_count`, `terminated_at`, and `terminate_reason`.
+- Database migration `0007_add_workload_session_management` adds `workloads.suspended_at`, `suspend_reason`, `resume_count`, `terminated_at`, and `terminate_reason`.
 
 **API**
 

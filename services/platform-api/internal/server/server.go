@@ -1022,6 +1022,7 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 		return nil, err
 	}
 	previousStatus := strings.TrimSpace(w.GetStatus())
+	suspendedAtUTC := strings.TrimSpace(w.GetSuspendedAtUtc())
 	alreadyTerminated := strings.EqualFold(previousStatus, statusTerminated)
 	if !strings.EqualFold(w.GetStatus(), statusRunning) &&
 		!strings.EqualFold(w.GetStatus(), statusSuspended) &&
@@ -1105,7 +1106,15 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 			fl := s.store.GetFlavor(reqFlavor)
 			runtimeSecs := int64(0)
 			if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
-				runtimeSecs = int64(time.Since(t0).Seconds())
+				end := time.Now()
+				if strings.EqualFold(previousStatus, statusSuspended) && suspendedAtUTC != "" {
+					if parsed, parseErr := time.Parse(time.RFC3339Nano, suspendedAtUTC); parseErr == nil {
+						end = parsed
+					} else if parsed, parseErr := time.Parse(time.RFC3339, suspendedAtUTC); parseErr == nil {
+						end = parsed
+					}
+				}
+				runtimeSecs = int64(end.Sub(t0).Seconds())
 				if runtimeSecs < 0 {
 					runtimeSecs = 0
 				}

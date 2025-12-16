@@ -45,6 +45,15 @@ type failingStore struct {
 	failTerminate bool
 }
 
+type fixedStartedAtStore struct {
+	*store.MemStore
+	startedAt time.Time
+}
+
+func (s *fixedStartedAtStore) GetStartedAt(id string) (time.Time, bool) {
+	return s.startedAt, true
+}
+
 func (s *failingStore) ResumeWorkload(id string) (*aegis.Workload, error) {
 	if s.failResume {
 		return nil, errors.New("simulated store failure")
@@ -369,6 +378,40 @@ func TestTerminateWorkload_StoreFailureDoesNotDeleteResources(t *testing.T) {
 
 	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusRunning {
 		t.Fatalf("expected workload status to remain RUNNING, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_BillingCutsOffAtSuspendedAt(t *testing.T) {
+	startedAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC).Add(-10 * time.Hour)
+	suspendedAt := startedAt.Add(1 * time.Hour)
+
+	st := &fixedStartedAtStore{MemStore: store.NewMemStore(), startedAt: startedAt}
+	st.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "queue-a", LimitUsd: 1000, PolicyMode: "SOFT"})
+	st.PutFlavor(&aegis.Flavor{Name: "f-1", GpuCount: 1, PriceUsdPerGpuHour: 1})
+
+	srv := newTestServerWithStore(t, st)
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusSuspended
+	w.SuspendedAtUtc = suspendedAt.Format(time.RFC3339Nano)
+	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
+		wk.Workspace.Flavor = "f-1"
+	}
+	st.PutWorkload(w)
+
+	if _, err := srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	}); err != nil {
+		t.Fatalf("TerminateWorkload returned error: %v", err)
+	}
+
+	usage, ok := st.UsageView(w.GetProjectId(), w.GetQueue())
+	if !ok {
+		t.Fatalf("expected usage view to exist")
+	}
+	if usage.ActualUSD < 0.9 || usage.ActualUSD > 1.1 {
+		t.Fatalf("expected actualUSD ~1.0, got %f", usage.ActualUSD)
 	}
 }
 

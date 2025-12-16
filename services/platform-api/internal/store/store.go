@@ -114,6 +114,7 @@ type Store interface {
 	ClearPlacedAt(id string)
 	MarkStarted(id string)
 	GetStartedAt(id string) (time.Time, bool)
+	GetRuntimeSeconds(id string) (int64, bool)
 	SetEstimateUSD(id string, usd float64)
 	PopEstimateUSD(id string) float64
 	LeaseWorkloads(clusterID string, max int) []*aegis.Workload

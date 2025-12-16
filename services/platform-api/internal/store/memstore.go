@@ -27,6 +27,7 @@ type MemStore struct {
 	workloads map[string]*aegis.Workload
 	placedAt  map[string]time.Time
 	startedAt map[string]time.Time
+	runtime   map[string]int64
 	estUSD    map[string]float64
 
 	// cluster state is managed via clusterState for fine-grained locking
@@ -52,6 +53,7 @@ func NewMemStore() *MemStore {
 		workloads:          map[string]*aegis.Workload{},
 		placedAt:           map[string]time.Time{},
 		startedAt:          map[string]time.Time{},
+		runtime:            map[string]int64{},
 		estUSD:             map[string]float64{},
 		cstate:             newClusterState(),
 		usage:              map[string]*budgetUsage{},
@@ -411,6 +413,15 @@ func (s *MemStore) GetStartedAt(id string) (time.Time, bool) {
 	return t, ok
 }
 
+func (s *MemStore) GetRuntimeSeconds(id string) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.workloads[id]; !ok {
+		return 0, false
+	}
+	return s.runtime[id], true
+}
+
 func (s *MemStore) SetEstimateUSD(id string, usd float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -604,9 +615,18 @@ func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 	w.Status = nextStatus
+
+	now := time.Now()
+	if t0, ok := s.startedAt[id]; ok && !strings.EqualFold(strings.TrimSpace(nextStatus), statusRunning) {
+		secs := int64(now.Sub(t0).Seconds())
+		if secs < 0 {
+			secs = 0
+		}
+		s.runtime[id] += secs
+		delete(s.startedAt, id)
+	}
 	if strings.EqualFold(nextStatus, statusSuspended) {
-		now := time.Now().UTC()
-		w.SuspendedAtUtc = now.Format(time.RFC3339Nano)
+		w.SuspendedAtUtc = now.UTC().Format(time.RFC3339Nano)
 		if w.SuspendReason == "" {
 			w.SuspendReason = "idle_timeout"
 		}
@@ -631,6 +651,9 @@ func (s *MemStore) ResumeWorkload(id string) (*aegis.Workload, error) {
 
 	w.Status = statusRunning
 	w.ResumeCount++
+	w.SuspendedAtUtc = ""
+	w.SuspendReason = ""
+	s.startedAt[id] = time.Now()
 	return w, nil
 }
 

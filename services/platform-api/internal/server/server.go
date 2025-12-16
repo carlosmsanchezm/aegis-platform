@@ -1105,18 +1105,31 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 			reqFlavor, _ := requiredFlavor(updated)
 			fl := s.store.GetFlavor(reqFlavor)
 			runtimeSecs := int64(0)
-			if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
-				end := time.Now()
-				if strings.EqualFold(previousStatus, statusSuspended) && suspendedAtUTC != "" {
-					if parsed, parseErr := time.Parse(time.RFC3339Nano, suspendedAtUTC); parseErr == nil {
-						end = parsed
-					} else if parsed, parseErr := time.Parse(time.RFC3339, suspendedAtUTC); parseErr == nil {
-						end = parsed
+			if acc, ok := s.store.GetRuntimeSeconds(updated.GetId()); ok {
+				runtimeSecs = acc
+			}
+			if strings.EqualFold(previousStatus, statusRunning) {
+				if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
+					segSecs := int64(time.Since(t0).Seconds())
+					if segSecs < 0 {
+						segSecs = 0
 					}
+					runtimeSecs += segSecs
 				}
-				runtimeSecs = int64(end.Sub(t0).Seconds())
-				if runtimeSecs < 0 {
-					runtimeSecs = 0
+			} else if strings.EqualFold(previousStatus, statusSuspended) && runtimeSecs == 0 {
+				if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
+					end := time.Now()
+					if suspendedAtUTC != "" {
+						if parsed, parseErr := time.Parse(time.RFC3339Nano, suspendedAtUTC); parseErr == nil {
+							end = parsed
+						} else if parsed, parseErr := time.Parse(time.RFC3339, suspendedAtUTC); parseErr == nil {
+							end = parsed
+						}
+					}
+					runtimeSecs = int64(end.Sub(t0).Seconds())
+					if runtimeSecs < 0 {
+						runtimeSecs = 0
+					}
 				}
 			}
 			actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
@@ -2010,11 +2023,15 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		reqFlavor, _ := requiredFlavor(updated)
 		fl := s.store.GetFlavor(reqFlavor)
 		runtimeSecs := int64(0)
+		if acc, ok := s.store.GetRuntimeSeconds(updated.GetId()); ok {
+			runtimeSecs = acc
+		}
 		if t0, ok := s.store.GetStartedAt(updated.GetId()); ok {
-			runtimeSecs = int64(time.Since(t0).Seconds())
-			if runtimeSecs < 0 {
-				runtimeSecs = 0
+			segSecs := int64(time.Since(t0).Seconds())
+			if segSecs < 0 {
+				segSecs = 0
 			}
+			runtimeSecs += segSecs
 		}
 		actualUSD := s.runtimeCostUSD(updated, fl, runtimeSecs)
 		estUSD := s.store.PopEstimateUSD(updated.GetId())

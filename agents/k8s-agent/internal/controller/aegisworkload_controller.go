@@ -69,9 +69,16 @@ const (
 	annotationFinalAcked              = "aegis.yourorg.dev/final-acked"
 	annotationMaxDurationSeconds      = "aegis.yourorg.dev/maxDurationSeconds"
 	annotationTTLSecondsAfterFinished = "aegis.yourorg.dev/ttlSecondsAfterFinished"
+	annotationSuspendReason           = "aegis.yourorg.dev/suspend-reason"
+	annotationResumedAt               = "aegis.yourorg.dev/resumed-at"
+	annotationSuspendAckedKey         = "aegis.yourorg.dev/suspend-acked-key"
 
 	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
 	annotationSSHTrustedCA      = "aegis.yourorg.dev/ssh-trusted-user-ca"
+)
+
+const (
+	suspendReasonIdleTimeout = "idle_timeout"
 )
 
 // AegisWorkloadReconciler reconciles a AegisWorkload object.
@@ -218,7 +225,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			Interactive:             workspaceInteractive,
 			InteractivePorts:        ports,
 			SSHBootstrapImage:       r.sshBootstrapImage,
-			ActiveDeadlineSeconds:   maxDeadline,
+			ActiveDeadlineSeconds:   nil,
 			TTLSecondsAfterFinished: ttlAfterFinished,
 		}
 		if secretAvailable {
@@ -264,8 +271,9 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	}
 
 	if r.kueueEnabled {
+		policySuspended := job.GetAnnotations()[annotationSuspendReason] != ""
 		if ptr.Deref(job.Spec.Suspend, false) {
-			if aw.Status.Message != "Queued by Kueue" {
+			if !policySuspended && aw.Status.Message != "Queued by Kueue" {
 				r.Recorder.Eventf(aw, corev1.EventTypeNormal, "QueuedByKueue",
 					"Job %s queued by Kueue (queue=%q)", jobName, job.Labels["kueue.x-k8s.io/queue-name"])
 				if err := r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
@@ -285,8 +293,10 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 		}
 	} else {
 		if job.Spec.Suspend == nil || ptr.Deref(job.Spec.Suspend, false) {
-			job.Spec.Suspend = ptr.To(false)
-			updated = true
+			if job.GetAnnotations()[annotationSuspendReason] == "" {
+				job.Spec.Suspend = ptr.To(false)
+				updated = true
+			}
 		}
 		if job.Labels != nil {
 			if _, ok := job.Labels["kueue.x-k8s.io/queue-name"]; ok {
@@ -301,12 +311,32 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			}
 		}
 	}
-	if maxDeadline != nil {
-		current := ptr.Deref(job.Spec.ActiveDeadlineSeconds, int64(0))
-		if job.Spec.ActiveDeadlineSeconds == nil || current != *maxDeadline {
-			job.Spec.ActiveDeadlineSeconds = ptr.To(*maxDeadline)
-			updated = true
+	if job.Spec.ActiveDeadlineSeconds != nil {
+		job.Spec.ActiveDeadlineSeconds = nil
+		updated = true
+	}
+	if maxDeadline != nil && job.GetAnnotations()[annotationSuspendReason] == "" && !workstatus.IsJobComplete(&job) && !workstatus.IsJobFailed(&job) {
+		startTime := job.Status.StartTime
+		if resumedAtRaw := job.GetAnnotations()[annotationResumedAt]; resumedAtRaw != "" {
+			if resumedAt, err := time.Parse(time.RFC3339Nano, resumedAtRaw); err == nil {
+				startTime = &metav1.Time{Time: resumedAt}
+			}
 		}
+		if startTime != nil {
+			deadline := startTime.Time.Add(time.Duration(*maxDeadline) * time.Second)
+			if time.Now().After(deadline) {
+				if job.Annotations == nil {
+					job.Annotations = map[string]string{}
+				}
+				job.Annotations[annotationSuspendReason] = suspendReasonIdleTimeout
+				job.Spec.Suspend = ptr.To(true)
+				updated = true
+			}
+		}
+	}
+	if job.GetAnnotations()[annotationSuspendReason] != "" && (job.Spec.Suspend == nil || !ptr.Deref(job.Spec.Suspend, false)) {
+		job.Spec.Suspend = ptr.To(true)
+		updated = true
 	}
 	desiredTTL := ptr.Deref(ttlAfterFinished, workspaceJobTTLSeconds)
 	if job.Spec.TTLSecondsAfterFinished == nil || ptr.Deref(job.Spec.TTLSecondsAfterFinished, int32(0)) != desiredTTL {
@@ -342,11 +372,24 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 	phase := aw.Status.Phase
 	observedRunning := job.Status.Active > 0 || job.Status.Succeeded > 0 || job.Status.Failed > 0
 
+	if reason := strings.TrimSpace(job.GetAnnotations()[annotationSuspendReason]); reason != "" && workstatus.IsJobSuspended(job) && !workstatus.IsJobComplete(job) && !workstatus.IsJobFailed(job) {
+		if phase != aegisv1alpha1.PhaseSuspended {
+			_ = r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
+				st.Phase = aegisv1alpha1.PhaseSuspended
+				st.Backend = backend
+				st.Message = fmt.Sprintf("Suspended (%s)", reason)
+			})
+		}
+		r.ackWorkloadSuspended(ctx, aw, job, backend)
+		return
+	}
+
 	if observedRunning && phase != aegisv1alpha1.PhaseRunning {
 		prev := aw.Status.Phase
 		_ = r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
 			st.Phase = aegisv1alpha1.PhaseRunning
 			st.Backend = backend
+			st.Message = ""
 			if st.StartTime == nil {
 				if job.Status.StartTime != nil {
 					st.StartTime = job.Status.StartTime.DeepCopy()
@@ -714,6 +757,43 @@ func (r *AegisWorkloadReconciler) markAnnotation(ctx context.Context, aw *aegisv
 	return r.Patch(ctx, aw, client.MergeFrom(original))
 }
 
+func (r *AegisWorkloadReconciler) setAnnotationValue(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, key, value string) error {
+	original := aw.DeepCopy()
+	if aw.Annotations == nil {
+		aw.Annotations = map[string]string{}
+	}
+	aw.Annotations[key] = value
+	return r.Patch(ctx, aw, client.MergeFrom(original))
+}
+
+func (r *AegisWorkloadReconciler) ackWorkloadSuspended(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, job *batchv1.Job, backend string) {
+	if r.cpClient == nil || aw == nil || job == nil {
+		return
+	}
+
+	ackKey := suspensionInstanceKey(job)
+	if ackKey == "" {
+		return
+	}
+	if strings.TrimSpace(aw.GetAnnotations()[annotationSuspendAckedKey]) == ackKey {
+		return
+	}
+
+	url := aw.Status.URL
+	if url == "" {
+		url = fmt.Sprintf("k8s://%s/%s", aw.Namespace, aw.Name)
+	}
+
+	cpID := controlPlaneWorkloadID(aw.Name)
+	if err := r.cpClient.Ack(ctx, cpID, "SUSPENDED", backend, url); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", "SUSPENDED", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
+		return
+	}
+	if err := r.setAnnotationValue(ctx, aw, annotationSuspendAckedKey, ackKey); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "failed to persist suspension acknowledgement", "workload", aw.Name)
+	}
+}
+
 func (r *AegisWorkloadReconciler) ensureInteractiveResources(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
 	ports := effectiveWorkspacePorts(aw.Spec.Workspace)
 	changed := false
@@ -1015,6 +1095,19 @@ func deriveJobFailureMessage(job *batchv1.Job) string {
 		}
 	}
 	return "job failed"
+}
+
+func suspensionInstanceKey(job *batchv1.Job) string {
+	if job == nil {
+		return ""
+	}
+	if resumedAt := strings.TrimSpace(job.GetAnnotations()[annotationResumedAt]); resumedAt != "" {
+		return resumedAt
+	}
+	if job.Status.StartTime != nil {
+		return job.Status.StartTime.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return ""
 }
 
 func envOrDefault(key, def string) string {

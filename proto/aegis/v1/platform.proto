@@ -78,6 +78,11 @@ message Workload {
   ResourceHints hints = 12;
   string ui_status = 13;
   string message = 14;
+  string suspended_at_utc = 15;
+  string suspend_reason = 16;
+  int32 resume_count = 17;
+  string terminated_at_utc = 18;
+  string terminate_reason = 19;
 }
 
 message GetWorkspaceConnectionDetailsRequest {
@@ -194,6 +199,8 @@ message SubmitWorkloadRequest { Workload workload = 1; }
 message GetWorkloadRequest { string id = 1; }
 message ListWorkloadsRequest { string project_id = 1; }
 message ListWorkloadsResponse { repeated Workload items = 1; }
+message ResumeWorkloadRequest { string id = 1; }
+message TerminateWorkloadRequest { string id = 1; string reason = 2; }
 
 message LeaseWorkloadRequest {
   string cluster_id = 1;
@@ -439,6 +446,20 @@ service AegisPlatform {
   rpc GetWorkload(GetWorkloadRequest) returns (Workload) {
     option (google.api.http) = {
       get: "/api/v1/workloads/{id}"
+    };
+  }
+  rpc ResumeWorkload(ResumeWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/resume"
+      body: "*"
+      additional_bindings { post: "/v1/workloads/{id}/resume" body: "*" }
+    };
+  }
+  rpc TerminateWorkload(TerminateWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/terminate"
+      body: "*"
+      additional_bindings { post: "/v1/workloads/{id}/terminate" body: "*" }
     };
   }
   rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse) {

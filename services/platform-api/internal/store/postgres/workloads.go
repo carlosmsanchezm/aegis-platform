@@ -529,6 +529,8 @@ WHERE id=$1`, id, reason)
 
 	_, err = tx.Exec(ctx, `UPDATE workloads
 SET status=$2,
+    runtime_seconds = runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))), 0)::BIGINT,
+    started_at = NULL,
     terminated_at = now(),
     terminate_reason = NULLIF($3, ''),
     updated_at = now()
@@ -579,6 +581,7 @@ func (s *PostgresStore) RollbackTerminateWorkload(id, previousStatus string) (*a
 
 	_, err = tx.Exec(ctx, `UPDATE workloads
 SET status=$2,
+    started_at = CASE WHEN $2 = 'RUNNING' THEN now() ELSE NULL END,
     terminated_at = NULL,
     terminate_reason = NULL,
     updated_at = now()

@@ -295,6 +295,36 @@ func TestWorkloadLifecycle_Postgres(t *testing.T) {
 		t.Fatalf("expected runtime_seconds ~10800 after resume + completion, got %d (ok=%t)", runtimeSecs, ok)
 	}
 
+	terminatedID := fmt.Sprintf("w-term-%d", time.Now().UnixNano())
+	terminated := &aegis.Workload{
+		Id:        terminatedID,
+		ProjectId: projectID,
+		Queue:     queue,
+		Status:    statusRunning,
+		Kind: &aegis.Workload_Workspace{Workspace: &aegis.WorkspaceSpec{
+			Flavor:  "a10-mig-1g",
+			Image:   "alpine:3.19",
+			Command: []string{"sh", "-c", "echo term"},
+		}},
+	}
+	store.PutWorkload(terminated)
+	if _, err := pool.Exec(ctx, `UPDATE workloads SET started_at = now() - interval '3 hour' WHERE id=$1`, terminatedID); err != nil {
+		t.Fatalf("set started_at for terminate test: %v", err)
+	}
+	terminatedW, err := store.TerminateWorkload(terminatedID, "cleanup")
+	if err != nil {
+		t.Fatalf("terminate workload: %v", err)
+	}
+	if terminatedW.GetStatus() != statusTerminated {
+		t.Fatalf("expected status TERMINATED after terminate, got %s", terminatedW.GetStatus())
+	}
+	if _, ok := store.GetStartedAt(terminatedID); ok {
+		t.Fatalf("expected started_at to be cleared after terminate")
+	}
+	if runtimeSecs, ok := store.GetRuntimeSeconds(terminatedID); !ok || runtimeSecs < 10790 || runtimeSecs > 10810 {
+		t.Fatalf("expected runtime_seconds ~10800 after terminate, got %d (ok=%t)", runtimeSecs, ok)
+	}
+
 	store.SetEstimateUSD(workloadID, 42.25)
 	if est := store.PopEstimateUSD(workloadID); est < 42.20 || est > 42.30 {
 		t.Fatalf("unexpected estimate: %f", est)

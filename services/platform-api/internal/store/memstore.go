@@ -668,7 +668,17 @@ func (s *MemStore) TerminateWorkload(id, reason string) (*aegis.Workload, error)
 
 	switch w.GetStatus() {
 	case statusRunning, statusSuspended:
-		// ok
+		now := time.Now()
+		if w.GetStatus() == statusRunning {
+			if t0, ok := s.startedAt[id]; ok {
+				secs := int64(now.Sub(t0).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				s.runtime[id] += secs
+			}
+		}
+		delete(s.startedAt, id)
 	case statusTerminated:
 		if w.TerminateReason == "" && reason != "" {
 			w.TerminateReason = reason
@@ -705,6 +715,11 @@ func (s *MemStore) RollbackTerminateWorkload(id, previousStatus string) (*aegis.
 	w.Status = previousStatus
 	w.TerminatedAtUtc = ""
 	w.TerminateReason = ""
+	if previousStatus == statusRunning {
+		s.startedAt[id] = time.Now()
+	} else {
+		delete(s.startedAt, id)
+	}
 	return w, nil
 }
 

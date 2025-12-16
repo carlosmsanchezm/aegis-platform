@@ -259,6 +259,26 @@ func (s *PostgresStore) GetStartedAt(id string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+func (s *PostgresStore) GetRuntimeSeconds(id string) (int64, bool) {
+	if id == "" {
+		return 0, false
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	row := s.pool.QueryRow(ctx, `SELECT runtime_seconds FROM workloads WHERE id=$1`, id)
+	var secs int64
+	if err := row.Scan(&secs); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			s.logExecError("get_runtime_seconds", err, zap.String("workload_id", id))
+		}
+		return 0, false
+	}
+	if secs < 0 {
+		secs = 0
+	}
+	return secs, true
+}
+
 func (s *PostgresStore) SetEstimateUSD(id string, usd float64) {
 	if id == "" {
 		return
@@ -371,16 +391,26 @@ func (s *PostgresStore) AckWorkload(id, nextStatus, url string) (*aegis.Workload
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 
-	if strings.EqualFold(nextStatus, statusSuspended) {
+	if strings.EqualFold(nextStatus, statusRunning) {
+		_, err = tx.Exec(ctx, `UPDATE workloads SET url = NULLIF($2, ''), updated_at = now() WHERE id=$1`, id, url)
+	} else if strings.EqualFold(nextStatus, statusSuspended) {
 		_, err = tx.Exec(ctx, `UPDATE workloads
 SET status=$2,
     url = NULLIF($3, ''),
+    runtime_seconds = runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))), 0)::BIGINT,
+    started_at = NULL,
     suspended_at = now(),
     suspend_reason = $4,
     updated_at = now()
 WHERE id=$1`, id, nextStatus, url, "idle_timeout")
 	} else {
-		_, err = tx.Exec(ctx, `UPDATE workloads SET status=$2, url = NULLIF($3, ''), updated_at = now() WHERE id=$1`, id, nextStatus, url)
+		_, err = tx.Exec(ctx, `UPDATE workloads
+SET status=$2,
+    url = NULLIF($3, ''),
+    runtime_seconds = runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))), 0)::BIGINT,
+    started_at = NULL,
+    updated_at = now()
+WHERE id=$1`, id, nextStatus, url)
 	}
 	if err != nil {
 		return nil, err
@@ -425,7 +455,14 @@ func (s *PostgresStore) ResumeWorkload(id string) (*aegis.Workload, error) {
 		return nil, fmt.Errorf("workload %s not in SUSPENDED state", id)
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE workloads SET status=$2, resume_count=$3, updated_at=now() WHERE id=$1`,
+	_, err = tx.Exec(ctx, `UPDATE workloads
+SET status=$2,
+    resume_count=$3,
+    started_at=now(),
+    suspended_at=NULL,
+    suspend_reason=NULL,
+    updated_at=now()
+WHERE id=$1`,
 		id,
 		statusRunning,
 		resumeCount+1,

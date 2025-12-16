@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS workloads (
     resume_count INT NOT NULL DEFAULT 0,
     terminated_at TIMESTAMPTZ NULL,
     terminate_reason TEXT NULL,
+    runtime_seconds BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -240,6 +241,58 @@ func TestWorkloadLifecycle_Postgres(t *testing.T) {
 	store.MarkStarted(workloadID)
 	if startedAt, ok := store.GetStartedAt(workloadID); !ok || time.Since(startedAt) > time.Minute {
 		t.Fatalf("expected started_at to be present and recent, got %v (present=%t)", startedAt, ok)
+	}
+
+	// Suspending should accumulate active runtime and clear started_at so suspended time is not billed.
+	if _, err := pool.Exec(ctx, `UPDATE workloads SET started_at = now() - interval '1 hour' WHERE id=$1`, workloadID); err != nil {
+		t.Fatalf("set started_at for suspend test: %v", err)
+	}
+	suspendedW, err := store.AckWorkload(workloadID, statusSuspended, "")
+	if err != nil {
+		t.Fatalf("ack workload suspended: %v", err)
+	}
+	if suspendedW.GetStatus() != statusSuspended {
+		t.Fatalf("expected status SUSPENDED after ack, got %s", suspendedW.GetStatus())
+	}
+	if suspendedW.GetSuspendedAtUtc() == "" {
+		t.Fatalf("expected suspended_at to be set after ack")
+	}
+	if _, ok := store.GetStartedAt(workloadID); ok {
+		t.Fatalf("expected started_at to be cleared after suspend")
+	}
+	if runtimeSecs, ok := store.GetRuntimeSeconds(workloadID); !ok || runtimeSecs < 3590 || runtimeSecs > 3610 {
+		t.Fatalf("expected runtime_seconds ~3600 after suspend, got %d (ok=%t)", runtimeSecs, ok)
+	}
+
+	resumedW, err := store.ResumeWorkload(workloadID)
+	if err != nil {
+		t.Fatalf("resume workload: %v", err)
+	}
+	if resumedW.GetStatus() != statusRunning {
+		t.Fatalf("expected status RUNNING after resume, got %s", resumedW.GetStatus())
+	}
+	if resumedW.GetResumeCount() != 1 {
+		t.Fatalf("expected resume_count=1, got %d", resumedW.GetResumeCount())
+	}
+	if resumedW.GetSuspendedAtUtc() != "" {
+		t.Fatalf("expected suspended_at to be cleared after resume, got %s", resumedW.GetSuspendedAtUtc())
+	}
+	if _, ok := store.GetStartedAt(workloadID); !ok {
+		t.Fatalf("expected started_at to be present after resume")
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE workloads SET started_at = now() - interval '2 hour' WHERE id=$1`, workloadID); err != nil {
+		t.Fatalf("set started_at for completion test: %v", err)
+	}
+	completedW, err := store.AckWorkload(workloadID, "SUCCEEDED", "")
+	if err != nil {
+		t.Fatalf("ack workload succeeded: %v", err)
+	}
+	if completedW.GetStatus() != "SUCCEEDED" {
+		t.Fatalf("expected status SUCCEEDED after ack, got %s", completedW.GetStatus())
+	}
+	if runtimeSecs, ok := store.GetRuntimeSeconds(workloadID); !ok || runtimeSecs < 10790 || runtimeSecs > 10810 {
+		t.Fatalf("expected runtime_seconds ~10800 after resume + completion, got %d (ok=%t)", runtimeSecs, ok)
 	}
 
 	store.SetEstimateUSD(workloadID, 42.25)

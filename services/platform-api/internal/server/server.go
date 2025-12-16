@@ -1939,6 +1939,36 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		}
 	}()
 
+	// Background job for provisioning log retention cleanup
+	// Configurable via AEGIS_LOG_RETENTION_DAYS (default: 7 days)
+	go func() {
+		retentionDays := int(getEnvInt("AEGIS_LOG_RETENTION_DAYS", 7))
+		if retentionDays <= 0 {
+			log.Info("provisioning log retention disabled (AEGIS_LOG_RETENTION_DAYS <= 0)")
+			return
+		}
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		log.Info("provisioning log retention cleanup started",
+			zap.Int("retention_days", retentionDays),
+			zap.String("interval", "1h"))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("provisioning log retention cleanup stopped")
+				return
+			case <-ticker.C:
+				cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+				deleted := svc.store.DeleteOldProvisioningLogs(cutoff)
+				if deleted > 0 {
+					log.Info("provisioning log retention cleanup completed",
+						zap.Int64("deleted_entries", deleted),
+						zap.Time("cutoff", cutoff))
+				}
+			}
+		}
+	}()
+
 	if err := gs.Serve(lis); err != nil {
 		if errors.Is(err, grpc.ErrServerStopped) {
 			log.Info("gRPC server stopped")
@@ -2330,6 +2360,12 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 		} else {
 			return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
 		}
+	}
+	// Clear any old provisioning logs for this job ID immediately after creating the infra.
+	// This ensures old logs are cleared BEFORE the frontend starts polling,
+	// avoiding the race condition where old logs appear briefly.
+	if s.store != nil {
+		s.store.ClearProvisioningLogs(infra.Name)
 	}
 	s.log.Info("cluster provisioning job created",
 		zap.String("project", projectID),

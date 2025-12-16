@@ -660,6 +660,37 @@ func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, sinceSeq 
 	return out
 }
 
+func (s *MemStore) ClearProvisioningLogs(jobID string) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.provisioningLogs, jobID)
+}
+
+func (s *MemStore) DeleteOldProvisioningLogs(olderThan time.Time) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var deleted int64
+	for jobID, logs := range s.provisioningLogs {
+		var kept []ProvisioningLogEntry
+		for _, entry := range logs {
+			if entry.CreatedAt.After(olderThan) {
+				kept = append(kept, entry)
+			} else {
+				deleted++
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.provisioningLogs, jobID)
+		} else {
+			s.provisioningLogs[jobID] = kept
+		}
+	}
+	return deleted
+}
+
 func (s *MemStore) UpsertProvisioningRun(run ProvisioningRun) {
 	if strings.TrimSpace(run.JobID) == "" {
 		return

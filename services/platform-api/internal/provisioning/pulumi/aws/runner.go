@@ -5,8 +5,10 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -101,7 +103,8 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 
 	// Best-effort unlock before any operations in case a previous run left a remote lock.
 	_ = stack.Cancel(ctx)
-	r.clearPulumiLock(programCfg.ProjectID, r.stackName(programCfg.ProjectID, programCfg.Region))
+	infraName := strings.TrimSpace(infra.Name)
+	r.clearPulumiLock(programCfg.ProjectID, r.stackNameForInfra(infraName, programCfg.ProjectID, programCfg.Region))
 
 	jobID, clusterID := jobMetadata(infra)
 	progressWriter := &logWriter{
@@ -128,7 +131,8 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 		stackName := r.stackName(programCfg.ProjectID, programCfg.Region)
 		r.log.Warn("skipping pulumi up due to environment override", zap.String("stack", stackName))
 	} else {
-		if _, err := stack.Up(ctx, optup.ProgressStreams(progressWriter)); err != nil {
+		// Use runUpWithRetry which handles pending operations and "already exists" errors
+		if err := r.runUpWithRetry(ctx, stack, progressWriter); err != nil {
 			return nil, fmt.Errorf("pulumi up: %w", err)
 		}
 	}
@@ -153,28 +157,42 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 	return result, nil
 }
 
-// Destroy tears down the stack for the specified project/region combination.
+// Destroy tears down the stack for the specified ProjectInfra.
 func (r *Runner) Destroy(ctx context.Context, infra *infraapi.ProjectInfra, spec *infraapi.AWSInfraSpec) error {
 	if infra == nil || spec == nil {
 		return nil
 	}
 	projectID := strings.TrimSpace(infra.Spec.ProjectID)
 	region := strings.TrimSpace(infra.Spec.Region)
+	infraName := strings.TrimSpace(infra.Name)
 	if projectID == "" || region == "" {
 		return nil
 	}
 
-	stackName := r.stackName(projectID, region)
+	// Use infra-specific stack name to only destroy this ProjectInfra's resources
+	stackName := r.stackNameForInfra(infraName, projectID, region)
 	projectName := r.projectName(projectID)
 	program := r.buildPulumiProgram(&programInput{
 		ProjectID: projectID,
 		Region:    region,
 		SkipHelm:  true,
 	})
+
+	// Try to select the infra-specific stack first
 	stack, err := auto.SelectStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
 	if auto.IsSelectStack404Error(err) {
-		r.log.Info("pulumi stack not present; skipping destroy", zap.String("stack", stackName))
-		return nil
+		// Fall back to legacy shared stack for backward compatibility
+		legacyStackName := r.stackName(projectID, region)
+		r.log.Info("infra-specific stack not found, trying legacy shared stack",
+			zap.String("infra_stack", stackName),
+			zap.String("legacy_stack", legacyStackName),
+		)
+		stack, err = auto.SelectStackInlineSource(ctx, legacyStackName, projectName, program, r.buildWorkspaceOptions()...)
+		if auto.IsSelectStack404Error(err) {
+			r.log.Info("no pulumi stack found; skipping destroy", zap.String("stack", stackName))
+			return nil
+		}
+		stackName = legacyStackName // Use legacy name for logging
 	}
 	if err != nil {
 		return fmt.Errorf("select pulumi stack: %w", err)
@@ -238,7 +256,9 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		return auto.Stack{}, nil, errors.New("spec.region is required")
 	}
 
-	clusterDefs, err := r.buildClusterDefinitions(projectID, region, spec)
+	// Pass infra name to make cluster IDs unique per ProjectInfra
+	infraName := strings.TrimSpace(infra.Name)
+	clusterDefs, err := r.buildClusterDefinitions(projectID, region, infraName, spec)
 	if err != nil {
 		return auto.Stack{}, nil, err
 	}
@@ -262,12 +282,41 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		EnableCostEstimates: true,
 	}
 
-	stackName := r.stackName(projectID, region)
 	projectName := r.projectName(projectID)
 	program := r.buildPulumiProgram(programCfg)
-	stack, err := auto.UpsertStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
-	if err != nil {
-		return auto.Stack{}, nil, fmt.Errorf("upsert pulumi stack: %w", err)
+
+	// For backward compatibility, check if a legacy shared stack exists with resources.
+	// If it does, continue using it instead of creating a new per-infra stack.
+	// This prevents creating duplicate resources when upgrading existing deployments.
+	legacyStackName := r.stackName(projectID, region)
+	infraStackName := r.stackNameForInfra(infraName, projectID, region)
+	stackName := infraStackName // default to per-infra stack
+
+	legacyStack, legacyErr := auto.SelectStackInlineSource(ctx, legacyStackName, projectName, program, r.buildWorkspaceOptions()...)
+	if legacyErr == nil {
+		// Legacy stack exists - check if it has resources by looking at its state
+		// If it has resources, use it for backward compatibility
+		r.log.Info("legacy shared stack found, using it for backward compatibility",
+			zap.String("legacy_stack", legacyStackName),
+			zap.String("infra_stack", infraStackName),
+		)
+		stackName = legacyStackName
+	} else if !auto.IsSelectStack404Error(legacyErr) {
+		// Unexpected error selecting legacy stack
+		return auto.Stack{}, nil, fmt.Errorf("check legacy pulumi stack: %w", legacyErr)
+	}
+	// If legacy stack doesn't exist (404), we'll use the new per-infra stack name
+
+	var stack auto.Stack
+	if legacyErr == nil {
+		// Use the already-selected legacy stack
+		stack = legacyStack
+	} else {
+		// Create/select the new per-infra stack
+		stack, err = auto.UpsertStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
+		if err != nil {
+			return auto.Stack{}, nil, fmt.Errorf("upsert pulumi stack: %w", err)
+		}
 	}
 	if err := r.ensurePlugins(ctx, stack); err != nil {
 		return auto.Stack{}, nil, err
@@ -1554,14 +1603,18 @@ func observabilityFromEntry(val interface{}) infraapi.ObservabilityOutput {
 // ----------------------------------------------------------------------------- //
 // Spec translation helpers
 
-func (r *Runner) buildClusterDefinitions(projectID, region string, spec *infraapi.AWSInfraSpec) ([]clusterDefinition, error) {
+func (r *Runner) buildClusterDefinitions(projectID, region, infraName string, spec *infraapi.AWSInfraSpec) ([]clusterDefinition, error) {
 	var defs []clusterDefinition
+
+	// Generate a short unique suffix from the infra name to ensure cluster IDs are unique per ProjectInfra.
+	// This prevents conflicts when multiple ProjectInfras use the same base cluster name.
+	infraSuffix := shortHash(infraName)
 
 	appendCluster := func(name, version string, pools []infraapi.NodePool) {
 		if strings.TrimSpace(name) == "" {
 			return
 		}
-		clusterID := buildClusterID(projectID, region, name)
+		clusterID := buildClusterIDWithSuffix(projectID, region, name, infraSuffix)
 		defs = append(defs, clusterDefinition{
 			Name:      name,
 			ClusterID: clusterID,
@@ -1843,6 +1896,23 @@ func (r *Runner) findRepoRoot() string {
 // ----------------------------------------------------------------------------- //
 // Pulumi stack helpers
 
+// stackNameForInfra returns a unique stack name per ProjectInfra to ensure each
+// infrastructure resource has its own isolated Pulumi state. This prevents
+// deleting one ProjectInfra from affecting others in the same project/region.
+func (r *Runner) stackNameForInfra(infraName, projectID, region string) string {
+	// Use a hash of the infra name to keep stack names short while ensuring uniqueness
+	infraID := sanitize(infraName)
+	if len(infraID) > 20 {
+		// Truncate and add hash suffix for long names
+		h := fnv.New32a()
+		h.Write([]byte(infraName))
+		infraID = fmt.Sprintf("%s-%x", infraID[:12], h.Sum32())
+	}
+	return fmt.Sprintf("%s-%s-%s-%s", defaultStackPrefix, sanitize(projectID), sanitize(region), infraID)
+}
+
+// stackName returns the legacy shared stack name (deprecated - use stackNameForInfra)
+// Kept for backward compatibility during migration.
 func (r *Runner) stackName(projectID, region string) string {
 	return fmt.Sprintf("%s-%s-%s", defaultStackPrefix, sanitize(projectID), sanitize(region))
 }
@@ -1889,6 +1959,151 @@ func (r *Runner) retryAfterCancel(ctx context.Context, stack auto.Stack, fn func
 		return false
 	}
 	return true
+}
+
+// isAlreadyExistsError returns true if the error indicates a resource already exists in AWS.
+// This typically happens when Pulumi state has a pending CREATE operation but the resource
+// was actually created in a previous interrupted run.
+func isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	existsSnippets := []string{
+		"already exists",
+		"resourceinuseexception",
+		"entityalreadyexists",
+		"alreadyexistsexception",
+		"conflict",
+	}
+	return slices.ContainsFunc(existsSnippets, func(sub string) bool {
+		return strings.Contains(errStr, sub)
+	})
+}
+
+// hasPendingOperations returns true if the error message indicates pending operations exist.
+func hasPendingOperations(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "pending operations") ||
+		strings.Contains(errStr, "pending operation")
+}
+
+// clearPendingOperations exports the stack state, removes any pending operations,
+// and reimports the cleaned state. This resolves state conflicts from interrupted operations.
+func (r *Runner) clearPendingOperations(ctx context.Context, stack auto.Stack) error {
+	r.log.Info("checking for pending operations in stack state")
+
+	// Export current stack state
+	deployment, err := stack.Export(ctx)
+	if err != nil {
+		return fmt.Errorf("export stack state: %w", err)
+	}
+
+	// The deployment is an apitype.UntypedDeployment which wraps a JSON-serialized deployment
+	// We need to unmarshal it, check for pending_operations, and if found, clear them
+	var state map[string]interface{}
+	if err := json.Unmarshal(deployment.Deployment, &state); err != nil {
+		r.log.Warn("failed to parse stack deployment state", zap.Error(err))
+		return nil // Not fatal - continue with operation
+	}
+
+	// Check if there are pending operations
+	pendingOps, hasPending := state["pending_operations"]
+	if !hasPending {
+		r.log.Info("no pending operations in stack state")
+		return nil
+	}
+
+	pendingSlice, ok := pendingOps.([]interface{})
+	if !ok || len(pendingSlice) == 0 {
+		r.log.Info("no pending operations to clear")
+		return nil
+	}
+
+	r.log.Warn("found pending operations in stack state, clearing them",
+		zap.Int("count", len(pendingSlice)))
+
+	// Log details of pending operations for debugging
+	for i, op := range pendingSlice {
+		if opMap, ok := op.(map[string]interface{}); ok {
+			r.log.Info("pending operation details",
+				zap.Int("index", i),
+				zap.Any("type", opMap["type"]),
+				zap.Any("resource", opMap["resource"]))
+		}
+	}
+
+	// Clear the pending operations
+	state["pending_operations"] = []interface{}{}
+
+	// Serialize the cleaned state
+	cleanedData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal cleaned state: %w", err)
+	}
+
+	// Create a new deployment with cleaned state
+	deployment.Deployment = cleanedData
+
+	// Import the cleaned state back
+	if err := stack.Import(ctx, deployment); err != nil {
+		return fmt.Errorf("import cleaned stack state: %w", err)
+	}
+
+	r.log.Info("successfully cleared pending operations from stack state")
+	return nil
+}
+
+// runUpWithRetry runs pulumi up with automatic retry on recoverable errors.
+// If the operation fails due to "already exists" errors (from pending CREATE operations),
+// it will clear pending operations and retry once.
+func (r *Runner) runUpWithRetry(ctx context.Context, stack auto.Stack, progressWriter *logWriter) error {
+	// First, proactively check and clear any pending operations
+	if err := r.clearPendingOperations(ctx, stack); err != nil {
+		r.log.Warn("failed to clear pending operations pre-emptively", zap.Error(err))
+		// Continue anyway - the operation might still succeed
+	}
+
+	// Run the first attempt
+	_, err := stack.Up(ctx, optup.ProgressStreams(progressWriter))
+	if err == nil {
+		return nil
+	}
+
+	// Check if this is a recoverable error
+	if !isAlreadyExistsError(err) && !hasPendingOperations(err) {
+		// Not a recoverable error, return as-is
+		return err
+	}
+
+	r.log.Warn("pulumi up failed with recoverable error, attempting state repair and retry",
+		zap.Error(err))
+
+	// Clear pending operations and retry
+	if clearErr := r.clearPendingOperations(ctx, stack); clearErr != nil {
+		r.log.Error("failed to clear pending operations for retry", zap.Error(clearErr))
+		return fmt.Errorf("state repair failed: %w (original error: %v)", clearErr, err)
+	}
+
+	// Run refresh to sync state with actual AWS resources
+	r.log.Info("running refresh to sync state with AWS after clearing pending operations")
+	if _, refreshErr := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter)); refreshErr != nil {
+		r.log.Warn("refresh after clearing pending operations failed", zap.Error(refreshErr))
+		// Continue anyway - the up might still work
+	}
+
+	// Retry the up operation
+	r.log.Info("retrying pulumi up after state repair")
+	_, retryErr := stack.Up(ctx, optup.ProgressStreams(progressWriter))
+	if retryErr != nil {
+		return fmt.Errorf("pulumi up retry failed: %w (original error: %v)", retryErr, err)
+	}
+
+	r.log.Info("pulumi up succeeded after state repair and retry")
+	return nil
 }
 
 // ----------------------------------------------------------------------------- //
@@ -2005,6 +2220,34 @@ func buildClusterID(projectID, region, name string) string {
 	}
 	parts = append(parts, sanitize(name))
 	return strings.Join(parts, "-")
+}
+
+// buildClusterIDWithSuffix creates a unique cluster ID by appending a short hash suffix.
+// This ensures each ProjectInfra gets its own unique EKS cluster, preventing conflicts
+// when multiple ProjectInfras use the same base cluster name.
+func buildClusterIDWithSuffix(projectID, region, name, suffix string) string {
+	base := buildClusterID(projectID, region, name)
+	if suffix == "" {
+		return base
+	}
+	// EKS cluster name limit is 100 chars. Ensure we stay within that.
+	// Format: {base}-{suffix} where suffix is 8 chars
+	maxBase := 100 - len(suffix) - 1
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	return fmt.Sprintf("%s-%s", base, suffix)
+}
+
+// shortHash generates an 8-character hash from the input string.
+// Used to create unique suffixes for cluster names.
+func shortHash(input string) string {
+	if input == "" {
+		return ""
+	}
+	h := fnv.New32a()
+	h.Write([]byte(input))
+	return fmt.Sprintf("%08x", h.Sum32())
 }
 
 func sanitize(in string) string {

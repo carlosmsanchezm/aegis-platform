@@ -57,6 +57,11 @@ const (
 	maxObservabilityNameLength     = 40
 	maxLoggingNameLength           = 40
 	defaultHelmTimeout             = 15 * time.Minute
+
+	// kubePrometheusStackNameLimit is the internal name truncation limit used by
+	// the kube-prometheus-stack Helm chart for Prometheus and Alertmanager resources.
+	// The chart truncates fullnameOverride to this length before appending suffixes.
+	kubePrometheusStackNameLimit = 26
 )
 
 // HelmConfig describes a helm release configuration.
@@ -410,13 +415,18 @@ func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvi
 		return nil, err
 	}
 
+	// The kube-prometheus-stack chart internally truncates fullnameOverride to 26 chars
+	// before appending suffixes like "-prometheus" or "-alertmanager". We must match
+	// this behavior when reporting service names so the platform-api can reach them.
+	chartTruncatedName := truncateToChartLimit(stackFullname, kubePrometheusStackNameLimit)
+
 	outputs := pulumi.Map{
 		"namespace":                pulumi.String(namespace),
-		"prometheusService":        pulumi.String(stackFullname + "-prometheus"),
+		"prometheusService":        pulumi.String(chartTruncatedName + "-prometheus"),
 		"prometheusPort":           pulumi.Int(promPort),
-		"alertmanagerService":      pulumi.String(stackFullname + "-alertmanager"),
+		"alertmanagerService":      pulumi.String(chartTruncatedName + "-alertmanager"),
 		"alertmanagerPort":         pulumi.Int(alertPort),
-		"alertmanagerConfigSecret": pulumi.String("alertmanager-" + stackFullname + "-alertmanager"),
+		"alertmanagerConfigSecret": pulumi.String("alertmanager-" + chartTruncatedName + "-alertmanager"),
 		"metricsServerService":     pulumi.String(metricsFullname),
 		"metricsServerPort":        pulumi.Int(443),
 	}
@@ -836,4 +846,15 @@ func fileExists(path string) bool {
 		return true
 	}
 	return false
+}
+
+// truncateToChartLimit truncates a name to match the kube-prometheus-stack
+// chart's internal naming convention. The chart truncates fullnameOverride
+// to 26 characters before appending suffixes like "-prometheus" or "-alertmanager".
+func truncateToChartLimit(name string, limit int) string {
+	name = strings.TrimSpace(name)
+	if limit <= 0 || len(name) <= limit {
+		return name
+	}
+	return strings.TrimRight(name[:limit], "-")
 }

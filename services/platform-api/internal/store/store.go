@@ -142,6 +142,8 @@ type Store interface {
 	// provisioning logs
 	AppendProvisioningLog(entry ProvisioningLogEntry)
 	ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []ProvisioningLogEntry
+	ClearProvisioningLogs(jobID string)                // Clear logs when new provisioning starts
+	DeleteOldProvisioningLogs(olderThan time.Time) int64 // Retention policy cleanup
 	UpsertProvisioningRun(run ProvisioningRun)
 	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
 }

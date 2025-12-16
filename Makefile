@@ -130,8 +130,13 @@ kind-load-platform:
 .PHONY: build-agent
 build-agent:
 	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
-	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
+	@$(MAKE) -C agents/k8s-agent docker-build IMG=$(K8S_AGENT_IMAGE)
 	@$(MAKE) kind-load-agent
+
+.PHONY: build-agent-multi
+build-agent-multi:
+	@echo "Building k8s-agent multi-arch image $(K8S_AGENT_IMAGE)"
+	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
 
 .PHONY: kind-load-agent
 kind-load-agent:

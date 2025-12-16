@@ -120,6 +120,33 @@ func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, sinc
 	return out
 }
 
+func (s *PostgresStore) ClearProvisioningLogs(jobID string) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	result, err := s.pool.Exec(ctx, `DELETE FROM provisioning_logs WHERE job_id = $1`, jobID)
+	if err != nil {
+		s.logExecError("provisioning_logs_clear", err, zap.String("job_id", jobID))
+		return
+	}
+	if s.log != nil {
+		s.log.Info("cleared provisioning logs", zap.String("job_id", jobID), zap.Int64("deleted_count", result.RowsAffected()))
+	}
+}
+
+func (s *PostgresStore) DeleteOldProvisioningLogs(olderThan time.Time) int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	result, err := s.pool.Exec(ctx, `DELETE FROM provisioning_logs WHERE created_at < $1`, olderThan)
+	if err != nil {
+		s.logExecError("provisioning_logs_retention_cleanup", err, zap.Time("older_than", olderThan))
+		return 0
+	}
+	return result.RowsAffected()
+}
+
 func (s *PostgresStore) UpsertProvisioningRun(run store.ProvisioningRun) {
 	if strings.TrimSpace(run.JobID) == "" {
 		return

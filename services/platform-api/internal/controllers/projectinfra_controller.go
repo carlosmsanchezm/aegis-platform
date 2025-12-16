@@ -164,6 +164,13 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		defer releaseLock()
 	}
 
+	// Re-read the object after acquiring the lock to get the latest status.
+	// This prevents race conditions where another reconcile completed between
+	// our initial read and lock acquisition.
+	if err := r.Get(ctx, req.NamespacedName, &infra); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
 	if !infra.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, log, &infra)
 	}
@@ -178,6 +185,12 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	// Ensure the project exists in the store for the workspace wizard to list.
 	r.syncProjectToStore(infra)
+
+	// If already in Ready state, skip reconciliation. The infrastructure is provisioned.
+	if strings.EqualFold(infra.Status.Phase, "Ready") {
+		log.Info("skipping reconcile; infrastructure is already ready")
+		return ctrl.Result{}, nil
+	}
 
 	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
 	// the ProjectInfra to retry, so keep the object idle in error state.
@@ -335,6 +348,14 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 		r.recordProvisioningStatus(infra, "Error", true)
 		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
 		return ctrl.Result{}, err
+	}
+
+	// Clear old provisioning logs before starting new provisioning
+	// This prevents old logs from accumulating and mixing with new ones
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID != "" && r.Store != nil {
+		log.Info("clearing old provisioning logs", zap.String("job_id", jobID))
+		r.Store.ClearProvisioningLogs(jobID)
 	}
 
 	r.recordProvisioningStatus(infra, "Provisioning", false)
@@ -970,11 +991,19 @@ func (r *ProjectInfraReconciler) lockLocal(key string) func() {
 }
 
 func stackLockKey(infra *infraapi.ProjectInfra) string {
-	return fmt.Sprintf("%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	// Use infra name to create per-infra locks instead of shared project/region locks.
+	// This ensures deleting one ProjectInfra doesn't wait for provisions of others.
+	return fmt.Sprintf("%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), strings.TrimSpace(infra.Name))
 }
 
 func leaseNameForInfra(infra *infraapi.ProjectInfra) string {
-	base := fmt.Sprintf("pi-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	// Use infra name in lease to isolate each ProjectInfra's lock.
+	// Truncate infra name to fit within 63 char limit for k8s names.
+	infraName := strings.TrimSpace(infra.Name)
+	if len(infraName) > 30 {
+		infraName = infraName[:30]
+	}
+	base := fmt.Sprintf("pi-%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), infraName)
 	return sanitizeName(base, 63)
 }
 

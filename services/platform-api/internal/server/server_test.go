@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,9 +23,12 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/placement"
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
+	batchv1 "k8s.io/api/batch/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +37,58 @@ import (
 
 type staticKubeClient struct {
 	cli client.Client
+}
+
+type failingStore struct {
+	*store.MemStore
+	failResume    bool
+	failTerminate bool
+}
+
+type fixedRuntimeStore struct {
+	*store.MemStore
+	startedAt      time.Time
+	startedAtOK    bool
+	runtimeSeconds int64
+}
+
+func (s *fixedRuntimeStore) GetStartedAt(id string) (time.Time, bool) {
+	if !s.startedAtOK {
+		return time.Time{}, false
+	}
+	return s.startedAt, true
+}
+
+func (s *fixedRuntimeStore) GetRuntimeSeconds(id string) (int64, bool) {
+	return s.runtimeSeconds, true
+}
+
+func (s *failingStore) ResumeWorkload(id string) (*aegis.Workload, error) {
+	if s.failResume {
+		return nil, errors.New("simulated store failure")
+	}
+	return s.MemStore.ResumeWorkload(id)
+}
+
+func (s *failingStore) TerminateWorkload(id, reason string) (*aegis.Workload, error) {
+	if s.failTerminate {
+		return nil, errors.New("simulated store failure")
+	}
+	return s.MemStore.TerminateWorkload(id, reason)
+}
+
+type deleteFailingClient struct {
+	client.Client
+	failWorkspaceDelete bool
+}
+
+func (c deleteFailingClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if c.failWorkspaceDelete {
+		if u, ok := obj.(*unstructured.Unstructured); ok && u.GetKind() == "Workspace" {
+			return errors.New("simulated kube delete failure")
+		}
+	}
+	return c.Client.Delete(ctx, obj, opts...)
 }
 
 func (s staticKubeClient) ClientFor(clusterID string) (client.Client, error) {
@@ -64,13 +120,17 @@ func newFakeWorkspaceClient(t *testing.T) client.Client {
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	return newTestServerWithStore(t, store.NewMemStore())
+}
+
+func newTestServerWithStore(t *testing.T, st store.Store) *Server {
+	t.Helper()
 	t.Setenv("AEGIS_PROXY_BASE_URL", "https://proxy.test")
 	t.Setenv("AEGIS_PROXY_EXPECTED_AUDIENCE", "aegis-proxy")
 	t.Setenv("AEGIS_PROXY_JWT_SECRET", "super-secret-key")
 	t.Setenv("AEGIS_PROXY_TOKEN_TTL_SECONDS", "600")
 
 	logger := zap.NewNop()
-	st := store.NewMemStore()
 
 	srv := New(logger, st, nil, "default", placement.NewPolicyOverlay(), nil, "")
 	srv.kubeClients = staticKubeClient{cli: newFakeWorkspaceClient(t)}
@@ -100,6 +160,299 @@ func stubWorkspace(id string, interactive bool, env map[string]string) *aegis.Wo
 				Env:         env,
 			},
 		},
+	}
+}
+
+func TestResumeWorkload_RollbackJobWhenStoreUpdateFails(t *testing.T) {
+	fs := &failingStore{MemStore: store.NewMemStore(), failResume: true}
+	srv := newTestServerWithStore(t, fs)
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusSuspended
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+
+	suspend := true
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+			Annotations: map[string]string{
+				annotationSuspendReason: "idle_timeout",
+			},
+		},
+		Spec: batchv1.JobSpec{Suspend: &suspend},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.ResumeWorkload(contextWithSubject("alice@example.com"), &aegis.ResumeWorkloadRequest{Id: w.GetId()})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+	if gotJob.Spec.Suspend == nil || *gotJob.Spec.Suspend != true {
+		t.Fatalf("expected job to remain suspended, suspend=%v", gotJob.Spec.Suspend)
+	}
+	if gotJob.Annotations == nil || gotJob.Annotations[annotationSuspendReason] == "" {
+		t.Fatalf("expected suspend reason annotation to remain, annotations=%v", gotJob.Annotations)
+	}
+	if _, ok := gotJob.Annotations[annotationResumedAt]; ok {
+		t.Fatalf("expected resumed-at annotation to be rolled back, annotations=%v", gotJob.Annotations)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusSuspended {
+		t.Fatalf("expected workload status to remain SUSPENDED, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_PreconditionDoesNotDeleteResources(t *testing.T) {
+	srv := newTestServer(t)
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = "SUCCEEDED"
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	aw := &agentv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: w.GetId(), Namespace: targetNS}}
+	if err := cli.Create(context.Background(), aw); err != nil {
+		t.Fatalf("failed to create aegisworkload: %v", err)
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+		},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
+	}
+
+	gotAW := &agentv1alpha1.AegisWorkload{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotAW); err != nil {
+		t.Fatalf("expected aegisworkload to remain, got error: %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != "SUCCEEDED" {
+		t.Fatalf("expected workload status to remain SUCCEEDED, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_DeleteFailureRollsBackStore(t *testing.T) {
+	st := store.NewMemStore()
+	srv := newTestServerWithStore(t, st)
+
+	cli := deleteFailingClient{Client: newFakeWorkspaceClient(t), failWorkspaceDelete: true}
+	srv.kubeClients = staticKubeClient{cli: cli}
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusRunning
+	srv.store.PutWorkload(w)
+
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	_, err := srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected Internal, got %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusRunning || still.GetTerminatedAtUtc() != "" {
+		t.Fatalf("expected workload status to rollback to RUNNING with no terminated_at, got %v", still)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
+	}
+}
+
+func TestTerminateWorkload_StoreFailureDoesNotDeleteResources(t *testing.T) {
+	fs := &failingStore{MemStore: store.NewMemStore(), failTerminate: true}
+	srv := newTestServerWithStore(t, fs)
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusRunning
+	srv.store.PutWorkload(w)
+
+	cli, err := srv.kubeClients.ClientFor(w.GetClusterId())
+	if err != nil {
+		t.Fatalf("ClientFor returned error: %v", err)
+	}
+	targetNS := srv.namespaceForProject(w.GetProjectId())
+
+	workspace := &unstructured.Unstructured{}
+	workspace.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	workspace.SetKind("Workspace")
+	workspace.SetName(w.GetId())
+	workspace.SetNamespace(targetNS)
+	if err := cli.Create(context.Background(), workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	aw := &agentv1alpha1.AegisWorkload{ObjectMeta: metav1.ObjectMeta{Name: w.GetId(), Namespace: targetNS}}
+	if err := cli.Create(context.Background(), aw); err != nil {
+		t.Fatalf("failed to create aegisworkload: %v", err)
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "job-w-123",
+			Namespace: targetNS,
+			Labels:    map[string]string{labelWorkloadID: w.GetId()},
+		},
+	}
+	if err := cli.Create(context.Background(), job); err != nil {
+		t.Fatalf("failed to create job: %v", err)
+	}
+
+	_, err = srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{Id: w.GetId()})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
+	}
+
+	gotWS := &unstructured.Unstructured{}
+	gotWS.SetAPIVersion("aegis.yourorg.dev/v1alpha2")
+	gotWS.SetKind("Workspace")
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotWS); err != nil {
+		t.Fatalf("expected workspace to remain, got error: %v", err)
+	}
+
+	gotAW := &agentv1alpha1.AegisWorkload{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: w.GetId(), Namespace: targetNS}, gotAW); err != nil {
+		t.Fatalf("expected aegisworkload to remain, got error: %v", err)
+	}
+
+	gotJob := &batchv1.Job{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: job.GetName(), Namespace: targetNS}, gotJob); err != nil {
+		t.Fatalf("expected job to remain, got error: %v", err)
+	}
+
+	if still := srv.store.GetWorkload(w.GetId()); still == nil || still.GetStatus() != statusRunning {
+		t.Fatalf("expected workload status to remain RUNNING, got %v", still)
+	}
+}
+
+func TestTerminateWorkload_BillingCutsOffAtSuspendedAt(t *testing.T) {
+	st := &fixedRuntimeStore{MemStore: store.NewMemStore(), runtimeSeconds: 3600}
+	st.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "queue-a", LimitUsd: 1000, PolicyMode: "SOFT"})
+	st.PutFlavor(&aegis.Flavor{Name: "f-1", GpuCount: 1, PriceUsdPerGpuHour: 1})
+
+	srv := newTestServerWithStore(t, st)
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusSuspended
+	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
+		wk.Workspace.Flavor = "f-1"
+	}
+	st.PutWorkload(w)
+
+	if _, err := srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	}); err != nil {
+		t.Fatalf("TerminateWorkload returned error: %v", err)
+	}
+
+	usage, ok := st.UsageView(w.GetProjectId(), w.GetQueue())
+	if !ok {
+		t.Fatalf("expected usage view to exist")
+	}
+	if usage.ActualUSD < 0.9 || usage.ActualUSD > 1.1 {
+		t.Fatalf("expected actualUSD ~1.0, got %f", usage.ActualUSD)
+	}
+}
+
+func TestTerminateWorkload_BillingExcludesSuspendedTimeAfterResume(t *testing.T) {
+	st := &fixedRuntimeStore{
+		MemStore:       store.NewMemStore(),
+		runtimeSeconds: 3600, // 1h before suspension
+		startedAtOK:    true,
+		startedAt:      time.Now().Add(-2 * time.Hour), // 2h since resume
+	}
+	st.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "queue-a", LimitUsd: 1000, PolicyMode: "SOFT"})
+	st.PutFlavor(&aegis.Flavor{Name: "f-1", GpuCount: 1, PriceUsdPerGpuHour: 1})
+
+	srv := newTestServerWithStore(t, st)
+
+	w := stubWorkspace("w-123", true, nil)
+	w.Status = statusRunning
+	w.SuspendedAtUtc = time.Now().Add(-12 * time.Hour).Format(time.RFC3339Nano) // stale value should not affect billing
+	if wk, ok := w.GetKind().(*aegis.Workload_Workspace); ok && wk.Workspace != nil {
+		wk.Workspace.Flavor = "f-1"
+	}
+	st.PutWorkload(w)
+
+	if _, err := srv.TerminateWorkload(contextWithSubject("alice@example.com"), &aegis.TerminateWorkloadRequest{
+		Id:     w.GetId(),
+		Reason: "cleanup",
+	}); err != nil {
+		t.Fatalf("TerminateWorkload returned error: %v", err)
+	}
+
+	usage, ok := st.UsageView(w.GetProjectId(), w.GetQueue())
+	if !ok {
+		t.Fatalf("expected usage view to exist")
+	}
+	if usage.ActualUSD < 2.9 || usage.ActualUSD > 3.1 {
+		t.Fatalf("expected actualUSD ~3.0, got %f", usage.ActualUSD)
 	}
 }
 

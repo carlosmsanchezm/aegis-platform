@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	statusPlaced  = "PLACED"
-	statusRunning = "RUNNING"
+	statusPlaced     = "PLACED"
+	statusRunning    = "RUNNING"
+	statusSuspended  = "SUSPENDED"
+	statusTerminated = "TERMINATED"
 )
 
 type MemStore struct {
@@ -25,6 +27,7 @@ type MemStore struct {
 	workloads map[string]*aegis.Workload
 	placedAt  map[string]time.Time
 	startedAt map[string]time.Time
+	runtime   map[string]int64
 	estUSD    map[string]float64
 
 	// cluster state is managed via clusterState for fine-grained locking
@@ -50,6 +53,7 @@ func NewMemStore() *MemStore {
 		workloads:          map[string]*aegis.Workload{},
 		placedAt:           map[string]time.Time{},
 		startedAt:          map[string]time.Time{},
+		runtime:            map[string]int64{},
 		estUSD:             map[string]float64{},
 		cstate:             newClusterState(),
 		usage:              map[string]*budgetUsage{},
@@ -409,6 +413,15 @@ func (s *MemStore) GetStartedAt(id string) (time.Time, bool) {
 	return t, ok
 }
 
+func (s *MemStore) GetRuntimeSeconds(id string) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.workloads[id]; !ok {
+		return 0, false
+	}
+	return s.runtime[id], true
+}
+
 func (s *MemStore) SetEstimateUSD(id string, usd float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -602,8 +615,110 @@ func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis
 		return nil, fmt.Errorf("workload %s not in RUNNING state", id)
 	}
 	w.Status = nextStatus
+
+	now := time.Now()
+	if t0, ok := s.startedAt[id]; ok && !strings.EqualFold(strings.TrimSpace(nextStatus), statusRunning) {
+		secs := int64(now.Sub(t0).Seconds())
+		if secs < 0 {
+			secs = 0
+		}
+		s.runtime[id] += secs
+		delete(s.startedAt, id)
+	}
+	if strings.EqualFold(nextStatus, statusSuspended) {
+		w.SuspendedAtUtc = now.UTC().Format(time.RFC3339Nano)
+		if w.SuspendReason == "" {
+			w.SuspendReason = "idle_timeout"
+		}
+	}
 	if url != "" {
 		w.Url = url
+	}
+	return w, nil
+}
+
+func (s *MemStore) ResumeWorkload(id string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+	if w.GetStatus() != statusSuspended {
+		return nil, fmt.Errorf("workload %s not in SUSPENDED state", id)
+	}
+
+	w.Status = statusRunning
+	w.ResumeCount++
+	w.SuspendedAtUtc = ""
+	w.SuspendReason = ""
+	s.startedAt[id] = time.Now()
+	return w, nil
+}
+
+func (s *MemStore) TerminateWorkload(id, reason string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+
+	switch w.GetStatus() {
+	case statusRunning, statusSuspended:
+		now := time.Now()
+		if w.GetStatus() == statusRunning {
+			if t0, ok := s.startedAt[id]; ok {
+				secs := int64(now.Sub(t0).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				s.runtime[id] += secs
+			}
+		}
+		delete(s.startedAt, id)
+	case statusTerminated:
+		if w.TerminateReason == "" && reason != "" {
+			w.TerminateReason = reason
+		}
+		if w.TerminatedAtUtc == "" {
+			w.TerminatedAtUtc = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		return w, nil
+	default:
+		return nil, fmt.Errorf("workload %s not in a terminable state", id)
+	}
+
+	w.Status = statusTerminated
+	w.TerminatedAtUtc = time.Now().UTC().Format(time.RFC3339Nano)
+	w.TerminateReason = reason
+	return w, nil
+}
+
+func (s *MemStore) RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w, ok := s.workloads[id]
+	if !ok {
+		return nil, fmt.Errorf("workload %s not found", id)
+	}
+	if w.GetStatus() != statusTerminated {
+		return nil, fmt.Errorf("workload %s not in TERMINATED state", id)
+	}
+	if previousStatus != statusRunning && previousStatus != statusSuspended {
+		return nil, fmt.Errorf("invalid rollback target status %q for workload %s", previousStatus, id)
+	}
+
+	w.Status = previousStatus
+	w.TerminatedAtUtc = ""
+	w.TerminateReason = ""
+	if previousStatus == statusRunning {
+		s.startedAt[id] = time.Now()
+	} else {
+		delete(s.startedAt, id)
 	}
 	return w, nil
 }

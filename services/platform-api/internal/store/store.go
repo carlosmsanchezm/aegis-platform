@@ -106,11 +106,15 @@ type Store interface {
 	ListWorkloads(projectID string) []*aegis.Workload
 	StartWorkload(id string) (*aegis.Workload, time.Duration, bool, error)
 	AckWorkload(id, nextStatus, url string) (*aegis.Workload, error)
+	ResumeWorkload(id string) (*aegis.Workload, error)
+	TerminateWorkload(id, reason string) (*aegis.Workload, error)
+	RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error)
 	MarkPlaced(id string)
 	GetPlacedAt(id string) (time.Time, bool)
 	ClearPlacedAt(id string)
 	MarkStarted(id string)
 	GetStartedAt(id string) (time.Time, bool)
+	GetRuntimeSeconds(id string) (int64, bool)
 	SetEstimateUSD(id string, usd float64)
 	PopEstimateUSD(id string) float64
 	LeaseWorkloads(clusterID string, max int) []*aegis.Workload

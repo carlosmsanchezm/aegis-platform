@@ -22,7 +22,8 @@
 #   STEP_CA_MAX_TLS_CERT_DURATION     (default: 2160h)
 #   STEP_CA_DEFAULT_TLS_CERT_DURATION (default: 2160h)
 #   STEP_CA_MIN_TLS_CERT_DURATION     (default: 5m)
-#   STEP_CA_DB_PERSISTENT             (default: false)
+#   STEP_CA_DB_PERSISTENT             (default: true)
+#   STEP_CA_REINSTALL_ON_MISMATCH     (default: false)
 #   STEP_CLUSTER_ISSUER_NAME (default: aegis-internal)
 #   TRUST_BUNDLE_SECRET_NAME (default: aegis-trust-bundle)
 #   TRUST_BUNDLE_NAMESPACES  (default: aegis-system,keycloak)
@@ -63,6 +64,7 @@ STEP_CA_MAX_TLS_CERT_DURATION="${STEP_CA_MAX_TLS_CERT_DURATION:-2160h}"
 STEP_CA_DEFAULT_TLS_CERT_DURATION="${STEP_CA_DEFAULT_TLS_CERT_DURATION:-2160h}"
 STEP_CA_MIN_TLS_CERT_DURATION="${STEP_CA_MIN_TLS_CERT_DURATION:-5m}"
 STEP_CA_DB_PERSISTENT="${STEP_CA_DB_PERSISTENT:-true}"
+STEP_CA_REINSTALL_ON_MISMATCH="${STEP_CA_REINSTALL_ON_MISMATCH:-false}"
 
 TRUST_BUNDLE_SECRET_NAME="${TRUST_BUNDLE_SECRET_NAME:-aegis-trust-bundle}"
 TRUST_BUNDLE_NAMESPACES="${TRUST_BUNDLE_NAMESPACES:-aegis-system,keycloak}"
@@ -93,20 +95,36 @@ install_step_ca() {
   log "Installing/upgrading step-certificates (step-ca) in namespace ${PKI_NAMESPACE}"
   ensure_namespace "$PKI_NAMESPACE"
 
-  local db_persistent="${STEP_CA_DB_PERSISTENT}"
+  local desired_persistent="${STEP_CA_DB_PERSISTENT}"
+  local db_persistent="${desired_persistent}"
   if kubectl get statefulset "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" >/dev/null 2>&1; then
     local vct
     vct="$(kubectl get statefulset "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" -o jsonpath='{.spec.volumeClaimTemplates[0].metadata.name}' 2>/dev/null || true)"
     if [[ -n "$vct" ]]; then
-      if [[ "$db_persistent" != "true" ]]; then
-        log "step-ca already uses a persistent DB; preserving ca.db.persistent=true to avoid immutable StatefulSet updates"
+      if [[ "$desired_persistent" != "true" ]]; then
+        if [[ "$STEP_CA_REINSTALL_ON_MISMATCH" == "true" ]]; then
+          log "step-ca is installed with a persistent DB but STEP_CA_DB_PERSISTENT=false; reinstalling to avoid immutable StatefulSet updates"
+          helm uninstall "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" --wait --timeout 10m >/dev/null 2>&1 || true
+          kubectl delete pvc -n "$PKI_NAMESPACE" -l "app.kubernetes.io/instance=${STEP_CA_RELEASE}" --ignore-not-found >/dev/null 2>&1 || true
+        else
+          log "step-ca already uses a persistent DB; preserving ca.db.persistent=true to avoid immutable StatefulSet updates"
+          db_persistent="true"
+        fi
+      else
+        db_persistent="true"
       fi
-      db_persistent="true"
     else
-      if [[ "$db_persistent" != "false" ]]; then
-        log "step-ca already uses an ephemeral DB; preserving ca.db.persistent=false to avoid immutable StatefulSet updates"
+      if [[ "$desired_persistent" != "false" ]]; then
+        if [[ "$STEP_CA_REINSTALL_ON_MISMATCH" == "true" ]]; then
+          log "step-ca is installed with an ephemeral DB but STEP_CA_DB_PERSISTENT=true; reinstalling to avoid immutable StatefulSet updates"
+          helm uninstall "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" --wait --timeout 10m >/dev/null 2>&1 || true
+        else
+          log "step-ca already uses an ephemeral DB; preserving ca.db.persistent=false to avoid immutable StatefulSet updates"
+          db_persistent="false"
+        fi
+      else
+        db_persistent="false"
       fi
-      db_persistent="false"
     fi
   fi
 

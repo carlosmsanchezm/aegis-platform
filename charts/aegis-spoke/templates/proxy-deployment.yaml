@@ -1,4 +1,7 @@
 {{- if .Values.proxy.enabled }}
+{{- $tls := .Values.proxy.tls | default dict -}}
+{{- $cm := $tls.certManager | default dict -}}
+{{- $podTLS := and (not ($tls.terminateAtIngress | default false)) (or ($cm.enabled | default false) (and $tls.cert $tls.key)) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,7 +33,7 @@ spec:
           imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
           ports:
             - containerPort: 8080
-{{- if and (not .Values.proxy.tls.terminateAtIngress) .Values.proxy.tls.cert .Values.proxy.tls.key }}
+{{- if $podTLS }}
           volumeMounts:
             - name: proxy-tls
               mountPath: /etc/aegis-proxy
@@ -52,7 +55,7 @@ spec:
             - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
               value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
 {{- end }}
-{{- if and (not .Values.proxy.tls.terminateAtIngress) .Values.proxy.tls.cert .Values.proxy.tls.key }}
+{{- if $podTLS }}
             - name: AEGIS_PROXY_TLS_CERT
               value: "/etc/aegis-proxy/tls.crt"
             - name: AEGIS_PROXY_TLS_KEY
@@ -68,7 +71,7 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 20
-{{- if and (not .Values.proxy.tls.terminateAtIngress) .Values.proxy.tls.cert .Values.proxy.tls.key }}
+{{- if $podTLS }}
       volumes:
         - name: proxy-tls
           secret:

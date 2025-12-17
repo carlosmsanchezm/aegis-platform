@@ -25,7 +25,7 @@ fi
 
 BASE_URL="${KEYCLOAK_BASE_URL:-https://keycloak.localtest.me}"
 REALM="${KEYCLOAK_REALM:-aegis}"
-TOKEN_URL="${KEYCLOAK_TOKEN_URL:-${BASE_URL%/}/realms/${REALM}/protocol/openid-connect/token}"
+TOKEN_URL="${KEYCLOAK_TOKEN_URL:-}"
 CLIENT_ID="${KEYCLOAK_CLIENT_ID:-backstage}"
 CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-}"
 USERNAME="${KEYCLOAK_USERNAME:-}"
@@ -33,10 +33,92 @@ PASSWORD="${KEYCLOAK_PASSWORD:-}"
 GRANT_TYPE="${KEYCLOAK_GRANT_TYPE:-}"
 SCOPE="${KEYCLOAK_SCOPE:-openid profile email offline_access}"
 AUDIENCE="${KEYCLOAK_AUDIENCE:-}"
-CA_CERT="${KEYCLOAK_CA_CERT:-${HOME}/keycloak.localtest.me.crt}"
+CA_CERT="${KEYCLOAK_CA_CERT:-${GRPC_CA:-${GRPC_CA_PATH:-${HOME}/aegis-platform-api-ca.crt}}}"
 INSECURE="${KEYCLOAK_INSECURE:-0}"
 WAIT_SECONDS="${KEYCLOAK_WAIT_SECONDS:-180}"
 WAIT_ENABLED="${KEYCLOAK_WAIT:-1}"
+PORT_FORWARD_ENABLED="${KEYCLOAK_PORT_FORWARD:-0}"
+PORT_FORWARD_LOCAL_PORT="${KEYCLOAK_PORT_FORWARD_LOCAL_PORT:-18443}"
+
+port_is_ready() {
+  local host="$1" port="$2"
+  (exec 3<>"/dev/tcp/${host}/${port}" && exec 3<&- && exec 3>&-) >/dev/null 2>&1
+}
+
+maybe_port_forward() {
+  [[ "${PORT_FORWARD_ENABLED}" == "0" ]] && return 0
+  command -v kubectl >/dev/null 2>&1 || return 0
+
+  local url_no_scheme url_hostport url_host url_port scheme
+  url_no_scheme="${BASE_URL#http://}"
+  url_no_scheme="${url_no_scheme#https://}"
+  url_hostport="${url_no_scheme%%/*}"
+  url_host="${url_hostport}"
+  url_port=""
+  scheme="https"
+  [[ "${BASE_URL}" == http://* ]] && scheme="http"
+
+  if [[ "${url_hostport}" == *:* ]]; then
+    url_port="${url_hostport##*:}"
+    url_host="${url_hostport%:*}"
+  else
+    url_port=$([[ "${scheme}" == "https" ]] && echo "443" || echo "80")
+  fi
+
+  case "${url_host}" in
+    *.svc.cluster.local|*.cluster.local) ;;
+    *) return 0 ;;
+  esac
+
+  local ns svc pf_pid pf_log
+  ns="${KEYCLOAK_NAMESPACE:-}"
+  svc="${KEYCLOAK_SERVICE_NAME:-}"
+  if [[ -z "${svc}" ]]; then
+    svc="${url_host%%.*}"
+  fi
+  if [[ -z "${ns}" ]]; then
+    local rest
+    rest="${url_host#${svc}.}"
+    ns="${rest%%.*}"
+  fi
+
+  if [[ -z "${ns}" || -z "${svc}" ]]; then
+    echo "⚠ Unable to infer Keycloak namespace/service for port-forward; continuing without it" >&2
+    return 0
+  fi
+
+  pf_log="$(mktemp)"
+  kubectl -n "${ns}" port-forward --address 127.0.0.1 "svc/${svc}" "${PORT_FORWARD_LOCAL_PORT}:${url_port}" \
+    >"${pf_log}" 2>&1 &
+  pf_pid=$!
+
+  cleanup_pf() {
+    if [[ -n "${pf_pid:-}" ]]; then
+      kill "${pf_pid}" >/dev/null 2>&1 || true
+      wait "${pf_pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${pf_log}" >/dev/null 2>&1 || true
+  }
+  trap cleanup_pf EXIT
+
+  for _ in {1..50}; do
+    if port_is_ready 127.0.0.1 "${PORT_FORWARD_LOCAL_PORT}"; then
+      BASE_URL="${scheme}://${url_host}:${PORT_FORWARD_LOCAL_PORT}"
+      CURL_TRANSPORT_ARGS+=(--resolve "${url_host}:${PORT_FORWARD_LOCAL_PORT}:127.0.0.1")
+      return 0
+    fi
+    if ! kill -0 "${pf_pid}" >/dev/null 2>&1; then
+      echo "✖ kubectl port-forward exited prematurely" >&2
+      cat "${pf_log}" >&2
+      return 1
+    fi
+    sleep 0.2
+  done
+
+  echo "✖ Timed out waiting for Keycloak port-forward to become ready" >&2
+  cat "${pf_log}" >&2
+  return 1
+}
 
 wait_for_keycloak() {
   [[ "${WAIT_ENABLED}" == "0" ]] && return
@@ -81,6 +163,9 @@ wait_for_keycloak() {
   deadline=$((SECONDS + 60))
   while (( SECONDS < deadline )); do
     local curl_args=(-sS -o /dev/null -w '%{http_code}')
+    if (( ${#CURL_TRANSPORT_ARGS[@]} > 0 )); then
+      curl_args+=("${CURL_TRANSPORT_ARGS[@]}")
+    fi
     [[ -n "${CA_CERT}" && -f "${CA_CERT}" ]] && curl_args+=(--cacert "${CA_CERT}")
     [[ "${INSECURE}" == "1" ]] && curl_args+=(--insecure)
 
@@ -132,6 +217,8 @@ if [[ "${GRANT_TYPE}" == "client_credentials" ]]; then
     exit 1
   fi
 fi
+maybe_port_forward
+TOKEN_URL="${TOKEN_URL:-${BASE_URL%/}/realms/${REALM}/protocol/openid-connect/token}"
 wait_for_keycloak
 
 declare -a FORM_DATA

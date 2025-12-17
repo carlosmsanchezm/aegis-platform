@@ -549,8 +549,7 @@ echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 
 # Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
-echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
-kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
+echo "5️⃣  Applying CRDs (k8s-agent) before Helm upgrade..."
 CRD_BASE_DIR="${SCRIPT_DIR}/../agents/k8s-agent/config/crd/bases"
 if [ -d "${CRD_BASE_DIR}" ]; then
   kubectl apply -f "${CRD_BASE_DIR}" >/dev/null

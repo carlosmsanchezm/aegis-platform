@@ -29,7 +29,7 @@ terraform apply
 ./show-credentials.sh
 
 # 3. Deploy applications
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 ## 🔐 Accessing Credentials
@@ -58,7 +58,7 @@ When you need credentials for deployment:
 1. **Go to terraform directory**: `cd terraform`
 2. **Run**: `./show-credentials.sh`
 3. **Copy the database password** from the output
-4. **Use in Helm deployment** (handled automatically by `generate-helm-values.sh`)
+4. **Use in Helm deployment** (handled automatically by `generate-cloud-deployment.sh`)
 
 The password and all connection info are stored in Terraform state and can be retrieved anytime with the commands above.
 

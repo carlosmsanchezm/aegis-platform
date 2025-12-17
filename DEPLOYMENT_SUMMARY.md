@@ -98,7 +98,7 @@ terraform apply
 
 ### Generate value overlays
 ```bash
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 This creates/updates:
 - `charts/aegis-services/values-cloud-generated.yaml`
@@ -115,7 +115,7 @@ aws eks update-kubeconfig \
 
 ### Generate Helm values (script can deploy for you)
 ```bash
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 When the script finishes it prompts `Do you want to deploy now?`:
 
@@ -149,7 +149,7 @@ helm upgrade --install aegis-services charts/aegis-services \
 
 # Spoke
 helm upgrade --install aegis-spoke charts/aegis-spoke \
-  -f charts/aegis-spoke/values-cloud.yaml \
+  -f charts/aegis-spoke/values-cloud-tls.yaml \
   -f charts/aegis-spoke/values-cloud-generated.yaml \
   -f overrides.yaml \
   --namespace aegis-system
@@ -170,10 +170,9 @@ Use the same Terraform apply.
 
 ### Generate TLS assets + values
 ```bash
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
-The prompt behaves the same way as before (`y` to deploy now, `n` to just write the files). TLS is now enforced by default, and the script emits:
-- `tls-overrides.yaml`
+The prompt behaves the same way as before (`y` to deploy now, `n` to just write the files). TLS is now enforced by default via cert-manager and the internal PKI.
 
 ### Deploy with TLS-enabled services (manual path)
 ```bash
@@ -182,7 +181,6 @@ helm upgrade --install aegis-services charts/aegis-services \
   -f charts/aegis-services/values/cloud.yaml \
   -f charts/aegis-services/values-cloud-generated.yaml \
   -f overrides.yaml \
-  -f tls-overrides.yaml \
   --namespace aegis-system --create-namespace
 ```
 (Apply `charts/aegis-spoke/values-cloud-tls.yaml` alongside the spoke chart so the agent dials the hub over TLS.)

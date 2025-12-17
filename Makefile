@@ -312,11 +312,14 @@ deploy-local-tls: setup-local clean-webhook
 		else \
 		  echo "RHBK_USERNAME/RHBK_PASSWORD not set; skipping redhat-pull-secret creation (Keycloak pods must already have access)."; \
 		fi; \
+		echo "Installing internal PKI (cert-manager + step-ca + step-issuer)..."; \
+		PKI_NAMESPACE=aegis-pki CERT_MANAGER_NAMESPACE=cert-manager TRUST_BUNDLE_NAMESPACES=aegis-system,keycloak ./scripts/install-internal-pki.sh; \
 		echo "Deploying Aegis services locally with TLS..."; \
 		helm upgrade --install aegis-services charts/aegis-services \
 		  -f charts/aegis-services/values/common.yaml \
 		  -f charts/aegis-services/values/local.yaml \
 		  -f charts/aegis-services/values/local-tls.yaml \
+		  -f charts/aegis-services/values/local-pki.yaml \
 		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
 		  --set platformApi.image.tag=$$PLATFORM_API_TAG \
 		  --namespace aegis-system --create-namespace \
@@ -338,6 +341,7 @@ deploy-local-tls: setup-local clean-webhook
 	    -f charts/aegis-spoke/values.yaml \
 	    -f charts/aegis-spoke/values-local.yaml \
 	    -f charts/aegis-spoke/values-local-tls.yaml \
+	    -f charts/aegis-spoke/values-local-pki.yaml \
 	    --set k8sAgent.image.repository=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f1) \
 	    --set k8sAgent.image.tag=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f2) \
 	    --set k8sAgent.image.pullPolicy=Always \
@@ -356,40 +360,39 @@ deploy-local-tls: setup-local clean-webhook
 	  cp aegis-platform/.env.development aegis-platform/.env; \
 	  echo "Created aegis-platform/.env from .env.development"; \
 	fi; \
-	echo "Syncing platform API certificate to $$HOME/aegis-platform-api-ca.crt ..."; \
-	kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; \
+	echo "Syncing internal CA bundle to $$HOME/aegis-platform-api-ca.crt ..."; \
+	kubectl get secret aegis-trust-bundle -n aegis-system -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; \
 	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; \
-	echo "Syncing Keycloak certificate to $$HOME/keycloak.localtest.me.crt ..."; \
-	kubectl get secret keycloak-tls -n keycloak -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; \
+	echo "Syncing internal CA bundle to $$HOME/keycloak.localtest.me.crt ..."; \
+	kubectl get secret aegis-trust-bundle -n keycloak -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; \
 	chmod 0644 "$$HOME/keycloak.localtest.me.crt"; \
-	cat "$$HOME/aegis-platform-api-ca.crt" "$$HOME/keycloak.localtest.me.crt" > "$$HOME/aegis-local-trust.pem"; \
+	cp "$$HOME/aegis-platform-api-ca.crt" "$$HOME/aegis-local-trust.pem"; \
 	chmod 0644 "$$HOME/aegis-local-trust.pem"; \
 	echo "   CA bundles refreshed."; \
 	echo "   Combined trust store: $$HOME/aegis-local-trust.pem"; \
 	echo "   To trust the platform API system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
 	echo "   Launch VS Code with TLS trust:"; \
-	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-local-trust.pem \"; \
-	echo "       /Applications/Visual\ Studio\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
-	echo "✅ Deployed with TLS using self-signed certificates"; \
+	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-local-trust.pem /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
+	echo "✅ Deployed with TLS using internal PKI (step-ca + cert-manager)"; \
 	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
 	echo "   Platform API HTTPS: https://platform-api.localtest.me"; \
 	echo "   Proxy: https://proxy.localtest.me"; \
 	echo ""; \
 	echo "   For E2E tests with TLS:"; \
 	echo "   export GRPC_TLS=1"; \
-	echo "   export GRPC_TLS_SKIP_VERIFY=1  # Self-signed certs"; \
+	echo "   export GRPC_TLS_SKIP_VERIFY=0"; \
 	echo "   ./scripts/e2e-platform-api.sh"
 
 
 .PHONY: sync-certs
 sync-certs:
-	@echo "Syncing platform API certificate to $$HOME/aegis-platform-api-ca.crt ..."; 
-	kubectl get secret aegis-services-platform-api-tls -n aegis-system -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; 
+	@echo "Syncing internal CA bundle to $$HOME/aegis-platform-api-ca.crt ..."; 
+	kubectl get secret aegis-trust-bundle -n aegis-system -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; 
 	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; 
-	echo "Syncing Keycloak certificate to $$HOME/keycloak.localtest.me.crt ..."; 
-	kubectl get secret keycloak-tls -n keycloak -o "jsonpath={.data.tls\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; 
+	echo "Syncing internal CA bundle to $$HOME/keycloak.localtest.me.crt ..."; 
+	kubectl get secret aegis-trust-bundle -n keycloak -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; 
 	chmod 0644 "$$HOME/keycloak.localtest.me.crt"; 
-	cat "$$HOME/aegis-platform-api-ca.crt" "$$HOME/keycloak.localtest.me.crt" > "$$HOME/aegis-local-trust.pem"; 
+	cp "$$HOME/aegis-platform-api-ca.crt" "$$HOME/aegis-local-trust.pem"; 
 	chmod 0644 "$$HOME/aegis-local-trust.pem"; 
 	echo "   CA bundles refreshed."; 
 	echo "   Combined trust store: $$HOME/aegis-local-trust.pem";

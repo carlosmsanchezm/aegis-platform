@@ -861,6 +861,31 @@ if [[ -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
   SPOKE_HELM_ARGS+=( --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG_VALUE} )
 fi
 
+echo "   🔧 Ensuring existing CRDs are adoptable by Helm..."
+SPOKE_CRDS=( \
+  aegisworkloads.aegis.yourorg.dev \
+  aegisworkloadslices.aegis.yourorg.dev \
+  workspaceclasses.aegis.yourorg.dev \
+  workspaceclusters.aegis.yourorg.dev \
+  workspacegpuprofiles.aegis.yourorg.dev \
+  workspacenetworks.aegis.yourorg.dev \
+  workspaces.aegis.yourorg.dev \
+  workspacestorages.aegis.yourorg.dev \
+)
+for crd in "${SPOKE_CRDS[@]}"; do
+  if kubectl get crd "${crd}" >/dev/null 2>&1; then
+    existing_rel="$(kubectl get crd "${crd}" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)"
+    existing_ns="$(kubectl get crd "${crd}" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || true)"
+    if [[ -z "${existing_rel}" && -z "${existing_ns}" ]]; then
+      kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite >/dev/null
+      kubectl annotate crd "${crd}" \
+        meta.helm.sh/release-name="${SPOKE_HELM_RELEASE}" \
+        meta.helm.sh/release-namespace="${SPOKE_NAMESPACE}" \
+        --overwrite >/dev/null
+    fi
+  fi
+done
+
 helm "${SPOKE_HELM_ARGS[@]}"
 
 echo "   ✅ k8s-agent deployed"

@@ -40,6 +40,18 @@ WAIT_ENABLED="${KEYCLOAK_WAIT:-1}"
 PORT_FORWARD_ENABLED="${KEYCLOAK_PORT_FORWARD:-0}"
 PORT_FORWARD_LOCAL_PORT="${KEYCLOAK_PORT_FORWARD_LOCAL_PORT:-18443}"
 
+PF_PID=""
+PF_LOG=""
+
+cleanup_pf() {
+  if [[ -n "${PF_PID}" ]]; then
+    kill "${PF_PID}" >/dev/null 2>&1 || true
+    wait "${PF_PID}" >/dev/null 2>&1 || true
+  fi
+  [[ -n "${PF_LOG}" ]] && rm -f "${PF_LOG}" >/dev/null 2>&1 || true
+}
+trap cleanup_pf EXIT
+
 port_is_ready() {
   local host="$1" port="$2"
   (exec 3<>"/dev/tcp/${host}/${port}" && exec 3<&- && exec 3>&-) >/dev/null 2>&1
@@ -70,7 +82,7 @@ maybe_port_forward() {
     *) return 0 ;;
   esac
 
-  local ns svc pf_pid pf_log
+  local ns svc
   ns="${KEYCLOAK_NAMESPACE:-}"
   svc="${KEYCLOAK_SERVICE_NAME:-}"
   if [[ -z "${svc}" ]]; then
@@ -87,19 +99,10 @@ maybe_port_forward() {
     return 0
   fi
 
-  pf_log="$(mktemp)"
+  PF_LOG="$(mktemp)"
   kubectl -n "${ns}" port-forward --address 127.0.0.1 "svc/${svc}" "${PORT_FORWARD_LOCAL_PORT}:${url_port}" \
-    >"${pf_log}" 2>&1 &
-  pf_pid=$!
-
-  cleanup_pf() {
-    if [[ -n "${pf_pid:-}" ]]; then
-      kill "${pf_pid}" >/dev/null 2>&1 || true
-      wait "${pf_pid}" >/dev/null 2>&1 || true
-    fi
-    rm -f "${pf_log}" >/dev/null 2>&1 || true
-  }
-  trap cleanup_pf EXIT
+    >"${PF_LOG}" 2>&1 &
+  PF_PID=$!
 
   for _ in {1..50}; do
     if port_is_ready 127.0.0.1 "${PORT_FORWARD_LOCAL_PORT}"; then
@@ -107,16 +110,16 @@ maybe_port_forward() {
       CURL_TRANSPORT_ARGS+=(--resolve "${url_host}:${PORT_FORWARD_LOCAL_PORT}:127.0.0.1")
       return 0
     fi
-    if ! kill -0 "${pf_pid}" >/dev/null 2>&1; then
+    if ! kill -0 "${PF_PID}" >/dev/null 2>&1; then
       echo "✖ kubectl port-forward exited prematurely" >&2
-      cat "${pf_log}" >&2
+      cat "${PF_LOG}" >&2
       return 1
     fi
     sleep 0.2
   done
 
   echo "✖ Timed out waiting for Keycloak port-forward to become ready" >&2
-  cat "${pf_log}" >&2
+  cat "${PF_LOG}" >&2
   return 1
 }
 
@@ -160,7 +163,7 @@ wait_for_keycloak() {
   # Now wait for Keycloak to actually respond to HTTP requests
   echo "⏳ Waiting for Keycloak to be ready to serve requests..." >&2
   health_check_url="${BASE_URL%/}/realms/${REALM}"
-  deadline=$((SECONDS + 60))
+  deadline=$((SECONDS + WAIT_SECONDS))
   while (( SECONDS < deadline )); do
     local curl_args=(-sS -o /dev/null -w '%{http_code}')
     if (( ${#CURL_TRANSPORT_ARGS[@]} > 0 )); then

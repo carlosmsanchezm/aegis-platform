@@ -22,6 +22,7 @@
 #   STEP_CA_MAX_TLS_CERT_DURATION     (default: 2160h)
 #   STEP_CA_DEFAULT_TLS_CERT_DURATION (default: 2160h)
 #   STEP_CA_MIN_TLS_CERT_DURATION     (default: 5m)
+#   STEP_CA_DB_PERSISTENT             (default: false)
 #   STEP_CLUSTER_ISSUER_NAME (default: aegis-internal)
 #   TRUST_BUNDLE_SECRET_NAME (default: aegis-trust-bundle)
 #   TRUST_BUNDLE_NAMESPACES  (default: aegis-system,keycloak)
@@ -61,6 +62,7 @@ STEP_CLUSTER_ISSUER_NAME="${STEP_CLUSTER_ISSUER_NAME:-aegis-internal}"
 STEP_CA_MAX_TLS_CERT_DURATION="${STEP_CA_MAX_TLS_CERT_DURATION:-2160h}"
 STEP_CA_DEFAULT_TLS_CERT_DURATION="${STEP_CA_DEFAULT_TLS_CERT_DURATION:-2160h}"
 STEP_CA_MIN_TLS_CERT_DURATION="${STEP_CA_MIN_TLS_CERT_DURATION:-5m}"
+STEP_CA_DB_PERSISTENT="${STEP_CA_DB_PERSISTENT:-true}"
 
 TRUST_BUNDLE_SECRET_NAME="${TRUST_BUNDLE_SECRET_NAME:-aegis-trust-bundle}"
 TRUST_BUNDLE_NAMESPACES="${TRUST_BUNDLE_NAMESPACES:-aegis-system,keycloak}"
@@ -91,6 +93,23 @@ install_step_ca() {
   log "Installing/upgrading step-certificates (step-ca) in namespace ${PKI_NAMESPACE}"
   ensure_namespace "$PKI_NAMESPACE"
 
+  local db_persistent="${STEP_CA_DB_PERSISTENT}"
+  if kubectl get statefulset "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" >/dev/null 2>&1; then
+    local vct
+    vct="$(kubectl get statefulset "$STEP_CA_RELEASE" -n "$PKI_NAMESPACE" -o jsonpath='{.spec.volumeClaimTemplates[0].metadata.name}' 2>/dev/null || true)"
+    if [[ -n "$vct" ]]; then
+      if [[ "$db_persistent" != "true" ]]; then
+        log "step-ca already uses a persistent DB; preserving ca.db.persistent=true to avoid immutable StatefulSet updates"
+      fi
+      db_persistent="true"
+    else
+      if [[ "$db_persistent" != "false" ]]; then
+        log "step-ca already uses an ephemeral DB; preserving ca.db.persistent=false to avoid immutable StatefulSet updates"
+      fi
+      db_persistent="false"
+    fi
+  fi
+
   # The chart's bootstrap job is named after the release; keep release stable.
   helm upgrade --install "$STEP_CA_RELEASE" smallstep/step-certificates \
     --namespace "$PKI_NAMESPACE" \
@@ -98,6 +117,7 @@ install_step_ca() {
     --set bootstrap.image.repository=smallstep/step-ca-bootstrap \
     --set "ca.name=${STEP_CA_NAME}" \
     --set "ca.provisioner.name=${STEP_CA_PROVISIONER_NAME}" \
+    --set "ca.db.persistent=${db_persistent}" \
     --wait \
     --timeout 10m >/dev/null
 

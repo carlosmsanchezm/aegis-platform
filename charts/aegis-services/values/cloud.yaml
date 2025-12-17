@@ -285,6 +285,11 @@ keycloak:
     storage:
       className: gp2
   realm:
+    importResources:
+      requests:
+        memory: 1Gi
+      limits:
+        memory: 2Gi
     client:
       secret:
         name: keycloak-backstage-client-secret

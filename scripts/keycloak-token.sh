@@ -166,7 +166,7 @@ esac
 [[ -n "${AUDIENCE}" ]] && FORM_DATA+=("audience=${AUDIENCE}")
 
 declare -a CURL_ARGS=()
-if [[ ${#CURL_TRANSPORT_ARGS[@]:-0} -gt 0 ]]; then
+if (( ${#CURL_TRANSPORT_ARGS[@]} > 0 )); then
   CURL_ARGS+=("${CURL_TRANSPORT_ARGS[@]}")
 fi
 CURL_ARGS+=(-sS --fail "--request" "POST" "${TOKEN_URL}")

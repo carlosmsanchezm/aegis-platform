@@ -19,6 +19,7 @@
 #   STEP_ISSUER_RELEASE      (default: step-issuer)
 #   STEP_CA_PROVISIONER_NAME (default: aegis)
 #   STEP_CA_NAME             (default: Aegis Internal CA)
+#   STEP_CA_SERVICE_PORT     (default: auto; falls back to 443)
 #   STEP_CA_MAX_TLS_CERT_DURATION     (default: 2160h)
 #   STEP_CA_DEFAULT_TLS_CERT_DURATION (default: 2160h)
 #   STEP_CA_MIN_TLS_CERT_DURATION     (default: 5m)
@@ -59,6 +60,7 @@ STEP_ISSUER_RELEASE="${STEP_ISSUER_RELEASE:-step-issuer}"
 STEP_CA_PROVISIONER_NAME="${STEP_CA_PROVISIONER_NAME:-aegis}"
 STEP_CA_NAME="${STEP_CA_NAME:-Aegis Internal CA}"
 STEP_CLUSTER_ISSUER_NAME="${STEP_CLUSTER_ISSUER_NAME:-aegis-internal}"
+STEP_CA_SERVICE_PORT="${STEP_CA_SERVICE_PORT:-}"
 
 STEP_CA_MAX_TLS_CERT_DURATION="${STEP_CA_MAX_TLS_CERT_DURATION:-2160h}"
 STEP_CA_DEFAULT_TLS_CERT_DURATION="${STEP_CA_DEFAULT_TLS_CERT_DURATION:-2160h}"
@@ -217,7 +219,7 @@ create_step_cluster_issuer() {
   local password_secret="${STEP_CA_RELEASE}-provisioner-password"
 
   log "Creating/updating StepClusterIssuer ${STEP_CLUSTER_ISSUER_NAME}"
-  local ca_json root_ca kid ca_bundle_b64
+  local ca_json root_ca kid ca_bundle_b64 step_ca_port step_ca_url
   ca_json="$(kubectl get configmap "$cm_config" -n "$PKI_NAMESPACE" -o jsonpath='{.data.ca\.json}')"
   root_ca="$(kubectl get configmap "$cm_certs" -n "$PKI_NAMESPACE" -o jsonpath='{.data.root_ca\.crt}')"
 
@@ -235,6 +237,12 @@ create_step_cluster_issuer() {
   fi
 
   ca_bundle_b64="$(printf '%s' "$root_ca" | base64 | tr -d '\n')"
+  step_ca_port="${STEP_CA_SERVICE_PORT}"
+  if [[ -z "${step_ca_port}" ]]; then
+    step_ca_port="$(kubectl get svc "${STEP_CA_RELEASE}" -n "${PKI_NAMESPACE}" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || true)"
+  fi
+  step_ca_port="${step_ca_port:-443}"
+  step_ca_url="https://${STEP_CA_RELEASE}.${PKI_NAMESPACE}.svc.cluster.local:${step_ca_port}"
 
   cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: certmanager.step.sm/v1beta1
@@ -242,7 +250,7 @@ kind: StepClusterIssuer
 metadata:
   name: ${STEP_CLUSTER_ISSUER_NAME}
 spec:
-  url: https://${STEP_CA_RELEASE}.${PKI_NAMESPACE}.svc.cluster.local
+  url: ${step_ca_url}
   caBundle: ${ca_bundle_b64}
   provisioner:
     name: ${STEP_CA_PROVISIONER_NAME}

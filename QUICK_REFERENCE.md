@@ -4,38 +4,11 @@
 
 ```bash
 # 1. Deploy infrastructure
-cd terraform/
+cd terraform
 terraform init && terraform apply
 
-# 2. Generate Helm values
-./generate-helm-values.sh
-
-# 3. Update domains (replace 'yourdomain.com')
-DOMAIN="your-actual-domain.com"
-sed -i '' "s/yourdomain.com/${DOMAIN}/g" ../charts/aegis-services/values-cloud-generated.yaml
-sed -i '' "s/yourdomain.com/${DOMAIN}/g" ../charts/aegis-spoke/values-cloud-generated.yaml
-
-# 4. Configure kubectl
-aws eks update-kubeconfig --region $(terraform output -raw aws_region) --name $(terraform output -raw cluster_name)
-
-# 5. Create secrets
-kubectl create secret generic aegis-platform-secrets \
-  --from-literal=db-password="$(terraform output -raw db_password_secret_value)" \
-  --from-literal=proxy-jwt-secret="$(terraform output -raw jwt_secret_value)" \
-  --namespace aegis-system --create-namespace
-
-# 6. Deploy
-cd ../charts/
-helm upgrade --install aegis-services ./aegis-services \
-  -f ./aegis-services/values/common.yaml \
-  -f ./aegis-services/values/cloud.yaml \
-  -f ./aegis-services/values-cloud-generated.yaml \
-  --namespace aegis-system --create-namespace
-
-helm upgrade --install aegis-spoke ./aegis-spoke \
-  -f ./aegis-spoke/values-cloud.yaml \
-  -f ./aegis-spoke/values-cloud-generated.yaml \
-  --namespace aegis-system
+# 2. Deploy Aegis (installs internal PKI + deploys Helm)
+./generate-cloud-deployment.sh --non-interactive
 ```
 
 ## 🏠 Local Development
@@ -173,7 +146,7 @@ tail -f ~/Library/Application\ Support/Code/logs/*/window1/exthost/output_loggin
 ```bash
 cd terraform/
 terraform apply
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 ### Update Helm Deployment
@@ -206,12 +179,12 @@ npx @vscode/vsce package --out aegis-remote.vsix
 - `charts/aegis-services/values/common.yaml` - Hub base defaults (shared)
 - `charts/aegis-services/values/cloud.yaml` - Hub overlay (cloud)
 - `charts/aegis-services/values-cloud-generated.yaml` - Hub config (from Terraform)
-- `charts/aegis-spoke/values-cloud.yaml` - Spoke config (static)
+- `charts/aegis-spoke/values-cloud-tls.yaml` - Spoke TLS client overlay
 - `charts/aegis-spoke/values-cloud-generated.yaml` - Spoke config (from Terraform)
 
 ### Terraform
 - `terraform/outputs.tf` - Terraform outputs
-- `terraform/generate-helm-values.sh` - Auto-generate Helm values
+- `terraform/generate-cloud-deployment.sh` - Cloud deployment automation
 - `terraform/terraform.tfvars` - Your Terraform variables
 
 ### VS Code Extension

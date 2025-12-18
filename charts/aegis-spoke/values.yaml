@@ -18,7 +18,6 @@ k8sAgent:
     AEGIS_CP_OIDC_CLIENT_SECRET: ""
     AEGIS_CP_OIDC_AUDIENCE: ""
     AEGIS_CP_OIDC_CA_B64: ""
-    AEGIS_CP_OIDC_CA_FILE: ""
     AEGIS_CP_OIDC_SKIP_TLS_VERIFY: ""
     AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
@@ -39,6 +38,15 @@ k8sAgent:
     # Examples: "cpu-small,cpu-large,gpu-a100,gpu-h100"
     # Default to CPU-only; GPU flavors should be injected dynamically based on actual node pools/policy.
     AEGIS_FLAVORS: "cpu-small"
+
+  # Optional: mount a shared trust bundle secret and point the agent at it.
+  # This avoids duplicating base64 CA strings in values files.
+  trustBundle:
+    enabled: false
+    secretName: aegis-trust-bundle
+    key: ca.crt
+    mountPath: /etc/aegis/trust
+    fileName: ca.crt
 
 proxy:
   replicaCount: 1
@@ -70,6 +78,18 @@ proxy:
     terminateAtIngress: false
     cert: "" # Provide via --set-file proxy.tls.cert=/path/to/cert or external secret
     key: ""  # Provide via --set-file proxy.tls.key=/path/to/key or external secret
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
 
   clientCerts:
     enabled: false

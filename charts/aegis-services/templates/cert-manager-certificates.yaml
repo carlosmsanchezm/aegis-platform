@@ -1,0 +1,180 @@
+{{- /*
+cert-manager Certificates for Aegis services.
+
+These resources are only rendered when:
+  - the service is enabled
+  - pod TLS is enabled for that service
+  - tls.certManager.enabled is true
+  - cert-manager CRDs are present in the cluster
+
+Issuer defaults target the smallstep StepClusterIssuer (certmanager.step.sm).
+*/ -}}
+
+{{- if and (.Capabilities.APIVersions.Has "cert-manager.io/v1") -}}
+
+{{- /* --------------------------------------------------------------------- */ -}}
+{{- /* Platform API certificate */ -}}
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $platformTLS := $platform.tls | default dict -}}
+{{- $platformCM := $platformTLS.certManager | default dict -}}
+{{- if and ($platform.enabled | default false) ($platformTLS.enabled | default false) ($platformCM.enabled | default false) -}}
+{{- $issuer := $platformCM.issuerRef | default dict -}}
+{{- $issuerName := $issuer.name | default "aegis-internal" -}}
+{{- $issuerKind := $issuer.kind | default "StepClusterIssuer" -}}
+{{- $issuerGroup := $issuer.group | default "certmanager.step.sm" -}}
+{{- $dnsNames := list -}}
+{{- $svcName := include "aegis-services.platformApi.fullname" . -}}
+{{- $dnsNames = append $dnsNames (printf "%s.%s.svc.cluster.local" $svcName .Release.Namespace) -}}
+{{- $dnsNames = append $dnsNames $svcName -}}
+{{- $ingress := $platform.ingress | default dict -}}
+{{- range ($ingress.hosts | default list) -}}
+  {{- if .host -}}
+    {{- $dnsNames = append $dnsNames (.host | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $httpIngress := $platform.httpIngress | default dict -}}
+{{- range ($httpIngress.hosts | default list) -}}
+  {{- if .host -}}
+    {{- $dnsNames = append $dnsNames (.host | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- range ($platformCM.dnsNames | default list) -}}
+  {{- if . -}}
+    {{- $dnsNames = append $dnsNames (. | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $dnsNames = $dnsNames | uniq }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "aegis-services.platformApi.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+spec:
+  secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: {{ $issuerKind }}
+    group: {{ $issuerGroup }}
+  duration: {{ $platformCM.duration | default "2160h" | quote }}
+  renewBefore: {{ $platformCM.renewBefore | default "168h" | quote }}
+  privateKey:
+    algorithm: {{ (($platformCM.privateKey | default dict).algorithm) | default "RSA" }}
+    size: {{ (($platformCM.privateKey | default dict).size) | default 2048 }}
+  dnsNames:
+{{ toYaml $dnsNames | nindent 4 }}
+{{ end }}
+
+{{- /* --------------------------------------------------------------------- */ -}}
+{{- /* Proxy certificate */ -}}
+{{- $proxy := .Values.proxy | default dict -}}
+{{- $proxyTLS := $proxy.tls | default dict -}}
+{{- $proxyCM := $proxyTLS.certManager | default dict -}}
+{{- if and ($proxy.enabled | default false) ($proxyTLS.enabled | default false) ($proxyCM.enabled | default false) -}}
+{{- $issuer := $proxyCM.issuerRef | default dict -}}
+{{- $issuerName := $issuer.name | default "aegis-internal" -}}
+{{- $issuerKind := $issuer.kind | default "StepClusterIssuer" -}}
+{{- $issuerGroup := $issuer.group | default "certmanager.step.sm" -}}
+{{- $dnsNames := list -}}
+{{- $svcName := include "aegis-services.proxy.fullname" . -}}
+{{- $dnsNames = append $dnsNames (printf "%s.%s.svc.cluster.local" $svcName .Release.Namespace) -}}
+{{- $dnsNames = append $dnsNames $svcName -}}
+{{- if $proxy.publicHost -}}
+  {{- $dnsNames = append $dnsNames ($proxy.publicHost | trim) -}}
+{{- end -}}
+{{- $ingress := $proxy.ingress | default dict -}}
+{{- range ($ingress.hosts | default list) -}}
+  {{- if .host -}}
+    {{- $dnsNames = append $dnsNames (.host | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- range ($proxyCM.dnsNames | default list) -}}
+  {{- if . -}}
+    {{- $dnsNames = append $dnsNames (. | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $dnsNames = $dnsNames | uniq }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "aegis-services.proxy.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  secretName: {{ include "aegis-services.proxy.tlsSecretName" . }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: {{ $issuerKind }}
+    group: {{ $issuerGroup }}
+  duration: {{ $proxyCM.duration | default "2160h" | quote }}
+  renewBefore: {{ $proxyCM.renewBefore | default "168h" | quote }}
+  privateKey:
+    algorithm: {{ (($proxyCM.privateKey | default dict).algorithm) | default "RSA" }}
+    size: {{ (($proxyCM.privateKey | default dict).size) | default 2048 }}
+  dnsNames:
+{{ toYaml $dnsNames | nindent 4 }}
+{{ end }}
+
+{{- /* --------------------------------------------------------------------- */ -}}
+{{- /* Keycloak certificate */ -}}
+{{- $kc := .Values.keycloak | default dict -}}
+{{- $crdReady := or (.Capabilities.APIVersions.Has "k8s.keycloak.org/v2alpha1") ($kc.forceRender | default false) -}}
+{{- $kcTLS := $kc.tls | default dict -}}
+{{- $kcSecret := $kcTLS.secret | default dict -}}
+{{- $kcCM := $kcTLS.certManager | default dict -}}
+{{- if and ($kc.enabled | default false) $crdReady ($kcCM.enabled | default false) -}}
+{{- $ns := include "aegis-services.keycloak.namespace" . -}}
+{{- $issuer := $kcCM.issuerRef | default dict -}}
+{{- $issuerName := $issuer.name | default "aegis-internal" -}}
+{{- $issuerKind := $issuer.kind | default "StepClusterIssuer" -}}
+{{- $issuerGroup := $issuer.group | default "certmanager.step.sm" -}}
+{{- $dnsNames := list -}}
+{{- $alias := include "aegis-services.keycloak.fullname" . -}}
+{{- $dnsNames = append $dnsNames (printf "%s.%s.svc.cluster.local" $alias $ns) -}}
+{{- $dnsNames = append $dnsNames $alias -}}
+{{- $svc := printf "%s-service" $alias -}}
+{{- $dnsNames = append $dnsNames (printf "%s.%s.svc.cluster.local" $svc $ns) -}}
+{{- $hostname := ($kc.hostname | default dict).hostname | default "" -}}
+{{- if $hostname -}}
+  {{- $clean := $hostname | trim | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" -}}
+  {{- $hostOnly := (splitList ":" $clean | first) -}}
+  {{- if $hostOnly -}}
+    {{- $dnsNames = append $dnsNames $hostOnly -}}
+  {{- end -}}
+{{- end -}}
+{{- range ($kcCM.dnsNames | default list) -}}
+  {{- if . -}}
+    {{- $dnsNames = append $dnsNames (. | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $dnsNames = $dnsNames | uniq }}
+{{- $secretName := $kcSecret.name | default "keycloak-tls" -}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "aegis-services.keycloak.fullname" . }}-tls
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis-services.keycloak.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $secretName }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: {{ $issuerKind }}
+    group: {{ $issuerGroup }}
+  duration: {{ $kcCM.duration | default "2160h" | quote }}
+  renewBefore: {{ $kcCM.renewBefore | default "168h" | quote }}
+  privateKey:
+    algorithm: {{ (($kcCM.privateKey | default dict).algorithm) | default "RSA" }}
+    size: {{ (($kcCM.privateKey | default dict).size) | default 2048 }}
+  dnsNames:
+{{ toYaml $dnsNames | nindent 4 }}
+{{ end }}
+
+{{- end }}

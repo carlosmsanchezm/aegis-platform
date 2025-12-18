@@ -1,0 +1,23 @@
+# Internal PKI overlay for local development.
+#
+# This overlay assumes `scripts/install-internal-pki.sh` has been run and the
+# trust bundle secret exists (default: `aegis-trust-bundle` in `aegis-system`).
+#
+# Usage:
+#   helm upgrade --install aegis-services charts/aegis-services \
+#     -f charts/aegis-services/values/common.yaml \
+#     -f charts/aegis-services/values/local.yaml \
+#     -f charts/aegis-services/values/local-tls.yaml \
+#     -f charts/aegis-services/values/local-pki.yaml \
+#     --namespace aegis-system --create-namespace
+
+platformApi:
+  auth:
+    oidc:
+      caBundle:
+        create: false
+        secretName: aegis-trust-bundle
+        key: ca.crt
+        fileName: ca.crt
+        mountPath: /etc/aegis-platform-api/oidc
+

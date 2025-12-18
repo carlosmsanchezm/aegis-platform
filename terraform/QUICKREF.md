@@ -47,7 +47,7 @@ aws secretsmanager get-secret-value \
 cd terraform
 
 # One-command deployment
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 
 # Or manual deployment
 cd ../charts

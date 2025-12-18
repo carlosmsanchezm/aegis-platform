@@ -220,8 +220,18 @@ proxy:
 proxy:
   tls:
     enabled: true
-    cert: ""  # Set via --set-file proxy.tls.cert=/path/to/cert
-    key: ""   # Set via --set-file proxy.tls.key=/path/to/key
+    # Legacy: provide cert/key via --set-file proxy.tls.cert=/path/to/cert
+    cert: ""
+    key: ""
+
+    # Optional: have cert-manager mint the TLS secret for the proxy
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      dnsNames: []
 ```
 
 ## Security Configuration

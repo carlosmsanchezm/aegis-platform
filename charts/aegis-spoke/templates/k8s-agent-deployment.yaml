@@ -59,11 +59,21 @@ spec:
               cpu: 10m
               memory: 64Mi
           env:
-            {{- range $k, $v := .Values.k8sAgent.env }}
+            {{- $env := .Values.k8sAgent.env | default dict -}}
+            {{- $trust := .Values.k8sAgent.trustBundle | default dict -}}
+            {{- range $k, $v := $env }}
             {{- if and (ne $k "AEGIS_PROXY_INGRESS_HOST") (ne $k "AEGIS_PROXY_URL") }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+            {{- end }}
+            {{- if and ($trust.enabled | default false) (not (hasKey $env "AEGIS_PLATFORM_CA_FILE")) }}
+            - name: AEGIS_PLATFORM_CA_FILE
+              value: {{ printf "%s/%s" ($trust.mountPath | default "/etc/aegis/trust") ($trust.fileName | default "ca.crt") | quote }}
+            {{- end }}
+            {{- if and ($trust.enabled | default false) (not (hasKey $env "AEGIS_CP_OIDC_CA_FILE")) }}
+            - name: AEGIS_CP_OIDC_CA_FILE
+              value: {{ printf "%s/%s" ($trust.mountPath | default "/etc/aegis/trust") ($trust.fileName | default "ca.crt") | quote }}
             {{- end }}
             - name: AEGIS_PROXY_INGRESS_HOST
               value: {{ .Values.proxy.ingress.hostname | quote }}
@@ -71,3 +81,18 @@ spec:
             - name: AEGIS_PROXY_URL
               value: {{ .Values.proxy.url | quote }}
             {{- end }}
+          {{- if ($trust.enabled | default false) }}
+          volumeMounts:
+            - name: trust-bundle
+              mountPath: {{ $trust.mountPath | default "/etc/aegis/trust" }}
+              readOnly: true
+          {{- end }}
+      {{- if ($trust.enabled | default false) }}
+      volumes:
+        - name: trust-bundle
+          secret:
+            secretName: {{ $trust.secretName | default "aegis-trust-bundle" }}
+            items:
+              - key: {{ $trust.key | default "ca.crt" }}
+                path: {{ $trust.fileName | default "ca.crt" }}
+      {{- end }}

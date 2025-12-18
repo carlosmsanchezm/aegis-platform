@@ -1,0 +1,55 @@
+{{- /*
+cert-manager Certificate for the spoke proxy (optional).
+
+Rendered only when:
+  - proxy.enabled is true
+  - proxy.tls.terminateAtIngress is false (proxy serves TLS itself)
+  - proxy.tls.certManager.enabled is true
+  - cert-manager CRDs are present
+*/ -}}
+
+{{- if and (.Capabilities.APIVersions.Has "cert-manager.io/v1") -}}
+{{- $proxy := .Values.proxy | default dict -}}
+{{- $tls := $proxy.tls | default dict -}}
+{{- $cm := $tls.certManager | default dict -}}
+{{- if and ($proxy.enabled | default false) (not ($tls.terminateAtIngress | default false)) ($cm.enabled | default false) -}}
+{{- $issuer := $cm.issuerRef | default dict -}}
+{{- $issuerName := $issuer.name | default "aegis-internal" -}}
+{{- $issuerKind := $issuer.kind | default "StepClusterIssuer" -}}
+{{- $issuerGroup := $issuer.group | default "certmanager.step.sm" -}}
+{{- $dnsNames := list -}}
+{{- $svcName := include "aegis-spoke.proxy.fullname" . -}}
+{{- $dnsNames = append $dnsNames (printf "%s.%s.svc.cluster.local" $svcName .Release.Namespace) -}}
+{{- $dnsNames = append $dnsNames $svcName -}}
+{{- if ($proxy.ingress | default dict).hostname -}}
+  {{- $dnsNames = append $dnsNames (($proxy.ingress | default dict).hostname | trim) -}}
+{{- end -}}
+{{- range ($cm.dnsNames | default list) -}}
+  {{- if . -}}
+    {{- $dnsNames = append $dnsNames (. | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $dnsNames = $dnsNames | uniq }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "aegis-spoke.proxy.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-spoke.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  secretName: {{ include "aegis-spoke.proxy.tlsSecretName" . }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: {{ $issuerKind }}
+    group: {{ $issuerGroup }}
+  duration: {{ $cm.duration | default "2160h" | quote }}
+  renewBefore: {{ $cm.renewBefore | default "168h" | quote }}
+  privateKey:
+    algorithm: {{ (($cm.privateKey | default dict).algorithm) | default "RSA" }}
+    size: {{ (($cm.privateKey | default dict).size) | default 2048 }}
+  dnsNames:
+{{- toYaml $dnsNames | nindent 4 }}
+{{- end -}}
+{{- end -}}

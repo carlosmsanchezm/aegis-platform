@@ -34,7 +34,7 @@ KEYCLOAK_INTERNAL_HOST="${KEYCLOAK_SERVICE_NAME}.${K8S_NAMESPACE}.svc.cluster.lo
 
 usage() {
 cat <<'EOF'
-Usage: ./generate-helm-values.sh [--non-interactive]
+Usage: ./generate-cloud-deployment.sh [--non-interactive]
 
 Options:
   --non-interactive  Run without interactive prompts for CI/CD
@@ -273,10 +273,13 @@ kubectl create secret generic "${KEYCLOAK_CLIENT_SECRET_NAME}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "   ℹ️  Resetting Keycloak PVCs to pick up storage class overrides"
-kubectl delete pvc -n "${K8S_NAMESPACE}" -l app.kubernetes.io/component=keycloak-postgres --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete pvc -n "${K8S_NAMESPACE}" -l app.kubernetes.io/component=keycloak-postgres --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl wait --for=delete pvc -n "${K8S_NAMESPACE}" -l app.kubernetes.io/component=keycloak-postgres --timeout=120s >/dev/null 2>&1 || echo "   ⚠️  Keycloak PVC deletion still in progress; continuing"
 echo "   ℹ️  Resetting Keycloak StatefulSets to allow PVC recreation"
-kubectl delete statefulset "${HELM_RELEASE}-keycloak" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-kubectl delete statefulset "${HELM_RELEASE}-keycloak-db" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete statefulset "${HELM_RELEASE}-keycloak" -n "${K8S_NAMESPACE}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete statefulset "${HELM_RELEASE}-keycloak-db" -n "${K8S_NAMESPACE}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl wait --for=delete "statefulset/${HELM_RELEASE}-keycloak" -n "${K8S_NAMESPACE}" --timeout=120s >/dev/null 2>&1 || echo "   ⚠️  Keycloak StatefulSet deletion still in progress; continuing"
+kubectl wait --for=delete "statefulset/${HELM_RELEASE}-keycloak-db" -n "${K8S_NAMESPACE}" --timeout=120s >/dev/null 2>&1 || echo "   ⚠️  Keycloak DB StatefulSet deletion still in progress; continuing"
 
 echo "   ℹ️  Skipping aegis-kubeconfigs secret (managed by Helm)"
 
@@ -513,11 +516,11 @@ if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
   fi
 fi
 
-# Step 4: Generate self-signed TLS certs using Route53 DNS names
+# Step 4: Ensure internal PKI (step-ca + cert-manager) and refresh CA bundle
 echo ""
-echo "4️⃣  Generating TLS certificates using Route53 DNS names..."
+echo "4️⃣  Ensuring internal PKI (step-ca + cert-manager)..."
 
-# Get DNS hostnames from Terraform outputs
+# Get DNS hostnames from Terraform outputs (used for Certificate SANs)
 DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
 DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
 DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
@@ -527,77 +530,29 @@ echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
 echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
 echo "      Proxy:             ${DNS_PROXY}"
 
-if [ ! -f "${TLS_CERT_PATH}" ] || [ ! -f "${TLS_KEY_PATH}" ] || [ ! -f "${TLS_CA_CERT_PATH}" ]; then
-  openssl req -x509 -newkey rsa:2048 \
-    -keyout "${TLS_CA_KEY_PATH}" \
-    -out "${TLS_CA_CERT_PATH}" \
-    -days 365 -nodes \
-    -subj "/CN=Aegis Platform API CA" \
-    -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
-    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+PKI_NAMESPACE=${PKI_NAMESPACE:-aegis-pki}
+CERT_MANAGER_NAMESPACE=${CERT_MANAGER_NAMESPACE:-cert-manager}
 
-  openssl req -new -newkey rsa:2048 \
-    -keyout "${TLS_KEY_PATH}" \
-    -out "${TLS_CERT_CSR_PATH}" \
-    -nodes \
-    -subj "/CN=${DNS_PLATFORM_API_GRPC}" \
-    -addext "subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}" >/dev/null 2>&1
-
-  cat <<EOF > "${TLS_CERT_EXT_PATH}"
-basicConstraints=critical,CA:FALSE
-keyUsage=critical,digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=DNS:${DNS_PLATFORM_API_GRPC},DNS:${DNS_PLATFORM_API_HTTP},DNS:${DNS_PROXY}
-EOF
-
-  openssl x509 -req \
-    -in "${TLS_CERT_CSR_PATH}" \
-    -CA "${TLS_CA_CERT_PATH}" \
-    -CAkey "${TLS_CA_KEY_PATH}" \
-    -CAcreateserial \
-    -out "${TLS_CERT_PATH}" \
-    -days 365 \
-    -extfile "${TLS_CERT_EXT_PATH}" >/dev/null 2>&1
-
-  cat "${TLS_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${TLS_CERT_CHAIN_PATH}"
-  mv "${TLS_CERT_CHAIN_PATH}" "${TLS_CERT_PATH}"
-
-  openssl req -new -newkey rsa:2048 \
-    -keyout "${KEYCLOAK_KEY_PATH}" \
-    -out "${KEYCLOAK_CERT_CSR_PATH}" \
-    -nodes \
-    -subj "/CN=${KEYCLOAK_INTERNAL_HOST}" \
-    -addext "subjectAltName=DNS:${KEYCLOAK_INTERNAL_HOST}" >/dev/null 2>&1
-
-  cat <<EOF > "${KEYCLOAK_CERT_EXT_PATH}"
-basicConstraints=critical,CA:FALSE
-keyUsage=critical,digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=DNS:${KEYCLOAK_INTERNAL_HOST}
-EOF
-
-  openssl x509 -req \
-    -in "${KEYCLOAK_CERT_CSR_PATH}" \
-    -CA "${TLS_CA_CERT_PATH}" \
-    -CAkey "${TLS_CA_KEY_PATH}" \
-    -CAcreateserial \
-    -out "${KEYCLOAK_CERT_PATH}" \
-    -days 365 \
-    -extfile "${KEYCLOAK_CERT_EXT_PATH}" >/dev/null 2>&1
-
-  cat "${KEYCLOAK_CERT_PATH}" "${TLS_CA_CERT_PATH}" > "${KEYCLOAK_CERT_CHAIN_PATH}"
-  mv "${KEYCLOAK_CERT_CHAIN_PATH}" "${KEYCLOAK_CERT_PATH}"
+PKI_SCRIPT="${SCRIPT_DIR}/../scripts/install-internal-pki.sh"
+if [[ ! -x "${PKI_SCRIPT}" ]]; then
+  echo "❌ Internal PKI installer not found or not executable: ${PKI_SCRIPT}" >&2
+  exit 1
 fi
 
+TRUST_BUNDLE_NAMESPACES="${K8S_NAMESPACE},${SPOKE_NAMESPACE}" \
+PKI_NAMESPACE="${PKI_NAMESPACE}" \
+CERT_MANAGER_NAMESPACE="${CERT_MANAGER_NAMESPACE}" \
+STEP_CA_DB_PERSISTENT=false \
+STEP_CA_REINSTALL_ON_MISMATCH=true \
+  "${PKI_SCRIPT}"
+
 mkdir -p "$(dirname "${CA_BUNDLE}")"
-cat "${TLS_CA_CERT_PATH}" > "${CA_BUNDLE}"
+kubectl get secret aegis-trust-bundle -n "${K8S_NAMESPACE}" -o "jsonpath={.data.ca\\.crt}" | base64 --decode > "${CA_BUNDLE}"
 echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
-echo "   ✅ TLS certificates ready with proper DNS names"
 
 # Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
-echo "5️⃣  Applying CRDs (aegis-workload) before Helm upgrade..."
-kubectl apply -f "${SCRIPT_DIR}/../charts/aegis-spoke/crds/aegisworkload-crd.yaml" >/dev/null
+echo "5️⃣  Applying CRDs (k8s-agent) before Helm upgrade..."
 CRD_BASE_DIR="${SCRIPT_DIR}/../agents/k8s-agent/config/crd/bases"
 if [ -d "${CRD_BASE_DIR}" ]; then
   kubectl apply -f "${CRD_BASE_DIR}" >/dev/null
@@ -632,6 +587,20 @@ OVERRIDE_FILE=$(mktemp)
   echo "  secrets:"
   echo "    db-password: \"${DB_PASSWORD}\""
   echo "    proxy-jwt-secret: \"${JWT_SECRET}\""
+  echo "  tls:"
+  echo "    certManager:"
+  echo "      enabled: true"
+  echo "      dnsNames:"
+  echo "        - \"${DNS_PLATFORM_API_GRPC}\""
+  echo "        - \"${DNS_PLATFORM_API_HTTP}\""
+  echo "  auth:"
+  echo "    oidc:"
+  echo "      caBundle:"
+  echo "        create: false"
+  echo "        secretName: aegis-trust-bundle"
+  echo "        key: ca.crt"
+  echo "        fileName: ca.crt"
+  echo "        mountPath: /etc/aegis-platform-api/oidc"
   echo "proxy:"
   if [[ -n "${DNS_PROXY}" ]]; then
     echo "  publicHost: \"${DNS_PROXY}\""
@@ -644,11 +613,18 @@ OVERRIDE_FILE=$(mktemp)
     echo "    tag: \"${PROXY_IMAGE_TAG_VALUE}\""
   fi
   echo "  jwtSecret: \"${JWT_SECRET}\""
+  echo "  tls:"
+  echo "    enabled: true"
+  echo "    certManager:"
+  echo "      enabled: true"
+  echo "      dnsNames:"
+  echo "        - \"${DNS_PROXY}\""
   echo "keycloak:"
   echo "  enabled: true"
+  echo "  forceRender: true"
   echo "  namespace: ${K8S_NAMESPACE}"
   echo "  hostname:"
-  echo "    hostname: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
+    echo "    hostname: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
   echo "    admin: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
   echo "    strict: false"
   echo "  ingress:"
@@ -674,35 +650,11 @@ OVERRIDE_FILE=$(mktemp)
   echo "    secret:"
   echo "      name: ${KEYCLOAK_TLS_SECRET_NAME}"
   echo "      create: false"
+  echo "    certManager:"
+  echo "      enabled: true"
 } > "${OVERRIDE_FILE}"
 
-TLS_OVERRIDE_FILE=$(mktemp)
-{
-  echo "platformApi:"
-  echo "  tls:"
-  echo "    enabled: true"
-  echo "    cert: |"
-  sed 's/^/      /' "${TLS_CERT_PATH}"
-  echo "    key: |"
-  sed 's/^/      /' "${TLS_KEY_PATH}"
-  echo "proxy:"
-  echo "  tls:"
-  echo "    enabled: true"
-  echo "    cert: |"
-  sed 's/^/      /' "${TLS_CERT_PATH}"
-  echo "    key: |"
-  sed 's/^/      /' "${TLS_KEY_PATH}"
-} > "${TLS_OVERRIDE_FILE}"
-
 cd "${OUTPUT_DIR}"
-kubectl delete secret "${HELM_RELEASE}-platform-api-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-kubectl delete secret "${HELM_RELEASE}-proxy-tls" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-kubectl delete secret "${KEYCLOAK_TLS_SECRET_NAME}" -n "${K8S_NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
-kubectl create secret tls "${KEYCLOAK_TLS_SECRET_NAME}" \
-  --cert="${KEYCLOAK_CERT_PATH}" \
-  --key="${KEYCLOAK_KEY_PATH}" \
-  --namespace "${K8S_NAMESPACE}" \
-  --dry-run=client -o yaml | kubectl apply -f -
 HELM_ARGS=(
   upgrade --install "${HELM_RELEASE}" ./aegis-services
   -f ./aegis-services/values/common.yaml
@@ -710,8 +662,6 @@ HELM_ARGS=(
   -f ./aegis-services/values-cloud-generated.yaml
   -f "${OVERRIDE_FILE}"
 )
-
-HELM_ARGS+=( -f "${TLS_OVERRIDE_FILE}" )
 
 HELM_ARGS+=(
   --namespace "${K8S_NAMESPACE}" --create-namespace
@@ -741,8 +691,7 @@ echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.i
-ngress[0].hostname}' 2>/dev/null || echo "")
+  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PLATFORM_API_LB}" ]; then
     echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
     break
@@ -766,8 +715,7 @@ fi
 echo ""
 echo "   Waiting for proxy Load Balancer..."
 for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].host
-name}' 2>/dev/null || echo "")
+  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PROXY_LB}" ]; then
     echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
     break
@@ -899,6 +847,8 @@ echo "   ℹ️  Configuring k8s-agent to require TLS when dialing the hub"
 SPOKE_HELM_ARGS+=(
   --set k8sAgent.enabled=true
   --set k8sAgent.replicaCount=1
+  --set k8sAgent.trustBundle.enabled=true
+  --set k8sAgent.trustBundle.secretName=aegis-trust-bundle
   --set proxy.enabled=false
   --namespace "${SPOKE_NAMESPACE}"
   --create-namespace
@@ -911,6 +861,31 @@ fi
 if [[ -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
   SPOKE_HELM_ARGS+=( --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG_VALUE} )
 fi
+
+echo "   🔧 Ensuring existing CRDs are adoptable by Helm..."
+SPOKE_CRDS=( \
+  aegisworkloads.aegis.yourorg.dev \
+  aegisworkloadslices.aegis.yourorg.dev \
+  workspaceclasses.aegis.yourorg.dev \
+  workspaceclusters.aegis.yourorg.dev \
+  workspacegpuprofiles.aegis.yourorg.dev \
+  workspacenetworks.aegis.yourorg.dev \
+  workspaces.aegis.yourorg.dev \
+  workspacestorages.aegis.yourorg.dev \
+)
+for crd in "${SPOKE_CRDS[@]}"; do
+  if kubectl get crd "${crd}" >/dev/null 2>&1; then
+    existing_rel="$(kubectl get crd "${crd}" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)"
+    existing_ns="$(kubectl get crd "${crd}" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || true)"
+    if [[ -z "${existing_rel}" && -z "${existing_ns}" ]]; then
+      kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite >/dev/null
+      kubectl annotate crd "${crd}" \
+        meta.helm.sh/release-name="${SPOKE_HELM_RELEASE}" \
+        meta.helm.sh/release-namespace="${SPOKE_NAMESPACE}" \
+        --overwrite >/dev/null
+    fi
+  fi
+done
 
 helm "${SPOKE_HELM_ARGS[@]}"
 

@@ -44,6 +44,8 @@ platformApi:
   tls:
     enabled: true
     serveGrpc: true
+    certManager:
+      enabled: true
     cert: |
       -----BEGIN CERTIFICATE-----
       MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
@@ -204,6 +206,8 @@ proxy:
     sanSuffixes: []
   tls:
     enabled: true
+    certManager:
+      enabled: true
     cert: |
       -----BEGIN CERTIFICATE-----
       MIIEbzCCAlegAwIBAgIJAO7PYN9VNKhFMA0GCSqGSIb3DQEBCwUAMDIxEjAQBgNV
@@ -341,8 +345,10 @@ keycloak:
         defaultAction: true
         enabled: true
   tls:
+    certManager:
+      enabled: true
     secret:
-      create: true
+      create: false
       name: keycloak-tls
       cert: |
         -----BEGIN CERTIFICATE-----

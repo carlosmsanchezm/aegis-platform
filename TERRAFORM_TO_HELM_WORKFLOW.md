@@ -59,7 +59,7 @@ terraform output rds_endpoint
 **Option A: Use the helper script (recommended)**
 ```bash
 cd terraform/
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 This creates:
@@ -219,7 +219,7 @@ cd terraform/
 terraform apply
 
 # 2. Regenerate Helm values
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 
 # 3. Update domain names (if needed)
 sed -i '' 's/yourdomain.com/your-actual-domain.com/g' \
@@ -247,7 +247,7 @@ helm upgrade aegis-services ./aegis-services \
 Before deploying to cloud:
 
 - [ ] Terraform applied successfully
-- [ ] `generate-helm-values.sh` executed
+- [ ] `generate-cloud-deployment.sh` executed
 - [ ] Domain names updated in generated files
 - [ ] kubectl configured for EKS cluster
 - [ ] Kubernetes secrets created

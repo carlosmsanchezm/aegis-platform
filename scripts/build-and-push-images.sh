@@ -9,7 +9,7 @@ AWS_PROFILE=${AWS_PROFILE:-myclaude}
 AWS_REGION=${AWS_REGION:-us-east-1}
 ECR_REGISTRY="567751785679.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-# Image tags (should match terraform/generate-helm-values.sh)
+# Image tags (should match terraform/generate-cloud-deployment.sh)
 PLATFORM_API_TAG="v1.0.6-tls2"
 PROXY_TAG="no-client-cert"
 K8S_AGENT_TAG="v1.0.2-tls-20251005-amd64"
@@ -89,5 +89,5 @@ echo "   aws ecr list-images --repository-name aegis/proxy --region ${AWS_REGION
 echo "   aws ecr list-images --repository-name aegis/k8s-agent --region ${AWS_REGION} --profile ${AWS_PROFILE}"
 echo ""
 echo "🚀 Deploy with:"
-echo "   cd terraform && ./generate-helm-values.sh"
+echo "   cd terraform && ./generate-cloud-deployment.sh"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

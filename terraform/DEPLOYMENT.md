@@ -111,13 +111,13 @@ kubectl run migrate-job --rm -i --restart=Never \
 
 ### 6. Deploy Helm Charts
 
-The `generate-helm-values.sh` script automates the deployment:
+The `generate-cloud-deployment.sh` script automates the deployment (including internal PKI setup for pod TLS):
 
 ```bash
 cd terraform
 
 # Generate Helm values and deploy everything
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 This script will:

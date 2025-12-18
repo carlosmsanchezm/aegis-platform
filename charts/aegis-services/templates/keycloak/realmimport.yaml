@@ -67,6 +67,10 @@ metadata:
     aegis.aegis-services.io/client-access-token-lifespan: "{{ $clientAccessTokenLifespan }}"
 spec:
   keycloakCRName: {{ $kcName }}
+  {{- with $realm.importResources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- if and $clientSecret.name (or $clientSecret.value $clientSecret.placeholder) }}
   placeholders:
     {{ $placeholder }}:

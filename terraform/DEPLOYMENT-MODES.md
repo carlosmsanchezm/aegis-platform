@@ -8,8 +8,8 @@ This document explains the different deployment configurations and how to use th
 **Use case**: Local Kubernetes cluster (minikube, kind, Docker Desktop)
 
 ```bash
-cd terraform
-./generate-helm-values.sh
+# From repository root
+make deploy-local
 ```
 
 **Configuration**:
@@ -29,17 +29,17 @@ cd terraform
 ---
 
 ### 2. **Cloud with TLS** (recommended for production-like testing)
-**Use case**: AWS EKS with LoadBalancers and TLS
+**Use case**: AWS EKS with LoadBalancers and TLS (internal PKI + cert-manager)
 
 ```bash
 cd terraform
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 **Configuration**:
 - Platform API: TLS-enabled gRPC on port 8081
 - Proxy: TLS-enabled WebSocket on port 8080
-- Self-signed certificates with DNS SANs
+- cert-manager Certificates minted from an internal PKI (step-ca)
 - LoadBalancer services with Route53 DNS
 - Auto-updates /etc/hosts for local resolution
 
@@ -53,10 +53,10 @@ cd terraform
 ```
 
 **What happens**:
-1. Generates TLS certificates with SANs: `platform-api-grpc.aegist.dev`, `proxy.aegist.dev`
-2. Updates `/etc/hosts` with LoadBalancer IPs
-3. Deploys with `values-cloud.yaml`
-4. Applies generated TLS overrides for platform-api and proxy secrets
+1. Ensures internal PKI is installed (cert-manager + step-ca + step-issuer) and creates a `StepClusterIssuer` (`aegis-internal`)
+2. Creates/updates the `aegis-trust-bundle` Secret in the deployment namespaces
+3. Updates `/etc/hosts` with current LoadBalancer IPs (and Route53 records when enabled)
+4. Deploys with `values/cloud.yaml` plus generated overrides that enable cert-manager for pod TLS
 5. Sets `AEGIS_PROXY_BASE_URL=wss://proxy.aegist.dev:8080`
 6. Uses proxy image tag `no-client-cert` (server-side TLS only, no mTLS)
 
@@ -65,9 +65,11 @@ cd terraform
 ## Key Configuration Files
 
 ### Always Applied
-- `values-cloud.yaml` - Base cloud configuration (LoadBalancer, resources, replicas)
-- `values-cloud-generated.yaml` - Auto-generated from Terraform (DB, ECR, secrets)
-- `tls-overrides.yaml` - Generated certificate material for platform-api and proxy
+- `charts/aegis-services/values/cloud.yaml` - Base cloud configuration (LoadBalancer, resources, replicas)
+- `charts/aegis-services/values-cloud-generated.yaml` - Auto-generated from Terraform (DB, ECR, secrets)
+- `charts/aegis-spoke/values-cloud-generated.yaml` - Auto-generated from Terraform (hub endpoint, cluster ID)
+- `charts/aegis-spoke/values-cloud-tls.yaml` - Enables TLS client mode for the spoke agent
+- `scripts/install-internal-pki.sh` - Installs step-ca + cert-manager + step-issuer and creates `aegis-internal`
 
 ### Important Settings
 
@@ -91,7 +93,8 @@ cd terraform
 terraform destroy
 
 # Deploy locally
-./generate-helm-values.sh
+cd ..
+make deploy-local
 ```
 
 ### From Local to Cloud
@@ -101,21 +104,22 @@ cd terraform
 terraform apply
 
 # Deploy with TLS
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 ### Updating TLS Certificates
-If LoadBalancer IPs change, rerun:
+If DNS names (SANs) change, rerun:
 ```bash
 cd terraform
-./generate-helm-values.sh
+./generate-cloud-deployment.sh
 ```
 
 This will:
-- Regenerate certificates
 - Update /etc/hosts
 - Update Route53 DNS records
-- Redeploy with new configuration
+- Update Helm overrides (Certificate SANs, image tags, secrets) and redeploy
+
+cert-manager will rotate leaf certificates automatically; you should not need to regenerate keys manually.
 
 ---
 
@@ -134,7 +138,9 @@ This will:
 ### "Hostname/IP does not match certificate's altnames"
 - **Cause**: Certificate doesn't include the hostname you're connecting to
 - **Fix**: Use hostname in certificate SANs (`platform-api-grpc.aegist.dev` or `proxy.aegist.dev`)
-- **Verify**: `openssl x509 -in ~/aegis-platform-api-ca.crt -text -noout | grep DNS:`
+- **Verify**: inspect the leaf certificate SANs (not the CA bundle):
+  - `kubectl get certificate -n aegis-system`
+  - `kubectl get secret <tls-secret> -n aegis-system -o jsonpath='{.data.tls\.crt}' | base64 --decode | openssl x509 -text -noout | grep DNS:`
 
 ### WorkloadConnection fails but platform-api works
 - **Cause**: Proxy URL is wrong or proxy is unreachable
@@ -146,9 +152,9 @@ This will:
 
 ## Automation
 
-The `generate-helm-values.sh` script automatically:
+The `generate-cloud-deployment.sh` script automatically:
 1. Detects deployment mode (local vs cloud)
-2. Generates certificates for cloud deployments
+2. Ensures internal PKI (cert-manager + step-ca) is installed
 3. Updates /etc/hosts with current LoadBalancer IPs
 4. Updates Route53 DNS records when available
 5. Deploys with correct Helm values

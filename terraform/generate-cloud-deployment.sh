@@ -691,8 +691,7 @@ echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..
 
 echo "   Waiting for platform-api Load Balancer..."
 for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.i
-ngress[0].hostname}' 2>/dev/null || echo "")
+  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PLATFORM_API_LB}" ]; then
     echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
     break
@@ -716,8 +715,7 @@ fi
 echo ""
 echo "   Waiting for proxy Load Balancer..."
 for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].host
-name}' 2>/dev/null || echo "")
+  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
   if [ -n "${PROXY_LB}" ]; then
     echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
     break

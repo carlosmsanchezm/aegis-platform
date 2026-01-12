@@ -34,7 +34,20 @@ k8sAgent:
     # Default to CPU-only; GPU flavors should be injected dynamically based on actual node pools/policy.
     AEGIS_FLAVORS: "cpu-small"
 
+  # Optional: mount a shared trust bundle secret and point the agent at it.
+  # This avoids duplicating base64 CA strings in values files.
+  trustBundle:
+    enabled: false
+    secretName: aegis-trust-bundle
+    key: ca.crt
+    mountPath: /etc/aegis/trust
+    fileName: ca.crt
+
 proxy:
+  # Enable spoke proxy by default. Remote spoke clusters MUST have a proxy to allow
+  # VS Code/SSH connections from external clients. Set to false only for local development
+  # where connections go through the hub proxy (proxy.localtest.me).
+  enabled: true
   replicaCount: 1
   image:
     repository: carlosmsanchez/aegis-proxy
@@ -44,6 +57,8 @@ proxy:
   service:
     type: ClusterIP
     port: 8085
+    # NodePort to use when service.type is NodePort (configurable for multi-cluster deployments)
+    nodePort: 31484
 
   ingress:
     enabled: true
@@ -64,6 +79,18 @@ proxy:
     terminateAtIngress: false
     cert: "" # Provide via --set-file proxy.tls.cert=/path/to/cert or external secret
     key: ""  # Provide via --set-file proxy.tls.key=/path/to/key or external secret
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
 
   clientCerts:
     enabled: false

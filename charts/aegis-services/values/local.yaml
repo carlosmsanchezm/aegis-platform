@@ -53,6 +53,17 @@ platformApi:
   enabled: true
   replicaCount: 1
   serviceAccountName: aegis-platform-api
+  postgres:
+    enabled: true
+    initChown: true
+    initImage: registry.access.redhat.com/ubi9/ubi-minimal:9.3
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: Always
+    storage:
+      size: 5Gi
+      className: ""
   hostAliases:
   - ip: "10.96.146.219"
     hostnames:
@@ -61,7 +72,7 @@ platformApi:
   image:
     repository: carlosmsanchez/aegis-platform-api
     tag: "dev"
-    pullPolicy: Always  # Always pull to get latest :dev tag
+    pullPolicy: IfNotPresent  # Use local kind-loaded image; cloud.yaml uses Always
 
   service:
     type: ClusterIP
@@ -87,6 +98,8 @@ platformApi:
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AEGIS_STORE_BACKEND: "postgres"
+    # Enable automatic observability stack deployment on spoke clusters
+    AEGIS_OBSERVABILITY_ENABLED: "true"
     # IMPORTANT: Issuer must match the "iss" claim in tokens (aegis-platform.tech per realm config)
     # even though we access Keycloak locally via localtest.me or internal service
     OIDC_ISSUER_URL: "https://keycloak.aegis-platform.tech/realms/aegis"

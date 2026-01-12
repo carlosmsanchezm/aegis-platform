@@ -84,6 +84,20 @@ platformApi:
       - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
       - TLS_RSA_WITH_AES_256_GCM_SHA384
       - TLS_RSA_WITH_AES_128_GCM_SHA256
+    # When enabled, cert-manager is responsible for creating the TLS secret that
+    # this chart mounts. The legacy static (values-injected) secret is disabled.
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
 
   clientCerts:
     enabled: false
@@ -203,7 +217,19 @@ proxy:
       - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
       - TLS_RSA_WITH_AES_256_GCM_SHA384
       - TLS_RSA_WITH_AES_128_GCM_SHA256
-  
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+
   # IA-2: Identification and Authentication
   jwt:
     secretName: aegis-jwt-secret

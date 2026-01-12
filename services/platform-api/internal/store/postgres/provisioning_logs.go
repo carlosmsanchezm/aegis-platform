@@ -201,3 +201,48 @@ func (s *PostgresStore) GetProvisioningRun(jobID string) (*store.ProvisioningRun
 	}
 	return &run, true
 }
+
+func (s *PostgresStore) ListProvisioningRuns(projectID string) []*store.ProvisioningRun {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	query := `SELECT job_id, COALESCE(project_id, ''), COALESCE(cluster_id, ''), COALESCE(phase, ''), started_at, completed_at, updated_at FROM provisioning_runs`
+	var args []any
+	if strings.TrimSpace(projectID) != "" {
+		query += " WHERE project_id = $1"
+		args = append(args, projectID)
+	}
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		s.logExecError("provisioning_runs_list", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var out []*store.ProvisioningRun
+	for rows.Next() {
+		var (
+			run                  store.ProvisioningRun
+			projID, clusterID    string
+			phase                string
+			started, updated     time.Time
+			completed            sql.NullTime
+		)
+		if err := rows.Scan(&run.JobID, &projID, &clusterID, &phase, &started, &completed, &updated); err != nil {
+			s.logExecError("provisioning_runs_list_scan", err)
+			break
+		}
+		run.ProjectID = strings.TrimSpace(projID)
+		run.ClusterID = strings.TrimSpace(clusterID)
+		run.Phase = strings.TrimSpace(phase)
+		run.StartedAt = started
+		run.UpdatedAt = updated
+		if completed.Valid {
+			run.CompletedAt = &completed.Time
+		}
+		out = append(out, &run)
+	}
+	return out
+}

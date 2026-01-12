@@ -294,6 +294,37 @@ func (s *MemStore) ListProjects() []*aegis.Project {
 	return out
 }
 
+// DeleteProject removes a project from the store.
+// Returns an error if the project has active clusters attached.
+func (s *MemStore) DeleteProject(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("project id is required")
+	}
+
+	// Check for active clusters (via clusterState)
+	clusters := s.cstate.listByProject(id)
+	if len(clusters) > 0 {
+		return fmt.Errorf("cannot delete project %q: %d active cluster(s) still attached - delete clusters first to avoid incurring costs", id, len(clusters))
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.projects[id]; !exists {
+		return fmt.Errorf("project %q not found", id)
+	}
+
+	delete(s.projects, id)
+	return nil
+}
+
+// HasActiveClusters checks if a project has any clusters attached.
+func (s *MemStore) HasActiveClusters(projectID string) bool {
+	clusters := s.cstate.listByProject(projectID)
+	return len(clusters) > 0
+}
+
 func budgetKey(projectID, queue string) string { return projectID + "|" + queue }
 
 func monthStartUTC(t time.Time) time.Time {
@@ -464,6 +495,10 @@ func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
 }
 func (s *MemStore) ListClusterInfos() []*ClusterInfo {
 	return s.cstate.list()
+}
+
+func (s *MemStore) ListClustersByProject(projectID string) []*ClusterInfo {
+	return s.cstate.listByProject(projectID)
 }
 
 func (s *MemStore) SetClusterProjectID(clusterID, projectID string) {
@@ -737,4 +772,25 @@ func (s *MemStore) GetProvisioningRun(jobID string) (*ProvisioningRun, bool) {
 		copy.CompletedAt = &ts
 	}
 	return &copy, true
+}
+
+func (s *MemStore) ListProvisioningRuns(projectID string) []*ProvisioningRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*ProvisioningRun, 0, len(s.provisioningRuns))
+	for _, run := range s.provisioningRuns {
+		if run == nil {
+			continue
+		}
+		if projectID != "" && !strings.EqualFold(run.ProjectID, projectID) {
+			continue
+		}
+		copy := *run
+		if run.CompletedAt != nil {
+			ts := *run.CompletedAt
+			copy.CompletedAt = &ts
+		}
+		out = append(out, &copy)
+	}
+	return out
 }

@@ -36,6 +36,7 @@ const (
 // ProjectInfraReconciler handles ProjectInfra lifecycle orchestration.
 type ProjectInfraReconciler struct {
 	client.Client
+	APIReader                 client.Reader // Uncached reader for critical reads
 	Scheme                    *runtime.Scheme
 	Log                       *zap.Logger
 	Provisioner               provisioning.AWSProvisioner
@@ -167,9 +168,21 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Re-read the object after acquiring the lock to get the latest status.
 	// This prevents race conditions where another reconcile completed between
 	// our initial read and lock acquisition.
-	if err := r.Get(ctx, req.NamespacedName, &infra); err != nil {
+	// IMPORTANT: Use APIReader (uncached) to get the actual current state from the API server,
+	// not the potentially stale cached version. This is critical for detecting when another
+	// reconcile has already set the status to Ready.
+	reader := r.APIReader
+	usingAPIReader := reader != nil
+	if reader == nil {
+		reader = r.Client // Fallback to cached client if APIReader not configured
+	}
+	if err := reader.Get(ctx, req.NamespacedName, &infra); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	log.Info("re-read object after lock acquisition",
+		zap.Bool("using_api_reader", usingAPIReader),
+		zap.String("status_phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
 
 	if !infra.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, log, &infra)
@@ -427,8 +440,12 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 
 	condReady := newCondition(metav1.ConditionTrue, "Provisioned", "aws infrastructure provisioned")
 	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, result.CostHintUSDPerHour); err != nil {
+		log.Error("failed to set Ready status", zap.Error(err))
 		return ctrl.Result{}, err
 	}
+	log.Info("successfully set status to Ready",
+		zap.String("phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
 	r.recordProvisioningLog(infra, "Ready", store.LogTypeEvent, "pulumi provisioning completed")
 	r.recordProvisioningStatus(infra, "Ready", true)
 	log.Info("project infrastructure provisioned", zap.Int("clusters", len(outputs)))

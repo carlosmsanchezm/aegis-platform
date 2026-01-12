@@ -34,6 +34,8 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer func() { _ = logger.Sync() }()
 
+	logger.Info("PLATFORM_API_BUILD_VERSION_20251216_2030_RECONCILE_FIX")
+
 	grpcAddr := getenv("GRPC_ADDR", ":8081")
 	httpAddr := getenv("HTTP_ADDR", ":8080")
 

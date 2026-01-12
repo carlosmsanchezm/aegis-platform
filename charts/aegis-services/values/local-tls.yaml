@@ -135,10 +135,20 @@ platformApi:
           -----END CERTIFICATE-----
   env:
     # Use NLB for gRPC (Cloudflare doesn't handle streaming properly)
-    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081"
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-12123e67db2b2af4.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
+    # Authorization bindings - must include spoke-agent for k8s-agent to update workload status
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension", "spoke-agent"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"

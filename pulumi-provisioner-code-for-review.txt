@@ -1,0 +1,1122 @@
+================================================================================
+AEGIS PULUMI AWS EKS PROVISIONER - CODE FOR REVIEW
+================================================================================
+
+This document contains all the code used by the Aegis platform to provision
+AWS EKS clusters via Pulumi. The code is designed for:
+- On-demand GPU node provisioning for AI/ML workloads
+- Multi-tenant cluster management
+- Observability stack deployment (Prometheus, Loki, Tempo)
+
+REVIEW TOPICS:
+1. IL-4/IL-5 (FedRAMP High) compliance gaps
+2. Alternative approach: EC2 instances + RKE2 instead of EKS
+
+================================================================================
+FILE: services/platform-api/api/v1alpha1/projectinfra_types.go
+================================================================================
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+)
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pinfra
+
+// ProjectInfra represents a declarative request to provision or import
+// infrastructure for a specific Aegis project.
+type ProjectInfra struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   ProjectInfraSpec   `json:"spec,omitempty"`
+	Status ProjectInfraStatus `json:"status,omitempty"`
+}
+
+// ProjectInfraSpec defines the desired state for project-scoped infrastructure.
+type ProjectInfraSpec struct {
+	ProjectID                 string                  `json:"projectId"`
+	Provider                  string                  `json:"provider"`
+	Region                    string                  `json:"region"`
+	Strategy                  string                  `json:"strategy,omitempty"`
+	ImportKubeconfigSecretRef *corev1.SecretReference `json:"importKubeconfigSecretRef,omitempty"`
+	Aws                       *AWSInfraSpec           `json:"aws,omitempty"`
+	Addons                    map[string]bool         `json:"addons,omitempty"`
+	Labels                    map[string]string       `json:"labels,omitempty"`
+}
+
+// AWSProvisionMode declares how the automation runner should reconcile AWS resources.
+type AWSProvisionMode string
+
+const (
+	AWSProvisionModeProvision AWSProvisionMode = "Provision"
+	AWSProvisionModeImport    AWSProvisionMode = "Import"
+)
+
+// SecretKeyReference describes a namespaced secret key selector.
+type SecretKeyReference struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Key       string `json:"key"`
+}
+
+// AWSImportSpec describes existing infrastructure to import into the management plane.
+type AWSImportSpec struct {
+	ClusterID           string             `json:"clusterId"`
+	KubeconfigSecretRef SecretKeyReference `json:"kubeconfigSecretRef"`
+}
+
+// AWSInfraSpec captures AWS-specific provisioning parameters.
+type AWSInfraSpec struct {
+	AccountID          string           `json:"accountId,omitempty"`
+	Mode               AWSProvisionMode `json:"mode,omitempty"`
+	RoleARN            string           `json:"roleArn,omitempty"`
+	ExternalID         string           `json:"externalId,omitempty"`
+	SubnetIDs          []string         `json:"subnetIds,omitempty"`
+	VpcID              string           `json:"vpcId,omitempty"`
+	ClusterName        string           `json:"clusterName,omitempty"`
+	Version            string           `json:"version,omitempty"`
+	NodePools          []NodePool       `json:"nodePools,omitempty"`
+	AdditionalClusters []AWSClusterSpec `json:"additionalClusters,omitempty"`
+	Imports            []AWSImportSpec  `json:"imports,omitempty"`
+}
+
+// AWSClusterSpec describes a secondary cluster to provision in AWS.
+type AWSClusterSpec struct {
+	ClusterName string     `json:"clusterName"`
+	Version     string     `json:"version,omitempty"`
+	NodePools   []NodePool `json:"nodePools,omitempty"`
+}
+
+// NodePool represents a logical node group definition for a cluster.
+type NodePool struct {
+	Name         string            `json:"name"`
+	InstanceType string            `json:"instanceType"`
+	MinSize      int32             `json:"minSize"`
+	MaxSize      int32             `json:"maxSize"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Taints       []corev1.Taint    `json:"taints,omitempty"`
+}
+
+// ProjectInfraStatus reports provisioning progress and outputs.
+type ProjectInfraStatus struct {
+	Phase              string             `json:"phase,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	Outputs            []ClusterOutput    `json:"outputs,omitempty"`
+	CostHintUSDPerHour float64            `json:"costHintUsdPerHour,omitempty"`
+	LastSyncTime       *metav1.Time       `json:"lastSyncTime,omitempty"`
+}
+
+// ClusterOutput captures key material for a provisioned cluster.
+type ClusterOutput struct {
+	ClusterID           string              `json:"clusterId"`
+	Name                string              `json:"name"`
+	Region              string              `json:"region"`
+	KubeconfigSecretKey string              `json:"kubeconfigSecretKey"`
+	Observability       ObservabilityOutput `json:"observability,omitempty"`
+}
+
+// ObservabilityOutput holds optional telemetry endpoints for a cluster.
+type ObservabilityOutput struct {
+	Namespace                string `json:"namespace,omitempty"`
+	PrometheusService        string `json:"prometheusService,omitempty"`
+	PrometheusPort           int32  `json:"prometheusPort,omitempty"`
+	AlertmanagerService      string `json:"alertmanagerService,omitempty"`
+	AlertmanagerPort         int32  `json:"alertmanagerPort,omitempty"`
+	AlertmanagerConfigSecret string `json:"alertmanagerConfigSecret,omitempty"`
+	MetricsServerService     string `json:"metricsServerService,omitempty"`
+	MetricsServerPort        int32  `json:"metricsServerPort,omitempty"`
+	LokiNamespace            string `json:"lokiNamespace,omitempty"`
+	LokiService              string `json:"lokiService,omitempty"`
+	LokiPort                 int32  `json:"lokiPort,omitempty"`
+	LokiAuthSecret           string `json:"lokiAuthSecret,omitempty"`
+	OtelEndpoint             string `json:"otelEndpoint,omitempty"`
+	MetricsURL               string `json:"metricsUrl,omitempty"`
+	TracingNamespace         string `json:"tracingNamespace,omitempty"`
+	TempoService             string `json:"tempoService,omitempty"`
+	TempoPort                int32  `json:"tempoPort,omitempty"`
+	OtelService              string `json:"otelService,omitempty"`
+	OtelGrpcPort             int32  `json:"otelGrpcPort,omitempty"`
+	OtelHttpPort             int32  `json:"otelHttpPort,omitempty"`
+}
+
+================================================================================
+FILE: services/platform-api/internal/provisioning/pulumi/aws/runner.go
+================================================================================
+
+package aws
+
+import (
+	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/exp/slices"
+
+	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
+	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
+	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
+	awsiam "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
+	kubernetes "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
+	kubecorev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
+	"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
+	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto/optrefresh"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto/optup"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+
+	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/observability"
+	"github.com/yourorg/aegis/services/platform-api/internal/store"
+)
+
+const (
+	projectNamePrefix          = "aegis-platform"
+	defaultStackPrefix         = "aegis"
+	defaultHelmNamespace       = "aegis-system"
+	defaultWorkloadsNamespace  = "aegis-workloads"
+	defaultSpokeReleaseName    = "aegis-spoke"
+	envAegisWorkloadsNamespace = "AEGIS_WORKLOADS_NAMESPACE"
+	envPulumiBackendURL        = "PULUMI_BACKEND_URL"
+	// ... more constants
+	defaultSpokeReleaseTimeout = 15 * time.Minute
+)
+
+// Certain AZs are not eligible for EKS control planes even though they may exist in EC2.
+var unsupportedControlPlaneAZs = map[string]map[string]bool{
+	"us-east-1": {
+		"us-east-1e": true,
+	},
+}
+
+// Runner provisions AWS infrastructure via Pulumi Automation.
+type Runner struct {
+	log  *zap.Logger
+	sink store.ProvisioningLogSink
+}
+
+// NewRunner returns a new automation-backed AWS runner.
+func NewRunner(log *zap.Logger, sink store.ProvisioningLogSink) *Runner {
+	if log == nil {
+		log = zap.NewNop()
+	}
+	return &Runner{log: log.Named("aws-provisioner"), sink: sink}
+}
+
+// Provision reconciles AWS infrastructure described by the supplied ProjectInfra.
+func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, spec *infraapi.AWSInfraSpec) (*provisioning.ProvisionResult, error) {
+	if infra == nil {
+		return nil, errors.New("project infra required")
+	}
+	if spec == nil {
+		return nil, errors.New("aws spec required")
+	}
+	if strings.EqualFold(string(spec.Mode), string(infraapi.AWSProvisionModeImport)) {
+		return nil, errors.New("provision called for import-mode spec")
+	}
+
+	stack, programCfg, err := r.NewStack(ctx, infra, spec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Best-effort unlock before any operations in case a previous run left a remote lock.
+	_ = stack.Cancel(ctx)
+	infraName := strings.TrimSpace(infra.Name)
+	r.clearPulumiLock(programCfg.ProjectID, r.stackNameForInfra(infraName, programCfg.ProjectID, programCfg.Region))
+
+	jobID, clusterID := jobMetadata(infra)
+	progressWriter := &logWriter{
+		log:       r.log,
+		sink:      r.sink,
+		jobID:     jobID,
+		projectID: strings.TrimSpace(infra.Spec.ProjectID),
+		clusterID: clusterID,
+		phase:     "Provisioning",
+	}
+
+	if skip := strings.EqualFold(os.Getenv(envAegisPulumiSkipRefresh), "true"); !skip {
+		if _, err := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter)); err != nil {
+			if !isLockError(err) || !r.retryAfterCancel(ctx, stack, func() error {
+				_, retryErr := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter))
+				return retryErr
+			}) {
+				return nil, fmt.Errorf("pulumi refresh: %w", err)
+			}
+		}
+	}
+
+	if strings.EqualFold(os.Getenv(envAegisPulumiSkipApply), "true") {
+		stackName := r.stackName(programCfg.ProjectID, programCfg.Region)
+		r.log.Warn("skipping pulumi up due to environment override", zap.String("stack", stackName))
+	} else {
+		// Use runUpWithRetry which handles pending operations and "already exists" errors
+		if err := r.runUpWithRetry(ctx, stack, progressWriter); err != nil {
+			return nil, fmt.Errorf("pulumi up: %w", err)
+		}
+	}
+
+	outputs, err := stack.Outputs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve stack outputs: %w", err)
+	}
+
+	result, err := r.translateOutputs(outputs, programCfg.Region)
+	if err != nil {
+		return nil, err
+	}
+
+	result.CostHintUSDPerHour = estimateCost(spec)
+	r.log.Info("aws provisioning completed",
+		zap.String("project", programCfg.ProjectID),
+		zap.String("region", programCfg.Region),
+		zap.Int("clusters", len(result.Outputs)),
+		zap.Float64("cost_hint_usd_per_hour", result.CostHintUSDPerHour),
+	)
+	return result, nil
+}
+
+// buildPulumiProgram is the main Pulumi program that creates all AWS resources
+func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
+	if input == nil {
+		input = &programInput{}
+	}
+	return func(ctx *pulumi.Context) error {
+		installer := observability.NewInstaller()
+		if input.Region == "" {
+			return errors.New("region is required")
+		}
+
+		providerArgs := &aws.ProviderArgs{
+			Region: pulumi.StringPtr(input.Region),
+		}
+		if input.RoleARN != "" {
+			assume := aws.ProviderAssumeRoleArgs{
+				RoleArn: pulumi.StringPtr(input.RoleARN),
+			}
+			if input.ExternalID != "" {
+				assume.ExternalId = pulumi.StringPtr(input.ExternalID)
+			}
+			providerArgs.AssumeRole = assume.ToProviderAssumeRolePtrOutput()
+		}
+
+		awsProvider, err := aws.NewProvider(ctx, "aws", providerArgs)
+		if err != nil {
+			return fmt.Errorf("aws provider: %w", err)
+		}
+		providerOpt := pulumi.Provider(awsProvider)
+
+		resolvedVpcID := strings.TrimSpace(input.VpcID)
+		resolvedSubnets := sanitizeStrings(input.SubnetIDs)
+		if resolvedVpcID == "" || len(resolvedSubnets) == 0 {
+			vpcID, subnets, err := r.resolveDefaultSubnets(ctx, awsProvider, input.Region)
+			if err != nil {
+				return err
+			}
+			if resolvedVpcID == "" {
+				resolvedVpcID = vpcID
+			}
+			if len(resolvedSubnets) == 0 {
+				resolvedSubnets = subnets
+			}
+		}
+		if len(resolvedSubnets) == 0 {
+			return fmt.Errorf("no subnets available for region %s; specify VPC/subnet IDs in the cluster profile", input.Region)
+		}
+
+		clusterMap := pulumi.Map{}
+		kubeconfigMap := pulumi.Map{}
+
+		for idx, clusterDef := range input.Clusters {
+			if len(clusterDef.NodePools) == 0 {
+				return fmt.Errorf("cluster %q has no node pools configured", clusterDef.ClusterID)
+			}
+			clusterName := fmt.Sprintf("%s-%d", sanitize(clusterDef.Name), idx)
+			resourceName := pulumiResourceName(clusterName, 30)
+			if clusterDef.ClusterID != "" {
+				clusterName = sanitize(clusterDef.ClusterID)
+				resourceName = pulumiResourceName(clusterName, 30)
+			}
+			clusterIDLabel := clusterDef.ClusterID
+			if clusterIDLabel == "" {
+				clusterIDLabel = clusterName
+			}
+
+			tags := pulumi.StringMap{
+				"Project": pulumi.String(input.ProjectID),
+				"Cluster": pulumi.String(clusterIDLabel),
+			}
+
+			clusterRole, err := r.createClusterRole(ctx, fmt.Sprintf("%s-cluster-role", resourceName), tags, providerOpt)
+			if err != nil {
+				return err
+			}
+			nodeRole, err := r.createNodeRole(ctx, fmt.Sprintf("%s-node-role", resourceName), tags, providerOpt)
+			if err != nil {
+				return err
+			}
+			clusterSG, nodeSG, err := r.createSecurityGroups(ctx, resourceName, resolvedVpcID, tags, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			lt, ltVersion, err := r.buildNodeLaunchTemplate(ctx, resourceName, clusterSG, nodeSG, tags, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			clusterArgs := &awseks.ClusterArgs{
+				Name:    pulumi.StringPtr(clusterName),
+				RoleArn: clusterRole.Arn,
+				Tags:    tags,
+				VpcConfig: &awseks.ClusterVpcConfigArgs{
+					SecurityGroupIds: pulumi.StringArray{
+						clusterSG.ID().ToStringOutput(),
+					},
+					SubnetIds: pulumi.ToStringArray(resolvedSubnets),
+				},
+			}
+			if version := strings.TrimSpace(clusterDef.Version); version != "" {
+				clusterArgs.Version = pulumi.StringPtr(version)
+			}
+
+			cluster, err := awseks.NewCluster(ctx, resourceName, clusterArgs, providerOpt, pulumi.DependsOn([]pulumi.Resource{clusterRole, clusterSG}))
+			if err != nil {
+				return fmt.Errorf("create eks cluster %q: %w", clusterDef.ClusterID, err)
+			}
+
+			kubeconfig := r.buildKubeconfigWithExternalID(cluster, input.Region, input.RoleARN, input.ExternalID)
+
+			kubeProvider, err := kubernetes.NewProvider(ctx, fmt.Sprintf("%s-k8s", sanitize(clusterName)), &kubernetes.ProviderArgs{
+				Kubeconfig: kubeconfig,
+			}, pulumi.DependsOn([]pulumi.Resource{cluster}))
+			if err != nil {
+				return fmt.Errorf("create kubernetes provider: %w", err)
+			}
+
+			awsAuth, err := r.applyAWSAuthConfig(ctx, kubeProvider, nodeRole.Arn, input.RoleARN, clusterName, []pulumi.Resource{cluster})
+			if err != nil {
+				return err
+			}
+
+			nodeGroupDeps := []pulumi.Resource{cluster, awsAuth, lt}
+			nodeGroups, err := r.configureManagedNodeGroups(ctx, clusterDef, cluster, nodeRole, lt, ltVersion, resolvedSubnets, awsProvider, nodeGroupDeps, tags)
+			if err != nil {
+				return err
+			}
+			if hasGpuNodePool(clusterDef.NodePools) {
+				deps := append([]pulumi.Resource{}, nodeGroups...)
+				deps = append(deps, cluster)
+				if err := r.installNvidiaDevicePlugin(ctx, clusterDef.ClusterID, clusterDef.NodePools, kubeProvider, deps); err != nil {
+					return err
+				}
+			}
+
+			// Extract AWS account ID from the RoleARN (format: arn:aws:iam::ACCOUNT_ID:role/...)
+			accountID := extractAccountIDFromARN(input.RoleARN)
+			if accountID == "" {
+				if ident, err := aws.GetCallerIdentity(ctx, nil, providerOpt); err == nil && ident != nil {
+					accountID = strings.TrimSpace(ident.AccountId)
+				} else {
+					return fmt.Errorf("resolve AWS account id for IRSA: %w", err)
+				}
+			}
+
+			// Create OIDC provider for IRSA (IAM Roles for Service Accounts).
+			// This allows Kubernetes service accounts to assume IAM roles.
+			oidcProvider, err := r.createOIDCProvider(ctx, clusterDef.ClusterID, cluster, accountID, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			// Create IAM role for cluster autoscaler with IRSA trust policy.
+			autoscalerRoleArn, err := r.createClusterAutoscalerRole(ctx, clusterDef.ClusterID, oidcProvider, accountID, providerOpt)
+			if err != nil {
+				return err
+			}
+
+			// Install Cluster Autoscaler to enable automatic node scaling.
+			if err := r.installClusterAutoscaler(ctx, clusterDef.ClusterID, cluster.Name, input.Region, autoscalerRoleArn, kubeProvider, append(nodeGroups, cluster, oidcProvider)); err != nil {
+				return err
+			}
+
+			var observabilityOutputs pulumi.Map
+			if input.EnableObservability && input.Observability.Enable {
+				obs, err := installer.Install(ctx, clusterDef.ClusterID, kubeProvider, input.Observability, append(nodeGroups, cluster))
+				if err != nil {
+					return err
+				}
+				observabilityOutputs = obs
+			}
+
+			if !input.SkipHelm {
+				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
+					return err
+				}
+			}
+
+			// Create the workloads namespace where workspace pods will be scheduled.
+			if _, err := r.createWorkloadsNamespace(ctx, input.ProjectID, clusterDef.ClusterID, kubeProvider, append(nodeGroups, cluster)); err != nil {
+				return err
+			}
+
+			key := clusterDef.ClusterID
+			if key == "" {
+				key = clusterName
+			}
+			kubeconfigKey := fmt.Sprintf("%s.kubeconfig", key)
+			kubeconfigMap[key] = kubeconfig
+			entry := pulumi.Map{
+				"clusterId":           pulumi.String(key),
+				"name":                pulumi.String(clusterDef.Name),
+				"region":              pulumi.String(input.Region),
+				"kubeconfigSecretKey": pulumi.String(kubeconfigKey),
+			}
+			if observabilityOutputs != nil {
+				entry["observability"] = observabilityOutputs
+			}
+			clusterMap[key] = entry
+		}
+
+		ctx.Export("clusters", clusterMap)
+		ctx.Export("kubeconfigs", kubeconfigMap)
+		return nil
+	}
+}
+
+// createClusterRole creates the IAM role for EKS control plane
+func (r *Runner) createClusterRole(ctx *pulumi.Context, name string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsiam.Role, error) {
+	assume := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["eks.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}`
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(assume),
+		Tags:             tags,
+	}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("create eks service role: %w", err)
+	}
+
+	policies := []string{
+		"arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+		"arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
+		"arn:aws:iam::aws:policy/AmazonEKSVPCResourceController",
+	}
+	for i, policy := range policies {
+		if _, err := awsiam.NewRolePolicyAttachment(ctx, fmt.Sprintf("%s-attach-%d", name, i), &awsiam.RolePolicyAttachmentArgs{
+			PolicyArn: pulumi.String(policy),
+			Role:      role.Name,
+		}, opts); err != nil {
+			return nil, fmt.Errorf("attach policy %s: %w", policy, err)
+		}
+	}
+	return role, nil
+}
+
+// createNodeRole creates the IAM role for EKS worker nodes
+func (r *Runner) createNodeRole(ctx *pulumi.Context, name string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsiam.Role, error) {
+	assume := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}`
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(assume),
+		Tags:             tags,
+	}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("create eks node role: %w", err)
+	}
+
+	policies := []string{
+		"arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+		"arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+		"arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+		"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+	}
+	for i, policy := range policies {
+		if _, err := awsiam.NewRolePolicyAttachment(ctx, fmt.Sprintf("%s-attach-%d", name, i), &awsiam.RolePolicyAttachmentArgs{
+			PolicyArn: pulumi.String(policy),
+			Role:      role.Name,
+		}, opts); err != nil {
+			return nil, fmt.Errorf("attach policy %s: %w", policy, err)
+		}
+	}
+
+	// Cluster Autoscaler IAM policy - allows autoscaler to modify ASGs
+	// TODO: For FedRAMP, consider migrating to IRSA with a dedicated service account.
+	autoscalerPolicy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:DescribeAutoScalingGroups",
+					"autoscaling:DescribeAutoScalingInstances",
+					"autoscaling:DescribeLaunchConfigurations",
+					"autoscaling:DescribeScalingActivities",
+					"autoscaling:DescribeTags",
+					"ec2:DescribeImages",
+					"ec2:DescribeInstanceTypes",
+					"ec2:DescribeLaunchTemplateVersions",
+					"ec2:GetInstanceTypesFromInstanceRequirements",
+					"eks:DescribeNodegroup"
+				],
+				"Resource": ["*"]
+			},
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:SetDesiredCapacity",
+					"autoscaling:TerminateInstanceInAutoScalingGroup"
+				],
+				"Resource": ["*"],
+				"Condition": {
+					"StringEquals": {
+						"autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true"
+					}
+				}
+			}
+		]
+	}`
+	if _, err := awsiam.NewRolePolicy(ctx, fmt.Sprintf("%s-autoscaler", name), &awsiam.RolePolicyArgs{
+		Role:   role.Name,
+		Policy: pulumi.String(autoscalerPolicy),
+	}, opts); err != nil {
+		return nil, fmt.Errorf("attach cluster autoscaler policy: %w", err)
+	}
+
+	return role, nil
+}
+
+// createOIDCProvider creates an IAM OIDC identity provider for EKS IRSA.
+func (r *Runner) createOIDCProvider(ctx *pulumi.Context, clusterID string, cluster *awseks.Cluster, accountID string, opts pulumi.ResourceOption) (*awsiam.OpenIdConnectProvider, error) {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("%s-oidc", key), 53)
+
+	oidcURL := cluster.Identities.Index(pulumi.Int(0)).Oidcs().Index(pulumi.Int(0)).Issuer().Elem()
+
+	// AWS EKS OIDC issuers use Amazon's root CA thumbprint
+	eksOIDCThumbprint := "9e99a48a9960b14926bb7f3b02e22da2b0ab7280"
+
+	provider, err := awsiam.NewOpenIdConnectProvider(ctx, name, &awsiam.OpenIdConnectProviderArgs{
+		Url: oidcURL,
+		ClientIdLists: pulumi.StringArray{
+			pulumi.String("sts.amazonaws.com"),
+		},
+		ThumbprintLists: pulumi.StringArray{
+			pulumi.String(eksOIDCThumbprint),
+		},
+	}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("create OIDC provider: %w", err)
+	}
+
+	return provider, nil
+}
+
+// createClusterAutoscalerRole creates an IAM role for the cluster autoscaler with IRSA trust policy.
+func (r *Runner) createClusterAutoscalerRole(ctx *pulumi.Context, clusterID string, oidcProvider *awsiam.OpenIdConnectProvider, accountID string, opts pulumi.ResourceOption) (pulumi.StringOutput, error) {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("cluster-autoscaler-%s", key), 53)
+
+	// Build the trust policy for IRSA
+	trustPolicy := oidcProvider.Url.ApplyT(func(url string) string {
+		oidcID := strings.TrimPrefix(url, "https://")
+		return fmt.Sprintf(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Effect": "Allow",
+				"Principal": {
+					"Federated": "arn:aws:iam::%s:oidc-provider/%s"
+				},
+				"Action": "sts:AssumeRoleWithWebIdentity",
+				"Condition": {
+					"StringEquals": {
+						"%s:sub": "system:serviceaccount:kube-system:cluster-autoscaler",
+						"%s:aud": "sts.amazonaws.com"
+					}
+				}
+			}]
+		}`, accountID, oidcID, oidcID, oidcID)
+	}).(pulumi.StringOutput)
+
+	role, err := awsiam.NewRole(ctx, name, &awsiam.RoleArgs{
+		AssumeRolePolicy: trustPolicy,
+		Description:      pulumi.String("IAM role for EKS cluster autoscaler (IRSA)"),
+	}, opts)
+	if err != nil {
+		return pulumi.StringOutput{}, fmt.Errorf("create cluster autoscaler role: %w", err)
+	}
+
+	// Attach the cluster autoscaler policy
+	autoscalerPolicy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:DescribeAutoScalingGroups",
+					"autoscaling:DescribeAutoScalingInstances",
+					"autoscaling:DescribeLaunchConfigurations",
+					"autoscaling:DescribeScalingActivities",
+					"autoscaling:DescribeTags",
+					"ec2:DescribeImages",
+					"ec2:DescribeInstanceTypes",
+					"ec2:DescribeLaunchTemplateVersions",
+					"ec2:GetInstanceTypesFromInstanceRequirements",
+					"eks:DescribeNodegroup"
+				],
+				"Resource": ["*"]
+			},
+			{
+				"Effect": "Allow",
+				"Action": [
+					"autoscaling:SetDesiredCapacity",
+					"autoscaling:TerminateInstanceInAutoScalingGroup"
+				],
+				"Resource": ["*"],
+				"Condition": {
+					"StringEquals": {
+						"autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true"
+					}
+				}
+			}
+		]
+	}`
+	if _, err := awsiam.NewRolePolicy(ctx, fmt.Sprintf("%s-policy", name), &awsiam.RolePolicyArgs{
+		Role:   role.Name,
+		Policy: pulumi.String(autoscalerPolicy),
+	}, opts); err != nil {
+		return pulumi.StringOutput{}, fmt.Errorf("attach cluster autoscaler policy: %w", err)
+	}
+
+	return role.Arn, nil
+}
+
+// createSecurityGroups creates security groups for EKS cluster and nodes
+func (r *Runner) createSecurityGroups(ctx *pulumi.Context, baseName, vpcID string, tags pulumi.StringMap, opts pulumi.ResourceOption) (*awsec2.SecurityGroup, *awsec2.SecurityGroup, error) {
+	clusterSG, err := awsec2.NewSecurityGroup(ctx, fmt.Sprintf("%s-cluster-sg", baseName), &awsec2.SecurityGroupArgs{
+		VpcId:       pulumi.String(vpcID),
+		Description: pulumi.String("EKS control plane security group"),
+		Tags:        tags,
+		Egress: awsec2.SecurityGroupEgressArray{
+			&awsec2.SecurityGroupEgressArgs{
+				Protocol:   pulumi.String("-1"),
+				FromPort:   pulumi.Int(0),
+				ToPort:     pulumi.Int(0),
+				CidrBlocks: pulumi.StringArray{pulumi.String("0.0.0.0/0")},
+			},
+		},
+	}, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create cluster security group: %w", err)
+	}
+
+	nodeSG, err := awsec2.NewSecurityGroup(ctx, fmt.Sprintf("%s-node-sg", baseName), &awsec2.SecurityGroupArgs{
+		VpcId:       pulumi.String(vpcID),
+		Description: pulumi.String("EKS managed node group security group"),
+		Tags:        tags,
+		Egress: awsec2.SecurityGroupEgressArray{
+			&awsec2.SecurityGroupEgressArgs{
+				Protocol:   pulumi.String("-1"),
+				FromPort:   pulumi.Int(0),
+				ToPort:     pulumi.Int(0),
+				CidrBlocks: pulumi.StringArray{pulumi.String("0.0.0.0/0")},
+			},
+		},
+	}, opts, pulumi.DependsOn([]pulumi.Resource{clusterSG}))
+	if err != nil {
+		return nil, nil, fmt.Errorf("create node security group: %w", err)
+	}
+
+	// Security group rules for cluster-to-node and node-to-node communication
+	// ... (rules for ingress between cluster and nodes)
+
+	return clusterSG, nodeSG, nil
+}
+
+// configureManagedNodeGroups creates EKS managed node groups for each pool
+func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clusterDefinition, cluster *awseks.Cluster, nodeRole *awsiam.Role, lt *awsec2.LaunchTemplate, ltVersion pulumi.StringOutput, subnets []string, provider *aws.Provider, depends []pulumi.Resource, tags pulumi.StringMap) ([]pulumi.Resource, error) {
+	if len(clusterDef.NodePools) == 0 {
+		return nil, nil
+	}
+
+	nodeGroups := []pulumi.Resource{}
+	for _, pool := range clusterDef.NodePools {
+		name := strings.TrimSpace(pool.Name)
+		if name == "" {
+			name = fmt.Sprintf("%s-nodepool", sanitize(clusterDef.ClusterID))
+		}
+		name = pulumiResourceName(sanitize(name), 30)
+		instanceType := normalizeInstanceType(pool.InstanceType)
+		if instanceType == "" {
+			instanceType = "t3.small" // Default: 2 vCPU, 2GB
+		}
+		gpuPool := isGpuNodePool(pool)
+		maxSize := int(pool.MaxSize)
+		if maxSize < 1 {
+			maxSize = 5 // Default to 5 for autoscaling headroom
+		}
+		scaling := &awseks.NodeGroupScalingConfigArgs{
+			DesiredSize: pulumi.Int(int(pool.MinSize)),
+			MinSize:     pulumi.Int(int(pool.MinSize)),
+			MaxSize:     pulumi.Int(maxSize),
+		}
+
+		// Add Cluster Autoscaler discovery tags
+		ngTags := pulumi.StringMap{}
+		for k, v := range tags {
+			ngTags[k] = v
+		}
+		ngTags["k8s.io/cluster-autoscaler/enabled"] = pulumi.String("true")
+		ngTags["k8s.io/cluster-autoscaler/"+clusterDef.ClusterID] = pulumi.String("owned")
+
+		ngArgs := &awseks.NodeGroupArgs{
+			ClusterName:   pulumi.StringInput(cluster.Name),
+			NodeRoleArn:   nodeRole.Arn,
+			NodeGroupName: pulumi.StringPtr(name),
+			SubnetIds:     pulumi.ToStringArray(subnets),
+			InstanceTypes: pulumi.StringArray{
+				pulumi.String(instanceType),
+			},
+			ScalingConfig: scaling,
+			Taints:        convertTaints(pool.Taints),
+			Tags:          ngTags,
+			LaunchTemplate: &awseks.NodeGroupLaunchTemplateArgs{
+				Id:      lt.ID().ToStringPtrOutput(),
+				Version: ltVersion,
+			},
+		}
+
+		if gpuPool {
+			ngArgs.AmiType = pulumi.StringPtr(gpuAmiType(clusterDef.Version))
+		}
+
+		if len(pool.Labels) > 0 {
+			labels := pulumi.StringMap{}
+			for k, v := range pool.Labels {
+				labels[k] = pulumi.String(v)
+			}
+			ngArgs.Labels = labels
+		}
+
+		opts := []pulumi.ResourceOption{pulumi.Provider(provider), pulumi.DependsOn(depends)}
+		ng, err := awseks.NewNodeGroup(ctx, fmt.Sprintf("%s-nodegroup", name), ngArgs, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("create managed node group %q: %w", name, err)
+		}
+		nodeGroups = append(nodeGroups, ng)
+	}
+	return nodeGroups, nil
+}
+
+// installNvidiaDevicePlugin installs NVIDIA device plugin for GPU nodes
+func (r *Runner) installNvidiaDevicePlugin(ctx *pulumi.Context, clusterID string, nodePools []infraapi.NodePool, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("%s-nvidia-device-plugin", key), 53)
+	values := pulumi.Map{
+		"tolerations": pulumi.Array{
+			pulumi.Map{
+				"key":      pulumi.String("nvidia.com/gpu"),
+				"operator": pulumi.String("Exists"),
+				"effect":   pulumi.String("NoSchedule"),
+			},
+			pulumi.Map{
+				"key":      pulumi.String("CriticalAddonsOnly"),
+				"operator": pulumi.String("Exists"),
+			},
+		},
+	}
+
+	// Restrict scheduling to GPU nodegroups
+	if flavors := gpuFlavors(nodePools); len(flavors) == 1 {
+		values["nodeSelector"] = pulumi.Map{"aegis.io/gpu-flavor": pulumi.String(flavors[0])}
+	}
+
+	if mig := gpuMigStrategy(nodePools); mig != "" {
+		values["args"] = pulumi.Array{pulumi.String(fmt.Sprintf("--mig-strategy=%s", mig))}
+	}
+
+	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
+		Name:      pulumi.StringPtr(name),
+		Namespace: pulumi.StringPtr("kube-system"),
+		Chart:     pulumi.String("nvidia-device-plugin"),
+		RepositoryOpts: &helm.RepositoryOptsArgs{
+			Repo: pulumi.StringPtr("https://nvidia.github.io/k8s-device-plugin"),
+		},
+		Version: pulumi.StringPtr("0.14.5"),
+		Values:  values,
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return fmt.Errorf("install nvidia device plugin: %w", err)
+	}
+	return nil
+}
+
+// installClusterAutoscaler deploys the Kubernetes Cluster Autoscaler
+func (r *Runner) installClusterAutoscaler(ctx *pulumi.Context, clusterID string, clusterName pulumi.StringInput, region string, roleArn pulumi.StringOutput, kubeProvider *kubernetes.Provider, depends []pulumi.Resource) error {
+	key := sanitize(clusterID)
+	if key == "" {
+		key = "aegis"
+	}
+	name := pulumiResourceName(fmt.Sprintf("%s-cluster-autoscaler", key), 53)
+
+	values := pulumi.Map{
+		"autoDiscovery": pulumi.Map{
+			"clusterName": clusterName,
+		},
+		"awsRegion": pulumi.String(region),
+		"extraArgs": pulumi.Map{
+			"scale-down-enabled":               pulumi.Bool(true),
+			"scale-down-delay-after-add":       pulumi.String("5m"),
+			"scale-down-unneeded-time":         pulumi.String("5m"),
+			"scale-down-utilization-threshold": pulumi.String("0.5"),
+			"skip-nodes-with-local-storage":    pulumi.Bool(false),
+			"skip-nodes-with-system-pods":      pulumi.Bool(false),
+			"balance-similar-node-groups":      pulumi.Bool(true),
+			"expander":                         pulumi.String("least-waste"),
+		},
+		"resources": pulumi.Map{
+			"requests": pulumi.Map{
+				"cpu":    pulumi.String("100m"),
+				"memory": pulumi.String("300Mi"),
+			},
+			"limits": pulumi.Map{
+				"cpu":    pulumi.String("100m"),
+				"memory": pulumi.String("300Mi"),
+			},
+		},
+		"nodeSelector": pulumi.Map{
+			"kubernetes.io/os": pulumi.String("linux"),
+		},
+		"tolerations": pulumi.Array{
+			pulumi.Map{
+				"key":      pulumi.String("CriticalAddonsOnly"),
+				"operator": pulumi.String("Exists"),
+			},
+		},
+		"rbac": pulumi.Map{
+			"create": pulumi.Bool(true),
+			"serviceAccount": pulumi.Map{
+				"create": pulumi.Bool(true),
+				"name":   pulumi.String("cluster-autoscaler"),
+				"annotations": pulumi.Map{
+					"eks.amazonaws.com/role-arn": roleArn,
+				},
+			},
+		},
+	}
+
+	_, err := helm.NewRelease(ctx, name, &helm.ReleaseArgs{
+		Name:      pulumi.StringPtr("cluster-autoscaler"),
+		Namespace: pulumi.StringPtr("kube-system"),
+		Chart:     pulumi.String("cluster-autoscaler"),
+		RepositoryOpts: &helm.RepositoryOptsArgs{
+			Repo: pulumi.StringPtr("https://kubernetes.github.io/autoscaler"),
+		},
+		Version: pulumi.StringPtr("9.37.0"),
+		Values:  values,
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return fmt.Errorf("install cluster autoscaler: %w", err)
+	}
+
+	return nil
+}
+
+// gpuAmiType returns the appropriate AMI type for GPU nodes based on K8s version
+func gpuAmiType(clusterVersion string) string {
+	major, minor := parseK8sVersion(clusterVersion)
+	if major == 0 && minor == 0 {
+		return "BOTTLEROCKET_x86_64_NVIDIA"
+	}
+	if major > 1 || (major == 1 && minor >= 33) {
+		return "BOTTLEROCKET_x86_64_NVIDIA"
+	}
+	return "AL2_x86_64_GPU"
+}
+
+================================================================================
+FILE: services/platform-api/internal/provisioning/pulumi/aws/lock_utils.go
+================================================================================
+
+package aws
+
+import (
+	"errors"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+)
+
+type s3LockInfo struct {
+	Bucket    string
+	Key       string
+	CreatedBy string
+	CreatedAt time.Time
+}
+
+var (
+	s3PathRe        = regexp.MustCompile(`s3://([^/]+)/([^\s:]+)`)
+	createdByRe     = regexp.MustCompile(`created by ([^\s]+)`)
+	createdAtTimeRe = regexp.MustCompile(` at ([0-9]{4}-[0-9]{2}-[0-9]{2}T[^\s]+)`)
+)
+
+func parseLockInfoFromError(errMsg string) (*s3LockInfo, error) {
+	msg := strings.TrimSpace(errMsg)
+	if msg == "" {
+		return nil, errors.New("empty error message")
+	}
+
+	m := s3PathRe.FindStringSubmatch(msg)
+	if len(m) != 3 {
+		return nil, errors.New("no S3 lock path found in error message")
+	}
+
+	info := &s3LockInfo{
+		Bucket: strings.TrimSpace(m[1]),
+		Key:    strings.TrimSpace(m[2]),
+	}
+
+	if cm := createdByRe.FindStringSubmatch(msg); len(cm) == 2 {
+		info.CreatedBy = strings.TrimSpace(cm[1])
+	}
+	if tm := createdAtTimeRe.FindStringSubmatch(msg); len(tm) == 2 {
+		if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(tm[1])); err == nil {
+			info.CreatedAt = ts
+		}
+	}
+
+	return info, nil
+}
+
+func getLockStaleThreshold() time.Duration {
+	const defaultThreshold = 30 * time.Minute
+
+	raw := strings.TrimSpace(os.Getenv("AEGIS_PULUMI_LOCK_STALE_MINUTES"))
+	if raw == "" {
+		return defaultThreshold
+	}
+
+	minutes, err := time.ParseDuration(raw + "m")
+	if err != nil {
+		return defaultThreshold
+	}
+	if minutes <= 0 {
+		return defaultThreshold
+	}
+	return minutes
+}
+
+================================================================================
+FILE: services/platform-api/internal/provisioning/observability/stack.go
+================================================================================
+
+// (See full file content - installs kube-prometheus-stack, Loki, Fluent Bit, Tempo)
+// Key components:
+// - Prometheus for metrics
+// - Alertmanager for alerting
+// - Metrics Server for HPA
+// - Loki for log aggregation
+// - Fluent Bit for log forwarding
+// - Tempo for distributed tracing
+
+// ResolveFromEnv builds a Config using environment variables and defaults.
+func ResolveFromEnv(repoRoot string) Config {
+	// Default Helm chart repositories:
+	// - kube-prometheus-stack: https://prometheus-community.github.io/helm-charts
+	// - metrics-server: https://kubernetes-sigs.github.io/metrics-server/
+	// - loki: https://grafana.github.io/helm-charts
+	// - fluent-bit: https://fluent.github.io/helm-charts
+	// - tempo: https://grafana.github.io/helm-charts
+	// ...
+}
+
+// Install installs the observability stack and returns the outputs map
+func (defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, cfg Config, depends []pulumi.Resource) (pulumi.Map, error) {
+	// Installs:
+	// 1. kube-prometheus-stack (Prometheus + Alertmanager + Grafana)
+	// 2. metrics-server (for HPA)
+	// 3. Loki + Fluent Bit (for logging)
+	// 4. Tempo (for tracing)
+	// ...
+}
+
+================================================================================
+SUMMARY OF CURRENT ARCHITECTURE
+================================================================================
+
+WHAT THE CODE DOES:
+1. Creates EKS cluster with IAM roles for control plane and nodes
+2. Creates security groups for cluster-to-node communication
+3. Creates managed node groups with GPU support (g4dn, g5 instances)
+4. Sets up IRSA (IAM Roles for Service Accounts) via OIDC provider
+5. Installs Cluster Autoscaler for on-demand GPU scaling
+6. Installs NVIDIA device plugin for GPU workloads
+7. Deploys observability stack (Prometheus, Loki, Tempo)
+8. Creates workloads namespace for tenant isolation
+
+KEY AWS RESOURCES CREATED:
+- IAM Roles: cluster role, node role, autoscaler role (with IRSA)
+- Security Groups: cluster SG, node SG with rules
+- EKS Cluster: managed control plane
+- EKS Node Groups: system nodes, GPU nodes
+- OIDC Provider: for IRSA authentication
+- Launch Templates: for node configuration
+
+HELM CHARTS DEPLOYED:
+- aegis-spoke (platform agent)
+- nvidia-device-plugin (GPU support)
+- cluster-autoscaler (node scaling)
+- kube-prometheus-stack (monitoring)
+- metrics-server (HPA)
+- loki (logging)
+- fluent-bit (log forwarding)
+- tempo (tracing)
+
+================================================================================
+QUESTIONS FOR REVIEW
+================================================================================
+
+1. IL-4/IL-5 (FedRAMP HIGH) COMPLIANCE:
+   - What security controls are missing?
+   - What encryption at rest/transit is needed?
+   - What logging/auditing requirements?
+   - What IAM policy restrictions?
+   - What network isolation requirements?
+   - What compliance certifications needed for container images?
+
+2. EC2 + RKE2 ALTERNATIVE:
+   - How would provisioning change for EC2 instances instead of EKS?
+   - What Pulumi resources would be needed for EC2 instances?
+   - How to bootstrap RKE2 on EC2 instances?
+   - How to handle GPU driver installation without EKS managed AMIs?
+   - What networking changes needed (no EKS VPC CNI)?
+   - How to handle IRSA equivalent in RKE2?
+
+================================================================================

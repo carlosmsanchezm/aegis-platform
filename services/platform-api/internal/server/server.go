@@ -1323,10 +1323,30 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 
 	// Determine proxy URL: use spoke proxy if cluster reports one, otherwise use hub proxy
 	proxyBaseURL := s.proxyBaseURL
-	if clusterID := w.GetClusterId(); clusterID != "" {
-		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil && clusterInfo.ProxyURL != "" {
-			proxyBaseURL = clusterInfo.ProxyURL
-			s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+	clusterID := w.GetClusterId()
+	if clusterID != "" {
+		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil {
+			if clusterInfo.ProxyURL != "" {
+				proxyBaseURL = clusterInfo.ProxyURL
+				s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+			} else {
+				// Cluster is registered but has no proxy_url - this likely means spoke-proxy
+				// is not deployed on the remote cluster. Return a clear error instead of
+				// silently falling back to the hub proxy which won't work for remote clusters.
+				s.log.Warn("cluster has no proxy_url configured; spoke-proxy may not be deployed",
+					zap.String("cluster_id", clusterID),
+					zap.String("workload_id", workloadID),
+					zap.String("fallback_proxy", proxyBaseURL),
+				)
+				// Only error if the cluster appears to be remote (not a local dev cluster)
+				// Local clusters typically don't register or use in-cluster kubeconfig
+				if clusterInfo.Provider != "" && clusterInfo.Provider != "local" {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"cluster %s has no proxy URL configured; the spoke-proxy may not be deployed. "+
+							"Deploy the spoke chart with proxy.enabled=true or set AEGIS_PROXY_INGRESS_HOST on the k8s-agent",
+						clusterID)
+				}
+			}
 		}
 	}
 	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())

@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -65,10 +67,16 @@ const (
 	labelWorkloadID = "aegis.workload/id"
 	labelSSHManaged = "aegis.yourorg.dev/ssh-managed"
 
+	// Legacy annotations (kept for backward compatibility during rollout)
 	annotationStartAcked              = "aegis.yourorg.dev/start-acked"
 	annotationFinalAcked              = "aegis.yourorg.dev/final-acked"
 	annotationMaxDurationSeconds      = "aegis.yourorg.dev/maxDurationSeconds"
 	annotationTTLSecondsAfterFinished = "aegis.yourorg.dev/ttlSecondsAfterFinished"
+
+	// Event-driven state tracking annotations
+	// These track the last-pushed state to platform-api, enabling proper re-sync when jobs are recreated
+	annotationLastPushedState  = "aegis.yourorg.dev/last-pushed-state"  // PENDING, RUNNING, SUCCEEDED, FAILED
+	annotationLastPushedJobUID = "aegis.yourorg.dev/last-pushed-job-uid" // UID of the job when state was pushed
 
 	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
 	annotationSSHTrustedCA      = "aegis.yourorg.dev/ssh-trusted-user-ca"
@@ -338,15 +346,33 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 		return
 	}
 
+	// Get the job UID for state tracking - this enables proper re-sync when jobs are recreated
+	jobUID := string(job.UID)
+
 	phase := aw.Status.Phase
 	observedRunning := job.Status.Active > 0 || job.Status.Succeeded > 0 || job.Status.Failed > 0
 
-	if observedRunning && phase != aegisv1alpha1.PhaseRunning {
+	// Check if this is a recreated job (different UID than what we last pushed)
+	lastPushedJobUID := aw.GetAnnotations()[annotationLastPushedJobUID]
+	jobRecreated := lastPushedJobUID != "" && lastPushedJobUID != jobUID
+
+	// If job was recreated, we need to re-push status even if phase hasn't changed
+	if jobRecreated {
+		ctrl.LoggerFrom(ctx).Info("detected job recreation, will re-sync status",
+			"workload", aw.Name, "oldJobUID", lastPushedJobUID, "newJobUID", jobUID)
+	}
+
+	if observedRunning && (phase != aegisv1alpha1.PhaseRunning || jobRecreated) {
 		prev := aw.Status.Phase
 		_ = r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
 			st.Phase = aegisv1alpha1.PhaseRunning
 			st.Backend = backend
-			if st.StartTime == nil {
+			// If job was recreated, reset the start time and clear completion time
+			if jobRecreated {
+				st.CompletionTime = nil
+				st.Message = ""
+			}
+			if st.StartTime == nil || jobRecreated {
 				if job.Status.StartTime != nil {
 					st.StartTime = job.Status.StartTime.DeepCopy()
 				} else {
@@ -355,8 +381,8 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 				}
 			}
 		})
-		if prev != aegisv1alpha1.PhaseRunning {
-			r.startWorkloadBridge(ctx, aw)
+		if prev != aegisv1alpha1.PhaseRunning || jobRecreated {
+			r.startWorkloadBridge(ctx, aw, jobUID)
 		}
 	}
 
@@ -375,8 +401,8 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 			}
 			st.Message = ""
 		})
-		if prev != aegisv1alpha1.PhaseSucceeded {
-			r.ackWorkloadBridge(ctx, aw, "SUCCEEDED")
+		if prev != aegisv1alpha1.PhaseSucceeded || jobRecreated {
+			r.ackWorkloadBridge(ctx, aw, "SUCCEEDED", jobUID)
 		}
 		return
 	}
@@ -397,8 +423,8 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 				}
 			}
 		})
-		if prev != aegisv1alpha1.PhaseFailed {
-			r.ackWorkloadBridge(ctx, aw, "FAILED")
+		if prev != aegisv1alpha1.PhaseFailed || jobRecreated {
+			r.ackWorkloadBridge(ctx, aw, "FAILED", jobUID)
 		}
 	}
 }
@@ -408,18 +434,29 @@ func (r *AegisWorkloadReconciler) applyTrainingTransitions(ctx context.Context, 
 		return
 	}
 
-	if workstatus.HasCondition(obj, "Running") && aw.Status.Phase != aegisv1alpha1.PhaseRunning {
+	// Get the training object UID for state tracking
+	objUID := string(obj.GetUID())
+
+	// Check if this is a recreated training object
+	lastPushedJobUID := aw.GetAnnotations()[annotationLastPushedJobUID]
+	objRecreated := lastPushedJobUID != "" && lastPushedJobUID != objUID
+
+	if workstatus.HasCondition(obj, "Running") && (aw.Status.Phase != aegisv1alpha1.PhaseRunning || objRecreated) {
 		prev := aw.Status.Phase
 		_ = r.patchStatus(ctx, aw, func(st *aegisv1alpha1.AegisWorkloadStatus) {
 			st.Phase = aegisv1alpha1.PhaseRunning
 			st.Backend = backendPyTorch
-			if st.StartTime == nil {
+			if objRecreated {
+				st.CompletionTime = nil
+				st.Message = ""
+			}
+			if st.StartTime == nil || objRecreated {
 				now := metav1.NewTime(time.Now())
 				st.StartTime = &now
 			}
 		})
-		if prev != aegisv1alpha1.PhaseRunning {
-			r.startWorkloadBridge(ctx, aw)
+		if prev != aegisv1alpha1.PhaseRunning || objRecreated {
+			r.startWorkloadBridge(ctx, aw, objUID)
 		}
 	}
 
@@ -433,8 +470,8 @@ func (r *AegisWorkloadReconciler) applyTrainingTransitions(ctx context.Context, 
 				st.CompletionTime = &now
 			}
 		})
-		if prev != aegisv1alpha1.PhaseSucceeded {
-			r.ackWorkloadBridge(ctx, aw, "SUCCEEDED")
+		if prev != aegisv1alpha1.PhaseSucceeded || objRecreated {
+			r.ackWorkloadBridge(ctx, aw, "SUCCEEDED", objUID)
 		}
 		return
 	}
@@ -449,8 +486,8 @@ func (r *AegisWorkloadReconciler) applyTrainingTransitions(ctx context.Context, 
 				st.CompletionTime = &now
 			}
 		})
-		if prev != aegisv1alpha1.PhaseFailed {
-			r.ackWorkloadBridge(ctx, aw, "FAILED")
+		if prev != aegisv1alpha1.PhaseFailed || objRecreated {
+			r.ackWorkloadBridge(ctx, aw, "FAILED", objUID)
 		}
 	}
 }
@@ -483,12 +520,16 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 		}
 	}
 
+	// Build proxy URL before registration so it's included in the initial request
+	proxyURL := r.buildProxyURL()
+
 	registerReq := &aegisproto.ClusterRegisterRequest{
 		ClusterId: r.clusterID,
 		Provider:  os.Getenv("AEGIS_PROVIDER"),
 		Region:    os.Getenv("AEGIS_REGION"),
 		IlLevel:   os.Getenv("AEGIS_IL_LEVEL"),
 		Labels:    labels,
+		ProxyUrl:  proxyURL, // Include proxy URL in registration for immediate availability
 	}
 
 	for {
@@ -501,17 +542,17 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 			}
 			continue
 		}
-		zapLogger.Info("cluster registered", zap.String("cluster_id", r.clusterID))
+		zapLogger.Info("cluster registered", zap.String("cluster_id", r.clusterID), zap.String("proxy_url", proxyURL))
 		break
 	}
 
 	flavors := r.discoverFlavors()
-	proxyURL := r.buildProxyURL()
 	r.cpClient.HeartbeatLoop(ctx, zapLogger, r.clusterID, flavors, proxyURL)
 }
 
 // buildProxyURL returns the spoke proxy URL for heartbeat reporting.
 // If AEGIS_PROXY_URL is set, it's used directly. Otherwise, constructs from AEGIS_PROXY_INGRESS_HOST.
+// If neither is set and we're on AWS, auto-discovers the node public IP and constructs a nip.io URL.
 func (r *AegisWorkloadReconciler) buildProxyURL() string {
 	// Prefer explicit proxy URL if set (supports custom port for NodePort access)
 	if r.proxyURL != "" {
@@ -525,6 +566,13 @@ func (r *AegisWorkloadReconciler) buildProxyURL() string {
 	// Fall back to constructing from ingress host
 	host := r.proxyIngressHost
 	if host == "" {
+		// Auto-discover node public IP for AWS/cloud deployments
+		if ip := discoverNodePublicIP(); ip != "" {
+			// Construct nip.io URL with default NodePort
+			host = fmt.Sprintf("spoke-proxy.%s.nip.io:31484", ip)
+		}
+	}
+	if host == "" {
 		return ""
 	}
 	// If no scheme specified, default to wss://
@@ -532,6 +580,45 @@ func (r *AegisWorkloadReconciler) buildProxyURL() string {
 		host = "wss://" + host
 	}
 	return host
+}
+
+// discoverNodePublicIP attempts to discover the node's public IP address.
+// Tries AWS EC2 metadata service first, then falls back to external IP check services.
+func discoverNodePublicIP() string {
+	// Try AWS EC2 metadata service (IMDSv1 for simplicity)
+	if ip := fetchURL("http://169.254.169.254/latest/meta-data/public-ipv4", 2*time.Second); ip != "" {
+		return ip
+	}
+	// Fallback: try common external IP check services
+	services := []string{
+		"https://api.ipify.org",
+		"https://checkip.amazonaws.com",
+		"https://ifconfig.me/ip",
+	}
+	for _, svc := range services {
+		if ip := fetchURL(svc, 3*time.Second); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+// fetchURL fetches a URL and returns the trimmed body, or empty string on error.
+func fetchURL(url string, timeout time.Duration) string {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
 }
 
 func (r *AegisWorkloadReconciler) discoverFlavors() []*aegisproto.Flavor {
@@ -657,7 +744,7 @@ func workspaceAliasName(name string) string {
 	return fmt.Sprintf("aegis-w-%s", cpID)
 }
 
-func (r *AegisWorkloadReconciler) startWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) {
+func (r *AegisWorkloadReconciler) startWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, jobUID string) {
 	if r.cpClient == nil || aw == nil {
 		return
 	}
@@ -665,28 +752,57 @@ func (r *AegisWorkloadReconciler) startWorkloadBridge(ctx context.Context, aw *a
 		ctrl.LoggerFrom(ctx).Info("cluster id missing; skipping StartWorkload bridge", "workload", aw.Name)
 		return
 	}
-	if aw.GetAnnotations()[annotationStartAcked] == "true" {
+
+	annotations := aw.GetAnnotations()
+	lastPushedState := annotations[annotationLastPushedState]
+	lastPushedJobUID := annotations[annotationLastPushedJobUID]
+
+	// Only push if: state changed to RUNNING, OR job was recreated (different UID)
+	stateChanged := lastPushedState != "RUNNING"
+	jobRecreated := jobUID != "" && lastPushedJobUID != "" && lastPushedJobUID != jobUID
+
+	if !stateChanged && !jobRecreated {
+		// Already pushed RUNNING for this job
 		return
 	}
+
 	cpID := controlPlaneWorkloadID(aw.Name)
 	if err := r.cpClient.Start(ctx, cpID, r.clusterID); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "StartWorkload bridge failed", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
-	if err := r.markAnnotation(ctx, aw, annotationStartAcked); err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "failed to persist start acknowledgement", "workload", aw.Name)
+
+	// Update annotations to track what we just pushed
+	if err := r.updatePushedStateAnnotations(ctx, aw, "RUNNING", jobUID); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "failed to persist state tracking", "workload", aw.Name)
 		return
 	}
-	ctrl.LoggerFrom(ctx).Info("StartWorkload bridge sent", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
+
+	if jobRecreated {
+		ctrl.LoggerFrom(ctx).Info("StartWorkload bridge sent (job recreated)", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID, "oldJobUID", lastPushedJobUID, "newJobUID", jobUID)
+	} else {
+		ctrl.LoggerFrom(ctx).Info("StartWorkload bridge sent", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
+	}
 }
 
-func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, status string) {
+func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, status string, jobUID string) {
 	if r.cpClient == nil || aw == nil {
 		return
 	}
-	if aw.GetAnnotations()[annotationFinalAcked] == "true" {
+
+	annotations := aw.GetAnnotations()
+	lastPushedState := annotations[annotationLastPushedState]
+	lastPushedJobUID := annotations[annotationLastPushedJobUID]
+
+	// Only push if: state changed, OR job was recreated (different UID)
+	stateChanged := lastPushedState != status
+	jobRecreated := jobUID != "" && lastPushedJobUID != "" && lastPushedJobUID != jobUID
+
+	if !stateChanged && !jobRecreated {
+		// Already pushed this final state for this job
 		return
 	}
+
 	backend := backendForWorkload(aw)
 	url := aw.Status.URL
 	if url == "" {
@@ -697,11 +813,18 @@ func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aeg
 		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", status, "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
-	if err := r.markAnnotation(ctx, aw, annotationFinalAcked); err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "failed to persist final acknowledgement", "workload", aw.Name, "status", status)
+
+	// Update annotations to track what we just pushed
+	if err := r.updatePushedStateAnnotations(ctx, aw, status, jobUID); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "failed to persist state tracking", "workload", aw.Name, "status", status)
 		return
 	}
-	ctrl.LoggerFrom(ctx).Info("AckWorkload bridge sent", "status", status, "clusterID", r.clusterID)
+
+	if jobRecreated {
+		ctrl.LoggerFrom(ctx).Info("AckWorkload bridge sent (job recreated)", "status", status, "clusterID", r.clusterID, "oldJobUID", lastPushedJobUID, "newJobUID", jobUID)
+	} else {
+		ctrl.LoggerFrom(ctx).Info("AckWorkload bridge sent", "status", status, "clusterID", r.clusterID)
+	}
 }
 
 func (r *AegisWorkloadReconciler) markAnnotation(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, key string) error {
@@ -710,6 +833,27 @@ func (r *AegisWorkloadReconciler) markAnnotation(ctx context.Context, aw *aegisv
 		aw.Annotations = map[string]string{}
 	}
 	aw.Annotations[key] = "true"
+	return r.Patch(ctx, aw, client.MergeFrom(original))
+}
+
+// updatePushedStateAnnotations updates annotations to track the last-pushed state and job UID.
+// This enables proper re-sync when jobs are recreated - we compare against these values
+// to determine if a status push is needed.
+func (r *AegisWorkloadReconciler) updatePushedStateAnnotations(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, state string, jobUID string) error {
+	original := aw.DeepCopy()
+	if aw.Annotations == nil {
+		aw.Annotations = map[string]string{}
+	}
+	aw.Annotations[annotationLastPushedState] = state
+	if jobUID != "" {
+		aw.Annotations[annotationLastPushedJobUID] = jobUID
+	}
+	// Also set legacy annotations for backward compatibility during rollout
+	if state == "RUNNING" {
+		aw.Annotations[annotationStartAcked] = "true"
+	} else if state == "SUCCEEDED" || state == "FAILED" {
+		aw.Annotations[annotationFinalAcked] = "true"
+	}
 	return r.Patch(ctx, aw, client.MergeFrom(original))
 }
 

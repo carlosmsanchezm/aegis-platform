@@ -10,6 +10,7 @@ import (
 // ClusterInfo represents the latest known snapshot of a cluster.
 type ClusterInfo struct {
 	ID                 string
+	ProjectID          string // Direct FK to projects table for multi-tenancy
 	Provider           string
 	Region             string
 	Labels             map[string]string
@@ -18,6 +19,7 @@ type ClusterInfo struct {
 	LastHeartbeat      time.Time
 	ProxyURL           string // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
 	CreatedAt          time.Time
+	DeletedAt          *time.Time // Soft delete timestamp
 }
 
 type clusterState struct {
@@ -43,6 +45,10 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 	ci.Labels = map[string]string{}
 	for k, v := range req.GetLabels() {
 		ci.Labels[k] = v
+	}
+	// Set proxy URL if provided during registration (useful for spoke clusters)
+	if proxyURL := req.GetProxyUrl(); proxyURL != "" {
+		ci.ProxyURL = proxyURL
 	}
 	// Do not touch flavors/TTFG here; those arrive in heartbeat.
 }
@@ -107,6 +113,31 @@ func (cs *clusterState) list() []*ClusterInfo {
 	return out
 }
 
+func (cs *clusterState) listByProject(projectID string) []*ClusterInfo {
+	if projectID == "" {
+		return nil
+	}
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	out := make([]*ClusterInfo, 0)
+	for _, ci := range cs.clusters {
+		// Check the ProjectID field first (new FK-based approach)
+		if ci.ProjectID == projectID {
+			cpy := *ci
+			out = append(out, &cpy)
+			continue
+		}
+		// Fall back to checking the label for backward compatibility
+		if ci.Labels != nil {
+			if labelProjID, ok := ci.Labels["aegis.yourorg.dev/projectId"]; ok && labelProjID == projectID {
+				cpy := *ci
+				out = append(out, &cpy)
+			}
+		}
+	}
+	return out
+}
+
 func (cs *clusterState) setProjectID(clusterID, projectID string) {
 	if clusterID == "" || projectID == "" {
 		return
@@ -118,6 +149,9 @@ func (cs *clusterState) setProjectID(clusterID, projectID string) {
 		ci = &ClusterInfo{ID: clusterID, Labels: map[string]string{}}
 		cs.clusters[clusterID] = ci
 	}
+	// Set the direct ProjectID field (used by new FK-based code)
+	ci.ProjectID = projectID
+	// Also maintain label for backward compatibility
 	if ci.Labels == nil {
 		ci.Labels = map[string]string{}
 	}

@@ -27,9 +27,26 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, provider, region, created_at, updated_at)
-VALUES ($1, $2, $3, now(), now())
-ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider, region=EXCLUDED.region, deleted_at=NULL, updated_at=now()`, req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion())); err != nil {
+	// Extract project_id from labels if present (for multi-tenancy FK)
+	var projectID *string
+	if labels := req.GetLabels(); labels != nil {
+		if pid, ok := labels["aegis.yourorg.dev/projectId"]; ok && pid != "" {
+			projectID = &pid
+		}
+	}
+
+	// Insert or update cluster, including proxy_url and project_id if provided
+	proxyURL := strings.TrimSpace(req.GetProxyUrl())
+	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, created_at, updated_at)
+VALUES ($1, $5, $2, $3, NULLIF($4, ''), now(), now())
+ON CONFLICT (id) DO UPDATE SET
+    provider=EXCLUDED.provider,
+    region=EXCLUDED.region,
+    project_id = COALESCE(EXCLUDED.project_id, clusters.project_id),
+    proxy_url = CASE WHEN $4 <> '' THEN $4 ELSE clusters.proxy_url END,
+    deleted_at=NULL,
+    updated_at=now()`,
+		req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion()), proxyURL, projectID); err != nil {
 		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
 		return
 	}
@@ -121,14 +138,16 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 
 	var (
 		id        string
+		projectID sql.NullString
 		provider  string
 		region    string
 		ttf       float64
 		proxyURL  sql.NullString
 		heartbeat sql.NullTime
 		createdAt time.Time
+		deletedAt sql.NullTime
 	)
-	err := s.pool.QueryRow(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt)
+	err := s.pool.QueryRow(ctx, `SELECT id, project_id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at, deleted_at FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(&id, &projectID, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt, &deletedAt)
 	if err != nil {
 		return nil
 	}
@@ -141,11 +160,18 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 		TTFGSecondsP50:     ttf,
 		CreatedAt:          createdAt.UTC(),
 	}
+	if projectID.Valid {
+		info.ProjectID = projectID.String
+	}
 	if heartbeat.Valid {
 		info.LastHeartbeat = heartbeat.Time.UTC()
 	}
 	if proxyURL.Valid {
 		info.ProxyURL = proxyURL.String
+	}
+	if deletedAt.Valid {
+		t := deletedAt.Time.UTC()
+		info.DeletedAt = &t
 	}
 	return info
 }
@@ -154,7 +180,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE deleted_at IS NULL`)
+	rows, err := s.pool.Query(ctx, `SELECT id, project_id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE deleted_at IS NULL`)
 	if err != nil {
 		s.logExecError("cluster_list", err)
 		return nil
@@ -165,6 +191,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	for rows.Next() {
 		var (
 			id        string
+			projectID sql.NullString
 			provider  string
 			region    string
 			ttf       float64
@@ -172,7 +199,7 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			heartbeat sql.NullTime
 			createdAt time.Time
 		)
-		if err := rows.Scan(&id, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
+		if err := rows.Scan(&id, &projectID, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
 			s.logExecError("cluster_list_scan", err)
 			return nil
 		}
@@ -184,6 +211,9 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 			AvailableFlavorSet: map[string]bool{},
 			TTFGSecondsP50:     ttf,
 			CreatedAt:          createdAt.UTC(),
+		}
+		if projectID.Valid {
+			info.ProjectID = projectID.String
 		}
 		if heartbeat.Valid {
 			info.LastHeartbeat = heartbeat.Time.UTC()
@@ -239,6 +269,105 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
 	return out
 }
 
+// ListClustersByProject returns all non-deleted clusters for a specific project.
+// This is the primary multi-tenancy query for cluster isolation.
+func (s *PostgresStore) ListClustersByProject(projectID string) []*store.ClusterInfo {
+	if projectID == "" {
+		return nil
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	rows, err := s.pool.Query(ctx, `SELECT id, project_id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE project_id = $1 AND deleted_at IS NULL`, projectID)
+	if err != nil {
+		s.logExecError("cluster_list_by_project", err, zap.String("project_id", projectID))
+		return nil
+	}
+	defer rows.Close()
+
+	clusters := map[string]*store.ClusterInfo{}
+	for rows.Next() {
+		var (
+			id        string
+			projID    sql.NullString
+			provider  string
+			region    string
+			ttf       float64
+			proxyURL  sql.NullString
+			heartbeat sql.NullTime
+			createdAt time.Time
+		)
+		if err := rows.Scan(&id, &projID, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
+			s.logExecError("cluster_list_by_project_scan", err)
+			return nil
+		}
+		info := &store.ClusterInfo{
+			ID:                 id,
+			Provider:           provider,
+			Region:             region,
+			Labels:             map[string]string{},
+			AvailableFlavorSet: map[string]bool{},
+			TTFGSecondsP50:     ttf,
+			CreatedAt:          createdAt.UTC(),
+		}
+		if projID.Valid {
+			info.ProjectID = projID.String
+		}
+		if heartbeat.Valid {
+			info.LastHeartbeat = heartbeat.Time.UTC()
+		}
+		if proxyURL.Valid {
+			info.ProxyURL = proxyURL.String
+		}
+		clusters[id] = info
+	}
+
+	// Load labels for the filtered clusters
+	if len(clusters) > 0 {
+		clusterIDs := make([]string, 0, len(clusters))
+		for id := range clusters {
+			clusterIDs = append(clusterIDs, id)
+		}
+
+		labelRows, err := s.pool.Query(ctx, `SELECT cluster_id, k, v FROM cluster_labels WHERE cluster_id = ANY($1)`, clusterIDs)
+		if err == nil {
+			defer labelRows.Close()
+			for labelRows.Next() {
+				var id, k, v string
+				if err := labelRows.Scan(&id, &k, &v); err != nil {
+					s.logExecError("cluster_list_by_project_scan_labels", err)
+					break
+				}
+				if info, ok := clusters[id]; ok {
+					info.Labels[k] = v
+				}
+			}
+		}
+
+		// Load flavors for the filtered clusters
+		flavorRows, err := s.pool.Query(ctx, `SELECT cluster_id, flavor FROM cluster_flavors WHERE cluster_id = ANY($1)`, clusterIDs)
+		if err == nil {
+			defer flavorRows.Close()
+			for flavorRows.Next() {
+				var id, flavor string
+				if err := flavorRows.Scan(&id, &flavor); err != nil {
+					s.logExecError("cluster_list_by_project_scan_flavors", err)
+					break
+				}
+				if info, ok := clusters[id]; ok {
+					info.AvailableFlavorSet[flavor] = true
+				}
+			}
+		}
+	}
+
+	out := make([]*store.ClusterInfo, 0, len(clusters))
+	for _, info := range clusters {
+		out = append(out, info)
+	}
+	return out
+}
+
 func (s *PostgresStore) SetClusterProjectID(clusterID, projectID string) {
 	if clusterID == "" || projectID == "" {
 		return
@@ -246,12 +375,30 @@ func (s *PostgresStore) SetClusterProjectID(clusterID, projectID string) {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	// Upsert the project label for the cluster
-	_, err := s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
-ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
-		clusterID, "aegis.yourorg.dev/projectId", projectID)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		s.logExecError("set_cluster_project", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+		s.logExecError("set_cluster_project_begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Update the project_id column directly (new FK-based approach)
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET project_id = $2, updated_at = now() WHERE id = $1`,
+		clusterID, projectID); err != nil {
+		s.logExecError("set_cluster_project_update", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+		return
+	}
+
+	// Also maintain the label for backward compatibility
+	if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+		clusterID, "aegis.yourorg.dev/projectId", projectID); err != nil {
+		s.logExecError("set_cluster_project_label", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		s.logExecError("set_cluster_project_commit", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
 	}
 }
 

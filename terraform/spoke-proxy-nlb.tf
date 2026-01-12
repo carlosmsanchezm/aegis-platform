@@ -1,6 +1,9 @@
 # Spoke Proxy Network Load Balancer Infrastructure
 # This creates a public-facing NLB with stable Elastic IPs for VS Code remote connections
 #
+# IMPORTANT: This uses the DEFAULT VPC where Pulumi provisions EKS clusters.
+# The NLB must be in the same VPC as the cluster nodes to route traffic correctly.
+#
 # Architecture:
 #   VS Code Extension (external client)
 #         |
@@ -38,6 +41,42 @@ variable "spoke_proxy_port" {
 }
 
 ################################################################################
+# Data sources for default VPC (where Pulumi creates clusters)
+################################################################################
+
+data "aws_vpc" "default" {
+  count   = var.enable_spoke_proxy_nlb ? 1 : 0
+  default = true
+}
+
+data "aws_subnets" "default_public" {
+  count = var.enable_spoke_proxy_nlb ? 1 : 0
+
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default[0].id]
+  }
+
+  filter {
+    name   = "default-for-az"
+    values = ["true"]
+  }
+}
+
+################################################################################
+# Local values for spoke-proxy NLB
+################################################################################
+
+locals {
+  spoke_proxy_name = "aegis-spoke-proxy"
+  spoke_proxy_tags = {
+    Name      = local.spoke_proxy_name
+    Purpose   = "spoke-proxy-nlb"
+    ManagedBy = "terraform"
+  }
+}
+
+################################################################################
 # Elastic IP for stable spoke-proxy URL
 ################################################################################
 
@@ -45,9 +84,8 @@ resource "aws_eip" "spoke_proxy" {
   count  = var.enable_spoke_proxy_nlb ? 1 : 0
   domain = "vpc"
 
-  tags = merge(local.common_tags, {
-    Name    = "${local.cluster_name}-spoke-proxy-eip"
-    Purpose = "spoke-proxy-stable-ip"
+  tags = merge(local.spoke_proxy_tags, {
+    Name = "${local.spoke_proxy_name}-eip"
   })
 }
 
@@ -57,9 +95,9 @@ resource "aws_eip" "spoke_proxy" {
 
 resource "aws_security_group" "spoke_proxy_nlb" {
   count       = var.enable_spoke_proxy_nlb ? 1 : 0
-  name_prefix = "${local.cluster_name}-spoke-proxy-nlb-"
+  name_prefix = "spoke-proxy-nlb-"
   description = "Security group for spoke-proxy NLB traffic"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = data.aws_vpc.default[0].id
 
   # Allow WebSocket traffic from anywhere (VS Code clients)
   ingress {
@@ -75,7 +113,7 @@ resource "aws_security_group" "spoke_proxy_nlb" {
     from_port   = var.spoke_proxy_port
     to_port     = var.spoke_proxy_port
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = [data.aws_vpc.default[0].cidr_block]
     description = "Health checks from NLB"
   }
 
@@ -87,8 +125,8 @@ resource "aws_security_group" "spoke_proxy_nlb" {
     description = "Allow all outbound"
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${local.cluster_name}-spoke-proxy-nlb-sg"
+  tags = merge(local.spoke_proxy_tags, {
+    Name = "${local.spoke_proxy_name}-spoke-proxy-nlb-sg"
   })
 }
 
@@ -98,13 +136,13 @@ resource "aws_security_group" "spoke_proxy_nlb" {
 
 resource "aws_lb" "spoke_proxy" {
   count              = var.enable_spoke_proxy_nlb ? 1 : 0
-  name               = "${local.cluster_name}-spoke-proxy"
+  name               = "${local.spoke_proxy_name}-spoke-proxy"
   internal           = false # Public-facing for VS Code connections
   load_balancer_type = "network"
 
   # Use public subnets with Elastic IP
   dynamic "subnet_mapping" {
-    for_each = [module.vpc.public_subnets[0]] # Single AZ for cost optimization
+    for_each = [data.aws_subnets.default_public[0].ids[0]] # Single AZ for cost optimization
     content {
       subnet_id     = subnet_mapping.value
       allocation_id = aws_eip.spoke_proxy[0].id
@@ -114,8 +152,8 @@ resource "aws_lb" "spoke_proxy" {
   enable_cross_zone_load_balancing = true
   enable_deletion_protection       = false # Set to true for production
 
-  tags = merge(local.common_tags, {
-    Name = "${local.cluster_name}-spoke-proxy-nlb"
+  tags = merge(local.spoke_proxy_tags, {
+    Name = "${local.spoke_proxy_name}-spoke-proxy-nlb"
   })
 }
 
@@ -125,10 +163,10 @@ resource "aws_lb" "spoke_proxy" {
 
 resource "aws_lb_target_group" "spoke_proxy" {
   count       = var.enable_spoke_proxy_nlb ? 1 : 0
-  name        = "${local.cluster_name}-spoke-proxy"
+  name        = "${local.spoke_proxy_name}-spoke-proxy"
   port        = var.spoke_proxy_port
   protocol    = "TCP"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = data.aws_vpc.default[0].id
   target_type = "instance" # Target EKS worker nodes
 
   health_check {
@@ -140,8 +178,8 @@ resource "aws_lb_target_group" "spoke_proxy" {
     interval            = 10
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${local.cluster_name}-spoke-proxy-tg"
+  tags = merge(local.spoke_proxy_tags, {
+    Name = "${local.spoke_proxy_name}-spoke-proxy-tg"
   })
 }
 
@@ -160,8 +198,8 @@ resource "aws_lb_listener" "spoke_proxy" {
     target_group_arn = aws_lb_target_group.spoke_proxy[0].arn
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${local.cluster_name}-spoke-proxy-listener"
+  tags = merge(local.spoke_proxy_tags, {
+    Name = "${local.spoke_proxy_name}-spoke-proxy-listener"
   })
 }
 
@@ -184,30 +222,27 @@ resource "aws_lb_listener" "spoke_proxy" {
 ################################################################################
 
 ################################################################################
-# Route53 DNS Record for spoke-proxy
+# Route53 DNS Record for spoke-proxy (Optional)
+# Uncomment if you have a Route53 hosted zone configured
 ################################################################################
 
-resource "aws_route53_record" "spoke_proxy" {
-  count   = var.enable_spoke_proxy_nlb ? 1 : 0
-  zone_id = aws_route53_zone.aegist.zone_id
-  name    = "spoke-proxy.aegist.dev"
-  type    = "A"
-  ttl     = 60
+# resource "aws_route53_record" "spoke_proxy" {
+#   count   = var.enable_spoke_proxy_nlb ? 1 : 0
+#   zone_id = aws_route53_zone.aegist.zone_id
+#   name    = "spoke-proxy.aegist.dev"
+#   type    = "A"
+#   ttl     = 60
+#   records = [aws_eip.spoke_proxy[0].public_ip]
+# }
 
-  records = [aws_eip.spoke_proxy[0].public_ip]
-}
-
-# Wildcard record for cluster-specific subdomains
-# e.g., spoke-proxy-demo-1.aegist.dev
-resource "aws_route53_record" "spoke_proxy_wildcard" {
-  count   = var.enable_spoke_proxy_nlb ? 1 : 0
-  zone_id = aws_route53_zone.aegist.zone_id
-  name    = "*.spoke-proxy.aegist.dev"
-  type    = "A"
-  ttl     = 60
-
-  records = [aws_eip.spoke_proxy[0].public_ip]
-}
+# resource "aws_route53_record" "spoke_proxy_wildcard" {
+#   count   = var.enable_spoke_proxy_nlb ? 1 : 0
+#   zone_id = aws_route53_zone.aegist.zone_id
+#   name    = "*.spoke-proxy.aegist.dev"
+#   type    = "A"
+#   ttl     = 60
+#   records = [aws_eip.spoke_proxy[0].public_ip]
+# }
 
 ################################################################################
 # Outputs
@@ -233,10 +268,10 @@ output "spoke_proxy_url_nip_io" {
   value       = try("wss://spoke-proxy.${aws_eip.spoke_proxy[0].public_ip}.nip.io:443", "")
 }
 
-output "spoke_proxy_url_dns" {
-  description = "Spoke-proxy URL using Route53 DNS"
-  value       = try("wss://${aws_route53_record.spoke_proxy[0].fqdn}:443", "")
-}
+# output "spoke_proxy_url_dns" {
+#   description = "Spoke-proxy URL using Route53 DNS"
+#   value       = try("wss://${aws_route53_record.spoke_proxy[0].fqdn}:443", "")
+# }
 
 output "spoke_proxy_helm_values" {
   description = "Helm values to use for aegis-spoke deployment"

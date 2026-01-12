@@ -66,6 +66,7 @@ const (
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
 	envAegisSpokeProxyNodePort = "AEGIS_SPOKE_PROXY_NODEPORT"
+	envAegisSpokeProxyHost     = "AEGIS_SPOKE_PROXY_HOST" // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
 	envAegisPulumiSkipRefresh  = "AEGIS_PULUMI_SKIP_REFRESH"
 	envAegisPulumiSkipApply    = "AEGIS_PULUMI_SKIP_APPLY"
 	envAegisPulumiWorkdir      = "AEGIS_PULUMI_WORKDIR"
@@ -1110,6 +1111,15 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	if input.Platform.CABundleBase64 != "" {
 		envValues["AEGIS_PLATFORM_CA_B64"] = pulumi.String(input.Platform.CABundleBase64)
 	}
+
+	// If AEGIS_SPOKE_PROXY_HOST is set, use it as the stable proxy URL.
+	// This allows the operator to configure a stable NLB/EIP-based URL.
+	if proxyHost := strings.TrimSpace(os.Getenv(envAegisSpokeProxyHost)); proxyHost != "" {
+		envValues["AEGIS_PROXY_INGRESS_HOST"] = pulumi.String(proxyHost)
+		r.log.Info("using stable spoke proxy host from environment",
+			zap.String("proxy_host", proxyHost))
+	}
+
 	k8sAgentValues := pulumi.Map{
 		"env": envValues,
 	}

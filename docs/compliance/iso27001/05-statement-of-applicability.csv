@@ -72,8 +72,8 @@ A.8.11,Data masking,No,N/A,Not applicable,-,No PII processing requiring masking,
 A.8.12,Data leakage prevention,Yes,Partial,GitHub secret scanning enabled,CC6.1,Required for data protection,Secret scanning config
 A.8.13,Information backup,Yes,Implemented,AWS snapshots; git history provides code backup,CC9.2; A1.3,Required for recovery,Backup configs
 A.8.14,Redundancy of information processing facilities,Yes,Inherited,AWS multi-AZ and regions,A1.2,AWS provides redundancy,AWS architecture
-A.8.15,Logging,Yes,Implemented,CloudTrail; application logs; GitHub audit log,CC7.2,Required for audit trail,Log configs
-A.8.16,Monitoring activities,Yes,Implemented,Prometheus metrics; alerting configured,CC4.1; CC7.2,Required for detection,Monitoring configs
+A.8.15,Logging,Yes,Implemented,CloudTrail for AWS API audit (dev/test); GitHub audit log; application logs. Monthly evidence exports capture logging state.,CC7.2,Required for audit trail,CloudTrail + monthly AWS exports to evidence vault
+A.8.16,Monitoring activities,Yes,Implemented,Dev/test monitoring via CloudTrail + monthly baseline exports. AWS Config/SecurityHub/GuardDuty not enabled (dev/test scope only - not processing customer data).,CC4.1; CC7.2,Required for detection - scoped to dev/test,evidence-vault/soc2/YYYY/MM/access-reviews/
 A.8.17,Clock synchronization,Yes,Inherited,AWS/cloud managed NTP,CC7.2,AWS provides time sync,AWS default
 A.8.18,Use of privileged utility programs,Yes,Implemented,Restricted to authorized users; logged via CloudTrail,CC6.7,Required for privilege control,CloudTrail logs
 A.8.19,Installation of software on operational systems,Yes,Implemented,CI/CD only; no manual deployment,CC8.1,Required for change control,CI/CD configs

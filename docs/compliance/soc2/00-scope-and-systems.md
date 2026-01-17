@@ -95,6 +95,8 @@ Aegis currently operates as a **self-hosted software vendor** (Model B). Custome
 
 ### 3. Cloud Infrastructure
 
+> **Scope Clarification:** AWS account is used for **development/testing and corporate engineering only**. Production environments are customer-operated (Model B). Security monitoring in customer environments is out of scope.
+
 | System | Purpose | Data Types | SOC 2 Relevance | Evidence Location |
 |--------|---------|------------|-----------------|-------------------|
 | **AWS GovCloud** | Development/test infrastructure | Dev workloads, CI/CD | CC6.1, CC7.2 | CloudTrail |
@@ -106,15 +108,31 @@ Aegis currently operates as a **self-hosted software vendor** (Model B). Custome
 **AWS Resources Identified (from Terraform):**
 - S3: `aegis-platform-tf-state-bucket` (Terraform state)
 - DynamoDB: `aegis-terraform-locks`
-- EKS: Aegis clusters (prod)
+- EKS: Aegis clusters (dev/test)
 - Region: `us-east-1` (GovCloud)
+
+**Monitoring Approach (Dev/Test Account):**
+
+For our development/test AWS account, we rely on:
+- ✅ **CloudTrail** for API audit logging (enabled)
+- ✅ **Monthly baseline exports** to evidence vault (automated)
+- ✅ **Root MFA** enforced
+- ✅ **No long-lived IAM users** (deleted aegis-pulumi-provisioner)
+
+The following managed security services are **not enabled** for dev/test:
+- AWS Config (not required for dev/test scope)
+- Security Hub (not required for dev/test scope)
+- GuardDuty (not required for dev/test scope)
+
+> **Rationale:** These services are appropriate for production workloads. Our dev/test environment does not process customer data and is monitored via CloudTrail + monthly evidence exports.
 
 **Current State:**
 - ✅ Terraform-managed infrastructure
 - ✅ S3 state bucket encrypted
-- ⚠️ CloudTrail status unknown
-- ⚠️ AWS Config status unknown
-- 🔴 **GAP:** Verify CloudTrail, Config, GuardDuty, Security Hub
+- ✅ CloudTrail enabled
+- ✅ Root MFA enabled
+- ✅ No IAM users (role-based access only)
+- ℹ️ AWS Config/SecurityHub/GuardDuty: Not applicable for dev/test scope
 
 ### 4. Monitoring & Logging
 

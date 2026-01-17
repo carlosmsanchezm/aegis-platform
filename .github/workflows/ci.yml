@@ -30,8 +30,8 @@ jobs:
       - name: Install envtest binaries
         run: |
           go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-          setup-envtest use --bin-dir $(pwd)/bin/k8s
-          echo "KUBEBUILDER_ASSETS=$(pwd)/bin/k8s/$(ls $(pwd)/bin/k8s)" >> $GITHUB_ENV
+          ENVTEST_ASSETS=$(setup-envtest use -p path)
+          echo "KUBEBUILDER_ASSETS=$ENVTEST_ASSETS" >> $GITHUB_ENV
 
       - name: Run tests
         run: |

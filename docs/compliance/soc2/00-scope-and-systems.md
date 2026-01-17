@@ -78,15 +78,20 @@ Aegis currently operates as a **self-hosted software vendor** (Model B). Custome
 | **Docker/Container Registry** | Container images | Built artifacts | CC7.1 | ECR/Registry |
 
 **Repositories in Scope:**
-- `carlosmsanchezm/aegis-platform` (primary)
-- Related service repositories (TBD - confirm full list)
+
+| Repository | Purpose | Commits | Controls |
+|------------|---------|---------|----------|
+| `carlosmsanchezm/aegis-platform` | Platform backend, K8s agents, proxy | 465 | ✅ Branch protection, ✅ Dependabot, ✅ CODEOWNERS |
+| `carlosmsanchezm/aegis-ui` | Frontend UI | 99 | ✅ Branch protection, ✅ Dependabot |
+| `carlosmsanchezm/sovran` | Infrastructure/IaC | 161 | ✅ Branch protection, ✅ Dependabot |
 
 **Current State:**
 - ✅ GitHub Actions CI/CD exists
-- ⚠️ No branch protection visible
-- ⚠️ No CODEOWNERS file
-- ⚠️ No Dependabot configuration
-- 🔴 **GAP:** Secret scanning, code scanning, branch protection
+- ✅ Branch protection enabled on all repos
+- ✅ CODEOWNERS file (aegis-platform)
+- ✅ Dependabot enabled on all repos
+- ⚠️ Secret scanning requires GitHub Advanced Security
+- ⚠️ Vulnerabilities to remediate: aegis-ui (25), sovran (19)
 
 ### 3. Cloud Infrastructure
 

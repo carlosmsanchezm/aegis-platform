@@ -27,10 +27,16 @@ jobs:
       - name: Sync Go workspace
         run: go work sync
 
+      - name: Install envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          setup-envtest use --bin-dir $(pwd)/bin/k8s
+          echo "KUBEBUILDER_ASSETS=$(pwd)/bin/k8s/$(ls $(pwd)/bin/k8s)" >> $GITHUB_ENV
+
       - name: Run tests
         run: |
           set -euo pipefail
-          # Test k8s-agent
+          # Test k8s-agent (requires envtest)
           (cd agents/k8s-agent && go test ./... -v)
 
           # Test other modules

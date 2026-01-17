@@ -36,8 +36,8 @@ jobs:
       - name: Run tests
         run: |
           set -euo pipefail
-          # Test k8s-agent (requires envtest)
-          (cd agents/k8s-agent && go test ./... -v)
+          # Test k8s-agent (requires envtest) - exclude e2e tests that need Kind cluster
+          (cd agents/k8s-agent && go test $(go list ./... | grep -v /test/e2e) -v)
 
           # Test other modules
           for module in pkg/workspace services/platform-api services/proxy; do

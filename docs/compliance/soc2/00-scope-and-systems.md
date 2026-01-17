@@ -119,12 +119,12 @@ For our development/test AWS account, we rely on:
 - ✅ **Root MFA** enforced
 - ✅ **No long-lived IAM users** (deleted aegis-pulumi-provisioner)
 
-The following managed security services are **not enabled** for dev/test:
-- AWS Config (not required for dev/test scope)
-- Security Hub (not required for dev/test scope)
-- GuardDuty (not required for dev/test scope)
+**Services Not Applicable:**
+- AWS Config: **N/A** - Production is customer-operated
+- Security Hub: **N/A** - Production is customer-operated
+- GuardDuty: **N/A** - Production is customer-operated
 
-> **Rationale:** These services are appropriate for production workloads. Our dev/test environment does not process customer data and is monitored via CloudTrail + monthly evidence exports.
+> **Rationale:** These services are designed for production security monitoring. Since Aegis operates as Model B (self-hosted software), production environments are deployed and operated by customers in their own AWS accounts. Our AWS account contains only development/test workloads and does not process customer data.
 
 **Current State:**
 - ✅ Terraform-managed infrastructure
@@ -132,7 +132,7 @@ The following managed security services are **not enabled** for dev/test:
 - ✅ CloudTrail enabled
 - ✅ Root MFA enabled
 - ✅ No IAM users (role-based access only)
-- ℹ️ AWS Config/SecurityHub/GuardDuty: Not applicable for dev/test scope
+- ⬜ AWS Config/SecurityHub/GuardDuty: **Not applicable** (production is customer-operated)
 
 ### 4. Monitoring & Logging
 

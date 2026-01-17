@@ -16,8 +16,8 @@ YEAR=$(date +%Y)
 # Navigate to platform repo
 cd ~/code/aegis-platform  # Adjust path as needed
 
-# 1. Export GitHub security baseline
-GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS=aegis-platform \
+# 1. Export GitHub security baseline (ALL 3 REPOS)
+GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS="aegis-platform aegis-ui sovran" \
     ./scripts/compliance/export_github_security_baseline.sh \
     ../aegis-compliance-evidence/soc2/${YEAR}/${MONTH}/ci-cd-security/
 
@@ -44,13 +44,22 @@ git push
 - [ ] Evidence committed to vault
 - [ ] No secrets in committed files (verified via git status)
 
-### Security Review
-- [ ] Dependabot alerts reviewed
-  - High/Critical: Remediate within 7 days
-  - Medium: Remediate within 30 days
-  - Low: Remediate within 90 days
+### Security Review (All 3 Repos)
+- [ ] Dependabot alerts reviewed for aegis-platform
+- [ ] Dependabot alerts reviewed for aegis-ui
+- [ ] Dependabot alerts reviewed for sovran
+  - SLA: High/Critical: 7 days | Medium: 30 days | Low: 90 days
 - [ ] Any new security advisories reviewed
 - [ ] Failed CI runs reviewed (any security-related failures?)
+
+**Quick vuln check:**
+```bash
+for repo in aegis-platform aegis-ui sovran; do
+    echo "=== $repo ==="
+    gh api repos/carlosmsanchezm/$repo/dependabot/alerts \
+        --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo "0"
+done
+```
 
 ### Quick Health Check
 - [ ] MFA still enabled on all accounts

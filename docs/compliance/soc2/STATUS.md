@@ -29,16 +29,42 @@
 | **Minimum for Audit** | 3-6 months |
 | **Status** | ✅ **Ready for auditor engagement** |
 
+### Repositories in Scope (3 repos)
+
+| Repository | Purpose | Commits | Branch Protection | Dependabot | Vulns |
+|------------|---------|---------|-------------------|------------|-------|
+| `aegis-platform` | Backend, K8s agents | 465 | ✅ | ✅ | 0 |
+| `aegis-ui` | Frontend (Backstage) | 99 | ✅ | ✅ | 0 |
+| `sovran` | IaC, VS Code ext | 161 | ✅ | ✅ | 0 |
+| **Total** | | **725** | | | **0** |
+
 ### Retroactive Evidence (Sept 2025 - Jan 2026)
 
 | Evidence | Count | Controls |
 |----------|-------|----------|
-| Git commits | 488 | CC8.1 |
-| Pull requests | 58 | CC8.1, CC6.1 |
-| CI/CD runs | 100+ | CC7.2, CC8.1 |
-| Dependabot alerts | 11 | CC7.1 |
+| Git commits | 725 (465+99+161) | CC8.1 |
+| Pull requests | 58+ | CC8.1, CC6.1 |
+| CI/CD runs | 200+ | CC7.2, CC8.1 |
+| Dependabot alerts fixed | 55 (11+25+19) | CC7.1 |
 
 See: `retroactive-evidence-summary.md` for full details.
+
+### Vulnerability Remediation (CC7.1) ✅
+
+All vulnerabilities fixed across 3 repositories on 2026-01-17:
+
+| Repository | Vulns Fixed | Method |
+|------------|-------------|--------|
+| aegis-platform | 11 | Go module updates |
+| aegis-ui | 25 | Yarn resolutions |
+| sovran | 19 | npm overrides + Python deps |
+| **Total** | **55** | **All at 0** |
+
+Key packages updated:
+- docker/docker v28.5.2 (Critical)
+- containerd v1.7.30 (High)
+- golang-jwt v5.3.0 (High)
+- undici, tar, elliptic (Node - various)
 
 ---
 
@@ -246,10 +272,42 @@ See: `retroactive-evidence-summary.md` for full details.
 
 SOC 2 Type II requires **3-12 months of operating** controls before audit. You're now in the observation period.
 
+### Wrapper Scripts (Single-Command Operation)
+
+| Task | Frequency | Command |
+|------|-----------|---------|
+| Weekly Security Check | Every Monday | `./scripts/compliance/run_weekly_checks.sh` |
+| Monthly Evidence | 1st of month | `./scripts/compliance/run_monthly_evidence.sh` |
+
+**Full Runbook:** [`docs/compliance/OPERATIONS_RUNBOOK.md`](../OPERATIONS_RUNBOOK.md)
+
+### Evidence Collected This Month
+
+"Evidence collected this month" means:
+1. ✅ `run_monthly_evidence.sh` completed successfully
+2. ✅ Files present in `$EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/`
+3. ✅ Monthly summary file created
+
+**Minimum Evidence Artifacts Per Month:**
+
+| Category | Pattern | Location |
+|----------|---------|----------|
+| GitHub Security | `YYYY-MM-DD_security_baseline_summary.json` | `ci-cd-security/` |
+| AWS Security | `YYYY-MM-DD_aws_security_summary.json` | `access-reviews/` |
+| Vulnerability Scans | `YYYY-MM-DD_ci_security_summary.json` | `vuln-management/` |
+| Incident Log | `YYYY-MM_incident_log.md` | `incident-response/` |
+| Monthly Summary | `YYYY-MM-DD_monthly_summary.md` | Root of month folder |
+| Run Log | `RUN_LOG_YYYY-MM-DD.txt` | Root of month folder |
+
+### Weekly Tasks
+- [ ] Run `./scripts/compliance/run_weekly_checks.sh`
+- [ ] Review Dependabot/security alerts
+- [ ] Document any actions taken
+
 ### Monthly Tasks
-- [ ] Run evidence collection scripts (1st of each month)
-- [ ] Commit evidence to vault
-- [ ] Review any security alerts (Dependabot, etc.)
+- [ ] Run `./scripts/compliance/run_monthly_evidence.sh` (1st of each month)
+- [ ] Review monthly summary for gaps
+- [ ] Update incident log if any incidents
 
 ### Quarterly Tasks
 - [ ] Q1 Access Review (due April 15)

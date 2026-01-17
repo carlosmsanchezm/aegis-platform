@@ -22,7 +22,10 @@ set -euo pipefail
 # Configuration
 AWS_PROFILE="${AWS_PROFILE:-default}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-OUTPUT_DIR="${1:-./compliance-evidence/soc2/$(date +%Y)/$(date +%Y-%m)/access-reviews}"
+
+# Evidence vault location (use env var or argument or default)
+EVIDENCE_VAULT="${EVIDENCE_VAULT:-$HOME/code/aegis-compliance-evidence}"
+OUTPUT_DIR="${1:-$EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/access-reviews}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 DATE_STAMP=$(date +"%Y-%m-%d")
 

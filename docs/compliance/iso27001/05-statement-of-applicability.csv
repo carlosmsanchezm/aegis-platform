@@ -1,0 +1,94 @@
+Control_ID,Control_Title,Applicable,Status,Implementation_Description,SOC2_Mapping,Justification_for_Inclusion_or_Exclusion,Evidence_Location
+A.5.1,Policies for information security,Yes,Implemented,7 policies approved (ISP-001; ACP-001; CMP-001; IRP-001; RMP-001; VMP-001; AUP-001),CC1.1; CC5.3,Required for ISMS governance,soc2/policies/; iso27001/policies/
+A.5.2,Information security roles and responsibilities,Yes,Implemented,Documented in 01-leadership-policy-roles.md and org chart,CC1.3,Required for accountability,iso27001/01-leadership-policy-roles.md
+A.5.3,Segregation of duties,Yes,Partial,Compensating controls: PR audit trail; CloudTrail logging (solo founder limitation),CC5.1,Required but adapted for solo founder,GitHub PR logs; CloudTrail
+A.5.4,Management responsibilities,Yes,Implemented,Management commitment in policies; founder signs all policies,CC1.1; CC1.2,Required for leadership commitment,Signed policies
+A.5.5,Contact with authorities,Yes,Partial,Emergency contacts documented in 00-isms-scope-and-context.md,CC2.2,Required for incident response,iso27001/00-isms-scope-and-context.md
+A.5.6,Contact with special interest groups,Yes,Partial,GitHub security advisories; CVE monitoring via Dependabot,-,Helpful for threat intelligence,Dependabot configs
+A.5.7,Threat intelligence,Yes,Implemented,Dependabot automated alerts; GitHub security advisories,CC7.1,Required for vulnerability management,Dependabot alert exports
+A.5.8,Information security in project management,Yes,Implemented,Security review in PRs; CODEOWNERS; security impact in PR template,CC8.1,Required for secure development,CODEOWNERS; PR templates
+A.5.9,Inventory of information and other associated assets,Yes,Partial,Systems inventory in scope doc; needs formal asset register,CC3.1,Required for risk assessment,soc2/00-scope-and-systems.md
+A.5.10,Acceptable use of information and other associated assets,Yes,Implemented,Acceptable Use Policy (ISMS-POL-AUP-001) created,CC1.4,Required for user guidance,iso27001/policies/acceptable-use-policy.md
+A.5.11,Return of assets,Yes,Implemented,Offboarding checklist includes asset return,CC6.3,Required for access termination,soc2/procedures/employee-offboarding-checklist.md
+A.5.12,Classification of information,Yes,Implemented,Data classification (Confidential/Internal/Public) in scope doc,CC6.1,Required for data protection,soc2/00-scope-and-systems.md
+A.5.13,Labelling of information,Yes,Not Implemented,Document classification headers to be implemented,CC6.1,Required but low priority for small team,N/A - planned
+A.5.14,Information transfer,Yes,Implemented,TLS/mTLS for all communications; HTTPS enforced,CC6.1; CC6.7,Required for data in transit,Architecture docs; configs
+A.5.15,Access control,Yes,Implemented,Access Control Policy (ACP-001) approved,CC6.1,Required for access management,soc2/policies/access-control-policy.md
+A.5.16,Identity management,Yes,Partial,GitHub/AWS IAM in use; corporate IdP planned,CC6.1; CC6.2,Required for user identification,GitHub/AWS access exports
+A.5.17,Authentication information,Yes,Implemented,MFA enforced; strong password requirements,CC6.6,Required for access security,MFA status exports
+A.5.18,Access rights,Yes,Implemented,Least privilege; quarterly access review procedure,CC6.4; CC6.7,Required for authorization,soc2/procedures/quarterly-access-review.md
+A.5.19,Information security in supplier relationships,Yes,Implemented,Vendor Management Policy (VMP-001) approved,CC9.1,Required for supply chain,soc2/policies/vendor-management-policy.md
+A.5.20,Addressing information security within supplier agreements,Yes,Partial,Using vendor ToS; custom agreements for future vendors,CC9.1,Required for contractual controls,Vendor agreements
+A.5.21,Managing information security in the ICT supply chain,Yes,Implemented,SBOM generation; Dependabot; container scanning,CC7.1; CC9.1,Critical for supply chain security,SBOM; Dependabot exports
+A.5.22,Monitoring review and change management of supplier services,Yes,Partial,Annual vendor review planned,CC9.1,Required for ongoing assurance,Vendor inventory
+A.5.23,Information security for use of cloud services,Yes,Implemented,AWS GovCloud security config; CloudTrail; IAM; encryption,CC6.1; CC6.7,Required for cloud security,AWS security exports
+A.5.24,Information security incident management planning and preparation,Yes,Implemented,Incident Response Policy (IRP-001) and runbook,CC7.3; CC7.4,Required for incident readiness,soc2/policies/incident-response-policy.md
+A.5.25,Assessment and decision on information security events,Yes,Implemented,Severity classification (P1-P4) defined in IR policy,CC7.3,Required for triage,soc2/policies/incident-response-policy.md
+A.5.26,Response to information security incidents,Yes,Implemented,IR procedures documented,CC7.4,Required for incident handling,soc2/policies/incident-response-policy.md
+A.5.27,Learning from information security incidents,Yes,Implemented,Post-incident review process in IR policy,CC7.4; CC7.5,Required for improvement,soc2/policies/incident-response-policy.md
+A.5.28,Collection of evidence,Yes,Implemented,Evidence preservation procedures in IR policy,CC7.4,Required for forensics,soc2/policies/incident-response-policy.md
+A.5.29,Information security during disruption,Yes,Partial,Cloud-native recovery; BC/DR plan in development,CC9.2,Required for continuity,BC/DR documentation
+A.5.30,ICT readiness for business continuity,Yes,Partial,AWS multi-AZ; git-based code backup,CC9.2; A1.3,Required for recovery,AWS infrastructure config
+A.5.31,Legal statutory regulatory and contractual requirements,Yes,Implemented,Compliance tracking (SOC 2; ISO 27001; FIPS),CC2.3,Required for compliance,Compliance documentation
+A.5.32,Intellectual property rights,Yes,Implemented,License compliance via SBOM; license scanning,-,Required for legal compliance,SBOM
+A.5.33,Protection of records,Yes,Implemented,Evidence vault; CloudTrail; retention policies,CC7.2,Required for auditability,Evidence vault structure
+A.5.34,Privacy and protection of PII,Yes,Partial,Limited PII processing; privacy by design,-,Limited applicability for Model B,Architecture docs
+A.5.35,Independent review of information security,Yes,Not Implemented,External internal audit scheduled; SOC 2/ISO auditor planned,CC4.1,Required for assurance - CRITICAL GAP,Audit reports (pending)
+A.5.36,Compliance with policies rules and standards,Yes,Implemented,Internal audit program; monitoring via evidence collection,CC4.1; CC5.1,Required for compliance,iso27001/07-internal-audit-program.md
+A.5.37,Documented operating procedures,Yes,Implemented,Procedures documented as runbooks and checklists,CC5.2; CC8.1,Required for operations,soc2/procedures/
+A.6.1,Screening,Yes,Not Implemented,Background check process ready for future hires,CC1.4,Required for personnel security,Process documented for future use
+A.6.2,Terms and conditions of employment,Yes,Not Implemented,Employment agreement template needed,CC1.4,Required for contracts,Template (pending)
+A.6.3,Information security awareness education and training,Yes,Partial,Founder trained; program ready for future hires,CC1.4,Required for competence,Training records
+A.6.4,Disciplinary process,Yes,Not Implemented,Will be in employee handbook,CC1.5,Required for enforcement,Handbook (pending)
+A.6.5,Responsibilities after termination or change of employment,Yes,Implemented,Offboarding checklist; NDA,CC6.3,Required for access removal,soc2/procedures/employee-offboarding-checklist.md
+A.6.6,Confidentiality or non-disclosure agreements,Yes,Implemented,Standard NDA template in onboarding,CC1.4,Required for confidentiality,NDA template
+A.6.7,Remote working,Yes,Implemented,Remote work guidelines in acceptable use policy,CC6.6,Required - fully remote company,iso27001/policies/acceptable-use-policy.md
+A.6.8,Information security event reporting,Yes,Implemented,Report to founder per IR policy,CC7.3,Required for incident awareness,soc2/policies/incident-response-policy.md
+A.7.1,Physical security perimeters,No,N/A,Not applicable,-,No physical office - fully remote cloud-hosted,N/A
+A.7.2,Physical entry,No,N/A,Not applicable,-,No physical premises to control,N/A
+A.7.3,Securing offices rooms and facilities,No,N/A,Not applicable,-,No office facilities,N/A
+A.7.4,Physical security monitoring,No,N/A,Not applicable,-,No physical premises,N/A
+A.7.5,Protecting against physical and environmental threats,Yes,Inherited,Inherited from AWS data centers (FedRAMP),CC6.5,AWS provides physical security,AWS SOC 2 report
+A.7.6,Working in secure areas,No,N/A,Not applicable,-,No secure areas defined,N/A
+A.7.7,Clear desk and clear screen,Yes,Implemented,Screen lock; encrypted storage per acceptable use policy,CC6.6,Required for data protection,iso27001/policies/acceptable-use-policy.md
+A.7.8,Equipment siting and protection,Yes,Partial,Home office guidelines in acceptable use policy,CC6.6,Required for endpoint security,iso27001/policies/acceptable-use-policy.md
+A.7.9,Security of assets off-premises,Yes,Implemented,FileVault/BitLocker required per policy,CC6.6,Required for laptop security,iso27001/policies/acceptable-use-policy.md
+A.7.10,Storage media,Yes,Implemented,Full disk encryption required,CC6.1,Required for data at rest,Security configs
+A.7.11,Supporting utilities,No,N/A,Not applicable,-,Cloud-hosted; no data center,N/A
+A.7.12,Cabling security,No,N/A,Not applicable,-,Cloud-hosted; no data center,N/A
+A.7.13,Equipment maintenance,Yes,Partial,OS updates and patching automated,CC7.1,Required for security,Update policies
+A.7.14,Secure disposal or re-use of equipment,No,N/A,Not applicable,-,No company-owned hardware currently,N/A
+A.8.1,User endpoint devices,Yes,Partial,Personal devices with encryption required; MDM planned,CC6.6,Required for endpoint security,Acceptable use policy
+A.8.2,Privileged access rights,Yes,Implemented,Admin access limited and documented,CC6.7,Required for privilege management,Access exports
+A.8.3,Information access restriction,Yes,Implemented,RBAC via GitHub teams and AWS IAM,CC6.7,Required for least privilege,IAM/RBAC configs
+A.8.4,Access to source code,Yes,Implemented,GitHub access control; branch protection; CODEOWNERS,CC6.7; CC8.1,Required for code security,GitHub security exports
+A.8.5,Secure authentication,Yes,Implemented,MFA and strong passwords enforced,CC6.6,Required for access security,MFA status exports
+A.8.6,Capacity management,Yes,Partial,AWS auto-scaling for cloud resources,A1.1,Required for availability,AWS configs
+A.8.7,Protection against malware,Yes,Implemented,Container scanning; Dependabot for dependencies,CC6.8; CC7.1,Required for malware prevention,Scan reports
+A.8.8,Management of technical vulnerabilities,Yes,Implemented,Dependabot alerts; patching within SLA,CC7.1,Required for vulnerability management,Dependabot exports; 55 vulns fixed
+A.8.9,Configuration management,Yes,Implemented,Infrastructure as Code via Terraform; GitOps,CC8.1,Required for config control,Terraform files; Git history
+A.8.10,Information deletion,Yes,Not Implemented,Data retention/deletion procedures planned,-,Required for data lifecycle,Procedure (pending)
+A.8.11,Data masking,No,N/A,Not applicable,-,No PII processing requiring masking,N/A
+A.8.12,Data leakage prevention,Yes,Partial,GitHub secret scanning enabled,CC6.1,Required for data protection,Secret scanning config
+A.8.13,Information backup,Yes,Implemented,AWS snapshots; git history provides code backup,CC9.2; A1.3,Required for recovery,Backup configs
+A.8.14,Redundancy of information processing facilities,Yes,Inherited,AWS multi-AZ and regions,A1.2,AWS provides redundancy,AWS architecture
+A.8.15,Logging,Yes,Implemented,CloudTrail; application logs; GitHub audit log,CC7.2,Required for audit trail,Log configs
+A.8.16,Monitoring activities,Yes,Implemented,Prometheus metrics; alerting configured,CC4.1; CC7.2,Required for detection,Monitoring configs
+A.8.17,Clock synchronization,Yes,Inherited,AWS/cloud managed NTP,CC7.2,AWS provides time sync,AWS default
+A.8.18,Use of privileged utility programs,Yes,Implemented,Restricted to authorized users; logged via CloudTrail,CC6.7,Required for privilege control,CloudTrail logs
+A.8.19,Installation of software on operational systems,Yes,Implemented,CI/CD only; no manual deployment,CC8.1,Required for change control,CI/CD configs
+A.8.20,Networks security,Yes,Implemented,VPC; security groups; network isolation,CC6.7,Required for network protection,AWS VPC configs
+A.8.21,Security of network services,Yes,Implemented,TLS 1.3; mTLS between services,CC6.7,Required for encrypted communications,TLS configs
+A.8.22,Segregation of networks,Yes,Implemented,VPC segmentation; dev/prod separation,CC6.7,Required for isolation,VPC architecture
+A.8.23,Web filtering,No,N/A,Not applicable,-,No centralized network access to filter,N/A
+A.8.24,Use of cryptography,Yes,Implemented,TLS 1.3; AES-256; FIPS-capable crypto,CC6.1,Required for data protection,Crypto configs
+A.8.25,Secure development life cycle,Yes,Implemented,SDLC security: PR review; scanning; testing,CC8.1,Required for secure software,CI/CD pipeline
+A.8.26,Application security requirements,Yes,Implemented,Security requirements in design docs,CC8.1,Required for secure design,Design documentation
+A.8.27,Secure system architecture and engineering principles,Yes,Implemented,Defense in depth; zero trust architecture,CC5.2,Required for secure architecture,Architecture docs
+A.8.28,Secure coding,Yes,Implemented,Code review; SAST in CI/CD pipeline,CC8.1,Required for code quality,CI/CD pipeline
+A.8.29,Security testing in development and acceptance,Yes,Implemented,Automated unit; integration; security tests,CC8.1,Required for quality assurance,Test results
+A.8.30,Outsourced development,Yes,Not Implemented,Contractor security requirements ready for future use,CC9.1,Required when using contractors,Process documented
+A.8.31,Separation of development test and production environments,Yes,Implemented,Separate dev/staging/prod environments,CC8.1,Required for environment isolation,Environment configs
+A.8.32,Change management,Yes,Implemented,Change Management Policy; PR-based changes,CC8.1,Required for change control,soc2/policies/change-management-policy.md
+A.8.33,Test information,Yes,Implemented,No production data in test; synthetic test data used,CC6.1,Required for data protection,Test data policies
+A.8.34,Protection of information systems during audit testing,Yes,Implemented,Auditor access controlled per procedure,CC4.1,Required for audit security,Audit access procedures

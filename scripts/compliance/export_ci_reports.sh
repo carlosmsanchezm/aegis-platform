@@ -20,7 +20,10 @@ set -euo pipefail
 
 # Configuration
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-OUTPUT_DIR="${1:-./compliance-evidence/soc2/$(date +%Y)/$(date +%Y-%m)/vuln-management}"
+
+# Evidence vault location (use env var or argument or default)
+EVIDENCE_VAULT="${EVIDENCE_VAULT:-$HOME/code/aegis-compliance-evidence}"
+OUTPUT_DIR="${1:-$EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/vuln-management}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 DATE_STAMP=$(date +"%Y-%m-%d")
 

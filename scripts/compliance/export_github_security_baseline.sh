@@ -21,8 +21,11 @@ set -euo pipefail
 
 # Configuration
 GITHUB_OWNER="${GITHUB_OWNER:-carlosmsanchezm}"
-REPOS="${GITHUB_REPOS:-aegis-platform}"  # Comma-separated list
-OUTPUT_DIR="${1:-./compliance-evidence/soc2/$(date +%Y)/$(date +%Y-%m)/ci-cd-security}"
+REPOS="${GITHUB_REPOS:-aegis-platform,aegis-ui,sovran}"  # Comma-separated list
+
+# Evidence vault location (use env var or argument or default)
+EVIDENCE_VAULT="${EVIDENCE_VAULT:-$HOME/code/aegis-compliance-evidence}"
+OUTPUT_DIR="${1:-$EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/ci-cd-security}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 DATE_STAMP=$(date +"%Y-%m-%d")
 

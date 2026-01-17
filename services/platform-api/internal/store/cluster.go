@@ -166,3 +166,36 @@ func (cs *clusterState) delete(clusterID string) {
 	defer cs.mu.Unlock()
 	delete(cs.clusters, clusterID)
 }
+
+// preRegister creates or updates a cluster entry with provisioning-time information.
+// This is called before the k8s-agent connects to ensure project_id and proxy_url are set.
+func (cs *clusterState) preRegister(clusterID, projectID, provider, region, proxyURL string) {
+	if clusterID == "" {
+		return
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	ci, ok := cs.clusters[clusterID]
+	if !ok {
+		ci = &ClusterInfo{
+			ID:                 clusterID,
+			Labels:             map[string]string{},
+			AvailableFlavorSet: map[string]bool{},
+			CreatedAt:          time.Now(),
+		}
+		cs.clusters[clusterID] = ci
+	}
+	if projectID != "" {
+		ci.ProjectID = projectID
+		ci.Labels["aegis.yourorg.dev/projectId"] = projectID
+	}
+	if provider != "" {
+		ci.Provider = provider
+	}
+	if region != "" {
+		ci.Region = region
+	}
+	if proxyURL != "" {
+		ci.ProxyURL = proxyURL
+	}
+}

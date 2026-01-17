@@ -101,7 +101,7 @@ stop:
 .PHONY: platform-api-docker-build
 platform-api-docker-build:
 	@echo "Building multi-arch platform-api image $(PLATFORM_API_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-f services/platform-api/Dockerfile \
 		-t $(PLATFORM_API_IMAGE) \
 		--push \
@@ -151,7 +151,7 @@ kind-load-agent:
 .PHONY: build-workspace
 build-workspace:
 	@echo "Building workspace image $(WORKSPACE_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-t $(WORKSPACE_IMAGE) \
 		--push \
 		workspace-images/openssh-vscode
@@ -159,7 +159,7 @@ build-workspace:
 .PHONY: build-proxy
 build-proxy:
 	@echo "Building proxy image $(PROXY_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-t $(PROXY_IMAGE) \
 		--push \
 		-f services/proxy/Dockerfile \

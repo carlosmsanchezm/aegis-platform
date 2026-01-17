@@ -1943,6 +1943,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	registerWorkspaceWizardRoutes(mux, svc)
 	registerObservabilityRoutes(mux, svc)
 	registerProvisioningRoutes(mux, svc)
+	registerPKIRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

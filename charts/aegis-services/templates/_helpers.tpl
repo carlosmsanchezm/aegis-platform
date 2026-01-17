@@ -176,6 +176,68 @@ app.kubernetes.io/component: keycloak-postgres
 app.kubernetes.io/component: keycloak-postgres
 {{- end -}}
 
+{{/* PKI / Step-CA helpers */}}
+{{- define "aegis-services.pki.namespace" -}}
+{{- $pki := .Values.pki | default dict }}
+{{- $stepCa := $pki.stepCa | default dict }}
+{{- if $stepCa.namespace -}}
+{{- $stepCa.namespace -}}
+{{- else -}}
+{{- .Release.Namespace -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.fullname" -}}
+{{- printf "%s-step-ca" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.releaseName" -}}
+{{- $pki := .Values.pki | default dict }}
+{{- $stepCa := $pki.stepCa | default dict }}
+{{- default "step-certificates" $stepCa.releaseName -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.configMapName" -}}
+{{- printf "%s-config" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.certsConfigMapName" -}}
+{{- printf "%s-certs" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.provisionerSecretName" -}}
+{{- printf "%s-provisioner-password" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.stepCa.serviceURL" -}}
+{{- $pki := .Values.pki | default dict }}
+{{- $stepCa := $pki.stepCa | default dict }}
+{{- $ns := include "aegis-services.pki.namespace" . -}}
+{{- $release := include "aegis-services.pki.stepCa.releaseName" . -}}
+{{- $port := $stepCa.service.port | default 443 -}}
+{{- printf "https://%s.%s.svc.cluster.local:%d" $release $ns (int $port) -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.clusterIssuerName" -}}
+{{- $pki := .Values.pki | default dict }}
+{{- default "aegis-internal" $pki.clusterIssuerName -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.trustBundleSecretName" -}}
+{{- $pki := .Values.pki | default dict }}
+{{- default "aegis-trust-bundle" $pki.trustBundleSecretName -}}
+{{- end -}}
+
+{{- define "aegis-services.pki.labels" -}}
+{{ include "aegis-services.labels" . }}
+app.kubernetes.io/component: pki
+{{- end -}}
+
+{{- define "aegis-services.pki.selectorLabels" -}}
+{{ include "aegis-services.selectorLabels" . }}
+app.kubernetes.io/component: pki
+{{- end -}}
+
 {{- define "aegis-services.proxy.tlsIngress" -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

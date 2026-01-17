@@ -42,6 +42,7 @@ import (
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/certmanager"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/observability"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
@@ -66,7 +67,9 @@ const (
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
 	envAegisSpokeProxyNodePort = "AEGIS_SPOKE_PROXY_NODEPORT"
-	envAegisSpokeProxyHost     = "AEGIS_SPOKE_PROXY_HOST" // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
+	envAegisSpokeProxyHost     = "AEGIS_SPOKE_PROXY_HOST"   // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
+	envAegisSpokeProxyCACert   = "AEGIS_SPOKE_PROXY_CA_CERT" // Path to spoke-proxy CA certificate for signing
+	envAegisSpokeProxyCAKey    = "AEGIS_SPOKE_PROXY_CA_KEY"  // Path to spoke-proxy CA private key for signing
 	envAegisPulumiSkipRefresh  = "AEGIS_PULUMI_SKIP_REFRESH"
 	envAegisPulumiSkipApply    = "AEGIS_PULUMI_SKIP_APPLY"
 	envAegisPulumiWorkdir      = "AEGIS_PULUMI_WORKDIR"
@@ -297,6 +300,8 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		SpokeHelm:           r.resolveHelmConfig(),
 		Observability:       observability.ResolveFromEnv(r.findRepoRoot()),
 		EnableObservability: addonEnabled(infra.Spec.Addons, "observability", true),
+		CertManager:         certmanager.ResolveFromEnv(),
+		EnableCertManager:   addonEnabled(infra.Spec.Addons, "certmanager", false),
 		SkipHelm:            strings.EqualFold(os.Getenv("AEGIS_SKIP_SPOKE_HELM"), "true"),
 		EnableCostEstimates: true,
 	}
@@ -362,6 +367,8 @@ type programInput struct {
 	SpokeHelm           helmConfig
 	Observability       observability.Config
 	EnableObservability bool
+	CertManager         certmanager.Config
+	EnableCertManager   bool
 	SkipHelm            bool
 	EnableCostEstimates bool
 }
@@ -608,8 +615,34 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				observabilityOutputs = obs
 			}
 
+			// Install cert-manager and step-issuer for automated TLS certificate management.
+			// This enables spoke-proxy to get CA-signed certificates from the hub's step-ca.
+			r.log.Info("cert-manager installation check",
+				zap.Bool("EnableCertManager", input.EnableCertManager),
+				zap.Bool("CertManager.Enable", input.CertManager.Enable),
+				zap.String("cluster_id", clusterDef.ClusterID))
+
+			// Track cert-manager resources for use as dependencies by the spoke helm chart
+			var certMgrResources []pulumi.Resource
+			if input.EnableCertManager && input.CertManager.Enable {
+				r.log.Info("installing cert-manager on spoke cluster", zap.String("cluster_id", clusterDef.ClusterID))
+				certMgrInstaller := certmanager.NewInstaller()
+				var err error
+				certMgrResources, err = certMgrInstaller.Install(ctx, clusterDef.ClusterID, kubeProvider, input.CertManager, append(nodeGroups, cluster))
+				if err != nil {
+					return fmt.Errorf("install cert-manager: %w", err)
+				}
+				r.log.Info("cert-manager installed successfully", zap.String("cluster_id", clusterDef.ClusterID), zap.Int("num_resources", len(certMgrResources)))
+			} else {
+				r.log.Info("skipping cert-manager installation", zap.Bool("EnableCertManager", input.EnableCertManager), zap.Bool("CertManager.Enable", input.CertManager.Enable))
+			}
+
 			if !input.SkipHelm {
-				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
+				// Include cert-manager resources as dependencies so the spoke helm chart
+				// waits for the webhook to be ready before creating Certificate resources
+				spokeDeps := append(nodeGroups, cluster)
+				spokeDeps = append(spokeDeps, certMgrResources...)
+				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, spokeDeps); err != nil {
 					return err
 				}
 			}
@@ -1152,14 +1185,39 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 		}
 	}
 
-	// Generate self-signed TLS certificate for spoke-proxy with *.nip.io wildcard
-	certPEM, keyPEM, err := generateSpokeProxyCert()
-	if err != nil {
-		return fmt.Errorf("generate spoke-proxy TLS cert: %w", err)
-	}
-	proxyValues["tls"] = pulumi.Map{
-		"cert": pulumi.String(certPEM),
-		"key":  pulumi.String(keyPEM),
+	// Configure TLS for spoke-proxy.
+	// If cert-manager is enabled, use it for automated certificate management.
+	// Otherwise, generate a self-signed certificate (or CA-signed if CA is configured).
+	if input.EnableCertManager && input.CertManager.Enable {
+		// Use cert-manager to get certificates from step-ca
+		proxyValues["tls"] = pulumi.Map{
+			"terminateAtIngress": pulumi.Bool(false),
+			"certManager": pulumi.Map{
+				"enabled": pulumi.Bool(true),
+				"issuerRef": pulumi.Map{
+					"name":  pulumi.String(input.CertManager.ClusterIssuerName),
+					"kind":  pulumi.String("StepClusterIssuer"),
+					"group": pulumi.String("certmanager.step.sm"),
+				},
+				"dnsNames": pulumi.StringArray{
+					pulumi.String("*.nip.io"),
+					pulumi.String(fmt.Sprintf("spoke-proxy-%s.nip.io", clusterID)),
+				},
+			},
+		}
+		r.log.Info("spoke-proxy will use cert-manager for TLS certificates",
+			zap.String("cluster_id", clusterID),
+			zap.String("issuer", input.CertManager.ClusterIssuerName))
+	} else {
+		// Fallback: Generate self-signed TLS certificate for spoke-proxy with *.nip.io wildcard
+		certPEM, keyPEM, err := generateSpokeProxyCert()
+		if err != nil {
+			return fmt.Errorf("generate spoke-proxy TLS cert: %w", err)
+		}
+		proxyValues["tls"] = pulumi.Map{
+			"cert": pulumi.String(certPEM),
+			"key":  pulumi.String(keyPEM),
+		}
 	}
 
 	values := pulumi.Map{
@@ -2627,7 +2685,24 @@ func getSpokeProxyNodePort() int {
 // The certificate includes wildcard SANs for *.nip.io to work with any node public IP.
 // Returns PEM-encoded certificate and key.
 func generateSpokeProxyCert() (certPEM, keyPEM string, err error) {
-	// Generate RSA key
+	// Check if we have a CA to sign with
+	caCertPath := os.Getenv(envAegisSpokeProxyCACert)
+	caKeyPath := os.Getenv(envAegisSpokeProxyCAKey)
+
+	var caCert *x509.Certificate
+	var caKey *rsa.PrivateKey
+
+	if caCertPath != "" && caKeyPath != "" {
+		// Load CA certificate and key
+		caCert, caKey, err = loadCA(caCertPath, caKeyPath)
+		if err != nil {
+			// Log warning but fall back to self-signed
+			fmt.Printf("WARNING: failed to load spoke-proxy CA, falling back to self-signed: %v\n", err)
+			caCert, caKey = nil, nil
+		}
+	}
+
+	// Generate RSA key for the spoke-proxy cert
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", fmt.Errorf("generate private key: %w", err)
@@ -2647,10 +2722,10 @@ func generateSpokeProxyCert() (certPEM, keyPEM string, err error) {
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(1, 0, 0), // Valid for 1 year
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:                  true, // Self-signed CA for trust bundle
+		IsCA:                  false, // End-entity certificate, not a CA
 		DNSNames: []string{
 			"spoke-proxy.aegis.local",
 			"*.nip.io",             // Wildcard for any IP.nip.io
@@ -2663,10 +2738,21 @@ func generateSpokeProxyCert() (certPEM, keyPEM string, err error) {
 		},
 	}
 
-	// Create certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return "", "", fmt.Errorf("create certificate: %w", err)
+	var certDER []byte
+	if caCert != nil && caKey != nil {
+		// Sign with CA
+		certDER, err = x509.CreateCertificate(rand.Reader, &template, caCert, &privateKey.PublicKey, caKey)
+		if err != nil {
+			return "", "", fmt.Errorf("create CA-signed certificate: %w", err)
+		}
+	} else {
+		// Self-signed fallback - make it a CA so it can be added to trust bundle
+		template.IsCA = true
+		template.KeyUsage |= x509.KeyUsageCertSign
+		certDER, err = x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+		if err != nil {
+			return "", "", fmt.Errorf("create self-signed certificate: %w", err)
+		}
 	}
 
 	// Encode to PEM
@@ -2674,4 +2760,48 @@ func generateSpokeProxyCert() (certPEM, keyPEM string, err error) {
 	keyPEMBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 
 	return string(certPEMBytes), string(keyPEMBytes), nil
+}
+
+// loadCA loads a CA certificate and private key from PEM files.
+func loadCA(certPath, keyPath string) (*x509.Certificate, *rsa.PrivateKey, error) {
+	// Read CA certificate
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA cert: %w", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, nil, fmt.Errorf("failed to decode CA cert PEM")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA cert: %w", err)
+	}
+
+	// Read CA private key
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA key: %w", err)
+	}
+	block, _ = pem.Decode(keyPEM)
+	if block == nil {
+		return nil, nil, fmt.Errorf("failed to decode CA key PEM")
+	}
+
+	// Try parsing as PKCS1 first, then PKCS8
+	caKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		// Try PKCS8
+		key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err2 != nil {
+			return nil, nil, fmt.Errorf("parse CA key (tried PKCS1 and PKCS8): %w", err)
+		}
+		var ok bool
+		caKey, ok = key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, nil, fmt.Errorf("CA key is not RSA")
+		}
+	}
+
+	return caCert, caKey, nil
 }

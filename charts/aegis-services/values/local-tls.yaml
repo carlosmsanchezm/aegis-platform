@@ -254,6 +254,14 @@ keycloak:
   forceRender: true
   createNamespace: false
   operator: {}
+  postgres:
+    enabled: true
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: IfNotPresent
+    storage:
+      size: 1Gi
   http:
     httpEnabled: false
   networkPolicy:

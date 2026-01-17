@@ -664,6 +664,71 @@ podSecurity:
       drop:
         - ALL
 
+# PKI Configuration (Step-CA + cert-manager)
+# SC-12: Cryptographic Key Establishment and Management
+pki:
+  # Enable all PKI components (cert-manager, step-ca, step-issuer)
+  enabled: false
+
+  # ClusterIssuer name that cert-manager will use
+  clusterIssuerName: aegis-internal
+
+  # Trust bundle secret name (distributed to namespaces)
+  trustBundleSecretName: aegis-trust-bundle
+
+  # Namespaces to distribute trust bundle to
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+
+  # cert-manager subchart configuration
+  certManager:
+    enabled: false
+    # Install CRDs with cert-manager
+    installCRDs: true
+    # Additional cert-manager values passed to subchart
+    # See: https://artifacthub.io/packages/helm/cert-manager/cert-manager
+
+  # step-ca subchart configuration
+  stepCa:
+    enabled: false
+    namespace: ""  # Empty means use Release.Namespace
+    releaseName: step-certificates
+
+    # CA configuration
+    ca:
+      name: "Aegis Internal CA"
+      provisioner:
+        name: aegis
+        # JWK provisioner for cert-manager integration
+        type: JWK
+      # Certificate validity claims
+      claims:
+        minTLSCertDuration: 5m
+        maxTLSCertDuration: 2160h
+        defaultTLSCertDuration: 2160h
+      # Database persistence
+      db:
+        persistent: true
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 443
+
+    # Bootstrap job (runs on first install)
+    bootstrap:
+      enabled: true
+
+    # Additional step-certificates values passed to subchart
+    # See: https://artifacthub.io/packages/helm/smallstep/step-certificates
+
+  # step-issuer subchart configuration
+  stepIssuer:
+    enabled: false
+    # Additional step-issuer values passed to subchart
+    # See: https://artifacthub.io/packages/helm/smallstep/step-issuer
+
 # Global Configuration
 global:
   domain: aegis.example.com

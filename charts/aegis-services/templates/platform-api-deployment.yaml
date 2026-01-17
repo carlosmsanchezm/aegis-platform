@@ -53,6 +53,31 @@ spec:
       {{- $oidcCAKey := include "aegis-services.platformApi.oidcCAKey" . }}
       {{- $pulumi := .Values.platformApi.pulumi | default dict }}
       {{- $pulumiGh := $pulumi.githubTokenSecret | default dict }}
+      {{- $postgres := .Values.platformApi.postgres | default dict }}
+      {{- $pgHost := $postgres.host | default (printf "platform-postgres.%s.svc.cluster.local" .Release.Namespace) }}
+      {{- $pgPort := $postgres.port | default 5432 }}
+      {{- if and .Values.platformApi.postgres .Values.platformApi.postgres.waitForReady }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL at {{ $pgHost }}:{{ $pgPort }}..."
+              until nc -z {{ $pgHost }} {{ $pgPort }}; do
+                echo "PostgreSQL not ready, waiting..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready!"
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+      {{- end }}
       containers:
         - name: platform-api
           image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"

@@ -552,7 +552,8 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 
 // buildProxyURL returns the spoke proxy URL for heartbeat reporting.
 // If AEGIS_PROXY_URL is set, it's used directly. Otherwise, constructs from AEGIS_PROXY_INGRESS_HOST.
-// If neither is set and we're on AWS, auto-discovers the node public IP and constructs a nip.io URL.
+// If neither is set, tries to auto-discover the LoadBalancer hostname from the proxy Service.
+// Falls back to node public IP with nip.io for NodePort access.
 func (r *AegisWorkloadReconciler) buildProxyURL() string {
 	// Prefer explicit proxy URL if set (supports custom port for NodePort access)
 	if r.proxyURL != "" {
@@ -566,8 +567,11 @@ func (r *AegisWorkloadReconciler) buildProxyURL() string {
 	// Fall back to constructing from ingress host
 	host := r.proxyIngressHost
 	if host == "" {
-		// Auto-discover node public IP for AWS/cloud deployments
-		if ip := discoverNodePublicIP(); ip != "" {
+		// Try to discover LoadBalancer hostname from the proxy Service (NLB)
+		if lbHost := r.discoverLoadBalancerHost(); lbHost != "" {
+			host = lbHost
+		} else if ip := discoverNodePublicIP(); ip != "" {
+			// Fallback: Auto-discover node public IP for AWS/cloud deployments
 			// Construct nip.io URL with default NodePort
 			host = fmt.Sprintf("spoke-proxy.%s.nip.io:31484", ip)
 		}
@@ -580,6 +584,55 @@ func (r *AegisWorkloadReconciler) buildProxyURL() string {
 		host = "wss://" + host
 	}
 	return host
+}
+
+// discoverLoadBalancerHost queries the aegis-spoke-proxy Service and returns the LoadBalancer
+// hostname or IP if available. Returns empty string if not a LoadBalancer or not yet provisioned.
+func (r *AegisWorkloadReconciler) discoverLoadBalancerHost() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Try common service names and namespaces for the spoke proxy
+	serviceNames := []string{"aegis-spoke-proxy", "spoke-proxy"}
+	namespaces := []string{"aegis-system", "default"}
+
+	for _, ns := range namespaces {
+		for _, name := range serviceNames {
+			var svc corev1.Service
+			if err := r.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &svc); err != nil {
+				continue
+			}
+			if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
+				continue
+			}
+			// Check if LoadBalancer has been provisioned
+			for _, ingress := range svc.Status.LoadBalancer.Ingress {
+				if ingress.Hostname != "" {
+					// AWS NLB uses hostname
+					port := int32(31484) // default proxy port
+					for _, p := range svc.Spec.Ports {
+						if p.Name == "proxy" || p.Name == "https" || p.Port == 8443 || p.Port == 31484 {
+							port = p.Port
+							break
+						}
+					}
+					return fmt.Sprintf("%s:%d", ingress.Hostname, port)
+				}
+				if ingress.IP != "" {
+					// GCP/Azure use IP
+					port := int32(31484)
+					for _, p := range svc.Spec.Ports {
+						if p.Name == "proxy" || p.Name == "https" || p.Port == 8443 || p.Port == 31484 {
+							port = p.Port
+							break
+						}
+					}
+					return fmt.Sprintf("%s:%d", ingress.IP, port)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // discoverNodePublicIP attempts to discover the node's public IP address.

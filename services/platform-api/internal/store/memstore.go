@@ -484,6 +484,10 @@ func (s *MemStore) StartWorkload(id string) (*aegis.Workload, time.Duration, boo
 
 // -------- clusters --------
 
+func (s *MemStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error {
+	s.cstate.preRegister(clusterID, projectID, provider, region, proxyURL)
+	return nil
+}
 func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) {
 	s.cstate.upsertFromRegister(req)
 }

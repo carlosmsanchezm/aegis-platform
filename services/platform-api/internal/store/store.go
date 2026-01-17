@@ -131,6 +131,10 @@ type Store interface {
 	PurgeExpiredSessions(now time.Time)
 
 	// clusters
+	// PreRegisterCluster creates a placeholder cluster row during provisioning,
+	// before the k8s-agent connects. This ensures project_id and proxy_url are set
+	// when the agent's RegisterCluster call updates the row.
+	PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
 	GetClusterInfo(clusterID string) *ClusterInfo

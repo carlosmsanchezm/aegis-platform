@@ -35,17 +35,18 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 		}
 	}
 
-	// Insert or update cluster, including proxy_url and project_id if provided
+	// Insert or update cluster, including proxy_url and project_id if provided.
+	// Use COALESCE to handle empty proxy_url gracefully (column has NOT NULL constraint with default '').
 	proxyURL := strings.TrimSpace(req.GetProxyUrl())
 	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, created_at, updated_at)
-VALUES ($1, $5, $2, $3, NULLIF($4, ''), now(), now())
+VALUES ($1, $5, $2, $3, COALESCE(NULLIF($4, ''), ''), now(), now())
 ON CONFLICT (id) DO UPDATE SET
-    provider=EXCLUDED.provider,
-    region=EXCLUDED.region,
+    provider = COALESCE(NULLIF(EXCLUDED.provider, ''), clusters.provider),
+    region = COALESCE(NULLIF(EXCLUDED.region, ''), clusters.region),
     project_id = COALESCE(EXCLUDED.project_id, clusters.project_id),
     proxy_url = CASE WHEN $4 <> '' THEN $4 ELSE clusters.proxy_url END,
-    deleted_at=NULL,
-    updated_at=now()`,
+    deleted_at = NULL,
+    updated_at = now()`,
 		req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion()), proxyURL, projectID); err != nil {
 		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
 		return
@@ -73,6 +74,52 @@ ON CONFLICT (id) DO UPDATE SET
 	if err := tx.Commit(ctx); err != nil {
 		s.logExecError("cluster_register_commit", err, zap.String("cluster_id", req.GetClusterId()))
 	}
+}
+
+// PreRegisterCluster creates a placeholder cluster row during provisioning.
+// This is called by the Pulumi runner after cluster creation but before the k8s-agent connects.
+// The k8s-agent's RegisterCluster call will then update this row rather than failing.
+func (s *PostgresStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error {
+	if clusterID == "" {
+		return nil
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Use ON CONFLICT to handle race conditions if cluster already exists
+	_, err := s.pool.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, created_at, updated_at)
+VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), COALESCE(NULLIF($5, ''), ''), now(), now())
+ON CONFLICT (id) DO UPDATE SET
+    project_id = COALESCE(clusters.project_id, EXCLUDED.project_id),
+    provider = COALESCE(NULLIF(EXCLUDED.provider, ''), clusters.provider),
+    region = COALESCE(NULLIF(EXCLUDED.region, ''), clusters.region),
+    proxy_url = CASE WHEN EXCLUDED.proxy_url <> '' THEN EXCLUDED.proxy_url ELSE clusters.proxy_url END,
+    updated_at = now()`,
+		clusterID, projectID, provider, region, proxyURL)
+	if err != nil {
+		s.logExecError("cluster_pre_register", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+		return err
+	}
+
+	// Also insert the project label for this cluster
+	if projectID != "" {
+		_, err = s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v)
+VALUES ($1, 'aegis.yourorg.dev/projectId', $2)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+			clusterID, projectID)
+		if err != nil {
+			s.logExecError("cluster_pre_register_label", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+			// Don't fail for label errors
+		}
+	}
+
+	s.log.Info("pre-registered cluster",
+		zap.String("cluster_id", clusterID),
+		zap.String("project_id", projectID),
+		zap.String("provider", provider),
+		zap.String("region", region),
+		zap.String("proxy_url", proxyURL))
+	return nil
 }
 
 func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {

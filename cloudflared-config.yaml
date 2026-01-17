@@ -34,6 +34,12 @@ data:
           noTLSVerify: true
           httpHostHeader: keycloak.aegis-platform.tech
           originServerName: keycloak.aegis-platform.tech
+      - hostname: step-ca.aegis-platform.tech
+        service: https://step-certificates.aegis-pki.svc.cluster.local:443
+        originRequest:
+          noTLSVerify: true
+          httpHostHeader: step-ca.aegis-platform.tech
+          originServerName: step-ca.aegis-platform.tech
       - service: http_status:404
 ---
 apiVersion: apps/v1

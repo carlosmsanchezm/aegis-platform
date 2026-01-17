@@ -644,10 +644,33 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 	}
 
 	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+	provider := strings.TrimSpace(infra.Spec.Provider)
+	region := strings.TrimSpace(output.Region)
 
-	// Update the store's cluster<->project mapping so the workspace wizard can find clusters for projects.
+	// Pre-register the cluster in the store so it exists before the k8s-agent tries to register.
+	// This ensures project_id and proxy_url are set when the agent's RegisterCluster call updates the row.
 	if r.Store != nil && projectID != "" {
-		r.Store.SetClusterProjectID(clusterID, projectID)
+		// Get proxy URL from environment (set by operator for stable NLB-based URL)
+		proxyURL := ""
+		if host := strings.TrimSpace(os.Getenv("AEGIS_SPOKE_PROXY_HOST")); host != "" {
+			if !strings.HasPrefix(host, "wss://") && !strings.HasPrefix(host, "ws://") {
+				proxyURL = "wss://" + host
+			} else {
+				proxyURL = host
+			}
+		}
+		if err := r.Store.PreRegisterCluster(clusterID, projectID, provider, region, proxyURL); err != nil {
+			r.Log.Warn("failed to pre-register cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.Error(err))
+			// Don't fail - k8s-agent will retry registration
+		} else {
+			r.Log.Info("pre-registered cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.String("proxy_url", proxyURL))
+		}
 	}
 
 	spec := infraapi.AegisClusterSpec{

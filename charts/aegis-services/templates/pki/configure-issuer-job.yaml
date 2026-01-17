@@ -1,0 +1,210 @@
+{{- /*
+Post-install job to configure StepClusterIssuer after step-ca bootstraps.
+
+This job:
+  1. Waits for step-ca bootstrap to complete
+  2. Reads root CA from step-ca configmap
+  3. Reads provisioner KID from ca.json config
+  4. Creates/patches StepClusterIssuer with correct values
+  5. Creates trust bundle secrets in target namespaces
+
+Requires kubectl and jq in the image.
+*/ -}}
+
+{{- $pki := .Values.pki | default dict -}}
+{{- if and ($pki.enabled | default false) (($pki.stepCa | default dict).enabled | default false) (($pki.stepIssuer | default dict).enabled | default false) -}}
+{{- $stepCa := $pki.stepCa | default dict -}}
+{{- $ca := $stepCa.ca | default dict -}}
+{{- $provisioner := $ca.provisioner | default dict -}}
+{{- $ns := include "aegis-services.pki.namespace" . -}}
+{{- $issuerName := include "aegis-services.pki.clusterIssuerName" . -}}
+{{- $trustBundleName := include "aegis-services.pki.trustBundleSecretName" . -}}
+{{- $release := include "aegis-services.pki.stepCa.releaseName" . -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-pki-configure
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.pki.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-pki-configure
+  labels:
+    {{- include "aegis-services.pki.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["certmanager.step.sm"]
+    resources: ["stepclusterissuers"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-pki-configure
+  labels:
+    {{- include "aegis-services.pki.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "aegis-services.fullname" . }}-pki-configure
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "aegis-services.fullname" . }}-pki-configure
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-pki-configure
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.pki.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "aegis-services.pki.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "aegis-services.fullname" . }}-pki-configure
+      restartPolicy: OnFailure
+      containers:
+        - name: configure
+          image: bitnami/kubectl:1.29
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              PKI_NAMESPACE="{{ $ns }}"
+              RELEASE_NAME="{{ $release }}"
+              ISSUER_NAME="{{ $issuerName }}"
+              TRUST_BUNDLE_NAME="{{ $trustBundleName }}"
+              PROVISIONER_NAME="{{ $provisioner.name | default "aegis" }}"
+              STEP_CA_URL="{{ include "aegis-services.pki.stepCa.serviceURL" . }}"
+
+              echo "==> Waiting for step-ca bootstrap job to complete..."
+              for i in {1..60}; do
+                if kubectl get job "${RELEASE_NAME}" -n "${PKI_NAMESPACE}" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q "1"; then
+                  echo "    Bootstrap job completed successfully"
+                  break
+                fi
+                echo "    Waiting for bootstrap job... (attempt $i/60)"
+                sleep 10
+              done
+
+              echo "==> Waiting for step-ca configmaps to be populated..."
+              for i in {1..60}; do
+                CONFIG_CM="${RELEASE_NAME}-config"
+                CERTS_CM="${RELEASE_NAME}-certs"
+
+                CA_JSON=$(kubectl get configmap "${CONFIG_CM}" -n "${PKI_NAMESPACE}" -o jsonpath='{.data.ca\.json}' 2>/dev/null || true)
+                ROOT_CA=$(kubectl get configmap "${CERTS_CM}" -n "${PKI_NAMESPACE}" -o jsonpath='{.data.root_ca\.crt}' 2>/dev/null || true)
+
+                if [[ -n "${CA_JSON}" && -n "${ROOT_CA}" ]]; then
+                  echo "    ConfigMaps are ready"
+                  break
+                fi
+                echo "    Waiting for configmaps... (attempt $i/60)"
+                sleep 5
+              done
+
+              if [[ -z "${CA_JSON}" || -z "${ROOT_CA}" ]]; then
+                echo "ERROR: Timed out waiting for step-ca configmaps"
+                exit 1
+              fi
+
+              echo "==> Extracting provisioner KID..."
+              # Use kubectl exec to run jq since bitnami/kubectl may not have jq
+              KID=$(echo "${CA_JSON}" | python3 -c "
+              import json, sys
+              data = json.load(sys.stdin)
+              provisioners = data.get('authority', {}).get('provisioners', [])
+              for p in provisioners:
+                  if p.get('type') == 'JWK' and p.get('name') == '${PROVISIONER_NAME}':
+                      print(p.get('key', {}).get('kid', ''))
+                      sys.exit(0)
+              print('')
+              " 2>/dev/null || echo "")
+
+              if [[ -z "${KID}" ]]; then
+                echo "WARNING: Could not extract provisioner KID, StepClusterIssuer may need manual configuration"
+              else
+                echo "    Found KID: ${KID}"
+              fi
+
+              echo "==> Base64 encoding root CA..."
+              ROOT_CA_B64=$(echo -n "${ROOT_CA}" | base64 | tr -d '\n')
+
+              echo "==> Creating/updating StepClusterIssuer..."
+              cat <<EOF | kubectl apply -f -
+              apiVersion: certmanager.step.sm/v1beta1
+              kind: StepClusterIssuer
+              metadata:
+                name: ${ISSUER_NAME}
+                labels:
+                  app.kubernetes.io/managed-by: Helm
+                  app.kubernetes.io/component: pki
+              spec:
+                url: ${STEP_CA_URL}
+                caBundle: ${ROOT_CA_B64}
+                provisioner:
+                  name: ${PROVISIONER_NAME}
+                  kid: "${KID}"
+                  passwordRef:
+                    name: ${RELEASE_NAME}-provisioner-password
+                    namespace: ${PKI_NAMESPACE}
+                    key: password
+              EOF
+
+              echo "==> Creating trust bundle secrets in target namespaces..."
+              {{- range $pki.trustBundleNamespaces | default (list "aegis-system" "keycloak") }}
+              NS="{{ . }}"
+              echo "    Creating namespace ${NS} if not exists..."
+              kubectl create namespace "${NS}" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+
+              echo "    Creating trust bundle secret in ${NS}..."
+              kubectl create secret generic "${TRUST_BUNDLE_NAME}" \
+                --namespace "${NS}" \
+                --from-literal=ca.crt="${ROOT_CA}" \
+                --from-literal=aegis-local-trust.pem="${ROOT_CA}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              {{- end }}
+
+              echo "==> PKI configuration complete!"
+              echo "    StepClusterIssuer: ${ISSUER_NAME}"
+              echo "    Trust bundle: ${TRUST_BUNDLE_NAME}"
+{{- end -}}

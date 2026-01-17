@@ -55,6 +55,7 @@ platformApi:
   serviceAccountName: aegis-platform-api
   postgres:
     enabled: true
+    waitForReady: true  # Wait for postgres to be ready before starting platform-api
     initChown: true
     initImage: registry.access.redhat.com/ubi9/ubi-minimal:9.3
     image:
@@ -118,6 +119,17 @@ platformApi:
     AEGIS_PLATFORM_API_CA_FILE: ""
     AEGIS_PLATFORM_API_GRPC_INSECURE: "true"
     AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
+    # Spoke-proxy CA for signing certs (fallback when cert-manager not enabled)
+    AEGIS_SPOKE_PROXY_CA_CERT: "/etc/spoke-proxy-ca/ca.crt"
+    AEGIS_SPOKE_PROXY_CA_KEY: "/etc/spoke-proxy-ca/ca.key"
+    # cert-manager + step-ca configuration for production-ready PKI
+    AEGIS_CERT_MANAGER_ENABLED: "true"
+    AEGIS_STEP_CA_URL: "https://step-ca.aegis-platform.tech"
+    AEGIS_STEP_CA_ROOT_CA_FILE: "/etc/step-ca/root_ca.crt"
+    AEGIS_STEP_PROVISIONER_NAME: "aegis"
+    AEGIS_STEP_PROVISIONER_KID: "SIsML7Um9gI1YJCUoY1CAEny7foRMiJ3rIx1W95yM-o"
+    AEGIS_STEP_PROVISIONER_PASSWORD_FILE: "/etc/step-ca/provisioner-password"
+    AEGIS_CLUSTER_ISSUER_NAME: "aegis-internal"
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [
         {
@@ -295,10 +307,36 @@ platformApi:
     - name: kubeconfigs
       mountPath: /tmp/kubeconfigs
       readOnly: true
+    - name: spoke-proxy-ca
+      mountPath: /etc/spoke-proxy-ca
+      readOnly: true
+    - name: step-ca-root
+      mountPath: /etc/step-ca/root_ca.crt
+      subPath: root_ca.crt
+      readOnly: true
+    - name: step-ca-credentials
+      mountPath: /etc/step-ca/provisioner-password
+      subPath: provisioner-password
+      readOnly: true
   volumes:
     - name: kubeconfigs
       secret:
         secretName: aegis-kubeconfigs
+    - name: spoke-proxy-ca
+      secret:
+        secretName: spoke-proxy-ca
+    - name: step-ca-root
+      secret:
+        secretName: aegis-trust-bundle
+        items:
+          - key: ca.crt
+            path: root_ca.crt
+    - name: step-ca-credentials
+      secret:
+        secretName: step-ca-credentials
+        items:
+          - key: provisioner-password
+            path: provisioner-password
 
 #################################################################
 # Proxy Configuration - Local
@@ -373,3 +411,38 @@ proxy:
     periodSeconds: 15
     timeoutSeconds: 5
     failureThreshold: 5
+
+#################################################################
+# PKI Configuration - Local (Step-CA + cert-manager)
+# Enable this to use automated certificate management
+#################################################################
+pki:
+  # Set to true to enable internal PKI for local development
+  enabled: false
+
+  clusterIssuerName: aegis-internal
+  trustBundleSecretName: aegis-trust-bundle
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+
+  # cert-manager subchart
+  certManager:
+    enabled: false
+    installCRDs: true
+
+  # step-ca subchart
+  stepCa:
+    enabled: false
+    ca:
+      name: "Aegis Internal CA"
+      provisioner:
+        name: aegis
+      db:
+        persistent: false  # Use ephemeral storage for local dev
+    service:
+      port: 443
+
+  # step-issuer subchart
+  stepIssuer:
+    enabled: false

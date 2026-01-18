@@ -1,9 +1,23 @@
 # Compliance Operations Runbook
 
-**Version:** 1.0
+**Version:** 1.1
 **Last Updated:** 2026-01-17
 **Owner:** Carlos Sanchez
 **Applies To:** SOC 2 Type II + ISO 27001
+
+---
+
+## For AI Assistants (Claude)
+
+**Instructions file:** [`CLAUDE_INSTRUCTIONS.md`](./CLAUDE_INSTRUCTIONS.md)
+
+When asking Claude to run compliance tasks, use these prompts:
+
+| Task | Prompt |
+|------|--------|
+| Weekly | "Read docs/compliance/CLAUDE_INSTRUCTIONS.md and run the weekly compliance check" |
+| Monthly | "Read docs/compliance/CLAUDE_INSTRUCTIONS.md and run the monthly evidence collection" |
+| Quarterly | "Read docs/compliance/CLAUDE_INSTRUCTIONS.md and run the quarterly access review" |
 
 ---
 

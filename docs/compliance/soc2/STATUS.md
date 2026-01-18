@@ -31,12 +31,12 @@
 
 ### Repositories in Scope (3 repos)
 
-| Repository | Purpose | Commits | Branch Protection | Dependabot | Vulns |
-|------------|---------|---------|-------------------|------------|-------|
-| `aegis-platform` | Backend, K8s agents | 465 | ✅ | ✅ | 0 |
-| `aegis-ui` | Frontend (Backstage) | 99 | ✅ | ✅ | 0 |
-| `sovran` | IaC, VS Code ext | 161 | ✅ | ✅ | 0 |
-| **Total** | | **725** | | | **0** |
+| Repository | Purpose | Commits | Branch Protection | CI Required | Dependabot | Vulns |
+|------------|---------|---------|-------------------|-------------|------------|-------|
+| `aegis-platform` | Backend, K8s agents | 465 | ✅ | ✅ `Test & Build` | ✅ | 0 |
+| `aegis-ui` | Frontend (Backstage) | 99 | ✅ | ✅ `Test & Build` | ✅ | 0 |
+| `sovran` | IaC, VS Code ext | 161 | ✅ | ✅ `Tests on ubuntu-latest` | ✅ | 0 |
+| **Total** | | **725** | | | | **0** |
 
 ### Retroactive Evidence (Sept 2025 - Jan 2026)
 
@@ -68,12 +68,38 @@ Key packages updated:
 
 ---
 
+## Baseline Controls (as of 2026-01-17)
+
+| Control Area | Status | Evidence |
+|-------------|--------|----------|
+| **Branch Protection** | ✅ Enforced | PR required, force push blocked |
+| **CI Required** | ✅ Enforced | Merge blocked until CI passes |
+| **Strict Mode** | ✅ Enforced | Branch must be up-to-date |
+| **Enforce Admins** | ✅ Enforced | Admins cannot bypass |
+| **Dependabot** | ✅ Enabled | All 3 repos |
+| **Vulnerability Count** | ✅ Zero | 0 high/critical across all repos |
+
+### CI Check Requirements (CC8.1)
+
+| Repository | Required Check Name | Status |
+|------------|---------------------|--------|
+| aegis-platform | `Test & Build` | ✅ Required |
+| aegis-ui | `Test & Build` | ✅ Required |
+| sovran | `Tests on ubuntu-latest (Node 20.x)` | ✅ Required |
+
+**Verification:** Test PR #52 on aegis-ui confirmed merge blocked until CI passes.
+
+**Evidence Commit:** `fd2d388` (aegis-compliance-evidence repo, 2026-01-17)
+
+---
+
 ## Evidence Vault
 
-**Location:** `../aegis-compliance-evidence` (local git repository)
-**Status:** ✅ Created and initialized
+**Location:** `$EVIDENCE_VAULT` → `../aegis-compliance-evidence` (local git repository)
+**Status:** ✅ Created and operational
 **Retroactive Evidence:** Sept 2025 - Jan 2026
 **Ongoing Collection:** Monthly
+**Latest Commit:** `fd2d388` (2026-01-17)
 
 ---
 
@@ -299,6 +325,14 @@ SOC 2 Type II requires **3-12 months of operating** controls before audit. You'r
 | Monthly Summary | `YYYY-MM-DD_monthly_summary.md` | Root of month folder |
 | Run Log | `RUN_LOG_YYYY-MM-DD.txt` | Root of month folder |
 
+### Evidence Collection Cadence
+
+| Frequency | Task | Next Due |
+|-----------|------|----------|
+| **Weekly** | Run `run_weekly_checks.sh` | Every Monday |
+| **Monthly** | Run `run_monthly_evidence.sh` | 1st of each month |
+| **Quarterly** | Quarterly access review | Q1: Apr 15, 2026 |
+
 ### Weekly Tasks
 - [ ] Run `./scripts/compliance/run_weekly_checks.sh`
 - [ ] Review Dependabot/security alerts
@@ -314,6 +348,10 @@ SOC 2 Type II requires **3-12 months of operating** controls before audit. You'r
 - [ ] Q2 Access Review (due July 15)
 - [ ] Q3 Access Review (due October 15)
 - [ ] Q4 Access Review (due January 15)
+
+### Annual Tasks
+- [ ] Policy review (all 6 policies, due 2027-01-17)
+- [ ] Risk assessment refresh
 
 ### When Ready to Engage Auditor
 1. Select SOC 2 auditor (recommend: Drata, Vanta, or boutique firm)
@@ -366,6 +404,7 @@ SOC 2 Type II requires **3-12 months of operating** controls before audit. You'r
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.3 | 2026-01-17 | Claude Opus 4.5 | Added CI-required branch protection, baseline controls section, evidence commit fd2d388 |
 | 1.2 | 2026-01-17 | Claude (SOC2 Engineer) | Completed Step 3: Evidence vault created, first exports run |
 | 1.1 | 2025-01-17 | Claude (SOC2 Engineer) | Narrowed scope to Model B, Security only |
 | 1.0 | 2025-01-17 | Claude (SOC2 Engineer) | Initial status document |

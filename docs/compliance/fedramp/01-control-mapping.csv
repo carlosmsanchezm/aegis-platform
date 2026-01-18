@@ -1,0 +1,145 @@
+NIST_800_53_Control,Control_Title,FedRAMP_Low_Required,SOC2_TSC_Mapping,ISO27001_Mapping,Aegis_Status,Reuse_Potential,Gap_Notes
+AC-1,Access Control Policy and Procedures,Yes,CC6.1,A.5.1,Implemented,High,Reuse ISO 27001 policy with FedRAMP tailoring
+AC-2,Account Management,Yes,"CC6.1,CC6.2,CC6.3","A.5.15,A.5.16,A.5.18",Implemented,High,Onboard/offboard procedures exist
+AC-3,Access Enforcement,Yes,"CC6.1,CC6.6","A.5.15,A.8.3",Implemented,High,RBAC in place via Keycloak
+AC-4,Information Flow Enforcement,Conditional,CC6.1,A.8.22,Partial,Medium,Need network segmentation docs
+AC-5,Separation of Duties,Yes,CC6.1,A.5.3,Partial,Medium,Solo founder - compensating controls needed
+AC-6,Least Privilege,Yes,"CC6.1,CC6.7",A.5.15,Implemented,High,RBAC with minimal permissions
+AC-7,Unsuccessful Logon Attempts,Yes,CC6.6,A.8.3,Implemented,High,Keycloak lockout policy
+AC-8,System Use Notification,Yes,CC6.1,A.5.10,Not Implemented,Low,Need login banner
+AC-11,Device Lock,Conditional,CC6.6,A.8.1,Partial,Medium,Endpoint policy needed
+AC-12,Session Termination,Yes,CC6.6,A.8.3,Implemented,High,Session timeout in Keycloak
+AC-14,Permitted Actions without ID,Yes,CC6.1,A.5.15,Implemented,High,All actions require auth
+AC-17,Remote Access,Conditional,CC6.6,A.6.7,Implemented,High,VPN/mTLS in place
+AC-18,Wireless Access,Conditional,CC6.6,A.8.20,N/A,N/A,Cloud-hosted - no wireless infra
+AC-19,Access Control for Mobile,Conditional,CC6.6,A.8.1,Partial,Medium,Need mobile device policy
+AC-20,Use of External Systems,Conditional,"CC6.6,CC6.7",A.5.19,Partial,Medium,Need external system policy
+AC-22,Publicly Accessible Content,Conditional,CC6.1,A.5.33,Implemented,High,No public content hosting
+AT-1,Training Policy and Procedures,Yes,CC1.4,A.6.3,Partial,Medium,Need formal training program
+AT-2,Security Awareness Training,Yes,CC1.4,A.6.3,Partial,Medium,Solo founder - need evidence
+AT-3,Role-Based Training,Conditional,CC1.4,A.6.3,Partial,Medium,Need specialized training records
+AT-4,Training Records,Yes,CC1.4,A.6.3,Not Implemented,Low,Need training log
+AU-1,Audit Policy and Procedures,Yes,CC7.2,A.5.1,Implemented,High,Logging policy exists
+AU-2,Event Logging,Yes,CC7.2,A.8.15,Implemented,High,Structured logging in place
+AU-3,Content of Audit Records,Yes,CC7.2,A.8.15,Implemented,High,Rich audit log format
+AU-4,Audit Log Storage Capacity,Yes,CC7.2,A.8.15,Implemented,High,Cloud storage scalable
+AU-5,Response to Audit Failures,Yes,CC7.2,A.8.15,Partial,Medium,Need alerting on failures
+AU-6,Audit Review and Reporting,Yes,"CC7.2,CC4.1","A.8.15,A.8.16",Partial,Medium,Monthly review process
+AU-8,Time Stamps,Yes,CC7.2,A.8.17,Implemented,High,NTP synchronized
+AU-9,Protection of Audit Info,Yes,CC7.2,A.8.15,Implemented,High,Immutable cloud logs
+AU-11,Audit Record Retention,Yes,CC7.2,A.8.15,Partial,Medium,Need 90+ day retention policy
+AU-12,Audit Record Generation,Yes,CC7.2,A.8.15,Implemented,High,Application audit logging
+CA-1,Assessment Policy,Yes,CC4.1,A.5.35,Implemented,High,Internal audit program
+CA-2,Control Assessments,Yes,CC4.1,A.5.35,Partial,Medium,ISO internal audit pending
+CA-3,Information Exchange,Conditional,CC6.1,A.5.14,Partial,Medium,Need interconnection agreements
+CA-5,Plan of Action and Milestones,Yes,CC4.2,Clause 10.1,Implemented,High,Corrective actions log exists
+CA-6,Authorization,Yes,CC4.1,Clause 9,Not Started,Low,FedRAMP-specific
+CA-7,Continuous Monitoring,Yes,"CC4.1,CC7.2",Clause 9.1,Implemented,High,Monthly evidence collection
+CA-9,Internal System Connections,Conditional,CC6.1,A.8.22,Partial,Medium,Need connection inventory
+CM-1,Config Management Policy,Yes,CC8.1,A.8.32,Implemented,High,Change management policy
+CM-2,Baseline Configuration,Yes,CC8.1,A.8.9,Implemented,High,IaC baselines
+CM-3,Configuration Change Control,Yes,CC8.1,A.8.32,Implemented,High,GitOps with PR review
+CM-4,Impact Analysis,Yes,CC8.1,A.8.32,Implemented,High,PR review process
+CM-5,Access Restrictions for Change,Yes,CC8.1,A.8.32,Implemented,High,Branch protection enforced
+CM-6,Configuration Settings,Yes,CC8.1,A.8.9,Implemented,High,Documented configs
+CM-7,Least Functionality,Yes,CC8.1,A.8.9,Implemented,High,Minimal container images
+CM-8,System Component Inventory,Yes,CC8.1,A.5.9,Partial,Medium,Need formal inventory
+CM-10,Software Usage Restrictions,Conditional,CC8.1,A.8.19,Implemented,High,License compliance
+CM-11,User-Installed Software,Conditional,CC8.1,A.8.19,N/A,N/A,Cloud platform - controlled
+CP-1,Contingency Planning Policy,Yes,A1.2,A.5.29,Partial,Medium,Need formal CP
+CP-2,Contingency Plan,Yes,A1.2,A.5.30,Partial,Medium,Need documented plan
+CP-3,Contingency Training,Conditional,A1.2,A.5.30,Not Implemented,Low,Need training records
+CP-4,Contingency Plan Testing,Yes,A1.2,A.5.30,Not Implemented,Low,Need test results
+CP-9,System Backup,Yes,A1.2,A.8.13,Implemented,High,Cloud backups enabled
+CP-10,System Recovery,Yes,A1.2,A.5.30,Partial,Medium,Need recovery procedures
+IA-1,ID and Auth Policy,Yes,CC6.1,A.5.1,Implemented,High,Access control policy
+IA-2,Identification and Authentication,Yes,CC6.6,A.8.3,Implemented,High,OIDC/SAML/MFA
+IA-4,Identifier Management,Yes,CC6.2,A.5.16,Implemented,High,Unique identifiers
+IA-5,Authenticator Management,Yes,CC6.6,A.5.17,Implemented,High,Password policy
+IA-6,Authentication Feedback,Yes,CC6.6,A.8.3,Implemented,High,Masked passwords
+IA-7,Cryptographic Module Auth,Yes,CC6.6,A.8.24,Not Implemented,Low,FIPS 140 gap
+IA-8,ID and Auth (Non-Org Users),Conditional,CC6.6,A.5.16,Implemented,High,Customer IdP integration
+IA-11,Re-authentication,Yes,CC6.6,A.8.3,Implemented,High,Session timeout
+IR-1,Incident Response Policy,Yes,CC7.4,A.5.24,Implemented,High,IRP policy exists
+IR-2,Incident Response Training,Conditional,CC7.4,A.5.24,Partial,Medium,Solo founder training
+IR-3,Incident Response Testing,Conditional,CC7.4,A.5.30,Not Implemented,Low,Need tabletop exercise
+IR-4,Incident Handling,Yes,CC7.4,A.5.26,Implemented,High,Incident procedure exists
+IR-5,Incident Monitoring,Yes,CC7.4,A.5.28,Partial,Medium,Monthly incident log
+IR-6,Incident Reporting,Yes,CC7.4,A.5.27,Implemented,High,Reporting process exists
+IR-7,Incident Response Assistance,Conditional,CC7.4,A.5.26,Partial,Medium,Support process
+IR-8,Incident Response Plan,Yes,CC7.4,A.5.24,Implemented,High,IRP documented
+MA-1,System Maintenance Policy,Conditional,CC8.1,A.7.13,Partial,Medium,Cloud - limited applicability
+MA-2,Controlled Maintenance,Conditional,CC8.1,A.7.13,N/A,N/A,IaaS inherited
+MA-4,Nonlocal Maintenance,Conditional,CC8.1,A.7.13,N/A,N/A,IaaS inherited
+MA-5,Maintenance Personnel,Conditional,CC8.1,A.7.13,N/A,N/A,IaaS inherited
+MP-1,Media Protection Policy,Conditional,CC6.1,A.7.10,Partial,Medium,Digital media policy
+MP-2,Media Access,Conditional,CC6.1,A.7.10,N/A,N/A,Cloud - no physical media
+MP-6,Media Sanitization,Conditional,CC6.1,A.7.10,N/A,N/A,IaaS inherited
+MP-7,Media Use,Conditional,CC6.1,A.7.10,Implemented,High,No removable media
+PE-1,Physical Security Policy,Conditional,CC6.4,A.7.1,N/A,N/A,IaaS inherited (AWS)
+PE-2,Physical Access Authorizations,Conditional,CC6.4,A.7.2,N/A,N/A,IaaS inherited
+PE-3,Physical Access Control,Conditional,CC6.4,A.7.2,N/A,N/A,IaaS inherited
+PE-6,Monitoring Physical Access,Conditional,CC6.4,A.7.4,N/A,N/A,IaaS inherited
+PE-8,Visitor Access Records,Conditional,CC6.4,A.7.2,N/A,N/A,IaaS inherited
+PE-12,Emergency Lighting,Conditional,A1.2,A.7.11,N/A,N/A,IaaS inherited
+PE-13,Fire Protection,Conditional,A1.2,A.7.11,N/A,N/A,IaaS inherited
+PE-14,Environmental Controls,Conditional,A1.2,A.7.11,N/A,N/A,IaaS inherited
+PE-15,Water Damage Protection,Conditional,A1.2,A.7.11,N/A,N/A,IaaS inherited
+PE-16,Delivery and Removal,Conditional,CC6.4,A.7.10,N/A,N/A,IaaS inherited
+PL-1,Planning Policy,Yes,CC2.2,A.5.1,Implemented,High,Security program docs
+PL-2,System Security Plan,Yes,CC2.2,Clause 6.1,Not Started,Low,FedRAMP SSP needed
+PL-4,Rules of Behavior,Yes,CC1.4,A.5.10,Partial,Medium,Need formal RoB
+PL-10,Baseline Selection,Yes,CC2.2,Clause 6.1,Not Started,Low,Low baseline selected
+PL-11,Baseline Tailoring,Yes,CC2.2,Clause 6.1,Not Started,Low,Tailoring rationale needed
+PS-1,Personnel Security Policy,Yes,CC6.2,A.6.1,Partial,Medium,Need formal policy
+PS-2,Position Risk Designation,Conditional,CC6.2,A.6.1,Not Implemented,Low,Need role classification
+PS-3,Personnel Screening,Conditional,CC6.2,A.6.1,Not Implemented,Low,Background checks gap
+PS-4,Personnel Termination,Yes,CC6.3,A.6.5,Implemented,High,Offboarding procedure
+PS-5,Personnel Transfer,Conditional,CC6.2,A.6.5,Partial,Medium,Solo founder - limited
+PS-6,Access Agreements,Yes,CC6.2,A.6.2,Partial,Medium,Need signed agreements
+PS-7,External Personnel Security,Conditional,CC6.2,A.6.1,Partial,Medium,Contractor policy needed
+PS-8,Personnel Sanctions,Yes,CC6.2,A.6.4,Partial,Medium,Need disciplinary process
+RA-1,Risk Assessment Policy,Yes,CC3.2,A.5.1,Implemented,High,Risk management policy
+RA-2,Security Categorization,Yes,CC3.2,Clause 4.1,Implemented,High,FIPS 199 completed
+RA-3,Risk Assessment,Yes,CC3.2,Clause 8.2,Implemented,High,Risk register with 17 risks
+RA-5,Vulnerability Monitoring,Yes,CC7.1,A.8.8,Implemented,High,Dependabot + scanning
+RA-7,Risk Response,Yes,CC3.2,Clause 8.3,Implemented,High,Risk treatment plan
+SA-1,System and Services Acquisition Policy,Yes,CC8.1,A.5.1,Partial,Medium,Need formal SA policy
+SA-2,Allocation of Resources,Conditional,CC5.2,Clause 7.1,Partial,Medium,Resource planning
+SA-3,System Development Lifecycle,Yes,CC8.1,A.8.25,Implemented,High,SDLC documented
+SA-4,Acquisition Process,Conditional,CC8.1,A.5.19,Partial,Medium,Vendor assessment exists
+SA-5,System Documentation,Yes,CC8.1,A.8.9,Implemented,High,Architecture docs
+SA-8,Security and Privacy Engineering,Yes,CC8.1,A.8.27,Implemented,High,Security by design
+SA-9,External System Services,Yes,"CC6.6,CC9.2",A.5.21,Partial,Medium,Third-party inventory
+SA-10,Developer Configuration Management,Yes,CC8.1,A.8.32,Implemented,High,GitOps workflow
+SA-11,Developer Testing,Yes,CC8.1,A.8.29,Implemented,High,CI/CD testing
+SA-22,Unsupported System Components,Conditional,CC8.1,A.8.9,Partial,Medium,Need EOL tracking
+SC-1,System and Comms Protection Policy,Yes,CC6.1,A.5.1,Partial,Medium,Need SC policy
+SC-5,Denial of Service Protection,Conditional,A1.2,A.8.6,Partial,Medium,Cloud DDoS protection
+SC-7,Boundary Protection,Yes,CC6.1,A.8.21,Implemented,High,Network segmentation
+SC-8,Transmission Confidentiality,Yes,CC6.1,A.8.24,Implemented,High,TLS everywhere
+SC-12,Cryptographic Key Management,Yes,CC6.1,A.8.24,Partial,Medium,Need key mgmt docs
+SC-13,Cryptographic Protection,Yes,CC6.1,A.8.24,Not Implemented,Low,FIPS 140 gap
+SC-15,Collaborative Computing,Conditional,CC6.1,A.8.22,N/A,N/A,No collaborative computing
+SC-20,Secure Name Resolution,Conditional,CC6.1,A.8.22,Implemented,High,DNS security
+SC-21,Secure Name Resolution (Recursive),Conditional,CC6.1,A.8.22,Implemented,High,Cloud DNS
+SC-22,Architecture and Provisioning,Conditional,CC6.1,A.8.22,Implemented,High,IaC provisioning
+SC-39,Process Isolation,Yes,CC6.1,A.8.22,Implemented,High,Container isolation
+SI-1,System and Info Integrity Policy,Yes,CC7.1,A.5.1,Partial,Medium,Need SI policy
+SI-2,Flaw Remediation,Yes,CC7.1,A.8.8,Implemented,High,Vuln remediation process
+SI-3,Malicious Code Protection,Conditional,CC7.1,A.8.7,Partial,Medium,Cloud workloads
+SI-4,System Monitoring,Yes,CC7.2,A.8.16,Implemented,High,Monitoring in place
+SI-5,Security Alerts and Advisories,Yes,CC7.1,A.5.7,Implemented,High,Dependabot alerts
+SI-10,Information Input Validation,Conditional,CC8.1,A.8.28,Implemented,High,Input validation
+SI-11,Error Handling,Conditional,CC8.1,A.8.28,Implemented,High,Secure error handling
+SI-12,Information Management,Yes,CC6.1,A.5.10,Partial,Medium,Data handling docs
+SI-16,Memory Protection,Conditional,CC7.1,A.8.6,Implemented,High,Container hardening
+SR-1,Supply Chain Risk Management Policy,Yes,CC9.2,A.5.19,Not Implemented,Low,SCRMP needed
+SR-2,Supply Chain Risk Management Plan,Yes,CC9.2,A.5.21,Not Implemented,Low,SCRMP needed
+SR-3,Supply Chain Controls,Yes,CC9.2,A.5.22,Partial,Medium,Vendor policy exists
+SR-5,Acquisition Strategies,Conditional,CC9.2,A.5.19,Partial,Medium,Need formal strategy
+SR-6,Supplier Assessments,Conditional,CC9.2,A.5.22,Partial,Medium,Vendor assessment template
+SR-8,Notification Agreements,Conditional,CC9.2,A.5.21,Partial,Medium,Contract terms
+SR-10,Inspection of Systems,Conditional,CC9.2,A.5.22,N/A,N/A,Cloud - limited
+SR-11,Component Authenticity,Conditional,CC9.2,A.8.27,Partial,Medium,SBOM exists
+SR-12,Component Disposal,Conditional,CC9.2,A.7.10,N/A,N/A,Cloud - IaaS inherited

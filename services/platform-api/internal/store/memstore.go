@@ -9,6 +9,7 @@ import (
 	"time"
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -293,8 +294,7 @@ func (s *MemStore) ListProjects() []*aegis.Project {
 		if p == nil {
 			continue
 		}
-		copy := *p
-		out = append(out, &copy)
+		out = append(out, proto.Clone(p).(*aegis.Project))
 	}
 	return out
 }

@@ -81,6 +81,29 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				},
 			},
 		},
+		// eks-system: Minimal cluster with only system nodes - NO GPU ASG.
+		// Use this when you don't need GPU capability at all.
+		"eks-system": {
+			ID:       "eks-system",
+			Version:  "1.0.0",
+			Provider: "aws",
+			AWS: &infraapi.AWSInfraSpec{
+				Mode:        infraapi.AWSProvisionModeProvision,
+				ClusterName: "",
+				Version:     "1.34",
+				NodePools: []infraapi.NodePool{
+					{
+						Name:         "system",
+						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for system workloads
+						MinSize:      1,
+						MaxSize:      5,
+						Labels: map[string]string{
+							"aegis.dev/purpose": "system",
+						},
+					},
+				},
+			},
+		},
 		"eks-secure": {
 			ID:       "eks-secure",
 			Version:  "1.3.0",

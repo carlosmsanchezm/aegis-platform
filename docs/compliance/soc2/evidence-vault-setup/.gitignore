@@ -1,0 +1,101 @@
+# =============================================================================
+# AEGIS SOC 2 EVIDENCE VAULT - .gitignore
+# =============================================================================
+# 🚨 SECURITY: This file helps prevent accidental secret commits
+# Review ALL files before committing - this is a safety net, not a guarantee
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SECRETS & CREDENTIALS - NEVER COMMIT
+# -----------------------------------------------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.ppk
+
+# Environment files with secrets
+.env
+.env.*
+*.env
+.envrc
+.secrets
+secrets.yml
+secrets.yaml
+secrets.json
+credentials.json
+service-account*.json
+
+# AWS credentials
+.aws/
+aws-credentials*
+*-credentials.csv
+
+# Terraform secrets
+*.tfvars
+terraform.tfstate*
+.terraform/
+
+# -----------------------------------------------------------------------------
+# SENSITIVE REPORTS - Store offline only
+# -----------------------------------------------------------------------------
+# Full penetration test reports (store summaries only)
+*-pentest-full.*
+*-penetration-test-full.*
+
+# Raw vulnerability scan data with exploit details
+*-vulns-raw.*
+*-vulnerabilities-detailed.*
+
+# -----------------------------------------------------------------------------
+# CUSTOMER DATA - Never commit
+# -----------------------------------------------------------------------------
+*-customer-data.*
+*-pii.*
+*-personal-data.*
+
+# -----------------------------------------------------------------------------
+# TEMPORARY & SYSTEM FILES
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+\#*\#
+.idea/
+.vscode/
+*.log
+
+# -----------------------------------------------------------------------------
+# LARGE BINARY FILES - Use Git LFS or store elsewhere
+# -----------------------------------------------------------------------------
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Exception: Allow specific archives if needed
+# !vendor-soc2-reports/*.pdf
+
+# -----------------------------------------------------------------------------
+# NOTES
+# -----------------------------------------------------------------------------
+# To add an exception for a specific file:
+# !path/to/allowed-file.json
+#
+# To check what would be committed:
+# git status --porcelain
+# git diff --staged
+#
+# To scan for secrets before commit:
+# git secrets --scan
+# trufflehog filesystem .
+# =============================================================================

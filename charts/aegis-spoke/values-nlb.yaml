@@ -1,0 +1,51 @@
+# NLB-based spoke-proxy deployment values
+# Use this when deploying to AWS with the spoke-proxy NLB infrastructure
+#
+# Usage:
+#   helm upgrade --install aegis-spoke ./charts/aegis-spoke \
+#     -n aegis-system --create-namespace \
+#     -f charts/aegis-spoke/values.yaml \
+#     -f charts/aegis-spoke/values-nlb.yaml \
+#     --set k8sAgent.env.AEGIS_CLUSTER_ID=<cluster-id> \
+#     --set proxy.ingress.hostname=spoke-proxy.<EIP>.nip.io
+#
+# The NLB infrastructure is created by: terraform apply -target=aws_lb.spoke_proxy
+# Get the Elastic IP from: terraform output spoke_proxy_eip
+
+proxy:
+  enabled: true
+
+  service:
+    # NodePort is required for NLB target group
+    type: NodePort
+    port: 8085
+    # Must match the terraform spoke_proxy_port variable (default: 31484)
+    nodePort: 31484
+
+  # Ingress is disabled - NLB handles external access
+  ingress:
+    enabled: false
+
+  tls:
+    # TLS is terminated at the proxy (not at NLB)
+    terminateAtIngress: false
+    # Certificates can be provided inline or via cert-manager
+    # When using cert-manager:
+    certManager:
+      enabled: false  # Set to true if you have cert-manager installed
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      dnsNames:
+        # Add the nip.io wildcard patterns
+        - "*.nip.io"
+        - "*.*.nip.io"
+        - "*.*.*.nip.io"
+        - "*.*.*.*.nip.io"
+
+k8sAgent:
+  env:
+    # AEGIS_PROXY_INGRESS_HOST must be set via --set to include the EIP
+    # Example: --set k8sAgent.env.AEGIS_PROXY_INGRESS_HOST=spoke-proxy.52.1.2.3.nip.io:443
+    AEGIS_PROXY_INGRESS_HOST: ""  # Required: set via --set

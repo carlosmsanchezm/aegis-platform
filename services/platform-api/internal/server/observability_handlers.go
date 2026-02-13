@@ -414,8 +414,13 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		writeWizardError(w, status.Errorf(codes.Internal, "alertmanager returned status %d", resp.StatusCode))
 		return
 	}
+	// Alertmanager v2 API returns status as an object with a "state" field
 	var alerts []struct {
-		Status      string            `json:"status"`
+		Status struct {
+			State       string   `json:"state"`
+			SilencedBy  []string `json:"silencedBy"`
+			InhibitedBy []string `json:"inhibitedBy"`
+		} `json:"status"`
 		Labels      map[string]string `json:"labels"`
 		Annotations map[string]string `json:"annotations"`
 		StartsAt    string            `json:"startsAt"`
@@ -429,7 +434,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	out := alertsResponse{Alerts: make([]alertView, 0, len(alerts))}
 	for _, a := range alerts {
 		out.Alerts = append(out.Alerts, alertView{
-			State:       a.Status,
+			State:       a.Status.State,
 			Labels:      a.Labels,
 			Annotations: a.Annotations,
 			StartsAt:    a.StartsAt,

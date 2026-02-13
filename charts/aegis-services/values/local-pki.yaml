@@ -3,6 +3,14 @@
 # This overlay assumes `scripts/install-internal-pki.sh` has been run and the
 # trust bundle secret exists (default: `aegis-trust-bundle` in `aegis-system`).
 #
+# This overlay enables the internal PKI infrastructure:
+# - cert-manager for automated certificate lifecycle management
+# - step-ca as the internal Certificate Authority
+# - step-issuer to integrate cert-manager with step-ca
+#
+# After deploying, services can use cert-manager Certificate resources
+# with the "aegis-internal" StepClusterIssuer to get CA-signed certificates.
+#
 # Usage:
 #   helm upgrade --install aegis-services charts/aegis-services \
 #     -f charts/aegis-services/values/common.yaml \
@@ -21,3 +29,91 @@ platformApi:
         fileName: ca.crt
         mountPath: /etc/aegis-platform-api/oidc
 
+pki:
+  enabled: true
+
+  clusterIssuerName: aegis-internal
+  trustBundleSecretName: aegis-trust-bundle
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+
+  # cert-manager configuration
+  certManager:
+    enabled: true
+    installCRDs: true
+    # Reduce resource usage for local dev
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  # step-ca configuration
+  stepCa:
+    enabled: true
+    ca:
+      name: "Aegis Internal CA"
+      provisioner:
+        name: aegis
+        type: JWK
+      claims:
+        minTLSCertDuration: 5m
+        maxTLSCertDuration: 2160h
+        defaultTLSCertDuration: 2160h
+      db:
+        persistent: false  # Use ephemeral storage for local dev
+    service:
+      type: ClusterIP
+      port: 443
+    bootstrap:
+      enabled: true
+    # External DNS names for step-ca (for spoke clusters connecting through Cloudflare)
+    # These are added to the CA's dnsNames config to allow JWT audience validation
+    externalDnsNames:
+      - step-ca.aegis-platform.tech
+
+  # step-issuer configuration
+  stepIssuer:
+    enabled: true
+
+# When PKI is enabled, platform-api and proxy can use cert-manager for TLS
+# Uncomment the following to enable cert-manager managed certificates:
+#
+# platformApi:
+#   tls:
+#     certManager:
+#       enabled: true
+#       issuerRef:
+#         name: aegis-internal
+#         kind: StepClusterIssuer
+#         group: certmanager.step.sm
+#
+# proxy:
+#   tls:
+#     certManager:
+#       enabled: true
+#       issuerRef:
+#         name: aegis-internal
+#         kind: StepClusterIssuer
+#         group: certmanager.step.sm
+
+# step-ca subchart values (aliased as "step-ca" in Chart.yaml)
+# These values are passed directly to the step-certificates subchart
+step-ca:
+  # Use Docker Hub images (default)
+  image:
+    repository: smallstep/step-ca
+    tag: "0.27.2"
+  inject:
+    config:
+      files:
+        ca.json:
+          # Add external DNS names so step-ca accepts JWT tokens with these audiences
+          # This is required for spoke clusters connecting through Cloudflare tunnel
+          dnsNames:
+            - step-certificates.aegis-pki.svc.cluster.local
+            - 127.0.0.1
+            - step-ca.aegis-platform.tech

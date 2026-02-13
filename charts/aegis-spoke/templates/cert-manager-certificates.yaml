@@ -5,10 +5,15 @@ Rendered only when:
   - proxy.enabled is true
   - proxy.tls.terminateAtIngress is false (proxy serves TLS itself)
   - proxy.tls.certManager.enabled is true
-  - cert-manager CRDs are present
+
+
+Note: We removed the .Capabilities.APIVersions.Has check because Pulumi's helm
+provider doesn't properly query cluster API versions. When certManager.enabled
+is true, we assume cert-manager CRDs are present (since cert-manager is installed
+as a dependency before the spoke helm chart).
 */ -}}
 
-{{- if and (.Capabilities.APIVersions.Has "cert-manager.io/v1") -}}
+
 {{- $proxy := .Values.proxy | default dict -}}
 {{- $tls := $proxy.tls | default dict -}}
 {{- $cm := $tls.certManager | default dict -}}
@@ -51,5 +56,4 @@ spec:
     size: {{ (($cm.privateKey | default dict).size) | default 2048 }}
   dnsNames:
 {{- toYaml $dnsNames | nindent 4 }}
-{{- end -}}
 {{- end -}}

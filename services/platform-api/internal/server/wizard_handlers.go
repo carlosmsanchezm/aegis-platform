@@ -28,16 +28,17 @@ type projectView struct {
 }
 
 type clusterView struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	ProjectID     string          `json:"projectId,omitempty"`
-	Region        string          `json:"region,omitempty"`
-	Provider      string          `json:"provider,omitempty"`
-	K8sVersion    string          `json:"k8sVersion,omitempty"`
-	HasGPU        bool            `json:"hasGpu"`
-	NodeGroups    []nodeGroupView `json:"nodeGroups,omitempty"`
-	Status        string          `json:"status,omitempty"`
-	LastHeartbeat string          `json:"lastHeartbeat,omitempty"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	ProjectID       string          `json:"projectId,omitempty"`
+	Region          string          `json:"region,omitempty"`
+	Provider        string          `json:"provider,omitempty"`
+	K8sVersion      string          `json:"k8sVersion,omitempty"`
+	HasGPU          bool            `json:"hasGpu"`
+	NodeGroups      []nodeGroupView `json:"nodeGroups,omitempty"`
+	Status          string          `json:"status,omitempty"`
+	LastHeartbeat   string          `json:"lastHeartbeat,omitempty"`
+	ProvisioningJob string          `json:"provisioningJob,omitempty"` // Job ID for clusters being provisioned
 }
 
 type nodeGroupView struct {
@@ -104,6 +105,7 @@ func registerWorkspaceWizardRoutes(mux *runtime.ServeMux, srv *Server) {
 	}); err != nil {
 		srv.log.Error("failed to register /aegis/api/workspaces route", zap.Error(err))
 	}
+
 	srv.log.Info("workspace wizard routes registered", zap.Strings("routes", []string{
 		"/api/projects", "/api/clusters", "/api/workspaces",
 		"/aegis/api/projects", "/aegis/api/clusters", "/aegis/api/workspaces",
@@ -332,6 +334,10 @@ func (s *Server) clusterViews(ctx context.Context, allowed map[string]struct{}, 
 	if allowed != nil && len(allowed) == 0 {
 		return []clusterView{}, nil
 	}
+
+	// Track which cluster IDs we've already added
+	seenClusters := make(map[string]bool)
+
 	out := make([]clusterView, 0, len(infos))
 	for _, ci := range infos {
 		if ci == nil {
@@ -348,7 +354,47 @@ func (s *Server) clusterViews(ctx context.Context, allowed map[string]struct{}, 
 		}
 		view := buildClusterView(ci, now, s.store)
 		out = append(out, view)
+		seenClusters[strings.ToLower(ci.ID)] = true
 	}
+
+	// Add provisioning clusters that don't have a cluster entry yet
+	provisioningRuns := s.store.ListProvisioningRuns(filterProject)
+	for _, run := range provisioningRuns {
+		if run == nil {
+			continue
+		}
+		// Skip if this cluster already exists in the clusters table
+		if seenClusters[strings.ToLower(run.ClusterID)] {
+			continue
+		}
+		// Skip completed provisioning runs (they should have a cluster entry)
+		if run.CompletedAt != nil && strings.EqualFold(run.Phase, "Ready") {
+			continue
+		}
+		projectID := run.ProjectID
+		if allowed != nil {
+			if _, ok := allowed[strings.ToLower(projectID)]; !ok {
+				continue
+			}
+		}
+		if filterProject != "" && !strings.EqualFold(filterProject, projectID) {
+			continue
+		}
+		// Create a "provisioning" cluster view
+		view := clusterView{
+			ID:              run.ClusterID,
+			Name:            run.ClusterID,
+			ProjectID:       projectID,
+			Status:          "provisioning",
+			ProvisioningJob: run.JobID,
+		}
+		if strings.EqualFold(run.Phase, "Error") || strings.EqualFold(run.Phase, "Failed") {
+			view.Status = "error"
+		}
+		out = append(out, view)
+		seenClusters[strings.ToLower(run.ClusterID)] = true
+	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }

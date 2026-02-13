@@ -120,6 +120,33 @@ func (s *PostgresStore) ListProvisioningLogs(jobID string, since time.Time, sinc
 	return out
 }
 
+func (s *PostgresStore) ClearProvisioningLogs(jobID string) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	result, err := s.pool.Exec(ctx, `DELETE FROM provisioning_logs WHERE job_id = $1`, jobID)
+	if err != nil {
+		s.logExecError("provisioning_logs_clear", err, zap.String("job_id", jobID))
+		return
+	}
+	if s.log != nil {
+		s.log.Info("cleared provisioning logs", zap.String("job_id", jobID), zap.Int64("deleted_count", result.RowsAffected()))
+	}
+}
+
+func (s *PostgresStore) DeleteOldProvisioningLogs(olderThan time.Time) int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	result, err := s.pool.Exec(ctx, `DELETE FROM provisioning_logs WHERE created_at < $1`, olderThan)
+	if err != nil {
+		s.logExecError("provisioning_logs_retention_cleanup", err, zap.Time("older_than", olderThan))
+		return 0
+	}
+	return result.RowsAffected()
+}
+
 func (s *PostgresStore) UpsertProvisioningRun(run store.ProvisioningRun) {
 	if strings.TrimSpace(run.JobID) == "" {
 		return
@@ -173,4 +200,49 @@ func (s *PostgresStore) GetProvisioningRun(jobID string) (*store.ProvisioningRun
 		run.CompletedAt = &completed.Time
 	}
 	return &run, true
+}
+
+func (s *PostgresStore) ListProvisioningRuns(projectID string) []*store.ProvisioningRun {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	query := `SELECT job_id, COALESCE(project_id, ''), COALESCE(cluster_id, ''), COALESCE(phase, ''), started_at, completed_at, updated_at FROM provisioning_runs`
+	var args []any
+	if strings.TrimSpace(projectID) != "" {
+		query += " WHERE project_id = $1"
+		args = append(args, projectID)
+	}
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		s.logExecError("provisioning_runs_list", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var out []*store.ProvisioningRun
+	for rows.Next() {
+		var (
+			run                  store.ProvisioningRun
+			projID, clusterID    string
+			phase                string
+			started, updated     time.Time
+			completed            sql.NullTime
+		)
+		if err := rows.Scan(&run.JobID, &projID, &clusterID, &phase, &started, &completed, &updated); err != nil {
+			s.logExecError("provisioning_runs_list_scan", err)
+			break
+		}
+		run.ProjectID = strings.TrimSpace(projID)
+		run.ClusterID = strings.TrimSpace(clusterID)
+		run.Phase = strings.TrimSpace(phase)
+		run.StartedAt = started
+		run.UpdatedAt = updated
+		if completed.Valid {
+			run.CompletedAt = &completed.Time
+		}
+		out = append(out, &run)
+	}
+	return out
 }

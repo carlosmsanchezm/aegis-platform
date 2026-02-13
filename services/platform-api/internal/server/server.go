@@ -1590,10 +1590,30 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 
 	// Determine proxy URL: use spoke proxy if cluster reports one, otherwise use hub proxy
 	proxyBaseURL := s.proxyBaseURL
-	if clusterID := w.GetClusterId(); clusterID != "" {
-		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil && clusterInfo.ProxyURL != "" {
-			proxyBaseURL = clusterInfo.ProxyURL
-			s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+	clusterID := w.GetClusterId()
+	if clusterID != "" {
+		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil {
+			if clusterInfo.ProxyURL != "" {
+				proxyBaseURL = clusterInfo.ProxyURL
+				s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
+			} else {
+				// Cluster is registered but has no proxy_url - this likely means spoke-proxy
+				// is not deployed on the remote cluster. Return a clear error instead of
+				// silently falling back to the hub proxy which won't work for remote clusters.
+				s.log.Warn("cluster has no proxy_url configured; spoke-proxy may not be deployed",
+					zap.String("cluster_id", clusterID),
+					zap.String("workload_id", workloadID),
+					zap.String("fallback_proxy", proxyBaseURL),
+				)
+				// Only error if the cluster appears to be remote (not a local dev cluster)
+				// Local clusters typically don't register or use in-cluster kubeconfig
+				if clusterInfo.Provider != "" && clusterInfo.Provider != "local" {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"cluster %s has no proxy URL configured; the spoke-proxy may not be deployed. "+
+							"Deploy the spoke chart with proxy.enabled=true or set AEGIS_PROXY_INGRESS_HOST on the k8s-agent",
+						clusterID)
+				}
+			}
 		}
 	}
 	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())
@@ -2197,6 +2217,7 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	registerWorkspaceWizardRoutes(mux, svc)
 	registerObservabilityRoutes(mux, svc)
 	registerProvisioningRoutes(mux, svc)
+	registerPKIRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2210,6 +2231,36 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		log.Info("HTTP gateway listening", zap.String("addr", addrHTTP))
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Warn("HTTP gateway stopped", zap.Error(err))
+		}
+	}()
+
+	// Background job for provisioning log retention cleanup
+	// Configurable via AEGIS_LOG_RETENTION_DAYS (default: 7 days)
+	go func() {
+		retentionDays := int(getEnvInt("AEGIS_LOG_RETENTION_DAYS", 7))
+		if retentionDays <= 0 {
+			log.Info("provisioning log retention disabled (AEGIS_LOG_RETENTION_DAYS <= 0)")
+			return
+		}
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		log.Info("provisioning log retention cleanup started",
+			zap.Int("retention_days", retentionDays),
+			zap.String("interval", "1h"))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("provisioning log retention cleanup stopped")
+				return
+			case <-ticker.C:
+				cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+				deleted := svc.store.DeleteOldProvisioningLogs(cutoff)
+				if deleted > 0 {
+					log.Info("provisioning log retention cleanup completed",
+						zap.Int64("deleted_entries", deleted),
+						zap.Time("cutoff", cutoff))
+				}
+			}
 		}
 	}()
 
@@ -2604,6 +2655,12 @@ func (s *Server) CreateCluster(ctx context.Context, req *aegis.CreateClusterRequ
 		} else {
 			return nil, status.Errorf(codes.Internal, "create projectinfra: %v", err)
 		}
+	}
+	// Clear any old provisioning logs for this job ID immediately after creating the infra.
+	// This ensures old logs are cleared BEFORE the frontend starts polling,
+	// avoiding the race condition where old logs appear briefly.
+	if s.store != nil {
+		s.store.ClearProvisioningLogs(infra.Name)
 	}
 	s.log.Info("cluster provisioning job created",
 		zap.String("project", projectID),

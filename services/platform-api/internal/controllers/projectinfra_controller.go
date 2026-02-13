@@ -36,6 +36,7 @@ const (
 // ProjectInfraReconciler handles ProjectInfra lifecycle orchestration.
 type ProjectInfraReconciler struct {
 	client.Client
+	APIReader                 client.Reader // Uncached reader for critical reads
 	Scheme                    *runtime.Scheme
 	Log                       *zap.Logger
 	Provisioner               provisioning.AWSProvisioner
@@ -164,6 +165,25 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		defer releaseLock()
 	}
 
+	// Re-read the object after acquiring the lock to get the latest status.
+	// This prevents race conditions where another reconcile completed between
+	// our initial read and lock acquisition.
+	// IMPORTANT: Use APIReader (uncached) to get the actual current state from the API server,
+	// not the potentially stale cached version. This is critical for detecting when another
+	// reconcile has already set the status to Ready.
+	reader := r.APIReader
+	usingAPIReader := reader != nil
+	if reader == nil {
+		reader = r.Client // Fallback to cached client if APIReader not configured
+	}
+	if err := reader.Get(ctx, req.NamespacedName, &infra); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	log.Info("re-read object after lock acquisition",
+		zap.Bool("using_api_reader", usingAPIReader),
+		zap.String("status_phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
+
 	if !infra.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, log, &infra)
 	}
@@ -178,6 +198,12 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	// Ensure the project exists in the store for the workspace wizard to list.
 	r.syncProjectToStore(infra)
+
+	// If already in Ready state, skip reconciliation. The infrastructure is provisioned.
+	if strings.EqualFold(infra.Status.Phase, "Ready") {
+		log.Info("skipping reconcile; infrastructure is already ready")
+		return ctrl.Result{}, nil
+	}
 
 	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
 	// the ProjectInfra to retry, so keep the object idle in error state.
@@ -337,6 +363,14 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 		return ctrl.Result{}, err
 	}
 
+	// Clear old provisioning logs before starting new provisioning
+	// This prevents old logs from accumulating and mixing with new ones
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID != "" && r.Store != nil {
+		log.Info("clearing old provisioning logs", zap.String("job_id", jobID))
+		r.Store.ClearProvisioningLogs(jobID)
+	}
+
 	r.recordProvisioningStatus(infra, "Provisioning", false)
 	r.recordProvisioningLog(infra, "Provisioning", store.LogTypeEvent, "pulumi provisioning started")
 
@@ -406,8 +440,12 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 
 	condReady := newCondition(metav1.ConditionTrue, "Provisioned", "aws infrastructure provisioned")
 	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, result.CostHintUSDPerHour); err != nil {
+		log.Error("failed to set Ready status", zap.Error(err))
 		return ctrl.Result{}, err
 	}
+	log.Info("successfully set status to Ready",
+		zap.String("phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
 	r.recordProvisioningLog(infra, "Ready", store.LogTypeEvent, "pulumi provisioning completed")
 	r.recordProvisioningStatus(infra, "Ready", true)
 	log.Info("project infrastructure provisioned", zap.Int("clusters", len(outputs)))
@@ -606,10 +644,33 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 	}
 
 	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+	provider := strings.TrimSpace(infra.Spec.Provider)
+	region := strings.TrimSpace(output.Region)
 
-	// Update the store's cluster<->project mapping so the workspace wizard can find clusters for projects.
+	// Pre-register the cluster in the store so it exists before the k8s-agent tries to register.
+	// This ensures project_id and proxy_url are set when the agent's RegisterCluster call updates the row.
 	if r.Store != nil && projectID != "" {
-		r.Store.SetClusterProjectID(clusterID, projectID)
+		// Get proxy URL from environment (set by operator for stable NLB-based URL)
+		proxyURL := ""
+		if host := strings.TrimSpace(os.Getenv("AEGIS_SPOKE_PROXY_HOST")); host != "" {
+			if !strings.HasPrefix(host, "wss://") && !strings.HasPrefix(host, "ws://") {
+				proxyURL = "wss://" + host
+			} else {
+				proxyURL = host
+			}
+		}
+		if err := r.Store.PreRegisterCluster(clusterID, projectID, provider, region, proxyURL); err != nil {
+			r.Log.Warn("failed to pre-register cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.Error(err))
+			// Don't fail - k8s-agent will retry registration
+		} else {
+			r.Log.Info("pre-registered cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.String("proxy_url", proxyURL))
+		}
 	}
 
 	spec := infraapi.AegisClusterSpec{
@@ -970,11 +1031,19 @@ func (r *ProjectInfraReconciler) lockLocal(key string) func() {
 }
 
 func stackLockKey(infra *infraapi.ProjectInfra) string {
-	return fmt.Sprintf("%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	// Use infra name to create per-infra locks instead of shared project/region locks.
+	// This ensures deleting one ProjectInfra doesn't wait for provisions of others.
+	return fmt.Sprintf("%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), strings.TrimSpace(infra.Name))
 }
 
 func leaseNameForInfra(infra *infraapi.ProjectInfra) string {
-	base := fmt.Sprintf("pi-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region))
+	// Use infra name in lease to isolate each ProjectInfra's lock.
+	// Truncate infra name to fit within 63 char limit for k8s names.
+	infraName := strings.TrimSpace(infra.Name)
+	if len(infraName) > 30 {
+		infraName = infraName[:30]
+	}
+	base := fmt.Sprintf("pi-%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), infraName)
 	return sanitizeName(base, 63)
 }
 

@@ -37,7 +37,7 @@ pulumi-preview:
 # Build the image (defaults to host arch + local load; override PLATFORMS/BUILDX_OUTPUT for multi-arch + push).
 docker-build docker-buildx:
 	@echo "Building $(IMG) for $(PLATFORMS) with output $(BUILDX_OUTPUT)"
-	docker buildx build \
+	docker buildx build --no-cache \
 		--platform $(PLATFORMS) \
 		--tag $(IMG) \
 		$(BUILDX_OUTPUT) \
@@ -50,7 +50,7 @@ docker-build docker-buildx:
 docker-load:
 	@PLATFORM="$$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || echo linux/amd64)"; \
 	echo "Building $(IMG) for $$PLATFORM (local load)"; \
-	docker buildx build \
+	docker buildx build --no-cache \
 		--platform "$$PLATFORM" \
 		--tag $(IMG) \
 		--load \

@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -31,6 +33,8 @@ import (
 func main() {
 	logger, _ := zap.NewProduction()
 	defer func() { _ = logger.Sync() }()
+
+	logger.Info("PLATFORM_API_BUILD_VERSION_20251216_2030_RECONCILE_FIX")
 
 	grpcAddr := getenv("GRPC_ADDR", ":8081")
 	httpAddr := getenv("HTTP_ADDR", ":8080")
@@ -76,7 +80,40 @@ func main() {
 
 	overlay := placement.NewPolicyOverlay()
 
+	// Set up signal handling for graceful shutdown.
+	// Pulumi operations can take several minutes, so we give them a grace period
+	// before forcefully cancelling. The grace period is configurable via
+	// AEGIS_SHUTDOWN_GRACE_PERIOD (default: 60s).
 	ctx, cancel := context.WithCancel(context.Background())
+	gracePeriod := 60 * time.Second
+	if gp := os.Getenv("AEGIS_SHUTDOWN_GRACE_PERIOD"); gp != "" {
+		if parsed, err := time.ParseDuration(gp); err == nil {
+			gracePeriod = parsed
+		}
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		logger.Info("received shutdown signal, starting graceful shutdown",
+			zap.String("signal", sig.String()),
+			zap.Duration("grace_period", gracePeriod))
+
+		// Start the grace period timer
+		graceTicker := time.NewTimer(gracePeriod)
+		defer graceTicker.Stop()
+
+		// Cancel context after grace period
+		select {
+		case <-graceTicker.C:
+			logger.Warn("grace period expired, forcing shutdown")
+		case sig := <-sigCh:
+			logger.Warn("received second signal, forcing immediate shutdown",
+				zap.String("signal", sig.String()))
+		}
+		cancel()
+	}()
 	defer cancel()
 
 	var mgr ctrl.Manager

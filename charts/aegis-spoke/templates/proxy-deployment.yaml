@@ -33,7 +33,9 @@ spec:
           imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
           ports:
             - containerPort: 8080
-{{- if $podTLS }}
+{{- $useCertManager := and (not .Values.proxy.tls.terminateAtIngress) ((.Values.proxy.tls.certManager).enabled | default false) }}
+{{- $useSelfSigned := and (not .Values.proxy.tls.terminateAtIngress) .Values.proxy.tls.cert .Values.proxy.tls.key }}
+{{- if or $useCertManager $useSelfSigned }}
           volumeMounts:
             - name: proxy-tls
               mountPath: /etc/aegis-proxy
@@ -55,7 +57,7 @@ spec:
             - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
               value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
 {{- end }}
-{{- if $podTLS }}
+{{- if or $useCertManager $useSelfSigned }}
             - name: AEGIS_PROXY_TLS_CERT
               value: "/etc/aegis-proxy/tls.crt"
             - name: AEGIS_PROXY_TLS_KEY
@@ -71,7 +73,7 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 20
-{{- if $podTLS }}
+{{- if or $useCertManager $useSelfSigned }}
       volumes:
         - name: proxy-tls
           secret:

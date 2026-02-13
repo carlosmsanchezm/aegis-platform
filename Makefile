@@ -101,7 +101,7 @@ stop:
 .PHONY: platform-api-docker-build
 platform-api-docker-build:
 	@echo "Building multi-arch platform-api image $(PLATFORM_API_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-f services/platform-api/Dockerfile \
 		-t $(PLATFORM_API_IMAGE) \
 		--push \
@@ -130,8 +130,13 @@ kind-load-platform:
 .PHONY: build-agent
 build-agent:
 	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
-	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
+	@$(MAKE) -C agents/k8s-agent docker-build IMG=$(K8S_AGENT_IMAGE)
 	@$(MAKE) kind-load-agent
+
+.PHONY: build-agent-multi
+build-agent-multi:
+	@echo "Building k8s-agent multi-arch image $(K8S_AGENT_IMAGE)"
+	@$(MAKE) -C agents/k8s-agent docker-build-multi IMG=$(K8S_AGENT_IMAGE)
 
 .PHONY: kind-load-agent
 kind-load-agent:
@@ -146,7 +151,7 @@ kind-load-agent:
 .PHONY: build-workspace
 build-workspace:
 	@echo "Building workspace image $(WORKSPACE_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-t $(WORKSPACE_IMAGE) \
 		--push \
 		workspace-images/openssh-vscode
@@ -154,7 +159,7 @@ build-workspace:
 .PHONY: build-proxy
 build-proxy:
 	@echo "Building proxy image $(PROXY_IMAGE)"
-	@docker buildx build --platform linux/amd64,linux/arm64 \
+	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
 		-t $(PROXY_IMAGE) \
 		--push \
 		-f services/proxy/Dockerfile \
@@ -318,6 +323,7 @@ deploy-local-tls: setup-local clean-webhook
 		helm upgrade --install aegis-services charts/aegis-services \
 		  -f charts/aegis-services/values/common.yaml \
 		  -f charts/aegis-services/values/local.yaml \
+		  -f charts/aegis-services/values/local-pki.yaml \
 		  -f charts/aegis-services/values/local-tls.yaml \
 		  -f charts/aegis-services/values/local-pki.yaml \
 		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
@@ -402,18 +408,32 @@ port-forward:
 	@pkill -f "kubectl.*port-forward" 2>/dev/null || true
 	@sleep 2
 	@echo "Setting up port-forwarding..."
-	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 >/dev/null 2>&1 &
-	@kubectl -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 >/dev/null 2>&1 &
-	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service $(PF_KEYCLOAK_HTTPS_PORT):8443 >/dev/null 2>&1 &
+	@# Use nohup to keep processes running after make exits
+	@nohup kubectl --context docker-desktop -n aegis-system port-forward svc/aegis-services-platform-api $(PF_PLATFORM_HTTP_PORT):8080 $(PF_PLATFORM_GRPC_PORT):8081 >/dev/null 2>&1 &
+	@nohup kubectl --context docker-desktop -n aegis-system port-forward svc/aegis-services-proxy $(PF_PROXY_HTTP_PORT):8085 >/dev/null 2>&1 &
+	@nohup kubectl --context docker-desktop -n keycloak port-forward svc/aegis-services-keycloak-service $(PF_KEYCLOAK_HTTPS_PORT):8443 >/dev/null 2>&1 &
 	@# AWS relay tunnel port-forwards (for remote spoke clusters to reach local platform-api)
-	@kubectl -n aegis-system port-forward svc/aegis-services-platform-api 8081:8081 >/dev/null 2>&1 &
-	@kubectl -n keycloak port-forward svc/aegis-services-keycloak-service 8443:8443 >/dev/null 2>&1 &
-	@sleep 1
+	@nohup kubectl --context docker-desktop -n aegis-system port-forward svc/aegis-services-platform-api 8081:8081 >/dev/null 2>&1 &
+	@nohup kubectl --context docker-desktop -n keycloak port-forward svc/aegis-services-keycloak-service 8443:8443 >/dev/null 2>&1 &
+	@sleep 3
+	@# Verify port-forwards are running
+	@if ! pgrep -f "kubectl.*port-forward.*aegis-services-platform-api.*$(PF_PLATFORM_HTTP_PORT)" >/dev/null; then \
+		echo "ERROR: Platform API port-forward failed to start. Check if pods are running:"; \
+		echo "  kubectl --context docker-desktop -n aegis-system get pods"; \
+		exit 1; \
+	fi
 	@echo "Port-forwarding started:"
 	@echo "  Platform API: http://localhost:$(PF_PLATFORM_HTTP_PORT) (HTTP) / localhost:$(PF_PLATFORM_GRPC_PORT) (gRPC)"
 	@echo "  Proxy: http://localhost:$(PF_PROXY_HTTP_PORT)"
 	@echo "  Keycloak: https://localhost:$(PF_KEYCLOAK_HTTPS_PORT)"
 	@echo "  AWS Relay: localhost:8081 (gRPC) / localhost:8443 (Keycloak)"
+	@echo ""
+	@# Quick connectivity test
+	@if curl -s --max-time 3 http://localhost:$(PF_PLATFORM_HTTP_PORT)/healthz >/dev/null 2>&1; then \
+		echo "Connectivity verified: Platform API is reachable"; \
+	else \
+		echo "Warning: Platform API health check failed (may still be starting)"; \
+	fi
 	@echo ""
 	@echo "Use 'make stop-port-forward' or 'pkill -f \"kubectl.*port-forward\"' to stop all port-forwards."
 

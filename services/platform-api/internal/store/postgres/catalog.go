@@ -3,6 +3,9 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -10,6 +13,76 @@ import (
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 )
+
+// Annotation key validation constants
+const (
+	annotationPrefix = "aegis.yourorg.dev/"
+)
+
+// knownAnnotationKeys maps valid camelCase annotation keys to their purpose.
+// This ensures consistency across the codebase.
+var knownAnnotationKeys = map[string]string{
+	"aegis.yourorg.dev/awsRoleArn":    "AWS IAM role ARN for assuming cross-account access",
+	"aegis.yourorg.dev/awsAccountId":  "AWS account ID for the project",
+	"aegis.yourorg.dev/awsExternalId": "External ID for STS AssumeRole",
+	"aegis.yourorg.dev/projectId":     "Project ID for cluster association",
+	"aegis.yourorg.dev/ilLevel":       "Information Level (IL) classification",
+	"aegis.yourorg.dev/environment":   "Environment (dev, staging, prod)",
+	"aegis.yourorg.dev/description":   "Human-readable description",
+	"aegis.yourorg.dev/enable_fips":   "Enable FIPS 140-2 compliance",
+	"aegis/description":               "Legacy description annotation",
+	"aegis/environment":               "Legacy environment annotation",
+	"aegis/enable_fips":               "Legacy FIPS annotation",
+	"aegis/monthly_budget":            "Monthly budget in USD",
+	"aegis/network_isolation":         "Network isolation enabled",
+	"aegis/monthly_alert_percent":     "Budget alert threshold percentage",
+	"aegis/compute_profiles":          "JSON array of compute profile configurations",
+}
+
+// invalidAnnotationKeyPatterns detects common mistakes in annotation keys
+var invalidAnnotationKeyPatterns = []*regexp.Regexp{
+	// Kebab-case after prefix (should be camelCase)
+	regexp.MustCompile(`^aegis\.yourorg\.dev/[a-z]+-[a-z]+`),
+}
+
+// normalizeAnnotationKey attempts to fix common annotation key mistakes.
+// Returns the normalized key and whether normalization was applied.
+func normalizeAnnotationKey(key string) (string, bool) {
+	// Check for kebab-case AWS keys and convert to camelCase
+	kebabToCamel := map[string]string{
+		"aegis.yourorg.dev/aws-role-arn":    "aegis.yourorg.dev/awsRoleArn",
+		"aegis.yourorg.dev/aws-account-id":  "aegis.yourorg.dev/awsAccountId",
+		"aegis.yourorg.dev/aws-external-id": "aegis.yourorg.dev/awsExternalId",
+		"aegis.yourorg.dev/project-id":      "aegis.yourorg.dev/projectId",
+		"aegis.yourorg.dev/il-level":        "aegis.yourorg.dev/ilLevel",
+	}
+
+	if normalized, ok := kebabToCamel[key]; ok {
+		return normalized, true
+	}
+	return key, false
+}
+
+// normalizeAnnotations fixes common annotation key mistakes and returns the normalized map.
+// It also logs warnings for normalized keys.
+func normalizeAnnotations(annotations map[string]string, log *zap.Logger, projectID string) map[string]string {
+	if len(annotations) == 0 {
+		return annotations
+	}
+
+	normalized := make(map[string]string, len(annotations))
+	for key, value := range annotations {
+		newKey, wasNormalized := normalizeAnnotationKey(key)
+		if wasNormalized && log != nil {
+			log.Warn("normalized annotation key from kebab-case to camelCase",
+				zap.String("project_id", projectID),
+				zap.String("original_key", key),
+				zap.String("normalized_key", newKey))
+		}
+		normalized[newKey] = value
+	}
+	return normalized
+}
 
 func (s *PostgresStore) PutProject(p *aegis.Project) {
 	if p == nil || strings.TrimSpace(p.GetId()) == "" {
@@ -24,6 +97,10 @@ func (s *PostgresStore) PutProject(p *aegis.Project) {
 		dataLevel = policy.GetDataLevel()
 		denyEgress = policy.GetDenyEgressByDefault()
 	}
+
+	// Normalize annotation keys (fix kebab-case to camelCase)
+	annotations := normalizeAnnotations(p.GetAnnotations(), s.log, p.GetId())
+
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
@@ -37,7 +114,7 @@ ON CONFLICT (id) DO UPDATE SET
     policy_deny_egress_by_default = EXCLUDED.policy_deny_egress_by_default,
     annotations = EXCLUDED.annotations,
     updated_at = now()
-`, p.GetId(), nullableString(p.GetDisplayName()), p.GetOwnerGroup(), regions, nullableString(dataLevel), denyEgress, mapToJSONB(p.GetAnnotations()))
+`, p.GetId(), nullableString(p.GetDisplayName()), p.GetOwnerGroup(), regions, nullableString(dataLevel), denyEgress, mapToJSONB(annotations))
 	s.logExecError("upsert_project", err, zap.String("project_id", p.GetId()))
 }
 
@@ -137,6 +214,64 @@ ORDER BY id
 		items = append(items, project)
 	}
 	return items
+}
+
+// DeleteProject removes a project from the database.
+// It returns an error if the project has active (non-deleted) clusters attached,
+// as those clusters would incur costs and should be deleted first.
+func (s *PostgresStore) DeleteProject(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("project id is required")
+	}
+
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	// Check if project has any active clusters
+	var clusterCount int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM clusters WHERE project_id = $1 AND deleted_at IS NULL`, id).Scan(&clusterCount)
+	if err != nil {
+		s.logExecError("delete_project_check_clusters", err, zap.String("project_id", id))
+		return fmt.Errorf("failed to check for active clusters: %w", err)
+	}
+
+	if clusterCount > 0 {
+		return fmt.Errorf("cannot delete project %q: %d active cluster(s) still attached - delete clusters first to avoid incurring costs", id, clusterCount)
+	}
+
+	// Safe to delete - no active clusters
+	result, err := s.pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, id)
+	if err != nil {
+		s.logExecError("delete_project", err, zap.String("project_id", id))
+		return fmt.Errorf("failed to delete project: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("project %q not found", id)
+	}
+
+	s.log.Info("project deleted", zap.String("project_id", id))
+	return nil
+}
+
+// HasActiveClusters checks if a project has any non-deleted clusters attached.
+func (s *PostgresStore) HasActiveClusters(projectID string) bool {
+	if projectID == "" {
+		return false
+	}
+
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM clusters WHERE project_id = $1 AND deleted_at IS NULL`, projectID).Scan(&count)
+	if err != nil {
+		s.logExecError("has_active_clusters", err, zap.String("project_id", projectID))
+		return false
+	}
+
+	return count > 0
 }
 
 func mapToJSONB(m map[string]string) []byte {

@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
 
@@ -22,15 +24,32 @@ type provisioningLogView struct {
 	Message   string `json:"message"`
 }
 
+type nodePoolView struct {
+	Name         string `json:"name"`
+	InstanceType string `json:"instanceType"`
+	MinSize      int32  `json:"minSize"`
+	MaxSize      int32  `json:"maxSize"`
+}
+
+type clusterConfigView struct {
+	Provider    string         `json:"provider,omitempty"`
+	Region      string         `json:"region,omitempty"`
+	K8sVersion  string         `json:"k8sVersion,omitempty"`
+	ClusterName string         `json:"clusterName,omitempty"`
+	NodePools   []nodePoolView `json:"nodePools,omitempty"`
+	Autoscaling bool           `json:"autoscaling"`
+}
+
 type provisioningLogsResponse struct {
-	JobID       string                `json:"jobId"`
-	ProjectID   string                `json:"projectId,omitempty"`
-	ClusterID   string                `json:"clusterId,omitempty"`
-	Phase       string                `json:"phase,omitempty"`
-	StartedAt   string                `json:"startedAt,omitempty"`
-	CompletedAt string                `json:"completedAt,omitempty"`
-	Logs        []provisioningLogView `json:"logs,omitempty"`
-	NextCursor  string                `json:"nextCursor,omitempty"`
+	JobID         string             `json:"jobId"`
+	ProjectID     string             `json:"projectId,omitempty"`
+	ClusterID     string             `json:"clusterId,omitempty"`
+	Phase         string             `json:"phase,omitempty"`
+	StartedAt     string             `json:"startedAt,omitempty"`
+	CompletedAt   string             `json:"completedAt,omitempty"`
+	Logs          []provisioningLogView `json:"logs,omitempty"`
+	NextCursor    string             `json:"nextCursor,omitempty"`
+	ClusterConfig *clusterConfigView `json:"clusterConfig,omitempty"`
 }
 
 func registerProvisioningRoutes(mux *runtime.ServeMux, srv *Server) {
@@ -53,7 +72,12 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	var clusterConfig *clusterConfigView
 	run, _ := s.store.GetProvisioningRun(jobID)
+	s.log.Info("provisioning logs request",
+		zap.String("job_id", jobID),
+		zap.Bool("has_run", run != nil),
+		zap.Bool("has_infra_client", s.infraClient != nil))
 	if run == nil && s.infraClient != nil {
 		if infra, err := s.fetchInfra(ctx, jobID); err == nil && infra != nil {
 			clusterID := ""
@@ -69,20 +93,49 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 				ClusterID: clusterID,
 				Phase:     strings.TrimSpace(infra.Status.Phase),
 			}
-			if infra.Status.LastSyncTime != nil {
+			// Try to get actual start time from provisioning logs first
+			firstLogs := s.store.ListProvisioningLogs(jobID, time.Time{}, 0, 1)
+			if len(firstLogs) > 0 {
+				run.StartedAt = firstLogs[0].CreatedAt
+			} else if infra.Status.LastSyncTime != nil {
 				run.StartedAt = infra.Status.LastSyncTime.Time
 			} else if !infra.CreationTimestamp.IsZero() {
 				run.StartedAt = infra.CreationTimestamp.Time
 			}
 			if strings.EqualFold(run.Phase, "Ready") || strings.EqualFold(run.Phase, "Error") {
-				ts := time.Now().UTC()
-				if infra.Status.LastSyncTime != nil {
-					ts = infra.Status.LastSyncTime.Time
+				// Get completion time from last log entry or lastSyncTime
+				lastLogs := s.store.ListProvisioningLogs(jobID, time.Time{}, 0, 1000)
+				if len(lastLogs) > 0 {
+					ts := lastLogs[len(lastLogs)-1].CreatedAt
+					run.CompletedAt = &ts
+				} else {
+					ts := time.Now().UTC()
+					if infra.Status.LastSyncTime != nil {
+						ts = infra.Status.LastSyncTime.Time
+					}
+					run.CompletedAt = &ts
 				}
-				run.CompletedAt = &ts
 			}
 			s.store.UpsertProvisioningRun(*run)
+
+			// Extract cluster configuration from infra spec
+			clusterConfig = extractClusterConfig(infra)
 		}
+	} else if s.infraClient != nil {
+		// Also fetch cluster config for existing runs
+		if infra, err := s.fetchInfra(ctx, jobID); err == nil && infra != nil {
+			clusterConfig = extractClusterConfig(infra)
+			s.log.Info("extracted cluster config for existing run",
+				zap.String("job_id", jobID),
+				zap.Bool("has_config", clusterConfig != nil))
+		} else if err != nil {
+			s.log.Info("failed to fetch infra for cluster config",
+				zap.String("job_id", jobID),
+				zap.Error(err))
+		}
+	} else {
+		s.log.Info("infra client not available for cluster config",
+			zap.String("job_id", jobID))
 	}
 	if run == nil {
 		writeWizardError(w, status.Errorf(codes.NotFound, "provisioning job %q not found", jobID))
@@ -111,11 +164,12 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 	}
 
 	resp := provisioningLogsResponse{
-		JobID:     jobID,
-		ProjectID: run.ProjectID,
-		ClusterID: run.ClusterID,
-		Phase:     strings.TrimSpace(run.Phase),
-		Logs:      make([]provisioningLogView, 0, len(logs)),
+		JobID:         jobID,
+		ProjectID:     run.ProjectID,
+		ClusterID:     run.ClusterID,
+		Phase:         strings.TrimSpace(run.Phase),
+		Logs:          make([]provisioningLogView, 0, len(logs)),
+		ClusterConfig: clusterConfig,
 	}
 	if !run.StartedAt.IsZero() {
 		resp.StartedAt = run.StartedAt.UTC().Format(time.RFC3339Nano)
@@ -180,7 +234,8 @@ func parseLimit(raw string, def, max int) int {
 func parseCursor(raw string) (time.Time, int64) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return time.Time{}, 0
+		// Default to 30 minutes ago to avoid returning ALL logs on initial load
+		return time.Now().UTC().Add(-30 * time.Minute), 0
 	}
 
 	var seqPart string
@@ -193,7 +248,7 @@ func parseCursor(raw string) (time.Time, int64) {
 
 	ts, err := time.Parse(time.RFC3339Nano, tsPart)
 	if err != nil {
-		return time.Time{}, 0
+		return time.Now().UTC().Add(-30 * time.Minute), 0
 	}
 
 	var seq int64
@@ -222,4 +277,33 @@ func formatCursor(ts time.Time, seq int64) string {
 		return fmt.Sprintf("%s|%d", ts.UTC().Format(time.RFC3339Nano), seq)
 	}
 	return ts.UTC().Format(time.RFC3339Nano)
+}
+
+// extractClusterConfig builds a cluster configuration view from the ProjectInfra spec.
+func extractClusterConfig(infra *infraapi.ProjectInfra) *clusterConfigView {
+	if infra == nil {
+		return nil
+	}
+	cfg := &clusterConfigView{
+		Provider:    strings.TrimSpace(infra.Spec.Provider),
+		Region:      strings.TrimSpace(infra.Spec.Region),
+		Autoscaling: true, // Default to true since we use cluster autoscaler
+	}
+	if infra.Spec.Aws != nil {
+		cfg.ClusterName = strings.TrimSpace(infra.Spec.Aws.ClusterName)
+		cfg.K8sVersion = strings.TrimSpace(infra.Spec.Aws.Version)
+		if cfg.K8sVersion == "" {
+			cfg.K8sVersion = "1.29" // Default version
+		}
+		// Extract node pools
+		for _, np := range infra.Spec.Aws.NodePools {
+			cfg.NodePools = append(cfg.NodePools, nodePoolView{
+				Name:         strings.TrimSpace(np.Name),
+				InstanceType: strings.TrimSpace(np.InstanceType),
+				MinSize:      np.MinSize,
+				MaxSize:      np.MaxSize,
+			})
+		}
+	}
+	return cfg
 }

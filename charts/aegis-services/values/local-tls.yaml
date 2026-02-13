@@ -137,23 +137,34 @@ platformApi:
           -----END CERTIFICATE-----
   env:
     # Use NLB for gRPC (Cloudflare doesn't handle streaming properly)
-    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081"
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-12123e67db2b2af4.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
     AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
+    # Authorization bindings - must include spoke-agent for k8s-agent to update workload status
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension", "spoke-agent"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
     AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AEGIS_DEV_MODE: "true"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
   secrets:
-    aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
-    aws-secret-access-key: "yxaIgPw06f56DRCWQE6Oea4U30c1aC5e25SRhbqw"
+    aws-access-key-id: "REDACTED_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REDACTED_AWS_SECRET_ACCESS_KEY"
   httpIngress:
     enabled: true
     className: "ingress-nginx"
@@ -248,6 +259,14 @@ keycloak:
   forceRender: true
   createNamespace: false
   operator: {}
+  postgres:
+    enabled: true
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: IfNotPresent
+    storage:
+      size: 1Gi
   http:
     httpEnabled: false
   networkPolicy:

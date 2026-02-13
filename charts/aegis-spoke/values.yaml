@@ -49,6 +49,10 @@ k8sAgent:
     fileName: ca.crt
 
 proxy:
+  # Enable spoke proxy by default. Remote spoke clusters MUST have a proxy to allow
+  # VS Code/SSH connections from external clients. Set to false only for local development
+  # where connections go through the hub proxy (proxy.localtest.me).
+  enabled: true
   replicaCount: 1
   image:
     repository: carlosmsanchez/aegis-proxy
@@ -58,6 +62,8 @@ proxy:
   service:
     type: ClusterIP
     port: 8085
+    # NodePort to use when service.type is NodePort (configurable for multi-cluster deployments)
+    nodePort: 31484
 
   ingress:
     enabled: true

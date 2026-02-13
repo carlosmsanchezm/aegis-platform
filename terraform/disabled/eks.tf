@@ -242,6 +242,16 @@ resource "aws_security_group_rule" "node_egress_all" {
   security_group_id = aws_security_group.node.id
 }
 
+resource "aws_security_group_rule" "node_ingress_nodeport_range" {
+  description       = "Allow external access to Kubernetes NodePort range for VS Code remote connections and other services"
+  type              = "ingress"
+  from_port         = 30000
+  to_port           = 32767
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]  # TODO: Restrict to VPN/office CIDR in production
+  security_group_id = aws_security_group.node.id
+}
+
 ################################################################################
 # CPU Worker Node Group
 ################################################################################

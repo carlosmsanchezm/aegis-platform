@@ -125,7 +125,14 @@ message RevokeConnectionSessionRequest {
 }
 
 // Cluster handshake
-message ClusterRegisterRequest { string cluster_id = 1; string provider = 2; string region = 3; string il_level = 4; map<string,string> labels = 5; }
+message ClusterRegisterRequest {
+  string cluster_id = 1;
+  string provider = 2;
+  string region = 3;
+  string il_level = 4;
+  map<string,string> labels = 5;
+  string proxy_url = 6; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+}
 message ClusterRegisterResponse { bool ok = 1; string message = 2; }
 message ClusterHeartbeat {
   string cluster_id = 1;

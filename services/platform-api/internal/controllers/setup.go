@@ -53,6 +53,7 @@ func SetupWithManager(mgr ctrl.Manager, cfg Config) error {
 
 	projectInfra := &ProjectInfraReconciler{
 		Client:                    mgr.GetClient(),
+		APIReader:                 mgr.GetAPIReader(), // Uncached reader for critical status checks
 		Scheme:                    mgr.GetScheme(),
 		Log:                       logger.Named("projectinfra"),
 		Provisioner:               cfg.Provisioner,

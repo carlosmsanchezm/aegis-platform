@@ -24,16 +24,15 @@ data:
         service: https://aegis-services-platform-api.aegis-system.svc.cluster.local:8081
         originRequest:
           noTLSVerify: true
+          httpHostHeader: platform-api-grpc.localtest.me
+          originServerName: platform-api-grpc.localtest.me
           http2Origin: true
-          disableChunkedEncoding: true
-          connectTimeout: 30s
-          keepAliveTimeout: 90s
       - hostname: keycloak.aegis-platform.tech
         service: https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443
         originRequest:
           noTLSVerify: true
-          httpHostHeader: keycloak.aegis-platform.tech
-          originServerName: keycloak.aegis-platform.tech
+          httpHostHeader: keycloak.localtest.me
+          originServerName: keycloak.localtest.me
       - service: http_status:404
 ---
 apiVersion: apps/v1
@@ -58,8 +57,6 @@ spec:
         - tunnel
         - --config
         - /etc/cloudflared/config/config.yaml
-        - --loglevel
-        - debug
         - run
         volumeMounts:
         - name: config

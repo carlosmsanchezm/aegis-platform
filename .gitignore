@@ -76,3 +76,6 @@ agents/__pycache__
 # Helm auto-generated values files
 charts/aegis-services/values-cloud-generated.yaml
 charts/aegis-spoke/values-cloud-generated.yaml
+
+# Compliance evidence (stored in separate vault)
+compliance-evidence/

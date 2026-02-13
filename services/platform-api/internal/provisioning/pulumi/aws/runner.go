@@ -2,11 +2,20 @@ package aws
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +25,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
+	awsautoscaling "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/autoscaling"
 	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
 	awsiam "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
@@ -33,9 +43,18 @@ import (
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/certmanager"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning/observability"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
+
+// isDevMode checks if development mode is enabled.
+// In dev mode, role assumption is skipped and AWS credentials are used directly.
+// WARNING: Do not enable in production - this breaks multi-tenancy isolation.
+func isDevMode() bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv("AEGIS_DEV_MODE")))
+	return val == "true" || val == "1" || val == "yes"
+}
 
 const (
 	projectNamePrefix          = "aegis-platform"
@@ -43,6 +62,7 @@ const (
 	defaultHelmNamespace       = "aegis-system"
 	defaultWorkloadsNamespace  = "aegis-workloads"
 	defaultSpokeReleaseName    = "aegis-spoke"
+	defaultSpokeProxyNodePort  = 31484 // Default NodePort for spoke-proxy (configurable via env)
 	envAegisWorkloadsNamespace = "AEGIS_WORKLOADS_NAMESPACE"
 	envPulumiBackendURL        = "PULUMI_BACKEND_URL"
 	envAegisSpokeChart         = "AEGIS_SPOKE_CHART"
@@ -55,6 +75,11 @@ const (
 	envAegisPlatformInsecure   = "AEGIS_PLATFORM_API_GRPC_INSECURE"
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
+	envAegisSpokeProxyNodePort = "AEGIS_SPOKE_PROXY_NODEPORT"
+	envAegisSpokeProxyHost        = "AEGIS_SPOKE_PROXY_HOST"           // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
+	envAegisSpokeProxyCACert      = "AEGIS_SPOKE_PROXY_CA_CERT"        // Path to spoke-proxy CA certificate for signing
+	envAegisSpokeProxyCAKey       = "AEGIS_SPOKE_PROXY_CA_KEY"         // Path to spoke-proxy CA private key for signing
+	envAegisSpokeProxyTargetGroup = "AEGIS_SPOKE_PROXY_TARGET_GROUP"   // ARN of NLB target group for spoke-proxy
 	envAegisPulumiSkipRefresh  = "AEGIS_PULUMI_SKIP_REFRESH"
 	envAegisPulumiSkipApply    = "AEGIS_PULUMI_SKIP_APPLY"
 	envAegisPulumiWorkdir      = "AEGIS_PULUMI_WORKDIR"
@@ -101,7 +126,8 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 
 	// Best-effort unlock before any operations in case a previous run left a remote lock.
 	_ = stack.Cancel(ctx)
-	r.clearPulumiLock(programCfg.ProjectID, r.stackName(programCfg.ProjectID, programCfg.Region))
+	infraName := strings.TrimSpace(infra.Name)
+	r.clearPulumiLock(programCfg.ProjectID, r.stackNameForInfra(infraName, programCfg.ProjectID, programCfg.Region))
 
 	jobID, clusterID := jobMetadata(infra)
 	progressWriter := &logWriter{
@@ -114,9 +140,17 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 	}
 
 	if skip := strings.EqualFold(os.Getenv(envAegisPulumiSkipRefresh), "true"); !skip {
-		if _, err := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter)); err != nil {
+		// Use ClearPendingCreates to handle any stale pending CREATE operations from
+		// previous interrupted runs. This ensures state is properly reconciled with AWS.
+		if _, err := stack.Refresh(ctx,
+			optrefresh.ProgressStreams(progressWriter),
+			optrefresh.ClearPendingCreates(),
+		); err != nil {
 			if !isLockError(err) || !r.retryAfterCancel(ctx, stack, func() error {
-				_, retryErr := stack.Refresh(ctx, optrefresh.ProgressStreams(progressWriter))
+				_, retryErr := stack.Refresh(ctx,
+					optrefresh.ProgressStreams(progressWriter),
+					optrefresh.ClearPendingCreates(),
+				)
 				return retryErr
 			}) {
 				return nil, fmt.Errorf("pulumi refresh: %w", err)
@@ -128,7 +162,8 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 		stackName := r.stackName(programCfg.ProjectID, programCfg.Region)
 		r.log.Warn("skipping pulumi up due to environment override", zap.String("stack", stackName))
 	} else {
-		if _, err := stack.Up(ctx, optup.ProgressStreams(progressWriter)); err != nil {
+		// Use runUpWithRetry which handles pending operations and "already exists" errors
+		if err := r.runUpWithRetry(ctx, stack, progressWriter); err != nil {
 			return nil, fmt.Errorf("pulumi up: %w", err)
 		}
 	}
@@ -153,28 +188,42 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 	return result, nil
 }
 
-// Destroy tears down the stack for the specified project/region combination.
+// Destroy tears down the stack for the specified ProjectInfra.
 func (r *Runner) Destroy(ctx context.Context, infra *infraapi.ProjectInfra, spec *infraapi.AWSInfraSpec) error {
 	if infra == nil || spec == nil {
 		return nil
 	}
 	projectID := strings.TrimSpace(infra.Spec.ProjectID)
 	region := strings.TrimSpace(infra.Spec.Region)
+	infraName := strings.TrimSpace(infra.Name)
 	if projectID == "" || region == "" {
 		return nil
 	}
 
-	stackName := r.stackName(projectID, region)
+	// Use infra-specific stack name to only destroy this ProjectInfra's resources
+	stackName := r.stackNameForInfra(infraName, projectID, region)
 	projectName := r.projectName(projectID)
 	program := r.buildPulumiProgram(&programInput{
 		ProjectID: projectID,
 		Region:    region,
 		SkipHelm:  true,
 	})
+
+	// Try to select the infra-specific stack first
 	stack, err := auto.SelectStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
 	if auto.IsSelectStack404Error(err) {
-		r.log.Info("pulumi stack not present; skipping destroy", zap.String("stack", stackName))
-		return nil
+		// Fall back to legacy shared stack for backward compatibility
+		legacyStackName := r.stackName(projectID, region)
+		r.log.Info("infra-specific stack not found, trying legacy shared stack",
+			zap.String("infra_stack", stackName),
+			zap.String("legacy_stack", legacyStackName),
+		)
+		stack, err = auto.SelectStackInlineSource(ctx, legacyStackName, projectName, program, r.buildWorkspaceOptions()...)
+		if auto.IsSelectStack404Error(err) {
+			r.log.Info("no pulumi stack found; skipping destroy", zap.String("stack", stackName))
+			return nil
+		}
+		stackName = legacyStackName // Use legacy name for logging
 	}
 	if err != nil {
 		return fmt.Errorf("select pulumi stack: %w", err)
@@ -238,7 +287,10 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		return auto.Stack{}, nil, errors.New("spec.region is required")
 	}
 
-	clusterDefs, err := r.buildClusterDefinitions(projectID, region, spec)
+	// Pass infra name to make cluster IDs unique per ProjectInfra
+	// Also pass existing outputs for backward compatibility with clusters created before the hash suffix was added
+	infraName := strings.TrimSpace(infra.Name)
+	clusterDefs, err := r.buildClusterDefinitions(projectID, region, infraName, spec, infra.Status.Outputs)
 	if err != nil {
 		return auto.Stack{}, nil, err
 	}
@@ -258,16 +310,50 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		SpokeHelm:           r.resolveHelmConfig(),
 		Observability:       observability.ResolveFromEnv(r.findRepoRoot()),
 		EnableObservability: addonEnabled(infra.Spec.Addons, "observability", true),
+		CertManager:         certmanager.ResolveFromEnv(),
+		// Use the env var (AEGIS_CERT_MANAGER_ENABLED) as the default when addon not specified.
+		// This allows enabling cert-manager globally via env var without requiring each ProjectInfra
+		// to explicitly request the addon.
+		EnableCertManager:   addonEnabled(infra.Spec.Addons, "certmanager", certmanager.ResolveFromEnv().Enable),
 		SkipHelm:            strings.EqualFold(os.Getenv("AEGIS_SKIP_SPOKE_HELM"), "true"),
 		EnableCostEstimates: true,
 	}
 
-	stackName := r.stackName(projectID, region)
 	projectName := r.projectName(projectID)
 	program := r.buildPulumiProgram(programCfg)
-	stack, err := auto.UpsertStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
-	if err != nil {
-		return auto.Stack{}, nil, fmt.Errorf("upsert pulumi stack: %w", err)
+
+	// For backward compatibility, check if a legacy shared stack exists with resources.
+	// If it does, continue using it instead of creating a new per-infra stack.
+	// This prevents creating duplicate resources when upgrading existing deployments.
+	legacyStackName := r.stackName(projectID, region)
+	infraStackName := r.stackNameForInfra(infraName, projectID, region)
+	stackName := infraStackName // default to per-infra stack
+
+	legacyStack, legacyErr := auto.SelectStackInlineSource(ctx, legacyStackName, projectName, program, r.buildWorkspaceOptions()...)
+	if legacyErr == nil {
+		// Legacy stack exists - check if it has resources by looking at its state
+		// If it has resources, use it for backward compatibility
+		r.log.Info("legacy shared stack found, using it for backward compatibility",
+			zap.String("legacy_stack", legacyStackName),
+			zap.String("infra_stack", infraStackName),
+		)
+		stackName = legacyStackName
+	} else if !auto.IsSelectStack404Error(legacyErr) {
+		// Unexpected error selecting legacy stack
+		return auto.Stack{}, nil, fmt.Errorf("check legacy pulumi stack: %w", legacyErr)
+	}
+	// If legacy stack doesn't exist (404), we'll use the new per-infra stack name
+
+	var stack auto.Stack
+	if legacyErr == nil {
+		// Use the already-selected legacy stack
+		stack = legacyStack
+	} else {
+		// Create/select the new per-infra stack
+		stack, err = auto.UpsertStackInlineSource(ctx, stackName, projectName, program, r.buildWorkspaceOptions()...)
+		if err != nil {
+			return auto.Stack{}, nil, fmt.Errorf("upsert pulumi stack: %w", err)
+		}
 	}
 	if err := r.ensurePlugins(ctx, stack); err != nil {
 		return auto.Stack{}, nil, err
@@ -294,6 +380,8 @@ type programInput struct {
 	SpokeHelm           helmConfig
 	Observability       observability.Config
 	EnableObservability bool
+	CertManager         certmanager.Config
+	EnableCertManager   bool
 	SkipHelm            bool
 	EnableCostEstimates bool
 }
@@ -379,7 +467,9 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		providerArgs := &aws.ProviderArgs{
 			Region: pulumi.StringPtr(input.Region),
 		}
-		if input.RoleARN != "" {
+		// In dev mode, skip role assumption and use ambient credentials directly.
+		// In production, assume the project-specific role for multi-tenancy isolation.
+		if input.RoleARN != "" && !isDevMode() {
 			assume := aws.ProviderAssumeRoleArgs{
 				RoleArn: pulumi.StringPtr(input.RoleARN),
 			}
@@ -493,6 +583,15 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			if err != nil {
 				return err
 			}
+
+			// Attach node groups to spoke-proxy NLB target group if configured
+			if targetGroupARN := os.Getenv(envAegisSpokeProxyTargetGroup); targetGroupARN != "" {
+				if err := r.attachNodeGroupsToTargetGroup(ctx, clusterDef.ClusterID, nodeGroups, targetGroupARN, awsProvider); err != nil {
+					r.log.Warn("failed to attach node groups to target group (non-fatal)", zap.Error(err))
+					// Don't fail the deployment, just log the warning
+				}
+			}
+
 			if hasGpuNodePool(clusterDef.NodePools) {
 				deps := append([]pulumi.Resource{}, nodeGroups...)
 				deps = append(deps, cluster)
@@ -540,8 +639,34 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				observabilityOutputs = obs
 			}
 
+			// Install cert-manager and step-issuer for automated TLS certificate management.
+			// This enables spoke-proxy to get CA-signed certificates from the hub's step-ca.
+			r.log.Info("cert-manager installation check",
+				zap.Bool("EnableCertManager", input.EnableCertManager),
+				zap.Bool("CertManager.Enable", input.CertManager.Enable),
+				zap.String("cluster_id", clusterDef.ClusterID))
+
+			// Track cert-manager resources for use as dependencies by the spoke helm chart
+			var certMgrResources []pulumi.Resource
+			if input.EnableCertManager && input.CertManager.Enable {
+				r.log.Info("installing cert-manager on spoke cluster", zap.String("cluster_id", clusterDef.ClusterID))
+				certMgrInstaller := certmanager.NewInstaller()
+				var err error
+				certMgrResources, err = certMgrInstaller.Install(ctx, clusterDef.ClusterID, kubeProvider, input.CertManager, append(nodeGroups, cluster))
+				if err != nil {
+					return fmt.Errorf("install cert-manager: %w", err)
+				}
+				r.log.Info("cert-manager installed successfully", zap.String("cluster_id", clusterDef.ClusterID), zap.Int("num_resources", len(certMgrResources)))
+			} else {
+				r.log.Info("skipping cert-manager installation", zap.Bool("EnableCertManager", input.EnableCertManager), zap.Bool("CertManager.Enable", input.CertManager.Enable))
+			}
+
 			if !input.SkipHelm {
-				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, append(nodeGroups, cluster)); err != nil {
+				// Include cert-manager resources as dependencies so the spoke helm chart
+				// waits for the webhook to be ready before creating Certificate resources
+				spokeDeps := append(nodeGroups, cluster)
+				spokeDeps = append(spokeDeps, certMgrResources...)
+				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, spokeDeps); err != nil {
 					return err
 				}
 			}
@@ -873,6 +998,20 @@ func (r *Runner) createSecurityGroups(ctx *pulumi.Context, baseName, vpcID strin
 		return nil, nil, fmt.Errorf("authorize node self traffic: %w", err)
 	}
 
+	// Allow inbound traffic to spoke-proxy NodePort from anywhere (for workspace connections)
+	nodePort := getSpokeProxyNodePort()
+	if _, err := awsec2.NewSecurityGroupRule(ctx, fmt.Sprintf("%s-spoke-proxy-nodeport", baseName), &awsec2.SecurityGroupRuleArgs{
+		Type:            pulumi.String("ingress"),
+		Protocol:        pulumi.String("tcp"),
+		FromPort:        pulumi.Int(nodePort),
+		ToPort:          pulumi.Int(nodePort),
+		SecurityGroupId: nodeSG.ID(),
+		CidrBlocks:      pulumi.StringArray{pulumi.String("0.0.0.0/0")},
+		Description:     pulumi.String(fmt.Sprintf("allow spoke-proxy NodePort %d for workspace connections", nodePort)),
+	}, opts); err != nil {
+		return nil, nil, fmt.Errorf("authorize spoke-proxy nodeport: %w", err)
+	}
+
 	return clusterSG, nodeSG, nil
 }
 
@@ -1029,6 +1168,15 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	if input.Platform.CABundleBase64 != "" {
 		envValues["AEGIS_PLATFORM_CA_B64"] = pulumi.String(input.Platform.CABundleBase64)
 	}
+
+	// If AEGIS_SPOKE_PROXY_HOST is set, use it as the stable proxy URL.
+	// This allows the operator to configure a stable NLB/EIP-based URL.
+	if proxyHost := strings.TrimSpace(os.Getenv(envAegisSpokeProxyHost)); proxyHost != "" {
+		envValues["AEGIS_PROXY_INGRESS_HOST"] = pulumi.String(proxyHost)
+		r.log.Info("using stable spoke proxy host from environment",
+			zap.String("proxy_host", proxyHost))
+	}
+
 	k8sAgentValues := pulumi.Map{
 		"env": envValues,
 	}
@@ -1038,7 +1186,68 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 			"tag":        pulumi.String(input.Platform.ImageTag),
 		}
 	}
-	values := pulumi.Map{"k8sAgent": k8sAgentValues}
+
+	// Configure spoke-proxy for remote workspace connections.
+	// Uses NodePort (31484) with nip.io for dynamic DNS based on node public IP.
+	// The k8s-agent will discover the node public IP and register the proxy_url.
+	nodePort := getSpokeProxyNodePort()
+	proxyValues := pulumi.Map{
+		"enabled": pulumi.Bool(true),
+		"service": pulumi.Map{
+			"type":     pulumi.String("NodePort"),
+			"nodePort": pulumi.Int(nodePort),
+			"port":     pulumi.Int(443),
+		},
+		"ingress": pulumi.Map{
+			"enabled": pulumi.Bool(false), // Using NodePort, not ingress
+		},
+	}
+	if input.Platform.ImageRepo != "" {
+		proxyValues["image"] = pulumi.Map{
+			"repository": pulumi.String(strings.Replace(input.Platform.ImageRepo, "aegis-k8s-agent", "aegis-proxy", 1)),
+			"tag":        pulumi.String(input.Platform.ImageTag),
+		}
+	}
+
+	// Configure TLS for spoke-proxy.
+	// If cert-manager is enabled, use it for automated certificate management.
+	// Otherwise, generate a self-signed certificate (or CA-signed if CA is configured).
+	if input.EnableCertManager && input.CertManager.Enable {
+		// Use cert-manager to get certificates from step-ca
+		proxyValues["tls"] = pulumi.Map{
+			"terminateAtIngress": pulumi.Bool(false),
+			"certManager": pulumi.Map{
+				"enabled": pulumi.Bool(true),
+				"issuerRef": pulumi.Map{
+					"name":  pulumi.String(input.CertManager.ClusterIssuerName),
+					"kind":  pulumi.String("StepClusterIssuer"),
+					"group": pulumi.String("certmanager.step.sm"),
+				},
+				"dnsNames": pulumi.StringArray{
+					pulumi.String("*.nip.io"),
+					pulumi.String(fmt.Sprintf("spoke-proxy-%s.nip.io", clusterID)),
+				},
+			},
+		}
+		r.log.Info("spoke-proxy will use cert-manager for TLS certificates",
+			zap.String("cluster_id", clusterID),
+			zap.String("issuer", input.CertManager.ClusterIssuerName))
+	} else {
+		// Fallback: Generate self-signed TLS certificate for spoke-proxy with *.nip.io wildcard
+		certPEM, keyPEM, err := generateSpokeProxyCert()
+		if err != nil {
+			return fmt.Errorf("generate spoke-proxy TLS cert: %w", err)
+		}
+		proxyValues["tls"] = pulumi.Map{
+			"cert": pulumi.String(certPEM),
+			"key":  pulumi.String(keyPEM),
+		}
+	}
+
+	values := pulumi.Map{
+		"k8sAgent": k8sAgentValues,
+		"proxy":    proxyValues,
+	}
 
 	helmCfg := input.SpokeHelm
 	if helmCfg.Namespace == "" {
@@ -1293,7 +1502,8 @@ func (r *Runner) buildKubeconfigWithExternalID(cluster *awseks.Cluster, region, 
 		return pulumi.Sprintf("")
 	}
 
-	hasExternal := strings.TrimSpace(roleARN) != "" && strings.TrimSpace(externalID) != ""
+	// In dev mode, skip role assumption and use direct credentials.
+	hasExternal := strings.TrimSpace(roleARN) != "" && strings.TrimSpace(externalID) != "" && !isDevMode()
 	if hasExternal {
 		return pulumi.Sprintf(`apiVersion: v1
 clusters:
@@ -1360,7 +1570,7 @@ users:
       interactiveMode: IfAvailable
 `, cluster.Endpoint, cluster.CertificateAuthority.Data().Elem(), cluster.Name,
 		cluster.Name, cluster.Name, cluster.Name, cluster.Name, cluster.Name,
-		cluster.Name, cluster.Name, pulumi.String(region))
+		cluster.Name, pulumi.String(region))
 }
 
 // ----------------------------------------------------------------------------- //
@@ -1554,14 +1764,42 @@ func observabilityFromEntry(val interface{}) infraapi.ObservabilityOutput {
 // ----------------------------------------------------------------------------- //
 // Spec translation helpers
 
-func (r *Runner) buildClusterDefinitions(projectID, region string, spec *infraapi.AWSInfraSpec) ([]clusterDefinition, error) {
+func (r *Runner) buildClusterDefinitions(projectID, region, infraName string, spec *infraapi.AWSInfraSpec, existingOutputs []infraapi.ClusterOutput) ([]clusterDefinition, error) {
 	var defs []clusterDefinition
+
+	// Build a map of existing cluster IDs from the status outputs for backward compatibility.
+	// If a cluster was already created with a specific ID, we must continue using that ID.
+	existingClusterIDs := make(map[string]string) // name -> clusterId
+	for _, out := range existingOutputs {
+		if out.Name != "" && out.ClusterID != "" {
+			existingClusterIDs[out.Name] = out.ClusterID
+		}
+	}
+
+	// Generate a short unique suffix from the infra name for NEW clusters only.
+	// This prevents conflicts when multiple ProjectInfras use the same base cluster name.
+	infraSuffix := shortHash(infraName)
 
 	appendCluster := func(name, version string, pools []infraapi.NodePool) {
 		if strings.TrimSpace(name) == "" {
 			return
 		}
-		clusterID := buildClusterID(projectID, region, name)
+		// Check if this cluster already exists with a known ID (backward compatibility)
+		clusterID := existingClusterIDs[name]
+		if clusterID == "" {
+			// Also check legacy format without suffix (e.g., demo-1-us-east-1-demo-3)
+			legacyID := buildClusterID(projectID, region, name)
+			for _, out := range existingOutputs {
+				if out.ClusterID == legacyID {
+					clusterID = legacyID
+					break
+				}
+			}
+		}
+		if clusterID == "" {
+			// New cluster - use suffix for uniqueness
+			clusterID = buildClusterIDWithSuffix(projectID, region, name, infraSuffix)
+		}
 		defs = append(defs, clusterDefinition{
 			Name:      name,
 			ClusterID: clusterID,
@@ -1843,6 +2081,23 @@ func (r *Runner) findRepoRoot() string {
 // ----------------------------------------------------------------------------- //
 // Pulumi stack helpers
 
+// stackNameForInfra returns a unique stack name per ProjectInfra to ensure each
+// infrastructure resource has its own isolated Pulumi state. This prevents
+// deleting one ProjectInfra from affecting others in the same project/region.
+func (r *Runner) stackNameForInfra(infraName, projectID, region string) string {
+	// Use a hash of the infra name to keep stack names short while ensuring uniqueness
+	infraID := sanitize(infraName)
+	if len(infraID) > 20 {
+		// Truncate and add hash suffix for long names
+		h := fnv.New32a()
+		h.Write([]byte(infraName))
+		infraID = fmt.Sprintf("%s-%x", infraID[:12], h.Sum32())
+	}
+	return fmt.Sprintf("%s-%s-%s-%s", defaultStackPrefix, sanitize(projectID), sanitize(region), infraID)
+}
+
+// stackName returns the legacy shared stack name (deprecated - use stackNameForInfra)
+// Kept for backward compatibility during migration.
 func (r *Runner) stackName(projectID, region string) string {
 	return fmt.Sprintf("%s-%s-%s", defaultStackPrefix, sanitize(projectID), sanitize(region))
 }
@@ -1889,6 +2144,327 @@ func (r *Runner) retryAfterCancel(ctx context.Context, stack auto.Stack, fn func
 		return false
 	}
 	return true
+}
+
+// isAlreadyExistsError returns true if the error indicates a resource already exists in AWS.
+// This typically happens when Pulumi state has a pending CREATE operation but the resource
+// was actually created in a previous interrupted run.
+func isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	existsSnippets := []string{
+		"already exists",
+		"resourceinuseexception",
+		"entityalreadyexists",
+		"alreadyexistsexception",
+		"conflict",
+	}
+	return slices.ContainsFunc(existsSnippets, func(sub string) bool {
+		return strings.Contains(errStr, sub)
+	})
+}
+
+// hasPendingOperations returns true if the error message indicates pending operations exist.
+func hasPendingOperations(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "pending operations") ||
+		strings.Contains(errStr, "pending operation")
+}
+
+// parseEKSClusterNameFromError extracts the EKS cluster name from a "ResourceInUseException" error.
+// Example error: "creating EKS Cluster (demo-1-us-east-1-demo-2): ResourceInUseException: Cluster already exists with name: demo-1-us-east-1-demo-2"
+func parseEKSClusterNameFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+
+	// Look for "Cluster already exists with name: <name>"
+	if idx := strings.Index(errStr, "Cluster already exists with name:"); idx >= 0 {
+		after := errStr[idx+len("Cluster already exists with name:"):]
+		// Find the cluster name - it ends at newline, quote, or brace
+		name := strings.TrimSpace(after)
+		for i, c := range name {
+			if c == '\n' || c == '"' || c == '}' || c == ',' {
+				name = name[:i]
+				break
+			}
+		}
+		return strings.TrimSpace(name)
+	}
+
+	// Fallback: look for "creating EKS Cluster (<name>)"
+	if idx := strings.Index(errStr, "creating EKS Cluster ("); idx >= 0 {
+		after := errStr[idx+len("creating EKS Cluster ("):]
+		if endIdx := strings.Index(after, ")"); endIdx >= 0 {
+			return strings.TrimSpace(after[:endIdx])
+		}
+	}
+
+	return ""
+}
+
+// importExistingEKSCluster imports an existing EKS cluster into Pulumi state.
+// This is needed when a cluster was created but Pulumi was interrupted, leaving the state out of sync.
+func (r *Runner) importExistingEKSCluster(ctx context.Context, stack auto.Stack, clusterName string, progressWriter *logWriter) error {
+	if clusterName == "" {
+		return fmt.Errorf("cluster name is required")
+	}
+
+	r.log.Info("importing existing EKS cluster into Pulumi state",
+		zap.String("cluster_name", clusterName))
+
+	// Export current state to manipulate it
+	deployment, err := stack.Export(ctx)
+	if err != nil {
+		return fmt.Errorf("export stack state: %w", err)
+	}
+
+	// Parse the deployment state
+	var state map[string]interface{}
+	if err := json.Unmarshal(deployment.Deployment, &state); err != nil {
+		return fmt.Errorf("parse stack state: %w", err)
+	}
+
+	// Find the resources array in the deployment
+	deploymentData, ok := state["deployment"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid deployment structure")
+	}
+
+	resources, ok := deploymentData["resources"].([]interface{})
+	if !ok {
+		return fmt.Errorf("no resources array in deployment")
+	}
+
+	// Look for pending EKS cluster resource and update it
+	modified := false
+	for i, res := range resources {
+		resMap, ok := res.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if this is the EKS cluster resource
+		resType, _ := resMap["type"].(string)
+		urn, _ := resMap["urn"].(string)
+
+		if resType != "aws:eks/cluster:Cluster" {
+			continue
+		}
+
+		// Check if the URN contains our cluster name
+		if !strings.Contains(urn, clusterName) {
+			continue
+		}
+
+		r.log.Info("found EKS cluster resource in state",
+			zap.String("urn", urn),
+			zap.String("type", resType))
+
+		// Check if it's in a pending state
+		if pending, hasPending := resMap["pending"].(string); hasPending && pending != "" {
+			r.log.Info("clearing pending state for EKS cluster",
+				zap.String("urn", urn),
+				zap.String("pending", pending))
+			delete(resMap, "pending")
+			modified = true
+		}
+
+		// Set the ID if not already set
+		if _, hasID := resMap["id"].(string); !hasID || resMap["id"] == "" {
+			resMap["id"] = clusterName
+			modified = true
+			r.log.Info("setting resource ID for EKS cluster",
+				zap.String("urn", urn),
+				zap.String("id", clusterName))
+		}
+
+		// Ensure outputs exist
+		if outputs, hasOutputs := resMap["outputs"].(map[string]interface{}); !hasOutputs || outputs == nil {
+			resMap["outputs"] = map[string]interface{}{
+				"name": clusterName,
+				"id":   clusterName,
+			}
+			modified = true
+		}
+
+		resources[i] = resMap
+	}
+
+	if !modified {
+		r.log.Info("no modifications needed to EKS cluster resource")
+		return nil
+	}
+
+	// Save the modified state back
+	deploymentData["resources"] = resources
+	state["deployment"] = deploymentData
+
+	modifiedJSON, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal modified state: %w", err)
+	}
+
+	deployment.Deployment = modifiedJSON
+
+	// Import the modified state
+	if err := stack.Import(ctx, deployment); err != nil {
+		return fmt.Errorf("import modified state: %w", err)
+	}
+
+	r.log.Info("successfully modified EKS cluster state")
+	return nil
+}
+
+// clearPendingOperations exports the stack state, removes any pending operations,
+// and reimports the cleaned state. This resolves state conflicts from interrupted operations.
+func (r *Runner) clearPendingOperations(ctx context.Context, stack auto.Stack) error {
+	r.log.Info("checking for pending operations in stack state")
+
+	// Export current stack state
+	deployment, err := stack.Export(ctx)
+	if err != nil {
+		return fmt.Errorf("export stack state: %w", err)
+	}
+
+	// The deployment is an apitype.UntypedDeployment which wraps a JSON-serialized deployment
+	// We need to unmarshal it, check for pending_operations, and if found, clear them
+	var state map[string]interface{}
+	if err := json.Unmarshal(deployment.Deployment, &state); err != nil {
+		r.log.Warn("failed to parse stack deployment state", zap.Error(err))
+		return nil // Not fatal - continue with operation
+	}
+
+	// Check if there are pending operations
+	pendingOps, hasPending := state["pending_operations"]
+	if !hasPending {
+		r.log.Info("no pending operations in stack state")
+		return nil
+	}
+
+	pendingSlice, ok := pendingOps.([]interface{})
+	if !ok || len(pendingSlice) == 0 {
+		r.log.Info("no pending operations to clear")
+		return nil
+	}
+
+	r.log.Warn("found pending operations in stack state, clearing them",
+		zap.Int("count", len(pendingSlice)))
+
+	// Log details of pending operations for debugging
+	for i, op := range pendingSlice {
+		if opMap, ok := op.(map[string]interface{}); ok {
+			r.log.Info("pending operation details",
+				zap.Int("index", i),
+				zap.Any("type", opMap["type"]),
+				zap.Any("resource", opMap["resource"]))
+		}
+	}
+
+	// Clear the pending operations
+	state["pending_operations"] = []interface{}{}
+
+	// Serialize the cleaned state
+	cleanedData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal cleaned state: %w", err)
+	}
+
+	// Create a new deployment with cleaned state
+	deployment.Deployment = cleanedData
+
+	// Import the cleaned state back
+	if err := stack.Import(ctx, deployment); err != nil {
+		return fmt.Errorf("import cleaned stack state: %w", err)
+	}
+
+	r.log.Info("successfully cleared pending operations from stack state")
+	return nil
+}
+
+// runUpWithRetry runs pulumi up with automatic retry on recoverable errors.
+// If the operation fails due to "already exists" errors (from pending CREATE operations),
+// it will clear pending operations using ClearPendingCreates and retry once.
+//
+// IMPORTANT: The key fix here is using optrefresh.ClearPendingCreates() which properly
+// handles pending CREATE operations. Simply clearing the pending_operations array is
+// NOT sufficient because Pulumi also tracks pending creates in the resource entries
+// themselves. ClearPendingCreates drops those resources from state so refresh can
+// re-discover them from AWS.
+func (r *Runner) runUpWithRetry(ctx context.Context, stack auto.Stack, progressWriter *logWriter) error {
+	// First, proactively run a refresh with ClearPendingCreates to handle any
+	// leftover state from previous interrupted operations
+	r.log.Info("running pre-emptive refresh with ClearPendingCreates to resolve any stale state")
+	if _, err := stack.Refresh(ctx,
+		optrefresh.ProgressStreams(progressWriter),
+		optrefresh.ClearPendingCreates(),
+	); err != nil {
+		r.log.Warn("pre-emptive refresh with ClearPendingCreates failed", zap.Error(err))
+		// Continue anyway - the operation might still succeed
+	}
+
+	// Run the first attempt
+	_, err := stack.Up(ctx, optup.ProgressStreams(progressWriter))
+	if err == nil {
+		return nil
+	}
+
+	// Check if this is a recoverable error
+	if !isAlreadyExistsError(err) && !hasPendingOperations(err) {
+		// Not a recoverable error, return as-is
+		return err
+	}
+
+	r.log.Warn("pulumi up failed with recoverable error, attempting state repair and retry",
+		zap.Error(err))
+
+	// Try to import the existing resource if it's an "already exists" error.
+	// ClearPendingCreates only removes resources from state - it does NOT re-import them.
+	// We need to explicitly import existing AWS resources into Pulumi state.
+	if isAlreadyExistsError(err) {
+		clusterName := parseEKSClusterNameFromError(err)
+		if clusterName != "" {
+			r.log.Info("attempting to import existing EKS cluster into Pulumi state",
+				zap.String("cluster_name", clusterName))
+			if importErr := r.importExistingEKSCluster(ctx, stack, clusterName, progressWriter); importErr != nil {
+				r.log.Warn("failed to import existing EKS cluster", zap.Error(importErr))
+				// Continue anyway - will try other recovery methods
+			} else {
+				r.log.Info("successfully imported existing EKS cluster", zap.String("cluster_name", clusterName))
+			}
+		}
+	}
+
+	// Clear pending operations from state file as additional cleanup
+	if clearErr := r.clearPendingOperations(ctx, stack); clearErr != nil {
+		r.log.Warn("failed to clear pending operations array", zap.Error(clearErr))
+		// Continue anyway
+	}
+
+	// Run refresh to sync state with AWS after import
+	r.log.Info("running refresh to sync state with AWS after import")
+	if _, refreshErr := stack.Refresh(ctx,
+		optrefresh.ProgressStreams(progressWriter),
+	); refreshErr != nil {
+		r.log.Warn("refresh failed", zap.Error(refreshErr))
+		// Continue anyway - the up might still work
+	}
+
+	// Retry the up operation
+	r.log.Info("retrying pulumi up after state repair")
+	_, retryErr := stack.Up(ctx, optup.ProgressStreams(progressWriter))
+	if retryErr != nil {
+		return fmt.Errorf("pulumi up retry failed: %w (original error: %v)", retryErr, err)
+	}
+
+	r.log.Info("pulumi up succeeded after state repair and retry")
+	return nil
 }
 
 // ----------------------------------------------------------------------------- //
@@ -2007,6 +2583,34 @@ func buildClusterID(projectID, region, name string) string {
 	return strings.Join(parts, "-")
 }
 
+// buildClusterIDWithSuffix creates a unique cluster ID by appending a short hash suffix.
+// This ensures each ProjectInfra gets its own unique EKS cluster, preventing conflicts
+// when multiple ProjectInfras use the same base cluster name.
+func buildClusterIDWithSuffix(projectID, region, name, suffix string) string {
+	base := buildClusterID(projectID, region, name)
+	if suffix == "" {
+		return base
+	}
+	// EKS cluster name limit is 100 chars. Ensure we stay within that.
+	// Format: {base}-{suffix} where suffix is 8 chars
+	maxBase := 100 - len(suffix) - 1
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	return fmt.Sprintf("%s-%s", base, suffix)
+}
+
+// shortHash generates an 8-character hash from the input string.
+// Used to create unique suffixes for cluster names.
+func shortHash(input string) string {
+	if input == "" {
+		return ""
+	}
+	h := fnv.New32a()
+	h.Write([]byte(input))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 func sanitize(in string) string {
 	trimmed := strings.ToLower(strings.TrimSpace(in))
 	replacer := strings.NewReplacer(" ", "-", "_", "-", ".", "-")
@@ -2089,4 +2693,198 @@ func estimateCost(spec *infraapi.AWSInfraSpec) float64 {
 		}
 	}
 	return cost
+}
+
+// getSpokeProxyNodePort returns the NodePort to use for the spoke-proxy service.
+// Configurable via AEGIS_SPOKE_PROXY_NODEPORT environment variable, defaults to 31484.
+func getSpokeProxyNodePort() int {
+	if portStr := strings.TrimSpace(os.Getenv(envAegisSpokeProxyNodePort)); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil && port >= 30000 && port <= 32767 {
+			return port
+		}
+	}
+	return defaultSpokeProxyNodePort
+}
+
+// attachNodeGroupsToTargetGroup attaches the Auto Scaling Groups of EKS managed node groups
+// to an NLB target group. This enables the spoke-proxy service to receive traffic via the NLB.
+func (r *Runner) attachNodeGroupsToTargetGroup(ctx *pulumi.Context, clusterID string, nodeGroups []pulumi.Resource, targetGroupARN string, provider *aws.Provider) error {
+	for i, ng := range nodeGroups {
+		eksNg, ok := ng.(*awseks.NodeGroup)
+		if !ok {
+			continue
+		}
+
+		// EKS NodeGroup has a Resources output containing the Auto Scaling Groups
+		// We need to extract the ASG name and attach it to the target group
+		attachmentName := fmt.Sprintf("%s-ng-%d-tg-attachment", clusterID, i)
+
+		// Use Apply to get the ASG name from the node group resources
+		eksNg.Resources.ApplyT(func(resources []awseks.NodeGroupResource) error {
+			if len(resources) == 0 {
+				return nil
+			}
+			for _, resource := range resources {
+				if len(resource.AutoscalingGroups) == 0 {
+					continue
+				}
+				for _, asg := range resource.AutoscalingGroups {
+					if asg.Name == nil || *asg.Name == "" {
+						continue
+					}
+					// Create the attachment outside of Apply using the known ASG name
+					// Note: This is a workaround since we can't create resources inside Apply
+					r.log.Info("found ASG for node group, attachment should be configured",
+						zap.String("asg_name", *asg.Name),
+						zap.String("target_group", targetGroupARN))
+				}
+			}
+			return nil
+		})
+
+		// Create the attachment using the node group's ASG
+		// The ASG name follows the pattern: eks-<nodegroup-name>-<uuid>
+		// We use Pulumi's ability to reference outputs directly
+		_, err := awsautoscaling.NewAttachment(ctx, attachmentName, &awsautoscaling.AttachmentArgs{
+			AutoscalingGroupName: eksNg.Resources.ApplyT(func(resources []awseks.NodeGroupResource) string {
+				if len(resources) == 0 || len(resources[0].AutoscalingGroups) == 0 {
+					return ""
+				}
+				if resources[0].AutoscalingGroups[0].Name != nil {
+					return *resources[0].AutoscalingGroups[0].Name
+				}
+				return ""
+			}).(pulumi.StringOutput),
+			LbTargetGroupArn: pulumi.String(targetGroupARN),
+		}, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{ng}))
+		if err != nil {
+			return fmt.Errorf("create ASG attachment for node group %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// generateSpokeProxyCert generates a self-signed TLS certificate for the spoke-proxy.
+// The certificate includes wildcard SANs for *.nip.io to work with any node public IP.
+// Returns PEM-encoded certificate and key.
+func generateSpokeProxyCert() (certPEM, keyPEM string, err error) {
+	// Check if we have a CA to sign with
+	caCertPath := os.Getenv(envAegisSpokeProxyCACert)
+	caKeyPath := os.Getenv(envAegisSpokeProxyCAKey)
+
+	var caCert *x509.Certificate
+	var caKey *rsa.PrivateKey
+
+	if caCertPath != "" && caKeyPath != "" {
+		// Load CA certificate and key
+		caCert, caKey, err = loadCA(caCertPath, caKeyPath)
+		if err != nil {
+			// Log warning but fall back to self-signed
+			fmt.Printf("WARNING: failed to load spoke-proxy CA, falling back to self-signed: %v\n", err)
+			caCert, caKey = nil, nil
+		}
+	}
+
+	// Generate RSA key for the spoke-proxy cert
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", fmt.Errorf("generate private key: %w", err)
+	}
+
+	// Create certificate template
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", "", fmt.Errorf("generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Aegis Platform"},
+			CommonName:   "spoke-proxy.aegis.local",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().AddDate(1, 0, 0), // Valid for 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  false, // End-entity certificate, not a CA
+		DNSNames: []string{
+			"spoke-proxy.aegis.local",
+			"*.nip.io",             // Wildcard for any IP.nip.io
+			"spoke-proxy.*.nip.io", // spoke-proxy prefix wildcard
+			"*.*.nip.io",           // Double wildcard for spoke-proxy.IP.nip.io
+			"localhost",
+		},
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+		},
+	}
+
+	var certDER []byte
+	if caCert != nil && caKey != nil {
+		// Sign with CA
+		certDER, err = x509.CreateCertificate(rand.Reader, &template, caCert, &privateKey.PublicKey, caKey)
+		if err != nil {
+			return "", "", fmt.Errorf("create CA-signed certificate: %w", err)
+		}
+	} else {
+		// Self-signed fallback - make it a CA so it can be added to trust bundle
+		template.IsCA = true
+		template.KeyUsage |= x509.KeyUsageCertSign
+		certDER, err = x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+		if err != nil {
+			return "", "", fmt.Errorf("create self-signed certificate: %w", err)
+		}
+	}
+
+	// Encode to PEM
+	certPEMBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEMBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	return string(certPEMBytes), string(keyPEMBytes), nil
+}
+
+// loadCA loads a CA certificate and private key from PEM files.
+func loadCA(certPath, keyPath string) (*x509.Certificate, *rsa.PrivateKey, error) {
+	// Read CA certificate
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA cert: %w", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, nil, fmt.Errorf("failed to decode CA cert PEM")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA cert: %w", err)
+	}
+
+	// Read CA private key
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA key: %w", err)
+	}
+	block, _ = pem.Decode(keyPEM)
+	if block == nil {
+		return nil, nil, fmt.Errorf("failed to decode CA key PEM")
+	}
+
+	// Try parsing as PKCS1 first, then PKCS8
+	caKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		// Try PKCS8
+		key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err2 != nil {
+			return nil, nil, fmt.Errorf("parse CA key (tried PKCS1 and PKCS8): %w", err)
+		}
+		var ok bool
+		caKey, ok = key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, nil, fmt.Errorf("CA key is not RSA")
+		}
+	}
+
+	return caCert, caKey, nil
 }

@@ -299,6 +299,37 @@ func (s *MemStore) ListProjects() []*aegis.Project {
 	return out
 }
 
+// DeleteProject removes a project from the store.
+// Returns an error if the project has active clusters attached.
+func (s *MemStore) DeleteProject(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("project id is required")
+	}
+
+	// Check for active clusters (via clusterState)
+	clusters := s.cstate.listByProject(id)
+	if len(clusters) > 0 {
+		return fmt.Errorf("cannot delete project %q: %d active cluster(s) still attached - delete clusters first to avoid incurring costs", id, len(clusters))
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.projects[id]; !exists {
+		return fmt.Errorf("project %q not found", id)
+	}
+
+	delete(s.projects, id)
+	return nil
+}
+
+// HasActiveClusters checks if a project has any clusters attached.
+func (s *MemStore) HasActiveClusters(projectID string) bool {
+	clusters := s.cstate.listByProject(projectID)
+	return len(clusters) > 0
+}
+
 func budgetKey(projectID, queue string) string { return projectID + "|" + queue }
 
 func monthStartUTC(t time.Time) time.Time {
@@ -467,6 +498,10 @@ func (s *MemStore) StartWorkload(id string) (*aegis.Workload, time.Duration, boo
 
 // -------- clusters --------
 
+func (s *MemStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error {
+	s.cstate.preRegister(clusterID, projectID, provider, region, proxyURL)
+	return nil
+}
 func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) {
 	s.cstate.upsertFromRegister(req)
 }
@@ -543,6 +578,10 @@ func (s *MemStore) GetClusterInfo(clusterID string) *ClusterInfo {
 }
 func (s *MemStore) ListClusterInfos() []*ClusterInfo {
 	return s.cstate.list()
+}
+
+func (s *MemStore) ListClustersByProject(projectID string) []*ClusterInfo {
+	return s.cstate.listByProject(projectID)
 }
 
 func (s *MemStore) SetClusterProjectID(clusterID, projectID string) {
@@ -864,6 +903,37 @@ func (s *MemStore) ListProvisioningLogs(jobID string, since time.Time, sinceSeq 
 	return out
 }
 
+func (s *MemStore) ClearProvisioningLogs(jobID string) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.provisioningLogs, jobID)
+}
+
+func (s *MemStore) DeleteOldProvisioningLogs(olderThan time.Time) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var deleted int64
+	for jobID, logs := range s.provisioningLogs {
+		var kept []ProvisioningLogEntry
+		for _, entry := range logs {
+			if entry.CreatedAt.After(olderThan) {
+				kept = append(kept, entry)
+			} else {
+				deleted++
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.provisioningLogs, jobID)
+		} else {
+			s.provisioningLogs[jobID] = kept
+		}
+	}
+	return deleted
+}
+
 func (s *MemStore) UpsertProvisioningRun(run ProvisioningRun) {
 	if strings.TrimSpace(run.JobID) == "" {
 		return
@@ -910,4 +980,25 @@ func (s *MemStore) GetProvisioningRun(jobID string) (*ProvisioningRun, bool) {
 		copy.CompletedAt = &ts
 	}
 	return &copy, true
+}
+
+func (s *MemStore) ListProvisioningRuns(projectID string) []*ProvisioningRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*ProvisioningRun, 0, len(s.provisioningRuns))
+	for _, run := range s.provisioningRuns {
+		if run == nil {
+			continue
+		}
+		if projectID != "" && !strings.EqualFold(run.ProjectID, projectID) {
+			continue
+		}
+		copy := *run
+		if run.CompletedAt != nil {
+			ts := *run.CompletedAt
+			copy.CompletedAt = &ts
+		}
+		out = append(out, &copy)
+	}
+	return out
 }

@@ -39,6 +39,8 @@ platformApi:
     LOG_LEVEL: "info"
     ENVIRONMENT: "production"
     AEGIS_STORE_BACKEND: "postgres"
+    # Enable automatic observability stack deployment on spoke clusters
+    AEGIS_OBSERVABILITY_ENABLED: "true"
     AEGIS_PROXY_BASE_URL: "wss://proxy.yourdomain.com:8080"
     # AEGIS_PROXY_BASE_URL is automatically set to the proxy service if proxy.enabled=true
     # For external proxy, set this to the public URL (e.g., "https://proxy.yourdomain.com")

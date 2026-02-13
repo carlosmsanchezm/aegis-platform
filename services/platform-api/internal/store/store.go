@@ -88,6 +88,8 @@ type Store interface {
 	PutProject(*aegis.Project)
 	GetProject(id string) *aegis.Project
 	ListProjects() []*aegis.Project
+	DeleteProject(id string) error      // Delete project (fails if active clusters exist)
+	HasActiveClusters(projectID string) bool // Check if project has non-deleted clusters
 
 	PutBudget(*aegis.Budget)
 	GetBudget(projectID string) *aegis.Budget
@@ -138,12 +140,17 @@ type Store interface {
 	PurgeExpiredSessions(now time.Time)
 
 	// clusters
+	// PreRegisterCluster creates a placeholder cluster row during provisioning,
+	// before the k8s-agent connects. This ensures project_id and proxy_url are set
+	// when the agent's RegisterCluster call updates the row.
+	PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
 	UpsertClusterImport(ClusterImport) error
 	GetClusterProjectID(clusterID string) (string, bool)
 	GetClusterInfo(clusterID string) *ClusterInfo
 	ListClusterInfos() []*ClusterInfo
+	ListClustersByProject(projectID string) []*ClusterInfo // Multi-tenancy: list clusters for a specific project
 	SetClusterProjectID(clusterID, projectID string)
 	DeleteCluster(clusterID string)
 	// CleanupStaleClusters soft-deletes clusters with heartbeats older than the threshold.
@@ -153,6 +160,9 @@ type Store interface {
 	// provisioning logs
 	AppendProvisioningLog(entry ProvisioningLogEntry)
 	ListProvisioningLogs(jobID string, since time.Time, sinceSeq int64, limit int) []ProvisioningLogEntry
+	ClearProvisioningLogs(jobID string)                // Clear logs when new provisioning starts
+	DeleteOldProvisioningLogs(olderThan time.Time) int64 // Retention policy cleanup
 	UpsertProvisioningRun(run ProvisioningRun)
 	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
+	ListProvisioningRuns(projectID string) []*ProvisioningRun // List runs for a project (or all if empty)
 }

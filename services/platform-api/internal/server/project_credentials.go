@@ -17,7 +17,19 @@ const (
 	envDefaultAWSAccountID  = "AEGIS_DEFAULT_AWS_ACCOUNT_ID"
 	envDefaultAWSRoleARN    = "AEGIS_DEFAULT_AWS_ROLE_ARN"
 	envDefaultAWSExternalID = "AEGIS_DEFAULT_AWS_EXTERNAL_ID"
+
+	// envDevMode enables development mode which skips IAM role assumption.
+	// In dev mode, AWS credentials are used directly without assuming a project role.
+	// WARNING: Do not enable in production - breaks multi-tenancy isolation.
+	envDevMode = "AEGIS_DEV_MODE"
 )
+
+// IsDevMode returns true if development mode is enabled.
+// In dev mode, role assumption is skipped and credentials are used directly.
+func IsDevMode() bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv(envDevMode)))
+	return val == "true" || val == "1" || val == "yes"
+}
 
 var awsAccountIDPattern = regexp.MustCompile(`^\d{12}$`)
 
@@ -39,8 +51,16 @@ func (c projectAWSCredentials) toProto() *aegis.ProjectAwsCredentials {
 }
 
 func (c projectAWSCredentials) isComplete() bool {
-	return strings.TrimSpace(c.AccountID) != "" &&
-		strings.TrimSpace(c.RoleARN) != "" &&
+	// Account ID is always required
+	if strings.TrimSpace(c.AccountID) == "" {
+		return false
+	}
+	// In dev mode, only account ID is required
+	if IsDevMode() {
+		return true
+	}
+	// Production mode: require all fields for role assumption
+	return strings.TrimSpace(c.RoleARN) != "" &&
 		strings.TrimSpace(c.ExternalID) != ""
 }
 
@@ -96,11 +116,25 @@ func sanitizeProjectAws(creds *aegis.ProjectAwsCredentials) *aegis.ProjectAwsCre
 
 func validateProjectAwsCredentials(creds *aegis.ProjectAwsCredentials) error {
 	if creds == nil {
+		// In dev mode, nil credentials are allowed - use ambient credentials
+		if IsDevMode() {
+			return nil
+		}
 		return fmt.Errorf("aws credentials are required")
 	}
+
+	// Account ID is always required (for resource tagging, etc.)
 	if !awsAccountIDPattern.MatchString(creds.GetAccountId()) {
 		return fmt.Errorf("account_id must be a 12-digit AWS account id")
 	}
+
+	// In dev mode, skip role ARN and external ID validation
+	// Credentials are used directly without assuming a role
+	if IsDevMode() {
+		return nil
+	}
+
+	// Production mode: require role ARN and external ID for multi-tenancy
 	role := creds.GetRoleArn()
 	if !strings.HasPrefix(role, "arn:") || !strings.Contains(role, ":role/") {
 		return fmt.Errorf("role_arn must be a valid IAM role ARN")

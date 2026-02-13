@@ -1,6 +1,6 @@
 # Aegis Platform Infrastructure Reference
 
-**Last Updated:** December 14, 2025
+**Last Updated:** January 7, 2026
 **Purpose:** Quick reference for understanding the complete local development infrastructure setup
 
 ---
@@ -11,17 +11,18 @@
 2. [Kubernetes Namespaces and Services](#kubernetes-namespaces-and-services)
 3. [Network Endpoints and Ports](#network-endpoints-and-ports)
 4. [AWS Spoke Cluster Connectivity](#aws-spoke-cluster-connectivity-critical) *(Critical for EKS clusters)*
-5. [DNS and Hostname Configuration](#dns-and-hostname-configuration)
-6. [TLS/Certificate Configuration](#tlscertificate-configuration)
-7. [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup)
-8. [Authentication (Keycloak)](#authentication-keycloak)
-9. [Database Configuration](#database-configuration)
-10. [AWS Credentials Architecture](#aws-credentials-architecture)
-11. [Key Environment Variables](#key-environment-variables)
-12. [Important Files Reference](#important-files-reference)
-13. [Deployment Commands](#deployment-commands)
-14. [Verification Checklist](#verification-checklist)
-15. [Common Issues and Solutions](#common-issues-and-solutions)
+5. [Spoke Architecture: Multi-Tenancy and Scalability](#spoke-architecture-multi-tenancy-and-scalability) *(Event-driven status sync)*
+6. [DNS and Hostname Configuration](#dns-and-hostname-configuration)
+7. [TLS/Certificate Configuration](#tlscertificate-configuration)
+8. [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup)
+9. [Authentication (Keycloak)](#authentication-keycloak)
+10. [Database Configuration](#database-configuration)
+11. [AWS Credentials Architecture](#aws-credentials-architecture)
+12. [Key Environment Variables](#key-environment-variables)
+13. [Important Files Reference](#important-files-reference)
+14. [Deployment Commands](#deployment-commands)
+15. [Verification Checklist](#verification-checklist)
+16. [Common Issues and Solutions](#common-issues-and-solutions)
 
 ---
 
@@ -203,6 +204,79 @@ This section documents the complete connectivity architecture for AWS EKS spoke 
 │  │                                                                               │ │
 │  └─────────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Local Dev Setup Order of Operations
+
+**IMPORTANT:** Follow these steps in order when setting up local development with remote EKS clusters.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Deploy Local Platform                                           │
+│   make deploy-local-tls                                                 │
+│   → Deploys platform-api, keycloak, postgres to Docker Desktop          │
+│   → Local platform must be running before the tunnel can work           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Deploy Relay Infrastructure (one-time)                          │
+│   cd terraform/pulumi-stack && terraform apply                          │
+│   → Creates: EC2 relay, NLB, target groups, listeners                   │
+│   → Outputs: NLB DNS, relay public IP                                   │
+│   → Only needed once; relay stays running                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Start AWS Tunnel                                                │
+│   ./scripts/start-aws-tunnel.sh                                         │
+│   → Reads terraform outputs (NLB DNS, relay IP)                         │
+│   → Generates charts/aegis-spoke/values-aws-relay.yaml with NLB endpoint│
+│   → Starts SSH tunnel to relay EC2                                      │
+│   → Starts port-forwards to local platform-api/keycloak                 │
+│   → MUST be running while provisioning or using remote clusters         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Provision Remote Cluster via UI                                 │
+│   Go to http://localhost:3000/aegis/create/clusters                     │
+│   → Pulumi provisions EKS cluster                                       │
+│   → Pulumi deploys aegis-spoke with correct NLB endpoint                │
+│   → Spoke agent connects to local platform-api via NLB tunnel           │
+│   → Cluster shows as "Ready" in UI                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Why This Order Matters
+
+| Step | Dependency | What Happens If Skipped |
+|------|------------|------------------------|
+| 1. Deploy local platform | SSH tunnel needs platform-api running | Tunnel starts but connections fail |
+| 2. Deploy relay infra | Tunnel script reads terraform outputs | Script fails with "relay IP not found" |
+| 3. Start AWS tunnel | Generates values-aws-relay.yaml with NLB | Spoke configured with wrong endpoint (Cloudflare) |
+| 4. Provision cluster | Needs all above running | Spoke can't connect, cluster stuck in "Pending" |
+
+#### Common Failure Modes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Spoke agent logs: "dial tcp: i/o timeout" | SSH tunnel not running | Run `./scripts/start-aws-tunnel.sh` |
+| Spoke agent logs: "server closed stream without trailers" | Spoke using Cloudflare endpoint (can't do gRPC streaming) | Re-run tunnel script to regenerate values, redeploy spoke |
+| NLB target "unused" state | NLB listeners not created | Check terraform completed; may need `terraform apply` |
+| "cluster registration failed" | Tunnel or port-forward died | Check `ps aux | grep ssh.*aegis-relay` and restart |
+
+#### Quick Start (Daily Development)
+
+After initial setup, you only need to restart the tunnel each day:
+
+```bash
+# 1. Ensure local platform is running
+kubectl get pods -n aegis-system | grep platform-api
+
+# 2. Start the tunnel (runs in foreground, Ctrl+C to stop)
+./scripts/start-aws-tunnel.sh
+
+# Or use Makefile target
+make spoke-start
 ```
 
 ### Critical Components
@@ -585,6 +659,242 @@ kubectl exec -n aegis-system platform-postgres-0 -- \
 
 # Check AegisCluster CRDs
 kubectl get aegisclusters -A
+```
+
+---
+
+## Spoke Architecture: Multi-Tenancy and Scalability
+
+This section explains how the Aegis platform handles multi-tenancy, scalability, and event-driven workload status synchronization.
+
+### Hub-Spoke Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Platform Hub                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         platform-api                                  │   │
+│  │  • Single source of truth for workload status                        │   │
+│  │  • Authorization enforcement per project/queue                       │   │
+│  │  • Multi-tenant data isolation                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+         ▲                    ▲                    ▲
+         │ gRPC               │ gRPC               │ gRPC
+         │ (push status)      │ (push status)      │ (push status)
+         │                    │                    │
+┌────────┴────────┐  ┌────────┴────────┐  ┌────────┴────────┐
+│  Cluster A      │  │  Cluster B      │  │  Cluster C      │
+│  (Tenant X)     │  │  (Tenant Y)     │  │  (Shared)       │
+│  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │
+│  │ k8s-agent │  │  │  │ k8s-agent │  │  │  │ k8s-agent │  │
+│  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │
+│  Only watches   │  │  Only watches   │  │  Watches its    │
+│  its cluster    │  │  its cluster    │  │  cluster only   │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+### Multi-Tenancy Isolation
+
+| Layer | How Isolation is Achieved |
+|-------|---------------------------|
+| **Cluster Level** | Each spoke cluster can be dedicated to a tenant via `projectId` label |
+| **Namespace Level** | Workloads run in tenant-specific namespaces (`aegis-workloads-{project}`) |
+| **Authorization** | platform-api enforces RBAC - spoke-agent can only update workloads for its cluster's project |
+| **Data Isolation** | Each k8s-agent only watches resources in its own cluster |
+| **Network Isolation** | Spokes connect to hub via authenticated gRPC; no spoke-to-spoke communication |
+
+### Scalability Design
+
+| Concern | How It's Addressed |
+|---------|-------------------|
+| **No Polling** | Controller-runtime uses Kubernetes watches (event-driven, not polling) |
+| **Idempotent Pushes** | Only pushes to platform-api when state OR job UID changes |
+| **Local State Tracking** | State tracked via CRD annotations - no shared state between reconciles |
+| **Horizontal Scaling** | Add more clusters = add more k8s-agents (linear scaling, no hub bottleneck) |
+| **O(1) Reconcile** | Each reconcile does simple string comparison, not database lookups |
+
+### Event-Driven Workload Status Sync
+
+The k8s-agent uses **event-driven status synchronization** to push workload status to platform-api. This is NOT polling - it reacts to Kubernetes watch events.
+
+#### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Spoke Cluster (EKS)                               │
+│                                                                             │
+│  ┌──────────────┐                                                          │
+│  │     Job      │                                                          │
+│  │ (state change)│                                                          │
+│  └──────┬───────┘                                                          │
+│         │ Kubernetes Watch Event                                            │
+│         ▼                                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                        k8s-agent Controller                           │  │
+│  │                                                                       │  │
+│  │  1. Receive watch event for Job                                       │  │
+│  │  2. Compute current state (PENDING, RUNNING, SUCCEEDED, FAILED)       │  │
+│  │  3. Get job.UID (unique identifier)                                   │  │
+│  │  4. Compare against annotations:                                      │  │
+│  │     - annotationLastPushedState: "RUNNING"                            │  │
+│  │     - annotationLastPushedJobUID: "abc-123"                           │  │
+│  │  5. If state changed OR job UID changed → Push to platform-api        │  │
+│  │  6. Update annotations with new state + job UID                       │  │
+│  │                                                                       │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│         │                                                                   │
+│         │ Push only if delta detected                                       │
+│         ▼                                                                   │
+└─────────┼───────────────────────────────────────────────────────────────────┘
+          │ gRPC: StartWorkload / AckWorkload
+          ▼
+   ┌──────────────┐
+   │ platform-api │
+   │   (Hub)      │
+   └──────────────┘
+```
+
+#### State Tracking Annotations
+
+The k8s-agent stores the last-pushed state on the AegisWorkload CRD:
+
+```yaml
+apiVersion: aegis.yourorg.dev/v1alpha1
+kind: AegisWorkload
+metadata:
+  name: aegis-80ea0930-19e8-4edc-a5b1-688bba36553c
+  annotations:
+    # Tracks last state pushed to platform-api
+    aegis.yourorg.dev/last-pushed-state: "RUNNING"
+    # Tracks which job instance this state was for
+    aegis.yourorg.dev/last-pushed-job-uid: "54701fac-b5d3-4ea0-bc2a-ee4d0f6308ee"
+```
+
+#### Why Job UID Tracking Matters
+
+When a job is **recreated** (e.g., after timeout or manual recreation), the new job has a different UID. Without UID tracking:
+
+```
+❌ OLD BEHAVIOR (broken):
+Job times out → Job recreated → AegisWorkload still has start-acked=true
+→ Controller skips StartWorkload call → Platform-api shows FAILED forever
+```
+
+With UID tracking:
+
+```
+✅ NEW BEHAVIOR (fixed):
+Job times out → Job recreated with new UID → Controller detects UID mismatch
+→ Clears stale completionTime → Pushes RUNNING with new UID → Status syncs correctly
+```
+
+#### Idempotency Guarantee
+
+```go
+// Pseudo-code from aegisworkload_controller.go
+stateChanged := lastPushedState != currentState
+jobRecreated := lastPushedJobUID != "" && lastPushedJobUID != job.UID
+
+if !stateChanged && !jobRecreated {
+    return  // No API call - same state, same job
+}
+
+// Only reach here if we need to push
+r.cpClient.Start(ctx, workloadID, clusterID)
+r.updatePushedStateAnnotations(ctx, aw, currentState, job.UID)
+```
+
+This ensures:
+- **Same state + same job** → No API call (idempotent)
+- **Same state + different job** → API call (job was recreated)
+- **Different state + same job** → API call (state transition)
+
+### Authorization Flow
+
+The spoke-agent authenticates with Keycloak and platform-api enforces authorization:
+
+```
+┌───────────┐         ┌───────────┐         ┌─────────────┐
+│ k8s-agent │──────►  │  Keycloak │         │ platform-api│
+│           │  OIDC   │           │         │             │
+│           │◄────────│           │         │             │
+│           │  Token  │           │         │             │
+│           │         └───────────┘         │             │
+│           │                               │             │
+│           │──────── gRPC + Token ────────►│             │
+│           │                               │ Validates:  │
+│           │                               │ • Token sig │
+│           │                               │ • client_id │
+│           │                               │ • roles     │
+│           │                               │ • project   │
+│           │◄───────── Response ──────────│             │
+└───────────┘                               └─────────────┘
+```
+
+Authorization is configured in `AUTHZ_ROLE_BINDINGS_JSON`:
+
+```json
+[
+  {
+    "clients": ["backstage", "vscode-extension", "spoke-agent"],
+    "roles": ["workspace-admin"],
+    "projects": ["*"],
+    "queues": ["*"]
+  }
+]
+```
+
+**Important:** The `spoke-agent` client must be included for k8s-agents to push workload status.
+
+### Troubleshooting Status Sync
+
+#### Symptom: Workload stuck in PROVISIONING
+
+```bash
+# 1. Check k8s-agent logs on spoke cluster
+kubectl logs -n aegis-spoke -l app.kubernetes.io/component=k8s-agent --tail=50
+
+# 2. Look for authorization errors
+grep -E "(authorization denied|PermissionDenied)"
+
+# 3. If auth errors, check platform-api logs
+kubectl logs -n aegis-system -l app.kubernetes.io/component=platform-api --tail=50 | grep "authorization denied"
+
+# 4. Fix: Ensure spoke-agent is in AUTHZ_ROLE_BINDINGS_JSON
+kubectl set env deployment/aegis-services-platform-api -n aegis-system \
+  'AUTHZ_ROLE_BINDINGS_JSON=[{"clients":["backstage","vscode-extension","spoke-agent"],"roles":["workspace-admin"],"projects":["*"],"queues":["*"]}]'
+```
+
+#### Symptom: Job recreated but status not updated
+
+```bash
+# 1. Check annotations on AegisWorkload
+kubectl get aegisworkload -n aegis-workloads-<project> <workload-name> -o jsonpath='{.metadata.annotations}'
+
+# 2. Compare job UID with annotation
+kubectl get job -n aegis-workloads-<project> <job-name> -o jsonpath='{.metadata.uid}'
+
+# 3. If different, the controller should detect and re-sync
+# If not syncing, check k8s-agent logs for errors
+
+# 4. Manual fix (if needed): Clear stale annotations
+kubectl annotate aegisworkload -n aegis-workloads-<project> <workload-name> \
+  aegis.yourorg.dev/last-pushed-state- \
+  aegis.yourorg.dev/last-pushed-job-uid-
+```
+
+#### Symptom: Heartbeats working but workload status not syncing
+
+This usually indicates the workload controller is failing while the cluster registration controller works:
+
+```bash
+# Check for different error types
+kubectl logs -n aegis-spoke -l app.kubernetes.io/component=k8s-agent --tail=100 | \
+  grep -E "(heartbeat|StartWorkload|AckWorkload|workload)"
+
+# Heartbeat OK but workload sync failing = look for authorization or connection errors
+# on the workload-specific gRPC calls
 ```
 
 ---
@@ -1070,6 +1380,101 @@ Platform API migrations run as a Helm post-install hook:
 - Wait for PostgreSQL to be ready (init container)
 - Run golang-migrate with SQL files from ConfigMap
 - Migration files: `charts/aegis-services/files/platform-api/migrations/`
+
+### Database Schema Design for Multi-Tenancy
+
+The database is designed with **multi-tenancy isolation** and **referential integrity** as core principles.
+
+#### Entity Relationship Diagram
+
+```
+┌─────────────┐     CASCADE    ┌─────────────┐
+│  projects   │◄───────────────┤   queues    │
+└─────────────┘                └─────────────┘
+       │
+       │ CASCADE
+       ▼
+┌─────────────┐    FK (SET NULL) ┌─────────────┐
+│  workloads  │──────────────────┤  clusters   │
+└─────────────┘   cluster_id     └─────────────┘
+       │                              │
+       │ CASCADE                      │ FK (SET NULL)
+       ▼                              │
+┌──────────────────┐                  │
+│connection_sessions│                  │
+└──────────────────┘                  │
+                                      ▼
+                              ┌─────────────┐
+                              │  projects   │
+                              └─────────────┘
+```
+
+#### Key Foreign Key Constraints
+
+| Child Table | Column | Parent Table | On Delete |
+|-------------|--------|--------------|-----------|
+| `clusters` | `project_id` | `projects` | SET NULL |
+| `workloads` | `project_id` | `projects` | CASCADE |
+| `workloads` | `cluster_id` | `clusters` | SET NULL |
+| `queues` | `project_id` | `projects` | CASCADE |
+| `provisioning_logs` | `project_id` | `projects` | CASCADE |
+| `provisioning_runs` | `project_id` | `projects` | CASCADE |
+
+> **Note:** `provisioning_logs` and `provisioning_runs` do NOT have FK constraints on `cluster_id`. This is intentional - provisioning logs are written **before** the cluster exists in the database.
+
+#### Multi-Tenancy Indexes
+
+These indexes ensure efficient queries for multi-tenant operations:
+
+```sql
+-- Cluster isolation by project
+CREATE INDEX clusters_by_project ON clusters(project_id);
+
+-- Workload queries by project and queue (for budget calculations)
+CREATE INDEX workloads_by_project ON workloads(project_id);
+CREATE INDEX workloads_by_project_queue ON workloads(project_id, queue);
+CREATE INDEX workloads_by_status ON workloads(status);
+
+-- Provisioning log queries
+CREATE INDEX provisioning_logs_by_project ON provisioning_logs(project_id);
+```
+
+#### Annotation Key Standards
+
+Project annotations **must use camelCase** after the domain prefix. The system auto-normalizes kebab-case keys but logs warnings.
+
+**Correct format:**
+```json
+{
+  "aegis.yourorg.dev/awsRoleArn": "arn:aws:iam::...",
+  "aegis.yourorg.dev/awsAccountId": "567751785679",
+  "aegis.yourorg.dev/awsExternalId": "..."
+}
+```
+
+**Incorrect format (will be auto-corrected):**
+```json
+{
+  "aegis.yourorg.dev/aws-role-arn": "...",  // kebab-case is wrong
+  "aegis.yourorg.dev/aws-account-id": "..."
+}
+```
+
+#### Query Examples
+
+```sql
+-- List all clusters for a project (uses FK index)
+SELECT * FROM clusters WHERE project_id = 'my-project' AND deleted_at IS NULL;
+
+-- List workloads for a project's queue (uses composite index)
+SELECT * FROM workloads WHERE project_id = 'my-project' AND queue = 'default';
+
+-- Check cluster-project association
+SELECT c.id, c.project_id, cl.v as label_project_id
+FROM clusters c
+LEFT JOIN cluster_labels cl ON c.id = cl.cluster_id AND cl.k = 'aegis.yourorg.dev/projectId'
+WHERE c.deleted_at IS NULL;
+```
 
 ---
 
@@ -1661,6 +2066,69 @@ terraform output pulumi_secret_access_key
 
 # Update and restart (see AWS Credentials section for full steps)
 ```
+
+### Pulumi Pending Operations / "Cluster Already Exists"
+
+**Symptom:**
+```
+Attempting to deploy or update resources with 1 pending operations from previous deployment
+```
+or
+```
+ResourceInUseException: Cluster already exists with name: ...
+```
+
+**Cause:** A previous Pulumi operation was interrupted (timeout, process killed, pod restart) while creating a resource. Pulumi state has a "pending CREATE" entry but the resource was actually created in AWS.
+
+**Root Cause Analysis:**
+1. Pulumi tracks pending operations in TWO places:
+   - The `pending_operations` array in state
+   - Resource entries marked as "creating"
+2. Simply clearing `pending_operations` is NOT sufficient
+3. The resource entry is still marked as "creating" → Pulumi tries to create again → AWS says "already exists"
+
+**Solution (Automatic):**
+
+The platform now uses `optrefresh.ClearPendingCreates()` which:
+1. Drops resources in pending CREATE state from Pulumi state
+2. Re-discovers them from AWS during refresh
+3. Properly reconciles state
+
+This happens automatically during provisioning. No manual intervention needed.
+
+**Solution (Manual Recovery):**
+
+If you need to manually recover:
+
+```bash
+# Assume the aegis-platform role
+AWS_PROFILE=aegis
+CREDS=$(aws sts assume-role --role-arn arn:aws:iam::567751785679:role/aegis-platform --role-session-name recovery --output json)
+export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')
+export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')
+export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')
+unset AWS_PROFILE
+
+# Delete the stale Pulumi state for the project
+aws s3 rm --recursive "s3://aegis-pulumi-state-dev/aegis/pulumi/.pulumi/stacks/aegis-platform-<project-id>/"
+
+# Delete the ProjectInfra CR to reset provisioning state
+kubectl delete projectinfra infra-<name> -n aegis-system
+
+# Clean up database
+kubectl exec -n aegis-system platform-postgres-0 -- psql -U aegis_platform -d aegis_platform -c "
+DELETE FROM provisioning_logs WHERE job_id LIKE '%<project-id>%';
+DELETE FROM provisioning_runs WHERE job_id LIKE '%<project-id>%';
+DELETE FROM clusters WHERE id LIKE '%<project-id>%';
+"
+
+# Re-provision the cluster from the UI
+```
+
+**Prevention:**
+- Don't kill the platform-api pod during provisioning
+- Increase provisioning timeouts if clusters take long to create
+- The auto-recovery with `ClearPendingCreates` handles most cases automatically
 
 ---
 

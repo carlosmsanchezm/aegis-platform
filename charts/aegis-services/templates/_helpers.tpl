@@ -198,24 +198,24 @@ app.kubernetes.io/component: keycloak-postgres
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.configMapName" -}}
-{{- printf "%s-config" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- printf "%s-config" (include "aegis-services.pki.stepCa.fullname" .) -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.certsConfigMapName" -}}
-{{- printf "%s-certs" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- printf "%s-certs" (include "aegis-services.pki.stepCa.fullname" .) -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.provisionerSecretName" -}}
-{{- printf "%s-provisioner-password" (include "aegis-services.pki.stepCa.releaseName" .) -}}
+{{- printf "%s-provisioner-password" (include "aegis-services.pki.stepCa.fullname" .) -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.serviceURL" -}}
 {{- $pki := .Values.pki | default dict }}
 {{- $stepCa := $pki.stepCa | default dict }}
 {{- $ns := include "aegis-services.pki.namespace" . -}}
-{{- $release := include "aegis-services.pki.stepCa.releaseName" . -}}
+{{- $fullname := include "aegis-services.pki.stepCa.fullname" . -}}
 {{- $port := $stepCa.service.port | default 443 -}}
-{{- printf "https://%s.%s.svc.cluster.local:%d" $release $ns (int $port) -}}
+{{- printf "https://%s.%s.svc.cluster.local:%d" $fullname $ns (int $port) -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.clusterIssuerName" -}}

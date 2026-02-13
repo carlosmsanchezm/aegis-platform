@@ -350,7 +350,11 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 	jobUID := string(job.UID)
 
 	phase := aw.Status.Phase
-	observedRunning := job.Status.Active > 0 || job.Status.Succeeded > 0 || job.Status.Failed > 0
+	// Only mark as running when pods are actually Ready, not just Active (which includes Pending pods).
+	// This ensures the UI shows accurate status - users shouldn't see "Running" until the container
+	// is truly running and ready (node provisioned, image pulled, container started).
+	podsReady := r.isJobPodReady(ctx, job)
+	observedRunning := (job.Status.Active > 0 && podsReady) || job.Status.Succeeded > 0 || job.Status.Failed > 0
 
 	// Check if this is a recreated job (different UID than what we last pushed)
 	lastPushedJobUID := aw.GetAnnotations()[annotationLastPushedJobUID]
@@ -427,6 +431,32 @@ func (r *AegisWorkloadReconciler) applyJobTransitions(ctx context.Context, aw *a
 			r.ackWorkloadBridge(ctx, aw, "FAILED", jobUID)
 		}
 	}
+}
+
+// isJobPodReady checks if at least one pod owned by the job is in Ready condition.
+// This ensures we only report Running status when the container is actually running,
+// not when the pod is still Pending (waiting for node, pulling image, etc.).
+func (r *AegisWorkloadReconciler) isJobPodReady(ctx context.Context, job *batchv1.Job) bool {
+	if job == nil {
+		return false
+	}
+
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods,
+		client.InNamespace(job.Namespace),
+		client.MatchingLabels{"job-name": job.Name}); err != nil {
+		ctrl.LoggerFrom(ctx).V(1).Info("failed to list job pods for readiness check", "job", job.Name, "error", err)
+		return false
+	}
+
+	for _, pod := range pods.Items {
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *AegisWorkloadReconciler) applyTrainingTransitions(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, obj *unstructured.Unstructured) {

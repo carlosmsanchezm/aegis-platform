@@ -80,14 +80,17 @@ locals {
 # Elastic IP for stable spoke-proxy URL
 ################################################################################
 
-resource "aws_eip" "spoke_proxy" {
-  count  = var.enable_spoke_proxy_nlb ? 1 : 0
-  domain = "vpc"
-
-  tags = merge(local.spoke_proxy_tags, {
-    Name = "${local.spoke_proxy_name}-eip"
-  })
-}
+# Note: EIP is no longer used since NLB spans multiple AZs.
+# The NLB DNS name provides a stable endpoint instead.
+# Keeping this commented for reference in case single-AZ deployment is needed.
+# resource "aws_eip" "spoke_proxy" {
+#   count  = var.enable_spoke_proxy_nlb ? 1 : 0
+#   domain = "vpc"
+#
+#   tags = merge(local.spoke_proxy_tags, {
+#     Name = "${local.spoke_proxy_name}-eip"
+#   })
+# }
 
 ################################################################################
 # Security Group for spoke-proxy NLB targets
@@ -140,14 +143,10 @@ resource "aws_lb" "spoke_proxy" {
   internal           = false # Public-facing for VS Code connections
   load_balancer_type = "network"
 
-  # Use public subnets with Elastic IP
-  dynamic "subnet_mapping" {
-    for_each = [data.aws_subnets.default_public[0].ids[0]] # Single AZ for cost optimization
-    content {
-      subnet_id     = subnet_mapping.value
-      allocation_id = aws_eip.spoke_proxy[0].id
-    }
-  }
+  # Use ALL public subnets to span all AZs where EKS nodes may be provisioned.
+  # This ensures the NLB can route traffic to nodes in any AZ.
+  # Note: We can only assign one EIP, so we use subnets directly (AWS assigns IPs).
+  subnets = data.aws_subnets.default_public[0].ids
 
   enable_cross_zone_load_balancing = true
   enable_deletion_protection       = false # Set to true for production
@@ -258,14 +257,20 @@ output "spoke_proxy_target_group_arn" {
   value       = try(aws_lb_target_group.spoke_proxy[0].arn, "")
 }
 
-output "spoke_proxy_eip" {
-  description = "Elastic IP address for spoke-proxy (stable URL)"
-  value       = try(aws_eip.spoke_proxy[0].public_ip, "")
-}
+# EIP outputs removed - NLB now spans all AZs and uses DNS name instead of EIP
+# output "spoke_proxy_eip" {
+#   description = "Elastic IP address for spoke-proxy (stable URL)"
+#   value       = try(aws_eip.spoke_proxy[0].public_ip, "")
+# }
 
-output "spoke_proxy_url_nip_io" {
-  description = "Spoke-proxy URL using nip.io (no DNS required)"
-  value       = try("wss://spoke-proxy.${aws_eip.spoke_proxy[0].public_ip}.nip.io:443", "")
+# output "spoke_proxy_url_nip_io" {
+#   description = "Spoke-proxy URL using nip.io (no DNS required)"
+#   value       = try("wss://spoke-proxy.${aws_eip.spoke_proxy[0].public_ip}.nip.io:443", "")
+# }
+
+output "spoke_proxy_url" {
+  description = "Spoke-proxy URL using NLB DNS name"
+  value       = try("wss://${aws_lb.spoke_proxy[0].dns_name}:443", "")
 }
 
 # output "spoke_proxy_url_dns" {
@@ -283,11 +288,11 @@ output "spoke_proxy_helm_values" {
         nodePort: ${var.spoke_proxy_port}
       ingress:
         enabled: false  # NLB handles external access
-        hostname: "spoke-proxy.${aws_eip.spoke_proxy[0].public_ip}.nip.io"
+        hostname: "${aws_lb.spoke_proxy[0].dns_name}"
 
     k8sAgent:
       env:
-        AEGIS_PROXY_INGRESS_HOST: "spoke-proxy.${aws_eip.spoke_proxy[0].public_ip}.nip.io:443"
+        AEGIS_PROXY_INGRESS_HOST: "${aws_lb.spoke_proxy[0].dns_name}:443"
   EOF
   , "")
 }

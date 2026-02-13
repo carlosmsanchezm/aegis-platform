@@ -321,6 +321,7 @@ deploy-local-tls: setup-local clean-webhook
 		helm upgrade --install aegis-services charts/aegis-services \
 		  -f charts/aegis-services/values/common.yaml \
 		  -f charts/aegis-services/values/local.yaml \
+		  -f charts/aegis-services/values/local-pki.yaml \
 		  -f charts/aegis-services/values/local-tls.yaml \
 		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
 		  --set platformApi.image.tag=$$PLATFORM_API_TAG \

@@ -154,14 +154,15 @@ platformApi:
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
     AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AEGIS_DEV_MODE: "true"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
   secrets:
-    aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
-    aws-secret-access-key: "yxaIgPw06f56DRCWQE6Oea4U30c1aC5e25SRhbqw"
+    aws-access-key-id: "REDACTED_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REDACTED_AWS_SECRET_ACCESS_KEY"
   httpIngress:
     enabled: true
     className: "ingress-nginx"

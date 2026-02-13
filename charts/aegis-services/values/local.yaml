@@ -95,6 +95,9 @@ platformApi:
 
   # Local development environment variables
   env:
+    # DEV MODE: Skip IAM role assumption, use credentials directly
+    # WARNING: Do not enable in production - breaks multi-tenancy isolation
+    AEGIS_DEV_MODE: "true"
     LOG_LEVEL: "debug"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
@@ -122,6 +125,11 @@ platformApi:
     # Spoke-proxy CA for signing certs (fallback when cert-manager not enabled)
     AEGIS_SPOKE_PROXY_CA_CERT: "/etc/spoke-proxy-ca/ca.crt"
     AEGIS_SPOKE_PROXY_CA_KEY: "/etc/spoke-proxy-ca/ca.key"
+    # Spoke-proxy NLB configuration for stable proxy URL
+    # Target group ARN for attaching EKS node groups to the NLB
+    AEGIS_SPOKE_PROXY_TARGET_GROUP: "arn:aws:elasticloadbalancing:us-east-1:567751785679:targetgroup/aegis-spoke-proxy-spoke-proxy/a07de2a1aacec63f"
+    # NLB hostname passed to k8s-agent for proxy URL registration
+    AEGIS_SPOKE_PROXY_HOST: "aegis-spoke-proxy-spoke-proxy-d85f4ee4d0d2890c.elb.us-east-1.amazonaws.com:443"
     # cert-manager + step-ca configuration for production-ready PKI
     AEGIS_CERT_MANAGER_ENABLED: "true"
     AEGIS_STEP_CA_URL: "https://step-ca.aegis-platform.tech"
@@ -142,7 +150,7 @@ platformApi:
     PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
-    AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: ""
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
@@ -159,11 +167,11 @@ platformApi:
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
     DB_PASSWORD: db-password
   secrets:
-    aws-access-key-id: "AKIAYIMFEXTH4GJUWCIY"
-    aws-secret-access-key: "yxaIgPw06f56DRCWQE6Oea4U30c1aC5e25SRhbqw"
+    aws-access-key-id: "REDACTED_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REDACTED_AWS_SECRET_ACCESS_KEY"
     AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
     AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
-    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "REDACTED_AWS_EXTERNAL_ID"
     db-password: "platform_local_pass"
     authz-role-bindings.json: |
       [

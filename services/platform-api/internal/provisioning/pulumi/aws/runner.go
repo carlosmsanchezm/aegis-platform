@@ -25,6 +25,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws"
+	awsautoscaling "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/autoscaling"
 	awsec2 "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	awseks "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/eks"
 	awsiam "github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
@@ -47,6 +48,14 @@ import (
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
 
+// isDevMode checks if development mode is enabled.
+// In dev mode, role assumption is skipped and AWS credentials are used directly.
+// WARNING: Do not enable in production - this breaks multi-tenancy isolation.
+func isDevMode() bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv("AEGIS_DEV_MODE")))
+	return val == "true" || val == "1" || val == "yes"
+}
+
 const (
 	projectNamePrefix          = "aegis-platform"
 	defaultStackPrefix         = "aegis"
@@ -67,9 +76,10 @@ const (
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
 	envAegisSpokeProxyNodePort = "AEGIS_SPOKE_PROXY_NODEPORT"
-	envAegisSpokeProxyHost     = "AEGIS_SPOKE_PROXY_HOST"   // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
-	envAegisSpokeProxyCACert   = "AEGIS_SPOKE_PROXY_CA_CERT" // Path to spoke-proxy CA certificate for signing
-	envAegisSpokeProxyCAKey    = "AEGIS_SPOKE_PROXY_CA_KEY"  // Path to spoke-proxy CA private key for signing
+	envAegisSpokeProxyHost        = "AEGIS_SPOKE_PROXY_HOST"           // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
+	envAegisSpokeProxyCACert      = "AEGIS_SPOKE_PROXY_CA_CERT"        // Path to spoke-proxy CA certificate for signing
+	envAegisSpokeProxyCAKey       = "AEGIS_SPOKE_PROXY_CA_KEY"         // Path to spoke-proxy CA private key for signing
+	envAegisSpokeProxyTargetGroup = "AEGIS_SPOKE_PROXY_TARGET_GROUP"   // ARN of NLB target group for spoke-proxy
 	envAegisPulumiSkipRefresh  = "AEGIS_PULUMI_SKIP_REFRESH"
 	envAegisPulumiSkipApply    = "AEGIS_PULUMI_SKIP_APPLY"
 	envAegisPulumiWorkdir      = "AEGIS_PULUMI_WORKDIR"
@@ -301,7 +311,10 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		Observability:       observability.ResolveFromEnv(r.findRepoRoot()),
 		EnableObservability: addonEnabled(infra.Spec.Addons, "observability", true),
 		CertManager:         certmanager.ResolveFromEnv(),
-		EnableCertManager:   addonEnabled(infra.Spec.Addons, "certmanager", false),
+		// Use the env var (AEGIS_CERT_MANAGER_ENABLED) as the default when addon not specified.
+		// This allows enabling cert-manager globally via env var without requiring each ProjectInfra
+		// to explicitly request the addon.
+		EnableCertManager:   addonEnabled(infra.Spec.Addons, "certmanager", certmanager.ResolveFromEnv().Enable),
 		SkipHelm:            strings.EqualFold(os.Getenv("AEGIS_SKIP_SPOKE_HELM"), "true"),
 		EnableCostEstimates: true,
 	}
@@ -454,7 +467,9 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 		providerArgs := &aws.ProviderArgs{
 			Region: pulumi.StringPtr(input.Region),
 		}
-		if input.RoleARN != "" {
+		// In dev mode, skip role assumption and use ambient credentials directly.
+		// In production, assume the project-specific role for multi-tenancy isolation.
+		if input.RoleARN != "" && !isDevMode() {
 			assume := aws.ProviderAssumeRoleArgs{
 				RoleArn: pulumi.StringPtr(input.RoleARN),
 			}
@@ -568,6 +583,15 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			if err != nil {
 				return err
 			}
+
+			// Attach node groups to spoke-proxy NLB target group if configured
+			if targetGroupARN := os.Getenv(envAegisSpokeProxyTargetGroup); targetGroupARN != "" {
+				if err := r.attachNodeGroupsToTargetGroup(ctx, clusterDef.ClusterID, nodeGroups, targetGroupARN, awsProvider); err != nil {
+					r.log.Warn("failed to attach node groups to target group (non-fatal)", zap.Error(err))
+					// Don't fail the deployment, just log the warning
+				}
+			}
+
 			if hasGpuNodePool(clusterDef.NodePools) {
 				deps := append([]pulumi.Resource{}, nodeGroups...)
 				deps = append(deps, cluster)
@@ -1478,7 +1502,8 @@ func (r *Runner) buildKubeconfigWithExternalID(cluster *awseks.Cluster, region, 
 		return pulumi.Sprintf("")
 	}
 
-	hasExternal := strings.TrimSpace(roleARN) != "" && strings.TrimSpace(externalID) != ""
+	// In dev mode, skip role assumption and use direct credentials.
+	hasExternal := strings.TrimSpace(roleARN) != "" && strings.TrimSpace(externalID) != "" && !isDevMode()
 	if hasExternal {
 		return pulumi.Sprintf(`apiVersion: v1
 clusters:
@@ -1545,7 +1570,7 @@ users:
       interactiveMode: IfAvailable
 `, cluster.Endpoint, cluster.CertificateAuthority.Data().Elem(), cluster.Name,
 		cluster.Name, cluster.Name, cluster.Name, cluster.Name, cluster.Name,
-		cluster.Name, cluster.Name, pulumi.String(region))
+		cluster.Name, pulumi.String(region))
 }
 
 // ----------------------------------------------------------------------------- //
@@ -2679,6 +2704,64 @@ func getSpokeProxyNodePort() int {
 		}
 	}
 	return defaultSpokeProxyNodePort
+}
+
+// attachNodeGroupsToTargetGroup attaches the Auto Scaling Groups of EKS managed node groups
+// to an NLB target group. This enables the spoke-proxy service to receive traffic via the NLB.
+func (r *Runner) attachNodeGroupsToTargetGroup(ctx *pulumi.Context, clusterID string, nodeGroups []pulumi.Resource, targetGroupARN string, provider *aws.Provider) error {
+	for i, ng := range nodeGroups {
+		eksNg, ok := ng.(*awseks.NodeGroup)
+		if !ok {
+			continue
+		}
+
+		// EKS NodeGroup has a Resources output containing the Auto Scaling Groups
+		// We need to extract the ASG name and attach it to the target group
+		attachmentName := fmt.Sprintf("%s-ng-%d-tg-attachment", clusterID, i)
+
+		// Use Apply to get the ASG name from the node group resources
+		eksNg.Resources.ApplyT(func(resources []awseks.NodeGroupResource) error {
+			if len(resources) == 0 {
+				return nil
+			}
+			for _, resource := range resources {
+				if len(resource.AutoscalingGroups) == 0 {
+					continue
+				}
+				for _, asg := range resource.AutoscalingGroups {
+					if asg.Name == nil || *asg.Name == "" {
+						continue
+					}
+					// Create the attachment outside of Apply using the known ASG name
+					// Note: This is a workaround since we can't create resources inside Apply
+					r.log.Info("found ASG for node group, attachment should be configured",
+						zap.String("asg_name", *asg.Name),
+						zap.String("target_group", targetGroupARN))
+				}
+			}
+			return nil
+		})
+
+		// Create the attachment using the node group's ASG
+		// The ASG name follows the pattern: eks-<nodegroup-name>-<uuid>
+		// We use Pulumi's ability to reference outputs directly
+		_, err := awsautoscaling.NewAttachment(ctx, attachmentName, &awsautoscaling.AttachmentArgs{
+			AutoscalingGroupName: eksNg.Resources.ApplyT(func(resources []awseks.NodeGroupResource) string {
+				if len(resources) == 0 || len(resources[0].AutoscalingGroups) == 0 {
+					return ""
+				}
+				if resources[0].AutoscalingGroups[0].Name != nil {
+					return *resources[0].AutoscalingGroups[0].Name
+				}
+				return ""
+			}).(pulumi.StringOutput),
+			LbTargetGroupArn: pulumi.String(targetGroupARN),
+		}, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{ng}))
+		if err != nil {
+			return fmt.Errorf("create ASG attachment for node group %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 // generateSpokeProxyCert generates a self-signed TLS certificate for the spoke-proxy.

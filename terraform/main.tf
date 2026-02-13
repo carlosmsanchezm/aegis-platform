@@ -47,4 +47,15 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
-# Locals moved to eks.tf
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
+# Common locals used across modules
+locals {
+  cluster_name = "${var.cluster_name_prefix}-${var.environment}"
+  common_tags = {
+    Environment = var.environment
+    Project     = "aegis"
+    ManagedBy   = "terraform"
+  }
+}

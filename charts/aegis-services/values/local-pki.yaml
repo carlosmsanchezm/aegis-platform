@@ -50,6 +50,10 @@ pki:
       port: 443
     bootstrap:
       enabled: true
+    # External DNS names for step-ca (for spoke clusters connecting through Cloudflare)
+    # These are added to the CA's dnsNames config to allow JWT audience validation
+    externalDnsNames:
+      - step-ca.aegis-platform.tech
 
   # step-issuer configuration
   stepIssuer:
@@ -75,3 +79,21 @@ pki:
 #         name: aegis-internal
 #         kind: StepClusterIssuer
 #         group: certmanager.step.sm
+
+# step-ca subchart values (aliased as "step-ca" in Chart.yaml)
+# These values are passed directly to the step-certificates subchart
+step-ca:
+  # Use Docker Hub images (default)
+  image:
+    repository: smallstep/step-ca
+    tag: "0.27.2"
+  inject:
+    config:
+      files:
+        ca.json:
+          # Add external DNS names so step-ca accepts JWT tokens with these audiences
+          # This is required for spoke clusters connecting through Cloudflare tunnel
+          dnsNames:
+            - step-certificates.aegis-pki.svc.cluster.local
+            - 127.0.0.1
+            - step-ca.aegis-platform.tech

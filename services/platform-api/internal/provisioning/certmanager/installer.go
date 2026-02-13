@@ -14,6 +14,7 @@ import (
 	"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
+	rbacv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/rbac/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -29,6 +30,8 @@ const (
 	envStepCaURL                 = "AEGIS_STEP_CA_URL"
 	envStepCaRootCAB64           = "AEGIS_STEP_CA_ROOT_CA_B64"
 	envStepCaRootCAFile          = "AEGIS_STEP_CA_ROOT_CA_FILE"
+	envStepCaTLSCAB64            = "AEGIS_STEP_CA_TLS_CA_B64"    // TLS verification CA (e.g., public CA for Cloudflare)
+	envStepCaTLSCAFile           = "AEGIS_STEP_CA_TLS_CA_FILE"   // Path to TLS verification CA file
 	envStepProvisionerName       = "AEGIS_STEP_PROVISIONER_NAME"
 	envStepProvisionerPasswordFile = "AEGIS_STEP_PROVISIONER_PASSWORD_FILE"
 	envStepProvisionerKID        = "AEGIS_STEP_PROVISIONER_KID"
@@ -61,7 +64,8 @@ type HelmConfig struct {
 // StepCAConfig contains connection info for the hub's step-ca.
 type StepCAConfig struct {
 	URL                 string
-	RootCABase64        string
+	RootCABase64        string // Internal CA used for certificate chain verification
+	TLSCABase64         string // TLS connection CA (for Cloudflare/proxy scenarios; falls back to RootCABase64)
 	ProvisionerName     string
 	ProvisionerKID      string
 	ProvisionerPassword string
@@ -132,6 +136,23 @@ func ResolveFromEnv() Config {
 	if stepCaRootCA == "" {
 		stepCaRootCA = strings.TrimSpace(os.Getenv(envStepCaRootCAB64))
 	}
+
+	// TLS CA for connection verification (e.g., public CA when connecting through Cloudflare)
+	// Falls back to RootCA if not set
+	var stepCaTLSCA string
+	if caFile := strings.TrimSpace(os.Getenv(envStepCaTLSCAFile)); caFile != "" {
+		if data, err := os.ReadFile(caFile); err == nil {
+			stepCaTLSCA = base64.StdEncoding.EncodeToString(data)
+		}
+	}
+	if stepCaTLSCA == "" {
+		stepCaTLSCA = strings.TrimSpace(os.Getenv(envStepCaTLSCAB64))
+	}
+	// Fall back to internal root CA if TLS CA not specified
+	if stepCaTLSCA == "" {
+		stepCaTLSCA = stepCaRootCA
+	}
+
 	provisionerName := strings.TrimSpace(os.Getenv(envStepProvisionerName))
 	if provisionerName == "" {
 		provisionerName = defaultProvisionerName
@@ -174,6 +195,7 @@ func ResolveFromEnv() Config {
 		StepCA: StepCAConfig{
 			URL:                 stepCaURL,
 			RootCABase64:        stepCaRootCA,
+			TLSCABase64:         stepCaTLSCA,
 			ProvisionerName:     provisionerName,
 			ProvisionerKID:      provisionerKID,
 			ProvisionerPassword: provisionerPassword,
@@ -216,14 +238,20 @@ func (d defaultInstaller) Install(ctx *pulumi.Context, clusterID string, kubePro
 			return nil, fmt.Errorf("failed to install step-issuer: %w", err)
 		}
 
+		// Create RBAC for cert-manager to approve StepClusterIssuer certificate requests
+		approverRBAC, err := createStepIssuerApproverRBAC(ctx, clusterID, kubeProvider, cfg, namespace, []pulumi.Resource{stepIssuerRelease})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create step-issuer approver RBAC: %w", err)
+		}
+
 		// Create provisioner password secret (depends on step-issuer)
 		provSecret, err := createProvisionerSecret(ctx, clusterID, kubeProvider, cfg, namespace, []pulumi.Resource{stepIssuerRelease})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provisioner secret: %w", err)
 		}
 
-		// Create StepClusterIssuer (depends on secret)
-		stepClusterIssuer, err := createStepClusterIssuer(ctx, clusterID, kubeProvider, cfg, namespace, []pulumi.Resource{provSecret})
+		// Create StepClusterIssuer (depends on secret and RBAC)
+		stepClusterIssuer, err := createStepClusterIssuer(ctx, clusterID, kubeProvider, cfg, namespace, []pulumi.Resource{provSecret, approverRBAC})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create StepClusterIssuer: %w", err)
 		}
@@ -361,6 +389,8 @@ func createStepClusterIssuer(ctx *pulumi.Context, clusterID string, kubeProvider
 	}
 
 	// StepClusterIssuer is a custom resource from step-issuer
+	// Use TLSCABase64 for the caBundle - this is the CA that verifies the TLS connection to step-ca
+	// (e.g., public CA roots when connecting through Cloudflare tunnel)
 	return apiextensions.NewCustomResource(ctx, pulumiResourceName(clusterID+"-step-cluster-issuer", 53), &apiextensions.CustomResourceArgs{
 		ApiVersion: pulumi.String("certmanager.step.sm/v1beta1"),
 		Kind:       pulumi.String("StepClusterIssuer"),
@@ -374,7 +404,7 @@ func createStepClusterIssuer(ctx *pulumi.Context, clusterID string, kubeProvider
 		OtherFields: kubernetes.UntypedArgs{
 			"spec": pulumi.Map{
 				"url":      pulumi.String(cfg.StepCA.URL),
-				"caBundle": pulumi.String(cfg.StepCA.RootCABase64),
+				"caBundle": pulumi.String(cfg.StepCA.TLSCABase64),
 				"provisioner": pulumi.Map{
 					"name": pulumi.String(cfg.StepCA.ProvisionerName),
 					"kid":  pulumi.String(cfg.StepCA.ProvisionerKID),
@@ -478,6 +508,73 @@ func createSelfSignedClusterIssuer(ctx *pulumi.Context, clusterID string, kubePr
 	}
 
 	return caClusterIssuer, nil
+}
+
+// createStepIssuerApproverRBAC creates RBAC resources to allow cert-manager to approve
+// CertificateRequests for StepClusterIssuer. This is required because cert-manager's
+// default approver doesn't have permission to approve requests for custom issuer types.
+func createStepIssuerApproverRBAC(ctx *pulumi.Context, clusterID string, kubeProvider *kubernetes.Provider, cfg Config, namespace string, depends []pulumi.Resource) (pulumi.Resource, error) {
+	issuerName := cfg.ClusterIssuerName
+	if issuerName == "" {
+		issuerName = defaultClusterIssuerName
+	}
+
+	// Create a ClusterRole that allows approving CertificateRequests for StepClusterIssuers
+	clusterRole, err := rbacv1.NewClusterRole(ctx, pulumiResourceName(clusterID+"-step-issuer-approver", 53), &rbacv1.ClusterRoleArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name: pulumi.String(fmt.Sprintf("cert-manager-approval:certmanager-step-sm:%s", issuerName)),
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/managed-by": pulumi.String("aegis-platform"),
+				"app.kubernetes.io/component":  pulumi.String("pki"),
+			},
+		},
+		Rules: rbacv1.PolicyRuleArray{
+			&rbacv1.PolicyRuleArgs{
+				ApiGroups: pulumi.StringArray{pulumi.String("cert-manager.io")},
+				Resources: pulumi.StringArray{
+					pulumi.String("signers"),
+				},
+				Verbs: pulumi.StringArray{
+					pulumi.String("approve"),
+				},
+				// Resource name format: <issuerGroup>/<issuerKind>.<issuerName>
+				ResourceNames: pulumi.StringArray{
+					pulumi.String(fmt.Sprintf("stepclusterissuers.certmanager.step.sm/%s", issuerName)),
+				},
+			},
+		},
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn(depends))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create step-issuer approver ClusterRole: %w", err)
+	}
+
+	// Create ClusterRoleBinding to bind the approver role to cert-manager's service account
+	clusterRoleBinding, err := rbacv1.NewClusterRoleBinding(ctx, pulumiResourceName(clusterID+"-step-issuer-approver-binding", 53), &rbacv1.ClusterRoleBindingArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name: pulumi.String(fmt.Sprintf("cert-manager-approval:certmanager-step-sm:%s", issuerName)),
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/managed-by": pulumi.String("aegis-platform"),
+				"app.kubernetes.io/component":  pulumi.String("pki"),
+			},
+		},
+		RoleRef: &rbacv1.RoleRefArgs{
+			ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
+			Kind:     pulumi.String("ClusterRole"),
+			Name:     clusterRole.Metadata.Name().Elem(),
+		},
+		Subjects: rbacv1.SubjectArray{
+			&rbacv1.SubjectArgs{
+				Kind:      pulumi.String("ServiceAccount"),
+				Name:      pulumi.String(fmt.Sprintf("cert-manager-%s", clusterID)),
+				Namespace: pulumi.String(namespace),
+			},
+		},
+	}, pulumi.Provider(kubeProvider), pulumi.DependsOn([]pulumi.Resource{clusterRole}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create step-issuer approver ClusterRoleBinding: %w", err)
+	}
+
+	return clusterRoleBinding, nil
 }
 
 // pulumiResourceName truncates a name to fit within Pulumi's resource name limits.

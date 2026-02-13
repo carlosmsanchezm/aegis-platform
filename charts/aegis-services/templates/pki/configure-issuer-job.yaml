@@ -19,7 +19,7 @@ Requires kubectl and jq in the image.
 {{- $ns := include "aegis-services.pki.namespace" . -}}
 {{- $issuerName := include "aegis-services.pki.clusterIssuerName" . -}}
 {{- $trustBundleName := include "aegis-services.pki.trustBundleSecretName" . -}}
-{{- $release := include "aegis-services.pki.stepCa.releaseName" . -}}
+{{- $release := include "aegis-services.pki.stepCa.fullname" . -}}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -58,6 +58,9 @@ rules:
     verbs: ["get", "list", "create", "update", "patch"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -102,7 +105,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: configure
-          image: bitnami/kubectl:1.29
+          image: bitnami/kubectl:latest
           command:
             - /bin/bash
             - -c
@@ -116,14 +119,14 @@ spec:
               PROVISIONER_NAME="{{ $provisioner.name | default "aegis" }}"
               STEP_CA_URL="{{ include "aegis-services.pki.stepCa.serviceURL" . }}"
 
-              echo "==> Waiting for step-ca bootstrap job to complete..."
+              echo "==> Waiting for step-ca pod to be ready..."
               for i in {1..60}; do
-                if kubectl get job "${RELEASE_NAME}" -n "${PKI_NAMESPACE}" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q "1"; then
-                  echo "    Bootstrap job completed successfully"
+                if kubectl get statefulset "${RELEASE_NAME}" -n "${PKI_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null | grep -q "1"; then
+                  echo "    step-ca pod is ready"
                   break
                 fi
-                echo "    Waiting for bootstrap job... (attempt $i/60)"
-                sleep 10
+                echo "    Waiting for step-ca pod... (attempt $i/60)"
+                sleep 5
               done
 
               echo "==> Waiting for step-ca configmaps to be populated..."

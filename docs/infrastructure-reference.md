@@ -1536,7 +1536,7 @@ terraform output pulumi_secret_access_key
 |------|-------|
 | IAM User | `aegis-pulumi-provisioner` |
 | User ARN | `arn:aws:iam::567751785679:user/service/aegis-pulumi-provisioner` |
-| Access Key ID | `REDACTED_AWS_ACCESS_KEY_ID` |
+| Access Key ID | `REPLACE_WITH_AWS_ACCESS_KEY_ID` |
 | Target Role ARN | `arn:aws:iam::567751785679:role/aegis-platform` |
 | S3 Bucket | `aegis-pulumi-state-dev` |
 | S3 Prefix | `aegis/pulumi` |
@@ -2172,7 +2172,7 @@ CREDENTIALS:
 
 AWS CREDENTIALS (terraform-managed):
   IAM User:         aegis-pulumi-provisioner
-  Access Key:       REDACTED_AWS_ACCESS_KEY_ID
+  Access Key:       REPLACE_WITH_AWS_ACCESS_KEY_ID
   Get secret:       cd terraform/pulumi-stack && terraform output pulumi_secret_access_key
   Target Role:      arn:aws:iam::567751785679:role/aegis-platform
 ```

@@ -52,10 +52,13 @@ lerna-debug.log*
 coverage/
 .nyc_output/
 
-# Environment files (only if you don’t want them committed)
+# Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+
+# PKI / TLS secrets
+.pki/**/*.key
+.pki/**/*.crt
 
 # Misc frontend artifacts
 *.tsbuildinfo

@@ -45,9 +45,20 @@ func main() {
 	if storeBackend == "postgres" {
 		dsn := buildPostgresDSN()
 		var err error
-		st, err = postgres.New(dsn, logger)
+		maxRetries := 5
+		for i := 0; i < maxRetries; i++ {
+			st, err = postgres.New(dsn, logger)
+			if err == nil {
+				break
+			}
+			logger.Warn("failed to connect to postgres, retrying...",
+				zap.Int("attempt", i+1),
+				zap.Int("max_retries", maxRetries),
+				zap.Error(err))
+			time.Sleep(time.Duration(1<<uint(i)) * time.Second) // exponential backoff: 1s, 2s, 4s, 8s, 16s
+		}
 		if err != nil {
-			logger.Fatal("failed to initialize postgres store", zap.Error(err))
+			logger.Fatal("failed to connect to postgres after retries", zap.Error(err))
 		}
 		logger.Info("using PostgreSQL store", zap.String("backend", "postgres"))
 

@@ -20,7 +20,7 @@ ingress-nginx:
 platformApi:
   image:
     repository: aegis-platform-api
-    tag: 8afb9e0-vscode-dynamic
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
 
   pulumi:
@@ -501,7 +501,7 @@ keycloak:
       usernameKey: username
       passwordKey: password
       username: admin
-      password: change-me
+      password: ""  # REQUIRED: Set via --set or values override
   database:
     vendor: postgres
     host: ""
@@ -513,7 +513,7 @@ keycloak:
       usernameKey: username
       passwordKey: password
       username: keycloak
-      password: supersecure
+      password: ""  # REQUIRED: Set via --set or values override
   postgres:
     enabled: true
     initChown: true

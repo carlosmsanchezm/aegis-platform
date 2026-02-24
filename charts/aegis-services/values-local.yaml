@@ -38,7 +38,7 @@ platformApi:
     LOG_LEVEL: "debug"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
-    AUTH_STATIC_TOKEN: "supersecret"
+    AUTH_STATIC_TOKEN: ""  # REQUIRED: Set via --set or values override
     AUTH_STATIC_SUBJECT: "dev-user@example.com"
 
   # Local kubeconfig directory

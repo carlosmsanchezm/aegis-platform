@@ -75,6 +75,31 @@ type ProvisioningRun struct {
 	UpdatedAt   time.Time
 }
 
+// AuditEvent represents a single auditable action within the platform.
+type AuditEvent struct {
+	ID           string
+	EventType    string    // e.g. "workload.submitted", "workload.rejected", "session.created"
+	Timestamp    time.Time
+	Subject      string    // user identity from auth token
+	ResourceType string    // "workload", "project", "cluster", "session", "budget"
+	ResourceID   string
+	Action       string    // "create", "read", "update", "delete"
+	Outcome      string    // "success", "failure", "denied"
+	Details      map[string]string
+	SourceIP     string
+}
+
+// AuditEventFilter defines optional criteria for listing audit events.
+type AuditEventFilter struct {
+	EventType    string
+	Subject      string
+	ResourceType string
+	ResourceID   string
+	StartTime    time.Time
+	EndTime      time.Time
+	Limit        int
+}
+
 // ProvisioningLogSink exposes the minimal interface required to persist provisioning log lines.
 type ProvisioningLogSink interface {
 	AppendProvisioningLog(entry ProvisioningLogEntry)
@@ -165,4 +190,8 @@ type Store interface {
 	UpsertProvisioningRun(run ProvisioningRun)
 	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
 	ListProvisioningRuns(projectID string) []*ProvisioningRun // List runs for a project (or all if empty)
+
+	// audit events
+	PutAuditEvent(event *AuditEvent) error
+	ListAuditEvents(filter AuditEventFilter) ([]*AuditEvent, error)
 }

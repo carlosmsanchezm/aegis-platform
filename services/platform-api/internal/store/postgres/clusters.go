@@ -185,6 +185,16 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`, req.GetClusterId(), k
 		}
 	}
 
+	// Persist IL level as a label so it survives round-trips through the DB.
+	if ilLevel := strings.TrimSpace(req.GetIlLevel()); ilLevel != "" {
+		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+			req.GetClusterId(), "aegis.yourorg.dev/ilLevel", strings.ToUpper(ilLevel)); err != nil {
+			s.logExecError("cluster_register_insert_il_level", err, zap.String("cluster_id", req.GetClusterId()))
+			return
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		s.logExecError("cluster_register_commit", err, zap.String("cluster_id", req.GetClusterId()))
 	}
@@ -376,6 +386,23 @@ FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(
 		t := deletedAt.Time.UTC()
 		info.DeletedAt = &t
 	}
+
+	// Load labels for the cluster.
+	labelRows, lErr := s.pool.Query(ctx, `SELECT k, v FROM cluster_labels WHERE cluster_id=$1`, clusterID)
+	if lErr == nil {
+		defer labelRows.Close()
+		for labelRows.Next() {
+			var k, v string
+			if err := labelRows.Scan(&k, &v); err != nil {
+				break
+			}
+			info.Labels[k] = v
+			if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+				info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+			}
+		}
+	}
+
 	return info
 }
 
@@ -469,6 +496,10 @@ FROM clusters WHERE deleted_at IS NULL`)
 			}
 			if info, ok := clusters[id]; ok {
 				info.Labels[k] = v
+				// Hydrate ILLevel from the well-known label.
+				if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+					info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+				}
 			}
 		}
 	} else {
@@ -570,6 +601,9 @@ func (s *PostgresStore) ListClustersByProject(projectID string) []*store.Cluster
 				}
 				if info, ok := clusters[id]; ok {
 					info.Labels[k] = v
+					if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+						info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+					}
 				}
 			}
 		}

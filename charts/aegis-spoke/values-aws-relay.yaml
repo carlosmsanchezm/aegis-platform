@@ -32,7 +32,7 @@ k8sAgent:
     # NOTE: Do NOT use NLB for Keycloak - port 8443 tunnel often fails
     AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
-    AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+    AEGIS_CP_OIDC_CLIENT_SECRET: ""  # REQUIRED: Set via --set or values override
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
     AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"
 

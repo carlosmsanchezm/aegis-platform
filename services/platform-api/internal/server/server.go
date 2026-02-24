@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -186,6 +187,9 @@ var (
 )
 
 func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay, infraClient client.Client, infraNamespace string) *Server {
+	if log == nil {
+		log = zap.Must(zap.NewProduction())
+	}
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -226,10 +230,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	}
 	policy, err := authz.LoadPolicyFromEnv(config.DefaultRoleBindingsJSON())
 	if err != nil {
-		if log != nil {
-			log.Fatal("failed to load authorization policy", zap.Error(err))
-		}
-		panic(fmt.Errorf("failed to load authorization policy: %w", err))
+		log.Fatal("failed to load authorization policy", zap.Error(err))
 	}
 	if strings.TrimSpace(infraNamespace) == "" {
 		infraNamespace = defaultInfraNamespace
@@ -317,6 +318,9 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	p.Annotations = mergeProjectAnnotations(p.GetAnnotations(), awsCreds)
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
+	s.audit(ctx, "project.created", "project", p.GetId(), "create", "success", map[string]string{
+		"owner_group": p.GetOwnerGroup(),
+	})
 	populateProjectAwsFromAnnotations(p)
 	return p, nil
 }
@@ -354,6 +358,11 @@ func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetReques
 		zap.Float64("limit_usd", b.GetLimitUsd()),
 		zap.String("policy_mode", b.GetPolicyMode()),
 	)
+	s.audit(ctx, "budget.updated", "budget", b.GetProjectId(), "update", "success", map[string]string{
+		"queue":       b.GetQueue(),
+		"limit_usd":   fmt.Sprintf("%.2f", b.GetLimitUsd()),
+		"policy_mode": b.GetPolicyMode(),
+	})
 	return b, nil
 }
 
@@ -407,6 +416,10 @@ func (s *Server) RegisterCluster(ctx context.Context, r *aegis.ClusterRegisterRe
 
 	s.store.UpsertClusterFromRegister(r)
 	s.log.Info("cluster registered", zap.String("cluster_id", r.GetClusterId()), zap.String("provider", r.GetProvider()), zap.String("region", r.GetRegion()), zap.Int("label_count", len(r.GetLabels())))
+	s.audit(ctx, "cluster.registered", "cluster", r.GetClusterId(), "create", "success", map[string]string{
+		"provider": r.GetProvider(),
+		"region":   r.GetRegion(),
+	})
 
 	resp := &aegis.ClusterRegisterResponse{Ok: true, Message: "registered"}
 	if warning != "" {
@@ -648,6 +661,11 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			zap.Float64("estimate_usd", estimateUSD),
 			zap.String("reason", reason),
 		)
+		s.audit(ctx, "workload.rejected", "workload", w.GetId(), "create", "denied", map[string]string{
+			"project_id":   w.GetProjectId(),
+			"reason":       reason,
+			"estimate_usd": fmt.Sprintf("%.2f", estimateUSD),
+		})
 		return nil, status.Error(codes.FailedPrecondition, "budget exceeded: "+reason)
 	}
 	if policy != "" {
@@ -703,10 +721,103 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 						zap.String("project_id", w.GetProjectId()),
 						zap.String("flavor", reqFlavor),
 						zap.Int("limit", limit))
+					s.audit(ctx, "workload.rejected", "workload", w.GetId(), "create", "denied", map[string]string{
+						"project_id": w.GetProjectId(),
+						"reason":     "quota_reached",
+						"flavor":     reqFlavor,
+					})
 					return nil, err
 				}
 			}
 		}
+	}
+
+	// ---- Compliance policy enforcement ----
+	// If the project has a PolicyDomain set, enforce region restrictions, data
+	// classification requirements, and egress policy before proceeding to placement.
+	if projectPD := p.GetPolicy(); projectPD != nil {
+		allowedRegions := normalizeStrings(projectPD.GetRegions())
+		requiredDataLevel := strings.TrimSpace(strings.ToUpper(projectPD.GetDataLevel()))
+
+		// For a pinned cluster, validate compliance constraints upfront.
+		if requestedCluster != "" {
+			pinCI := s.store.GetClusterInfo(requestedCluster)
+			if pinCI != nil {
+				// Region restriction check.
+				if len(allowedRegions) > 0 {
+					clusterRegion := strings.ToLower(strings.TrimSpace(pinCI.Region))
+					regionOK := false
+					for _, r := range allowedRegions {
+						if clusterRegion == r {
+							regionOK = true
+							break
+						}
+					}
+					if !regionOK {
+						s.log.Warn("compliance: cluster region not in allowed regions",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("cluster_region", pinCI.Region),
+							zap.Strings("allowed_regions", allowedRegions),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster region %q not in allowed regions %v",
+							pinCI.Region, allowedRegions)
+					}
+				}
+
+				// Data classification check.
+				if requiredDataLevel != "" {
+					clusterIL := strings.TrimSpace(strings.ToUpper(pinCI.ILLevel))
+					if clusterIL == "" {
+						// Also check the well-known label as fallback.
+						if v, ok := pinCI.Labels["aegis.yourorg.dev/ilLevel"]; ok {
+							clusterIL = strings.TrimSpace(strings.ToUpper(v))
+						}
+					}
+					if clusterIL == "" {
+						s.log.Warn("compliance: cluster has no IL level for data classification check",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("required_data_level", requiredDataLevel),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster %q has no data classification level; project requires %s",
+							requestedCluster, requiredDataLevel)
+					}
+					if !dataLevelSatisfied(requiredDataLevel, clusterIL) {
+						s.log.Warn("compliance: cluster IL level does not satisfy project requirement",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("cluster_il_level", clusterIL),
+							zap.String("required_data_level", requiredDataLevel),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster %q classification %q does not satisfy required level %q",
+							requestedCluster, clusterIL, requiredDataLevel)
+					}
+				}
+			}
+			// If pinCI is nil the cluster will be caught as "not registered" below.
+		}
+
+		// Egress policy: record the constraint (actual network policy enforcement
+		// happens at the K8s level; the API logs that this policy is active).
+		if projectPD.GetDenyEgressByDefault() {
+			s.log.Info("compliance: deny-egress-by-default active for workload",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+			)
+		}
+	}
+
+	// Derive the project's required data level once so we can filter candidates.
+	var projectRequiredDataLevel string
+	if pd := p.GetPolicy(); pd != nil {
+		projectRequiredDataLevel = strings.TrimSpace(strings.ToUpper(pd.GetDataLevel()))
 	}
 
 	// Build candidates from current cluster snapshots
@@ -724,6 +835,23 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				zap.Time("last_heartbeat", ci.LastHeartbeat),
 			)
 			continue
+		}
+		// Data classification filter: skip clusters that don't satisfy the project's required level.
+		if projectRequiredDataLevel != "" {
+			clusterIL := strings.TrimSpace(strings.ToUpper(ci.ILLevel))
+			if clusterIL == "" {
+				if v, ok := ci.Labels["aegis.yourorg.dev/ilLevel"]; ok {
+					clusterIL = strings.TrimSpace(strings.ToUpper(v))
+				}
+			}
+			if !dataLevelSatisfied(projectRequiredDataLevel, clusterIL) {
+				s.log.Debug("skipping cluster: data classification insufficient",
+					zap.String("cluster_id", ci.ID),
+					zap.String("cluster_il_level", clusterIL),
+					zap.String("required_data_level", projectRequiredDataLevel),
+				)
+				continue
+			}
 		}
 		cands = append(cands, placement.Candidate{
 			ClusterID:   ci.ID,
@@ -894,6 +1022,11 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		zap.String("status", w.GetStatus()),
 		zap.String("namespace", targetNS),
 	)
+	s.audit(ctx, "workload.submitted", "workload", w.GetId(), "create", "success", map[string]string{
+		"project_id": w.GetProjectId(),
+		"cluster_id": w.GetClusterId(),
+		"flavor":     reqFlavor,
+	})
 	return w, nil
 }
 
@@ -905,7 +1038,7 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 	}
 	w := s.store.GetWorkload(req.Id)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("workload not found", zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -928,7 +1061,7 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 	workloadID := strings.TrimSpace(req.GetId())
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 		s.log.Warn("resume workload failed", zap.Error(err), zap.String("workload_id", workloadID))
 		return nil, err
 	}
@@ -960,7 +1093,7 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 		return nil, status.Error(codes.Internal, "failed to locate workload job")
 	}
 	if job == nil {
-		return nil, status.Error(codes.NotFound, "workload job not found")
+		return nil, status.Errorf(codes.NotFound, "workload job not found for workload %q", workloadID)
 	}
 
 	orig := job.DeepCopy()
@@ -999,6 +1132,10 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 		zap.String("cluster_id", updated.GetClusterId()),
 		zap.Int32("resume_count", updated.GetResumeCount()),
 	)
+	s.audit(ctx, "workload.resumed", "workload", updated.GetId(), "update", "success", map[string]string{
+		"cluster_id":   updated.GetClusterId(),
+		"resume_count": fmt.Sprintf("%d", updated.GetResumeCount()),
+	})
 	return updated, nil
 }
 
@@ -1014,7 +1151,7 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 		s.log.Warn("terminate workload failed", zap.Error(err), zap.String("workload_id", workloadID))
 		return nil, err
 	}
@@ -1145,6 +1282,10 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 		zap.String("cluster_id", updated.GetClusterId()),
 		zap.String("reason", reason),
 	)
+	s.audit(ctx, "workload.terminated", "workload", updated.GetId(), "delete", "success", map[string]string{
+		"cluster_id": updated.GetClusterId(),
+		"reason":     reason,
+	})
 	return updated, nil
 }
 
@@ -1231,6 +1372,10 @@ func (s *Server) CreateConnectionSession(ctx context.Context, req *aegis.CreateC
 	}
 
 	s.auditSession("session.create", session, nil)
+	s.audit(ctx, "session.created", "session", session.SessionID, "create", "success", map[string]string{
+		"workload_id": session.WorkloadID,
+		"client":      session.Client,
+	})
 	return sessionToProto(session), nil
 }
 
@@ -1245,7 +1390,7 @@ func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewCon
 
 	existing, ok := s.store.ConnectionSession(sessionID)
 	if !ok {
-		err := status.Error(codes.NotFound, "session not found")
+		err := status.Errorf(codes.NotFound, "session %q not found", sessionID)
 		s.auditSession("session.renew", nil, err, zap.String("session_id", sessionID))
 		return nil, err
 	}
@@ -1333,6 +1478,9 @@ func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewCon
 	}
 
 	s.auditSession("session.renew", updated, nil)
+	s.audit(ctx, "session.renewed", "session", updated.SessionID, "update", "success", map[string]string{
+		"workload_id": updated.WorkloadID,
+	})
 	return sessionToProto(updated), nil
 }
 
@@ -1347,7 +1495,7 @@ func (s *Server) RevokeConnectionSession(ctx context.Context, req *aegis.RevokeC
 
 	existing, ok := s.store.ConnectionSession(sessionID)
 	if !ok {
-		err := status.Error(codes.NotFound, "session not found")
+		err := status.Errorf(codes.NotFound, "session %q not found", sessionID)
 		s.auditSession("session.revoke", nil, err, zap.String("session_id", sessionID))
 		return nil, err
 	}
@@ -1382,6 +1530,9 @@ func (s *Server) RevokeConnectionSession(ctx context.Context, req *aegis.RevokeC
 	}
 
 	s.auditSession("session.revoke", updated, nil)
+	s.audit(ctx, "session.revoked", "session", updated.SessionID, "delete", "success", map[string]string{
+		"workload_id": updated.WorkloadID,
+	})
 	return &emptypb.Empty{}, nil
 }
 
@@ -1565,7 +1716,7 @@ func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, 
 func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*sessionContext, error) {
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		return nil, status.Error(codes.NotFound, "workload not found")
+		return nil, status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 	}
 
 	wk, ok := w.GetKind().(*aegis.Workload_Workspace)
@@ -1679,6 +1830,30 @@ func (s *Server) auditSession(action string, session *store.ConnectionSession, e
 		return
 	}
 	s.log.Info("connection session event", fields...)
+}
+
+// audit records a structured audit event capturing who did what, to which resource, and the outcome.
+func (s *Server) audit(ctx context.Context, eventType, resourceType, resourceID, action, outcome string, details map[string]string) {
+	subject := subjectFromContext(ctx)
+	sourceIP := ""
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		sourceIP = p.Addr.String()
+	}
+	event := &store.AuditEvent{
+		ID:           "aud-" + RandID(),
+		EventType:    eventType,
+		Timestamp:    time.Now().UTC(),
+		Subject:      subject,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Outcome:      outcome,
+		Details:      details,
+		SourceIP:     sourceIP,
+	}
+	if err := s.store.PutAuditEvent(event); err != nil {
+		s.log.Error("failed to write audit event", zap.Error(err), zap.String("event_type", eventType))
+	}
 }
 
 func normalizeClient(raw string) (string, error) {
@@ -1925,7 +2100,7 @@ func (s *Server) StartWorkload(ctx context.Context, req *aegis.StartWorkloadRequ
 
 	w := s.store.GetWorkload(req.GetId())
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("start workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -1996,7 +2171,7 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 	}
 	w := s.store.GetWorkload(req.GetId())
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("ack workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -2143,7 +2318,7 @@ func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*a
 		b = s.store.GetBudgetExact(req.GetProjectId(), "")
 	}
 	if b == nil {
-		return nil, status.Error(codes.NotFound, "budget not found")
+		return nil, status.Errorf(codes.NotFound, "budget not found for project %q", req.GetProjectId())
 	}
 	view, _ := s.store.UsageView(b.GetProjectId(), b.GetQueue())
 	resp := &aegis.GetBudgetResponse{Budget: b, Usage: &aegis.BudgetUsage{
@@ -2522,6 +2697,36 @@ func normalizeStrings(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// dataLevelSatisfied returns true when the cluster's impact level meets or
+// exceeds the project's required level. Levels are compared numerically:
+// IL2 < IL4 < IL5 < IL6. If the cluster has no level set it is treated as
+// non-compliant (returns false). Unknown formats are compared lexicographically
+// as a safe fallback.
+func dataLevelSatisfied(required, clusterLevel string) bool {
+	if clusterLevel == "" {
+		return false
+	}
+	reqNum := ilLevelNumber(required)
+	clusterNum := ilLevelNumber(clusterLevel)
+	if reqNum > 0 && clusterNum > 0 {
+		return clusterNum >= reqNum
+	}
+	// Fallback: exact (case-insensitive) match for non-standard levels.
+	return strings.EqualFold(required, clusterLevel)
+}
+
+// ilLevelNumber extracts the numeric portion from common IL-level strings
+// (e.g. "IL4" -> 4, "IL5" -> 5). Returns 0 for unrecognised formats.
+func ilLevelNumber(level string) int {
+	level = strings.TrimSpace(strings.ToUpper(level))
+	level = strings.TrimPrefix(level, "IL")
+	n, err := strconv.Atoi(level)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func (s *Server) applyDefaultFlavor(policy placement.ProjectPolicy, w *aegis.Workload) {

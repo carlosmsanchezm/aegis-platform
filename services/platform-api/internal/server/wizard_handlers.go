@@ -170,7 +170,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	project := s.store.GetProject(projectID)
 	if project == nil {
-		writeWizardError(w, status.Error(codes.NotFound, "project not found"))
+		writeWizardError(w, status.Errorf(codes.NotFound, "project %q not found", projectID))
 		return
 	}
 	if err := s.authorize(ctx, projectID, "", "createWorkspace"); err != nil {
@@ -293,6 +293,11 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Status:    statusText,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+	s.audit(ctx, "workspace.created", "workload", res.GetId(), "create", "success", map[string]string{
+		"project_id": projectID,
+		"cluster_id": res.GetClusterId(),
+		"name":       name,
+	})
 	writeJSON(w, http.StatusCreated, resp)
 }
 

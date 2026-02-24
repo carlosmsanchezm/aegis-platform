@@ -43,6 +43,8 @@ type MemStore struct {
 	provisioningLogs map[string][]ProvisioningLogEntry
 	provisioningRuns map[string]*ProvisioningRun
 	provisioningSeq  int64
+
+	auditEvents []*AuditEvent
 }
 
 func NewMemStore() *MemStore {
@@ -1001,4 +1003,73 @@ func (s *MemStore) ListProvisioningRuns(projectID string) []*ProvisioningRun {
 		out = append(out, &copy)
 	}
 	return out
+}
+
+// -------- audit events --------
+
+// PutAuditEvent appends an audit event to the in-memory log.
+func (s *MemStore) PutAuditEvent(event *AuditEvent) error {
+	if event == nil {
+		return fmt.Errorf("audit event required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clone := *event
+	if clone.Details != nil {
+		clonedDetails := make(map[string]string, len(clone.Details))
+		for k, v := range clone.Details {
+			clonedDetails[k] = v
+		}
+		clone.Details = clonedDetails
+	}
+	s.auditEvents = append(s.auditEvents, &clone)
+	return nil
+}
+
+// ListAuditEvents returns audit events matching the provided filter, newest first.
+func (s *MemStore) ListAuditEvents(filter AuditEventFilter) ([]*AuditEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	out := make([]*AuditEvent, 0, limit)
+	// iterate in reverse for newest-first ordering
+	for i := len(s.auditEvents) - 1; i >= 0; i-- {
+		ev := s.auditEvents[i]
+		if filter.EventType != "" && !strings.EqualFold(ev.EventType, filter.EventType) {
+			continue
+		}
+		if filter.Subject != "" && !strings.EqualFold(ev.Subject, filter.Subject) {
+			continue
+		}
+		if filter.ResourceType != "" && !strings.EqualFold(ev.ResourceType, filter.ResourceType) {
+			continue
+		}
+		if filter.ResourceID != "" && ev.ResourceID != filter.ResourceID {
+			continue
+		}
+		if !filter.StartTime.IsZero() && ev.Timestamp.Before(filter.StartTime) {
+			continue
+		}
+		if !filter.EndTime.IsZero() && ev.Timestamp.After(filter.EndTime) {
+			continue
+		}
+		clone := *ev
+		if ev.Details != nil {
+			clonedDetails := make(map[string]string, len(ev.Details))
+			for k, v := range ev.Details {
+				clonedDetails[k] = v
+			}
+			clone.Details = clonedDetails
+		}
+		out = append(out, &clone)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }

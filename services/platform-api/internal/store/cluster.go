@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ type ClusterInfo struct {
 	ProjectID           string // Direct FK to projects table for multi-tenancy
 	Provider            string
 	Region              string
+	ILLevel             string // Impact level classification (e.g., "IL4", "IL5")
 	Labels              map[string]string
 	AvailableFlavorSet  map[string]bool
 	TTFGSecondsP50      float64
@@ -63,6 +65,9 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 	}
 	ci.Provider = req.GetProvider()
 	ci.Region = req.GetRegion()
+	if ilLevel := strings.TrimSpace(req.GetIlLevel()); ilLevel != "" {
+		ci.ILLevel = strings.ToUpper(ilLevel)
+	}
 	if ci.Labels == nil {
 		ci.Labels = map[string]string{}
 	}

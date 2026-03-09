@@ -37,7 +37,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | **Target Level** | CMMC Level 2 (110 practices = NIST 800-171 Rev 3) |
 | **Current Phase** | Foundation Building |
 | **Controls Mapped** | 97 of 110 (OSCAL extraction) |
-| **SPRS Score** | Estimated ~42/110 (see worksheet) |
+| **SPRS Score** | 38/110 (preliminary, see worksheet) |
 | **Reuse from SOC 2/ISO** | ~40% of controls |
 | **C3PAO** | ❌ Not selected |
 | **Strategy** | Level 1 self-assessment now; Level 2 when DoD customer pipeline |

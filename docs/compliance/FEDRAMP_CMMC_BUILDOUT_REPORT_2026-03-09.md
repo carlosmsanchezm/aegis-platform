@@ -58,11 +58,11 @@ This buildout created the CMMC (Cybersecurity Maturity Model Certification) prog
 
 | Status | Count | % |
 |--------|-------|---|
-| Implemented | 52 | 54% |
+| Implemented | 46 | 47% |
 | Partial | 25 | 26% |
 | Inherited/N/A | 11 | 11% |
 | Not Implemented | 6 | 6% |
-| Not Yet Mapped | 3 | 3% |
+| Not Assessed | 9 | 9% |
 | **Total** | **97** | |
 
 ### Gap Analysis Summary

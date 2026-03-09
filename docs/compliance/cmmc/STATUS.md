@@ -16,7 +16,7 @@ Aegis Technologies is building its Cybersecurity Maturity Model Certification (C
 | **Current Phase** | Foundation Building |
 | **Foundation Compliance** | SOC 2 Type II + ISO 27001 |
 | **Estimated Control Reuse** | ~40% from existing SOC 2 + ISO 27001 programs |
-| **SPRS Score** | Not yet calculated (see 03-sprs-score-worksheet.md) |
+| **SPRS Score** | 38/110 preliminary (see 03-sprs-score-worksheet.md) |
 | **C3PAO Selected** | No |
 | **Target Certification** | Level 1 self-assessment by Q3 2026; Level 2 when DoD pipeline materializes |
 
@@ -80,7 +80,7 @@ The following mandatory prerequisites have NOT been completed:
 
 | Asset | Location | CMMC Use |
 |-------|----------|----------|
-| Control Implementation Statements (17 controls) | `customer-docs/control-implementation-statements.md` | Direct input to SSP and CMMC practice descriptions |
+| Control Implementation Statements (40 controls) | `customer-docs/control-implementation-statements.md` | Direct input to SSP and CMMC practice descriptions |
 | OSCAL NIST 800-171 Rev 3 Catalog | `docs/oscal/nist_sp_800_171_rev3_catalog.json` | Machine-readable control catalog for automated mapping |
 | FedRAMP Control Mapping (145 controls) | `docs/compliance/fedramp/01-control-mapping.csv` | Cross-reference for 800-53 to 800-171 mapping |
 | FedRAMP Gap Analysis | `docs/compliance/fedramp/02-gap-analysis.md` | Shared gaps (FIPS crypto, SSP, supply chain) |
@@ -102,7 +102,7 @@ The following mandatory prerequisites have NOT been completed:
 
 ## SPRS Score
 
-**Current SPRS Score:** Not yet calculated
+**Current SPRS Score:** 38/110 (preliminary, per 03-sprs-score-worksheet.md)
 
 The SPRS (Supplier Performance Risk System) score represents the organization's self-assessed implementation status against NIST 800-171 requirements. The score will be calculated in the `03-sprs-score-worksheet.md` document.
 

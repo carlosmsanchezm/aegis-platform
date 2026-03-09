@@ -306,7 +306,7 @@ When asked to review CMMC readiness or work on CMMC tasks:
 ### CMMC Status Quick Summary
 - **Target Level:** CMMC Level 2 (NIST 800-171 Rev 3)
 - **Current Phase:** Foundation Building
-- **SPRS Score:** ~42/110 (estimated)
+- **SPRS Score:** 38/110 (preliminary)
 - **Reuse from SOC 2/ISO 27001:** ~40% of controls
 
 ### SPRS Score Recalculation

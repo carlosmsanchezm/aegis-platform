@@ -5,7 +5,7 @@
 **Version:** 1.0
 **Date:** 2026-03-09
 **Status:** DRAFT -- PRE-AUTHORIZATION
-**Baseline:** FedRAMP Moderate (with LOW override eligibility for Model B self-hosted deployments)
+**Baseline:** FedRAMP Low / LI-SaaS (target); Moderate baseline documented for CUI scenarios
 **Classification:** Controlled Unclassified Information (CUI) -- Pre-Decisional
 
 ---

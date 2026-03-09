@@ -1,7 +1,7 @@
 # Aegis Compliance Program Status
 
-**Last Updated:** 2026-01-18
-**Evidence Vault Commit:** `cf7cb73`
+**Last Updated:** 2026-03-09
+**Evidence Vault Commit:** `bc0b73d`
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
 ---
@@ -71,10 +71,10 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Metric | Value |
 |--------|-------|
 | **Location** | `$EVIDENCE_VAULT` → `../aegis-compliance-evidence` |
-| **Total Files** | 49+ |
-| **Observation Period** | Sept 2025 - Jan 2026 (4+ months) |
+| **Total Files** | 137 |
+| **Observation Period** | Sept 2025 - Mar 2026 (6 months) |
 | **Monthly Collection** | Automated scripts |
-| **Latest Commit** | `cf7cb73` (post-CI fix baseline, 2026-01-18) |
+| **Latest Commit** | `bc0b73d` (weekly check, 2026-03-09) |
 
 ### First Corrective Action Cycle (CA-001)
 
@@ -92,7 +92,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Frequency | Task | Command | Next Due |
 |-----------|------|---------|----------|
 | **Weekly** | Security checks | `./scripts/compliance/run_weekly_checks.sh` | Every Monday |
-| **Monthly** | Full evidence export | `./scripts/compliance/run_monthly_evidence.sh` | Feb 1, 2026 |
+| **Monthly** | Full evidence export | `./scripts/compliance/run_monthly_evidence.sh` | Apr 1, 2026 |
 | **Quarterly** | Access review | Manual (documented procedure) | Apr 15, 2026 |
 | **Annual** | Policy review | Manual (all 6 policies) | Jan 17, 2027 |
 
@@ -100,32 +100,32 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 ## 30/60/90-Day Plan
 
-### 30 Days (by Feb 17, 2026)
+### 30 Days (by Apr 9, 2026)
 
 | Priority | Task | Owner | Framework |
 |----------|------|-------|-----------|
-| 🔴 High | Run Feb monthly evidence collection | Carlos | Both |
-| 🔴 High | Engage internal auditor for ISO 27001 | Carlos | ISO 27001 |
-| 🟡 Medium | Run weekly security checks (4x) | Carlos | Both |
-| 🟡 Medium | Review Dependabot alerts | Carlos | SOC 2 |
+| CRITICAL | Remediate 2 critical Dependabot alerts (aegis-ui) | Carlos | SOC 2 |
+| CRITICAL | Schedule ISO 27001 internal audit (overdue) | Carlos | ISO 27001 |
+| HIGH | Triage 86 non-critical Dependabot alerts | Carlos | SOC 2 |
+| HIGH | Run weekly checks every Monday | Carlos | Both |
+| HIGH | Apr 1 monthly evidence collection | Carlos | Both |
 
-### 60 Days (by Mar 17, 2026)
-
-| Priority | Task | Owner | Framework |
-|----------|------|-------|-----------|
-| 🔴 High | Conduct internal audit (Clause 9.2) | External auditor | ISO 27001 |
-| 🔴 High | Conduct management review (Clause 9.3) | Carlos | ISO 27001 |
-| 🟡 Medium | Close any audit findings | Carlos | ISO 27001 |
-| 🟡 Medium | Run Mar monthly evidence collection | Carlos | Both |
-
-### 90 Days (by Apr 17, 2026)
+### 60 Days (by May 9, 2026)
 
 | Priority | Task | Owner | Framework |
 |----------|------|-------|-----------|
-| 🔴 High | Q1 Access Review | Carlos | SOC 2 (CC6.4) |
-| 🟡 Medium | Engage SOC 2 auditor | Carlos | SOC 2 |
-| 🟡 Medium | Schedule ISO 27001 Stage 1 audit | Carlos | ISO 27001 |
-| 🟢 Low | Consider combined SOC2+ISO audit | Carlos | Both |
+| CRITICAL | Complete ISO 27001 internal audit (Clause 9.2) | External auditor | ISO 27001 |
+| CRITICAL | Conduct management review (Clause 9.3) | Carlos | ISO 27001 |
+| HIGH | Q1 Access Review (Apr 15) | Carlos | SOC 2 (CC6.4) |
+| MEDIUM | Close audit findings from internal audit | Carlos | ISO 27001 |
+
+### 90 Days (by Jun 9, 2026)
+
+| Priority | Task | Owner | Framework |
+|----------|------|-------|-----------|
+| HIGH | Engage SOC 2 auditor (6+ months evidence by then) | Carlos | SOC 2 |
+| HIGH | Schedule ISO 27001 Stage 1 audit | Carlos | ISO 27001 |
+| MEDIUM | Consider combined SOC2+ISO audit engagement | Carlos | Both |
 
 ---
 
@@ -133,22 +133,23 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 ### This Week
 
-- [ ] Run `./scripts/compliance/run_weekly_checks.sh` (Monday)
-- [ ] Review any new Dependabot alerts
-- [ ] Verify CI continues to run on PRs
+- [ ] Remediate 2 critical Dependabot alerts in aegis-ui
+- [ ] Update CA-002 (overdue -- extend or close)
+- [ ] Enable secret scanning + code scanning on all repos
+- [ ] Run weekly check Monday Mar 16
 
 ### This Month
 
-- [ ] Run `./scripts/compliance/run_monthly_evidence.sh` (Feb 1)
-- [ ] Start internal auditor outreach for ISO 27001
-- [ ] Review incident log (document if any incidents)
+- [ ] Triage all high Dependabot alerts (create plan)
+- [ ] Run monthly evidence Apr 1
+- [ ] Schedule internal audit
 
 ### This Quarter
 
-- [ ] Q1 Access Review (due Apr 15)
-- [ ] Internal audit complete (target: Feb 28)
-- [ ] Management review complete (target: Mar 15)
-- [ ] Begin auditor selection for SOC 2
+- [ ] Q1 Access Review (Apr 15)
+- [ ] Internal audit complete
+- [ ] Management review complete
+- [ ] Begin SOC 2 auditor selection
 
 ---
 
@@ -158,7 +159,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 |-------------|---------------|-----------|--------|
 | Policies documented | Required | Required | ✅ Done |
 | Controls implemented | Required | Required | ✅ Done |
-| Evidence collected | 3-12 months | Required | ✅ 4+ months |
+| Evidence collected | 3-12 months | Required | ✅ 6 months |
 | Internal audit | Not required | Required (9.2) | ⏳ Scheduled |
 | Management review | Not required | Required (9.3) | ⏳ Pending |
 | Corrective action cycle | Not required | Required (10.1) | ✅ CA-001 Closed |
@@ -175,7 +176,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | `sovran` | IaC, VS Code extension | 161 | ✅ `Tests on ubuntu-latest` | ✅ Full |
 
 **Total Commits:** 725+
-**Total Vulnerabilities:** 0 (55 fixed on 2026-01-17)
+**Total Vulnerabilities:** 88 open Dependabot alerts (2 critical in aegis-ui, 36 high in sovran). 55 were fixed on 2026-01-17; new alerts accumulated during development.
 
 ---
 
@@ -204,13 +205,17 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 |-------|------|--------|------------|
 | Jan 2025 | `soc2/2025/2025-01` | ✅ Initial setup | `32ec2fd` |
 | Jan 2026 | `soc2/2026/2026-01` | ✅ Active (49+ files) | `fd2d388` |
-| Feb 2026 | `soc2/2026/2026-02` | ⏳ Pending | - |
-| Mar 2026 | `soc2/2026/2026-03` | ⏳ Pending | - |
+| Feb 2026 | `soc2/2026/2026-02` | Retroactive (20 files) | `6029f38` |
+| Mar 2026 | `soc2/2026/2026-03` | Active (69 files) | `bc0b73d` |
 
 ### Evidence Vault Commit History
 
 | Commit | Date | Description |
 |--------|------|-------------|
+| `bc0b73d` | 2026-03-09 | Weekly security check: Week 11 |
+| `70205a7` | 2026-03-09 | Monthly evidence collection: 2026-03 |
+| `353e5f6` | 2026-03-09 | Retroactive catch-up: 2026-03 |
+| `6029f38` | 2026-03-09 | Retroactive catch-up: 2026-02 |
 | `cf7cb73` | 2026-01-18 | Post-CI fix baseline (all 3 repos passing) |
 | `fd2d388` | 2026-01-17 | CI-required branch protection evidence |
 | `da318ec` | 2026-01-17 | Monthly evidence collection: 2026-01 |
@@ -244,9 +249,9 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Cadence | Task | Due Date |
 |---------|------|----------|
 | **Weekly** | Security checks | Every Monday |
-| **Monthly** | Evidence collection | Feb 1, 2026 |
+| **Monthly** | Evidence collection | Apr 1, 2026 |
 | **Quarterly** | Access review | Apr 15, 2026 |
-| **Semi-Annual** | Internal audit | Feb 28, 2026 (ISO only) |
+| **Semi-Annual** | Internal audit | OVERDUE (was Feb 28, 2026) |
 | **Annual** | Policy review | Jan 17, 2027 |
 
 ---
@@ -263,6 +268,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.3 | 2026-03-09 | Claude Opus 4.6 | Evidence catch-up (Feb-Mar); vault at 137 files; updated 30/60/90 plan; 88 Dependabot alerts tracked |
 | 1.2 | 2026-01-18 | Claude Opus 4.5 | CI fixes merged (PRs #60, #54, #9); evidence vault updated (cf7cb73); added RISK-018/019 and CA-002 tracking |
 | 1.1 | 2026-01-17 | Claude Opus 4.5 | Added Evidence Timeline, updated AWS scope rationale, CI enforcement verification |
 | 1.0 | 2026-01-17 | Claude Opus 4.5 | Initial unified compliance status document |

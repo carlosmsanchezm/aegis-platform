@@ -1,0 +1,98 @@
+NIST_800_171_Control,Control_Title,CMMC_Level,CMMC_Domain,SOC2_TSC_Mapping,ISO27001_Mapping,FedRAMP_800_53_Mapping,Aegis_Status,Reuse_Potential,Gap_Notes
+03.01.01,Account Management,2,Access Control (AC),CC6.1;CC6.2;CC6.3,A.5.15;A.5.16;A.5.18,AC-2,Implemented,High,Onboard/offboard procedures exist
+03.01.02,Access Enforcement,2,Access Control (AC),CC6.1;CC6.6,A.5.15;A.8.3,AC-3,Implemented,High,RBAC in place via Keycloak
+03.01.03,Information Flow Enforcement,2,Access Control (AC),CC6.1,A.8.22,AC-4,Partial,Medium,Need network segmentation docs
+03.01.04,Separation of Duties,2,Access Control (AC),CC6.1,A.5.3,AC-5,Partial,Medium,Solo founder - compensating controls needed
+03.01.05,Least Privilege,2,Access Control (AC),CC6.1;CC6.7,A.5.15,AC-6,Implemented,High,RBAC with minimal permissions
+03.01.06,Least Privilege – Privileged Accounts,2,Access Control (AC),CC6.1;CC6.7,A.5.15,AC-6(5),Implemented,High,RBAC with minimal permissions
+03.01.07,Least Privilege – Privileged Functions,2,Access Control (AC),CC6.1;CC6.7,A.5.15,"AC-6(9),AC-6(10)",Implemented,High,RBAC with minimal permissions
+03.01.08,Unsuccessful Logon Attempts,2,Access Control (AC),CC6.6,A.8.3,AC-7,Implemented,High,Keycloak lockout policy
+03.01.09,System Use Notification,2,Access Control (AC),CC6.1,A.5.10,AC-8,Not Implemented,Low,Need login banner
+03.01.10,Device Lock,2,Access Control (AC),CC6.6,A.8.1,AC-11,Partial,Medium,Endpoint policy needed
+03.01.11,Session Termination,2,Access Control (AC),CC6.6,A.8.3,AC-12,Implemented,High,Session timeout in Keycloak
+03.01.12,Remote Access,2,Access Control (AC),CC6.6,A.6.7,AC-17,Implemented,High,VPN/mTLS in place
+03.01.16,Wireless Access,2,Access Control (AC),CC6.6,A.8.20,AC-18,Inherited/N/A,N/A,Cloud-hosted - no wireless infra
+03.01.18,Access Control for Mobile Devices,2,Access Control (AC),CC6.6,A.8.1,AC-19,Partial,Medium,Need mobile device policy
+03.01.20,Use of External Systems,2,Access Control (AC),CC6.6;CC6.7,A.5.19,AC-20,Partial,Medium,Need external system policy
+03.01.22,Publicly Accessible Content,2,Access Control (AC),CC6.1,A.5.33,AC-22,Implemented,High,No public content hosting
+03.02.01,Literacy Training and Awareness,2,Awareness and Training (AT),CC1.4,A.6.3,AT-2,Partial,Medium,Solo founder - need evidence
+03.02.02,Role-Based Training,2,Awareness and Training (AT),CC1.4,A.6.3,AT-3,Partial,Medium,Need specialized training records
+03.03.01,Event Logging,2,Audit and Accountability (AU),CC7.2,A.8.15,AU-2,Implemented,High,Structured logging in place
+03.03.02,Audit Record Content,2,Audit and Accountability (AU),CC7.2,A.8.15,AU-3,Implemented,High,Rich audit log format
+03.03.03,Audit Record Generation,2,Audit and Accountability (AU),CC7.2,A.8.15,AU-12,Implemented,High,Application audit logging
+03.03.04,Response to Audit Logging Process Failures,2,Audit and Accountability (AU),CC7.2,A.8.15,AU-5,Partial,Medium,Need alerting on failures
+03.03.05,"Audit Record Review, Analysis, and Reporting",2,Audit and Accountability (AU),CC4.1;CC7.2,A.8.15;A.8.16,AU-6,Partial,Medium,Monthly review process
+03.03.06,Audit Record Reduction and Report Generation,2,Audit and Accountability (AU),CC4.1;CC7.2,A.8.15;A.8.16,AU-6(3),Partial,Medium,Monthly review process
+03.03.07,Time Stamps,2,Audit and Accountability (AU),CC7.2,A.8.17,AU-8,Implemented,High,NTP synchronized
+03.03.08,Protection of Audit Information,2,Audit and Accountability (AU),CC7.2,A.8.15,AU-9,Implemented,High,Immutable cloud logs
+03.04.01,Baseline Configuration,2,Configuration Management (CM),CC8.1,A.8.9,CM-2,Implemented,High,IaC baselines
+03.04.02,Configuration Settings,2,Configuration Management (CM),CC8.1,A.8.9,CM-6,Implemented,High,Documented configs
+03.04.03,Configuration Change Control,2,Configuration Management (CM),CC8.1,A.8.32,CM-3,Implemented,High,GitOps with PR review
+03.04.04,Impact Analyses,2,Configuration Management (CM),CC8.1,A.8.32,CM-4,Implemented,High,PR review process
+03.04.05,Access Restrictions for Change,2,Configuration Management (CM),CC8.1,A.8.32,CM-5,Implemented,High,Branch protection enforced
+03.04.06,Least Functionality,2,Configuration Management (CM),CC8.1,A.8.9,CM-7,Implemented,High,Minimal container images
+03.04.08,Authorized Software – Allow by Exception,2,Configuration Management (CM),CC8.1,A.8.9,CM-7(4),Implemented,High,Minimal container images
+03.04.10,System Component Inventory,2,Configuration Management (CM),CC8.1,A.5.9,CM-8,Partial,Medium,Need formal inventory
+03.04.11,Information Location,2,Configuration Management (CM),CC8.1,A.5.19;A.5.9,"CM-8,SA-4(2)",Partial,Medium,Vendor assessment exists; Need formal inventory
+03.04.12,System and Component Configuration for High-Risk Areas,2,Configuration Management (CM),CC8.1,A.8.9,CM-7(5),Implemented,High,Minimal container images
+03.05.01,User Identification and Authentication,2,Identification and Authentication (IA),CC6.6,A.8.3,IA-2,Implemented,High,OIDC/SAML/MFA
+03.05.02,Device Identification and Authentication,2,Identification and Authentication (IA),,,IA-3,Not Assessed,Low,Needs assessment and implementation planning
+03.05.03,Multi-Factor Authentication,2,Identification and Authentication (IA),CC6.6,A.8.3,"IA-2(1),IA-2(2)",Implemented,High,OIDC/SAML/MFA
+03.05.04,Replay-Resistant Authentication,2,Identification and Authentication (IA),CC6.6,A.8.3,IA-2(8),Implemented,High,OIDC/SAML/MFA
+03.05.05,Identifier Management,2,Identification and Authentication (IA),CC6.2,A.5.16,IA-4,Implemented,High,Unique identifiers
+03.05.07,Password Management,2,Identification and Authentication (IA),CC6.6,A.5.17,IA-5(1),Implemented,High,Password policy
+03.05.11,Authentication Feedback,2,Identification and Authentication (IA),CC6.6,A.8.3,IA-6,Implemented,High,Masked passwords
+03.05.12,Authenticator Management,2,Identification and Authentication (IA),CC6.6,A.5.17,IA-5,Implemented,High,Password policy
+03.06.01,Incident Handling,2,Incident Response (IR),CC7.4,A.5.26,IR-4,Implemented,High,Incident procedure exists
+03.06.02,"Incident Monitoring, Reporting, and Response Assistance",2,Incident Response (IR),CC7.4,A.5.26;A.5.27;A.5.28,"IR-5,IR-6,IR-7",Partial,High,Reporting process exists; Monthly incident log; Support process
+03.06.03,Incident Response Testing,2,Incident Response (IR),CC7.4,A.5.30,IR-3,Not Implemented,Low,Need tabletop exercise
+03.06.04,Incident Response Training,2,Incident Response (IR),CC7.4,A.5.24,IR-2,Partial,Medium,Solo founder training
+03.06.05,Incident Response Plan,2,Incident Response (IR),CC7.4,A.5.24,IR-8,Implemented,High,IRP documented
+03.07.04,Maintenance Tools,2,Maintenance (MA),,,MA-3,Not Assessed,Low,Needs assessment and implementation planning
+03.07.05,Nonlocal Maintenance,2,Maintenance (MA),CC8.1,A.7.13,MA-4,Inherited/N/A,N/A,IaaS inherited
+03.07.06,Maintenance Personnel,2,Maintenance (MA),CC8.1,A.7.13,MA-5,Inherited/N/A,N/A,IaaS inherited
+03.08.01,Media Storage,2,Media Protection (MP),,,MP-4,Not Assessed,Low,Needs assessment and implementation planning
+03.08.02,Media Access,2,Media Protection (MP),CC6.1,A.7.10,MP-2,Inherited/N/A,N/A,Cloud - no physical media
+03.08.03,Media Sanitization,2,Media Protection (MP),CC6.1,A.7.10,MP-6,Inherited/N/A,N/A,IaaS inherited
+03.08.04,Media Marking,2,Media Protection (MP),,,MP-3,Not Assessed,Low,Needs assessment and implementation planning
+03.08.05,Media Transport,2,Media Protection (MP),,,MP-5,Not Assessed,Low,Needs assessment and implementation planning
+03.08.07,Media Use,2,Media Protection (MP),CC6.1,A.7.10,MP-7,Implemented,High,No removable media
+03.08.09,System Backup – Cryptographic Protection,2,Media Protection (MP),A1.2,A.8.13,CP-9(8),Implemented,High,Cloud backups enabled
+03.09.01,Personnel Screening,2,Personnel Security (PS),CC6.2,A.6.1,PS-3,Not Implemented,Low,Background checks gap
+03.09.02,Personnel Termination and Transfer,2,Personnel Security (PS),CC6.2;CC6.3,A.6.5,"PS-4,PS-5",Partial,High,Solo founder - limited; Offboarding procedure
+03.10.01,Physical Access Authorizations,2,Physical and Environmental Protection (PE),CC6.4,A.7.2,PE-2,Inherited/N/A,N/A,IaaS inherited
+03.10.02,Monitoring Physical Access,2,Physical and Environmental Protection (PE),CC6.4,A.7.4,PE-6,Inherited/N/A,N/A,IaaS inherited
+03.10.06,Alternate Work Site,2,Physical and Environmental Protection (PE),,,PE-17,Inherited/N/A,N/A,Inherited from AWS IaaS or not applicable to cloud-hosted platform
+03.10.07,Physical Access Control,2,Physical and Environmental Protection (PE),CC6.4,A.7.2,PE-3,Inherited/N/A,N/A,IaaS inherited
+03.10.08,Access Control for Transmission,2,Physical and Environmental Protection (PE),,,PE-4,Inherited/N/A,N/A,Inherited from AWS IaaS or not applicable to cloud-hosted platform
+03.11.01,Risk Assessment,2,Risk Assessment (RA),CC3.2,Clause 8.2,RA-3,Implemented,High,Risk register with 17 risks
+03.11.02,Vulnerability Monitoring and Scanning,2,Risk Assessment (RA),CC7.1,A.8.8,RA-5,Implemented,High,Dependabot + scanning
+03.11.04,Risk Response,2,Risk Assessment (RA),CC3.2,Clause 8.3,RA-7,Implemented,High,Risk treatment plan
+03.12.01,Security Assessment,2,Security Assessment (CA),CC4.1,A.5.35,CA-2,Partial,Medium,ISO internal audit pending
+03.12.02,Plan of Action and Milestones,2,Security Assessment (CA),CC4.2,Clause 10.1,CA-5,Implemented,High,Corrective actions log exists
+03.12.03,Continuous Monitoring,2,Security Assessment (CA),CC4.1;CC7.2,Clause 9.1,CA-7,Implemented,High,Monthly evidence collection
+03.12.05,Information Exchange,2,Security Assessment (CA),CC6.1,A.5.14,CA-3,Partial,Medium,Need interconnection agreements
+03.13.01,Boundary Protection,2,System and Communications Protection (SC),CC6.1,A.8.21,SC-7,Implemented,High,Network segmentation
+03.13.04,Information in Shared System Resources,2,System and Communications Protection (SC),,,SC-4,Not Assessed,Low,Needs assessment and implementation planning
+03.13.06,Network Communications – Deny by Default – Allow by Exception,2,System and Communications Protection (SC),CC6.1,A.8.21,SC-7(5),Implemented,High,Network segmentation
+03.13.08,Transmission and Storage Confidentiality,2,System and Communications Protection (SC),CC6.1,A.8.24,"SC-8,SC-28",Implemented,High,TLS everywhere
+03.13.09,Network Disconnect,2,System and Communications Protection (SC),,,SC-10,Not Assessed,Low,Needs assessment and implementation planning
+03.13.10,Cryptographic Key Establishment and Management,2,System and Communications Protection (SC),CC6.1,A.8.24,SC-12,Partial,Medium,Need key mgmt docs
+03.13.11,Cryptographic Protection,2,System and Communications Protection (SC),CC6.1,A.8.24,SC-13,Not Implemented,Low,FIPS 140 gap
+03.13.12,Collaborative Computing Devices and Applications,2,System and Communications Protection (SC),CC6.1,A.8.22,SC-15,Inherited/N/A,N/A,No collaborative computing
+03.13.13,Mobile Code,2,System and Communications Protection (SC),,,SC-18,Not Assessed,Low,Needs assessment and implementation planning
+03.13.15,Session Authenticity,2,System and Communications Protection (SC),,,SC-23,Not Assessed,Low,Needs assessment and implementation planning
+03.14.01,Flaw Remediation,2,System and Information Integrity (SI),CC7.1,A.8.8,SI-2,Implemented,High,Vuln remediation process
+03.14.02,Malicious Code Protection,2,System and Information Integrity (SI),CC7.1,A.8.7,SI-3,Partial,Medium,Cloud workloads
+03.14.03,"Security Alerts, Advisories, and Directives",2,System and Information Integrity (SI),CC7.1,A.5.7,SI-5,Implemented,High,Dependabot alerts
+03.14.06,System Monitoring,2,System and Information Integrity (SI),CC7.2,A.8.16,SI-4,Implemented,High,Monitoring in place
+03.14.08,Information Management and Retention,2,System and Information Integrity (SI),CC6.1,A.5.10,SI-12,Partial,Medium,Data handling docs
+03.15.01,Policy and Procedures,2,Planning (PL),CC2.2,A.5.1,PL-1,Implemented,High,Security program docs
+03.15.02,System Security Plan,2,Planning (PL),CC2.2,Clause 6.1,PL-2,Not Implemented,Low,FedRAMP SSP needed
+03.15.03,Rules of Behavior,2,Planning (PL),CC1.4,A.5.10,PL-4,Partial,Medium,Need formal RoB
+03.16.01,Security Engineering Principles,2,System and Services Acquisition (SA),CC8.1,A.8.27,SA-8,Implemented,High,Security by design
+03.16.02,Unsupported System Components,2,System and Services Acquisition (SA),CC8.1,A.8.9,SA-22,Partial,Medium,Need EOL tracking
+03.16.03,External System Services,2,System and Services Acquisition (SA),CC6.6;CC9.2,A.5.21,SA-9,Partial,Medium,Third-party inventory
+03.17.01,Supply Chain Risk Management Plan,2,Supply Chain Risk Management (SR),CC9.2,A.5.21,SR-2,Not Implemented,Low,SCRMP needed
+03.17.02,"Acquisition Strategies, Tools, and Methods",2,Supply Chain Risk Management (SR),CC9.2,A.5.19,SR-5,Partial,Medium,Need formal strategy
+03.17.03,Supply Chain Requirements and Processes,2,Supply Chain Risk Management (SR),CC9.2,A.5.22,SR-3,Partial,Medium,Vendor policy exists

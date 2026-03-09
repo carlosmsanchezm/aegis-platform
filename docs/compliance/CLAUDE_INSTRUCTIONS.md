@@ -284,6 +284,63 @@ When asked to review FedRAMP readiness or work on FedRAMP tasks:
 | Control Mapping | `docs/compliance/fedramp/01-control-mapping.csv` |
 | Gap Analysis | `docs/compliance/fedramp/02-gap-analysis.md` |
 | SSP Outline | `docs/compliance/fedramp/03-ssp-outline.md` |
+| SSP Sections 1-3 | `docs/compliance/fedramp/04-ssp-sections-1-3.md` |
+| Appendix E: Digital Identity | `docs/compliance/fedramp/appendix-e-digital-identity-worksheet.md` |
+| Appendix F: Rules of Behavior | `docs/compliance/fedramp/appendix-f-rules-of-behavior.md` |
+| Appendix L: Separation of Duties | `docs/compliance/fedramp/appendix-l-separation-of-duties-matrix.md` |
+
+---
+
+## CMMC Readiness Tasks
+
+### CMMC Gap Review (As Needed)
+
+When asked to review CMMC readiness or work on CMMC tasks:
+
+### Files to Read (in order)
+1. `docs/compliance/cmmc/STATUS.md` - CMMC program status
+2. `docs/compliance/cmmc/01-control-mapping.csv` - 97 controls mapped to NIST 800-171
+3. `docs/compliance/cmmc/02-gap-analysis.md` - Detailed gap analysis with remediation roadmap
+4. `docs/compliance/cmmc/03-sprs-score-worksheet.md` - SPRS score calculation
+
+### CMMC Status Quick Summary
+- **Target Level:** CMMC Level 2 (NIST 800-171 Rev 3)
+- **Current Phase:** Foundation Building
+- **SPRS Score:** ~42/110 (estimated)
+- **Reuse from SOC 2/ISO 27001:** ~40% of controls
+
+### SPRS Score Recalculation
+
+When controls are implemented or updated:
+1. Read `docs/compliance/cmmc/01-control-mapping.csv`
+2. Update the `Aegis_Status` column for changed controls
+3. Read `docs/compliance/cmmc/03-sprs-score-worksheet.md`
+4. Update individual control scores (5=full, 3=partial, 1=planned, 0=not implemented)
+5. Recalculate the total SPRS score
+6. Update `docs/compliance/cmmc/STATUS.md` with new score
+
+### Control Implementation Statement Updates
+
+When new controls are implemented:
+1. Read `docs/compliance/customer-docs/control-implementation-statements.md`
+2. Add or update the control entry following the existing format:
+   - **Aegis Provides**: What the platform handles
+   - **Customer Configures**: Settings customers configure
+   - **Customer Implements**: Customer responsibilities
+   - **Evidence**: How to demonstrate compliance
+3. Update `docs/compliance/customer-docs/customer-responsibility-matrix.md` if new family
+4. Update the CMMC control mapping CSV status
+
+### CMMC Document Locations
+
+| Document | Path |
+|----------|------|
+| CMMC Status | `docs/compliance/cmmc/STATUS.md` |
+| Control Mapping (97 controls) | `docs/compliance/cmmc/01-control-mapping.csv` |
+| Gap Analysis | `docs/compliance/cmmc/02-gap-analysis.md` |
+| SPRS Score Worksheet | `docs/compliance/cmmc/03-sprs-score-worksheet.md` |
+| Control Implementation Statements | `docs/compliance/customer-docs/control-implementation-statements.md` |
+| Customer Responsibility Matrix | `docs/compliance/customer-docs/customer-responsibility-matrix.md` |
 
 ---
 
@@ -298,6 +355,11 @@ When asked to review FedRAMP readiness or work on FedRAMP tasks:
 | SOC 2 Status | `docs/compliance/soc2/STATUS.md` |
 | ISO 27001 Status | `docs/compliance/iso27001/STATUS.md` |
 | **FedRAMP Status** | `docs/compliance/fedramp/STATUS.md` |
+| FedRAMP SSP Sections 1-3 | `docs/compliance/fedramp/04-ssp-sections-1-3.md` |
+| **CMMC Status** | `docs/compliance/cmmc/STATUS.md` |
+| CMMC Control Mapping | `docs/compliance/cmmc/01-control-mapping.csv` |
+| CMMC Gap Analysis | `docs/compliance/cmmc/02-gap-analysis.md` |
+| CMMC SPRS Worksheet | `docs/compliance/cmmc/03-sprs-score-worksheet.md` |
 | Access Review Procedure | `docs/compliance/soc2/procedures/quarterly-access-review.md` |
 | Internal Audit Plan | `docs/compliance/iso27001/11-internal-audit-plan.md` |
 | Internal Audit Checklist | `docs/compliance/iso27001/12-internal-audit-checklist.md` |
@@ -309,5 +371,6 @@ When asked to review FedRAMP readiness or work on FedRAMP tasks:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-03-09 | Added CMMC section (key files, SPRS recalculation, control statement updates); updated FedRAMP docs with SSP + appendices |
 | 1.1 | 2026-01-17 | Added FedRAMP readiness tasks |
 | 1.0 | 2026-01-17 | Initial instructions |

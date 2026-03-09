@@ -1,6 +1,6 @@
 # Aegis Compliance Program Status
 
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-09 (CMMC + FedRAMP buildout)
 **Evidence Vault Commit:** `bc0b73d`
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
@@ -8,13 +8,14 @@
 
 ## Executive Summary
 
-Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, and **FedRAMP**. This document is the single source of truth for program status, accomplishments, and next actions.
+Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, **FedRAMP**, and **CMMC**. This document is the single source of truth for program status, accomplishments, and next actions.
 
 | Framework | Documentation | Controls | Evidence | Audit Ready |
 |-----------|---------------|----------|----------|-------------|
 | **SOC 2 Type II** | ✅ Complete | ✅ Implemented | ✅ 4+ months | ✅ **Yes** |
 | **ISO 27001** | ✅ Complete | ✅ 81% | ✅ CA-001 Closed | ⏳ Pending Internal Audit |
-| **FedRAMP** | 🔄 Planning | ⏳ 25-30% reuse | ❌ Not Started | ❌ Pre-Assessment |
+| **FedRAMP** | 🔄 In Progress | ⏳ 25-30% reuse | ⏳ SSP Sections 1-3 + Appendices E/F/L | ❌ Pre-Assessment |
+| **CMMC** | 🔄 Foundation | ⏳ ~40% reuse | ⏳ Control mapping complete | ❌ Pre-Assessment |
 
 ### FedRAMP Quick Status
 
@@ -28,6 +29,20 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | **Critical Gaps** | FIPS crypto, SSP, SCRMP |
 
 **Full FedRAMP Status:** [`docs/compliance/fedramp/STATUS.md`](fedramp/STATUS.md)
+
+### CMMC Quick Status
+
+| Metric | Status |
+|--------|--------|
+| **Target Level** | CMMC Level 2 (110 practices = NIST 800-171 Rev 3) |
+| **Current Phase** | Foundation Building |
+| **Controls Mapped** | 97 of 110 (OSCAL extraction) |
+| **SPRS Score** | Estimated ~42/110 (see worksheet) |
+| **Reuse from SOC 2/ISO** | ~40% of controls |
+| **C3PAO** | ❌ Not selected |
+| **Strategy** | Level 1 self-assessment now; Level 2 when DoD customer pipeline |
+
+**Full CMMC Status:** [`docs/compliance/cmmc/STATUS.md`](cmmc/STATUS.md)
 
 ---
 
@@ -268,6 +283,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.4 | 2026-03-09 | Claude Opus 4.6 | Added CMMC program structure (STATUS, control mapping, gap analysis, SPRS); FedRAMP SSP sections 1-3 + appendices E/F/L; expanded customer docs to 40 controls |
 | 1.3 | 2026-03-09 | Claude Opus 4.6 | Evidence catch-up (Feb-Mar); vault at 137 files; updated 30/60/90 plan; 88 Dependabot alerts tracked |
 | 1.2 | 2026-01-18 | Claude Opus 4.5 | CI fixes merged (PRs #60, #54, #9); evidence vault updated (cf7cb73); added RISK-018/019 and CA-002 tracking |
 | 1.1 | 2026-01-17 | Claude Opus 4.5 | Added Evidence Timeline, updated AWS scope rationale, CI enforcement verification |

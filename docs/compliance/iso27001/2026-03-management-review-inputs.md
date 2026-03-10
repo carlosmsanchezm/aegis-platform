@@ -53,7 +53,7 @@
 | Products/services | Aegis Platform v1.0 pilot release in progress; hub-and-spoke architecture operational | Production workloads introduce real operational risk; need to ensure controls cover production |
 | ISMS establishment | ISMS established 2026-01-17; evidence vault operational since 2026-01-17 (CA-001 closed) | ISMS is now operating; evidence collection running monthly |
 | Technology stack | CI enforcement active on all 3 repos; branch protection with required status checks | Positive: automated security controls reduce manual oversight burden |
-| Evidence collection | Evidence vault: 472 total files (27 from 2025 retroactive, 140 non-placeholder from 2026); monthly collection running Jan-Mar 2026 | Compliance evidence generation is operational and consistent |
+| Evidence collection | Evidence vault: **452 evidence files** (excluding .gitkeep placeholders); monthly collection running Jan-Mar 2026 | Compliance evidence generation is operational and consistent |
 
 ---
 
@@ -63,7 +63,7 @@
 
 | CA ID | Description | Root Cause | Status | Effectiveness |
 |-------|-------------|------------|--------|---------------|
-| CA-001 | Evidence vault not operational -- collection scripts existed but vault not created/populated | New ISMS implementation; scripts created but not executed; vault directory not initialized | **Closed** (2026-01-17) | Effective -- vault now contains 472 files across 6 months; monthly collection running |
+| CA-001 | Evidence vault not operational -- collection scripts existed but vault not created/populated | New ISMS implementation; scripts created but not executed; vault directory not initialized | **Closed** (2026-01-17) | Effective -- vault now contains 452 evidence files across 6 months; monthly collection running |
 | CA-002 | aegis-ui unit tests disabled in CI due to @backstage/cli Node 20 incompatibility | @backstage/cli jest config uses `promisify(glob)` incompatible with glob versions that removed callback API | **Open** (due 2026-04-15) | Pending -- lint, typecheck, and build still enforced in CI; test gap accepted as low risk |
 
 **Summary:**
@@ -93,8 +93,11 @@
 | Evidence collection months | 3/3 | **3/3** | Met | Jan (50 files), Feb (20 files), Mar (69 files) evidence collected |
 
 **Key concerns requiring management decision:**
-1. Vulnerability counts in aegis-ui (13 open) and sovran (30 open) exceed targets -- most are transitive dependencies
-2. AWS root MFA evidence shows `account_mfa_enabled: 0` -- needs immediate investigation
+
+> **URGENT — AWS Root MFA:** Evidence export shows `account_mfa_enabled: 0` for the AWS account. Carlos must verify root MFA status immediately by logging into the AWS Console → IAM → Security credentials. This may be a data export artifact (virtual MFA can report as 0 in some API responses), but if root MFA is genuinely disabled, it must be re-enabled before any other action. **Do this first — takes 5 minutes.**
+
+1. **AWS root MFA status** — verify and document (see above)
+2. Vulnerability counts in aegis-ui (13 open) and sovran (30 open) exceed targets — most are transitive dependencies
 3. Formal quarterly access reviews not yet executed (directory structure exists but no review documents)
 4. 10 risk treatments overdue (see Section 1.5)
 
@@ -106,19 +109,23 @@
 
 | Audit ID | Date | Scope | Major NCs | Minor NCs | Observations |
 |----------|------|-------|-----------|-----------|--------------|
-| IA-2026-01 | 2026-03-10/11 | Full ISMS (Clauses 4-10, Annex A) | TBD (audit in progress) | TBD | TBD |
+| IA-2026-01 | 2026-03-10/11 | Full ISMS (Clauses 4-10, Annex A sample) | **0** | **2** | **11** |
 
-> The internal audit is being conducted on 2026-03-10/11 by an external auditor. Findings will be
-> added to `09-corrective-actions-log.csv` and incorporated into this review when the audit report
-> is finalized.
+> Internal audit completed as a **self-assessment (AI-assisted)** on 2026-03-10/11.
+> Report: `2026-03-internal-audit-report.md`. 8 positive findings also documented.
+>
+> **Minor NC-001:** Management review not yet conducted (Clause 9.3) — this review addresses it.
+> **Minor NC-002:** CA-002 open past original due date (extended to 2026-04-15, upstream dependency).
+>
+> Corrective actions opened: CA-003 (management review), CA-004 (access reviews), CA-005 (overdue risk treatments).
 
 **External Audits:**
 
 | Audit | Date | Result | Findings |
 |-------|------|--------|----------|
-| SOC 2 Type II | Not yet conducted | Planned for 2026 | N/A |
-| ISO 27001 Stage 1 | Not yet conducted | Target: 2026-03-15 | N/A |
-| ISO 27001 Stage 2 | Not yet conducted | Target: 2026-04-15 | N/A |
+| SOC 2 Type II | Not yet conducted | Target: Q3 2026 | N/A |
+| ISO 27001 Stage 1 | Not yet conducted | Target: May 2026 | N/A |
+| ISO 27001 Stage 2 | Not yet conducted | Target: Jun 2026 | N/A |
 
 ---
 

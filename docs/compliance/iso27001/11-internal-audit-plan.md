@@ -182,7 +182,7 @@ See: `iso27001/12-internal-audit-checklist.md`
 |-----------|------|-------------|
 | Audit plan issued | 2026-01-17 | This document (original) |
 | Audit plan updated | 2026-03-10 | Updated for self-assessment |
-| Pre-audit preparation | 2026-03-09 | Evidence gathered (472 files in vault) |
+| Pre-audit preparation | 2026-03-09 | Evidence gathered (452 evidence files in vault) |
 | Audit execution | 2026-03-10-11 | AI-assisted systematic evidence review |
 | Final report | 2026-03-11 | Completed audit report |
 | CA submission | 2026-03-11 | Corrective action plans updated |

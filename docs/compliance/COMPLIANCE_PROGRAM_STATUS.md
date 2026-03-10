@@ -86,7 +86,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Metric | Value |
 |--------|-------|
 | **Location** | `$EVIDENCE_VAULT` → `../aegis-compliance-evidence` |
-| **Total Files** | 137 |
+| **Total Files** | 452 (excluding .gitkeep placeholders) |
 | **Observation Period** | Sept 2025 - Mar 2026 (6 months) |
 | **Monthly Collection** | Automated scripts |
 | **Latest Commit** | `bc0b73d` (weekly check, 2026-03-09) |

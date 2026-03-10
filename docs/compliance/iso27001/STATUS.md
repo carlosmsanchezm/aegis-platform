@@ -135,7 +135,7 @@ Existing SOC 2 evidence directly supports ISO 27001:
 | Internal Audit | Clause 9.2 - Self-assessment conducted | ✅ **COMPLETED Mar 10, 2026** | Done |
 | Management Review | Clause 9.3 - Inputs prepared (CA-003) | ⏳ **Conduct by Mar 31** | 2026-03-31 |
 | Corrective Actions | Clause 10.1 - CA-001 closed | ✅ **CA-001 CLOSED** | Done |
-| Evidence Vault | A.5.33 - Operational | ✅ **472 files collected** | Done |
+| Evidence Vault | A.5.33 - Operational | ✅ **452 evidence files collected** | Done |
 
 ### High Priority
 
@@ -255,7 +255,7 @@ $EVIDENCE_VAULT/
 | Milestone | Target Date | Status |
 |-----------|-------------|--------|
 | ISMS documentation complete | 2026-01-17 | ✅ Done |
-| Evidence vault operational | 2026-01-17 | ✅ Done (472 files) |
+| Evidence vault operational | 2026-01-17 | ✅ Done (452 evidence files) |
 | Internal audit | 2026-03-10 | ✅ **Done** (self-assessment) |
 | Management review | 2026-03-31 | ⏳ Inputs prepared |
 | Close audit findings | 2026-04-15 | ⏳ CA-003/004/005 open |

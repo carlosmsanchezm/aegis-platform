@@ -227,7 +227,7 @@ RHBK_PASSWORD ?= P1rac1cab@16love
 RHBK_EMAIL ?= aegis@local.test
 
 AWS_ECR_REGISTRY ?= 195714074609.dkr.ecr.us-east-1.amazonaws.com
-CLOUD_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+CLOUD_IMAGE_TAG := $(or $(CLOUD_IMAGE_TAG),$(shell git rev-parse --short HEAD))
 CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
 CLOUD_PROXY_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/proxy:$(CLOUD_IMAGE_TAG)
 CLOUD_K8S_AGENT_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/k8s-agent:$(CLOUD_IMAGE_TAG)
@@ -415,6 +415,9 @@ ecr-login:
 deploy-cloud:
 	@echo "Deploying Aegis hub to cloud EKS..."
 	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_ROUTE53_UPDATE=$(SKIP_ROUTE53_UPDATE) \
+		PLATFORM_API_IMAGE_TAG=$(CLOUD_PLATFORM_API_IMAGE) \
+		PROXY_IMAGE_TAG=$(CLOUD_PROXY_IMAGE) \
+		K8S_AGENT_IMAGE_TAG=$(CLOUD_K8S_AGENT_IMAGE) \
 		./terraform/generate-cloud-deployment.sh --non-interactive
 
 .PHONY: deploy-cloud-full

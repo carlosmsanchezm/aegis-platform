@@ -1014,7 +1014,7 @@ if [ -d "$AEGIS_UI_DIR" ]; then
 
     cd "${SCRIPT_DIR}"
     AWS_ECR_REGISTRY=$(terraform output -raw ecr_registry_url 2>/dev/null | sed 's|/aegis/.*||')
-    IMAGE_TAG="${PLATFORM_API_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+    IMAGE_TAG="${PLATFORM_API_IMAGE_TAG_VALUE:-$(git rev-parse --short HEAD)}"
     CLOUD_UI_IMAGE="${AWS_ECR_REGISTRY}/aegis/ui:${IMAGE_TAG}"
 
     # Build and push UI image

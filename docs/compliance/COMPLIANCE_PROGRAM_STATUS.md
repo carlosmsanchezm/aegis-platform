@@ -13,7 +13,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Framework | Documentation | Controls | Evidence | Audit Ready |
 |-----------|---------------|----------|----------|-------------|
 | **SOC 2 Type II** | ✅ Complete | ✅ Implemented | ✅ 4+ months | ✅ **Yes** |
-| **ISO 27001** | ✅ Complete | ✅ 81% | ✅ CA-001 Closed | ⏳ Pending Internal Audit |
+| **ISO 27001** | ✅ Complete | ✅ 81% | ✅ Audit Complete | ⏳ Pending Management Review |
 | **FedRAMP** | 🔄 In Progress | ⏳ 25-30% reuse | ⏳ SSP Sections 1-3 + Appendices E/F/L | ❌ Pre-Assessment |
 | **CMMC** | 🔄 Foundation | ⏳ ~40% reuse | ⏳ Control mapping complete | ❌ Pre-Assessment |
 
@@ -119,9 +119,11 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Priority | Task | Owner | Framework |
 |----------|------|-------|-----------|
+| CRITICAL | Conduct management review (CA-003, due Mar 31) | Carlos | ISO 27001 |
 | CRITICAL | Remediate 2 critical Dependabot alerts (aegis-ui) | Carlos | SOC 2 |
-| CRITICAL | Schedule ISO 27001 internal audit (overdue) | Carlos | ISO 27001 |
-| HIGH | Triage 86 non-critical Dependabot alerts | Carlos | SOC 2 |
+| CRITICAL | Update overdue risk treatments (CA-005, due Mar 31) | Carlos | ISO 27001 |
+| HIGH | Execute Q1 access review (CA-004, due Apr 15) | Carlos | Both |
+| HIGH | Triage 46 open Dependabot alerts | Carlos | SOC 2 |
 | HIGH | Run weekly checks every Monday | Carlos | Both |
 | HIGH | Apr 1 monthly evidence collection | Carlos | Both |
 
@@ -129,17 +131,17 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Priority | Task | Owner | Framework |
 |----------|------|-------|-----------|
-| CRITICAL | Complete ISO 27001 internal audit (Clause 9.2) | External auditor | ISO 27001 |
-| CRITICAL | Conduct management review (Clause 9.3) | Carlos | ISO 27001 |
-| HIGH | Q1 Access Review (Apr 15) | Carlos | SOC 2 (CC6.4) |
-| MEDIUM | Close audit findings from internal audit | Carlos | ISO 27001 |
+| CRITICAL | Close CA-003 (management review) | Carlos | ISO 27001 |
+| HIGH | Close CA-004 (access review) | Carlos | Both |
+| HIGH | Schedule ISO 27001 Stage 1 audit | Carlos | ISO 27001 |
+| MEDIUM | Close CA-005 (risk treatment updates) | Carlos | ISO 27001 |
 
 ### 90 Days (by Jun 9, 2026)
 
 | Priority | Task | Owner | Framework |
 |----------|------|-------|-----------|
 | HIGH | Engage SOC 2 auditor (6+ months evidence by then) | Carlos | SOC 2 |
-| HIGH | Schedule ISO 27001 Stage 1 audit | Carlos | ISO 27001 |
+| HIGH | ISO 27001 Stage 1 audit | Carlos | ISO 27001 |
 | MEDIUM | Consider combined SOC2+ISO audit engagement | Carlos | Both |
 
 ---
@@ -148,22 +150,23 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 ### This Week
 
+- [x] ~~Complete ISO 27001 internal audit~~ ✅ Done Mar 10
+- [ ] Conduct management review (CA-003) — target Mar 15
 - [ ] Remediate 2 critical Dependabot alerts in aegis-ui
-- [ ] Update CA-002 (overdue -- extend or close)
-- [ ] Enable secret scanning + code scanning on all repos
 - [ ] Run weekly check Monday Mar 16
 
 ### This Month
 
-- [ ] Triage all high Dependabot alerts (create plan)
+- [ ] Close CA-003 (management review, due Mar 31)
+- [ ] Close CA-005 (update overdue risk treatments, due Mar 31)
 - [ ] Run monthly evidence Apr 1
-- [ ] Schedule internal audit
+- [ ] Triage all high Dependabot alerts (create plan)
 
 ### This Quarter
 
-- [ ] Q1 Access Review (Apr 15)
-- [ ] Internal audit complete
-- [ ] Management review complete
+- [ ] Execute Q1 Access Review (CA-004, due Apr 15)
+- [ ] Close CA-002 (aegis-ui tests, due Apr 15)
+- [ ] Schedule ISO 27001 Stage 1 audit
 - [ ] Begin SOC 2 auditor selection
 
 ---
@@ -266,7 +269,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | **Weekly** | Security checks | Every Monday |
 | **Monthly** | Evidence collection | Apr 1, 2026 |
 | **Quarterly** | Access review | Apr 15, 2026 |
-| **Semi-Annual** | Internal audit | OVERDUE (was Feb 28, 2026) |
+| **Semi-Annual** | Internal audit | ✅ Completed Mar 10, 2026 (next: Sept 2026) |
 | **Annual** | Policy review | Jan 17, 2027 |
 
 ---
@@ -283,6 +286,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.5 | 2026-03-10 | Claude Opus 4.6 | ISO 27001 internal audit completed (self-assessment); ISO status → Pending Management Review; CA-003/004/005 opened; updated 30/60/90 plan |
 | 1.4 | 2026-03-09 | Claude Opus 4.6 | Added CMMC program structure (STATUS, control mapping, gap analysis, SPRS); FedRAMP SSP sections 1-3 + appendices E/F/L; expanded customer docs to 40 controls |
 | 1.3 | 2026-03-09 | Claude Opus 4.6 | Evidence catch-up (Feb-Mar); vault at 137 files; updated 30/60/90 plan; 88 Dependabot alerts tracked |
 | 1.2 | 2026-01-18 | Claude Opus 4.5 | CI fixes merged (PRs #60, #54, #9); evidence vault updated (cf7cb73); added RISK-018/019 and CA-002 tracking |

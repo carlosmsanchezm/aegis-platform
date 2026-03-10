@@ -68,9 +68,9 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/../charts"
-PLATFORM_API_IMAGE_TAG=${PLATFORM_API_IMAGE_TAG:-"v1.0.6-tls2"}
-PROXY_IMAGE_TAG=${PROXY_IMAGE_TAG:-"no-client-cert"}
-K8S_AGENT_IMAGE_TAG=${K8S_AGENT_IMAGE_TAG:-"v1.0.2-tls-20251005-amd64"}
+PLATFORM_API_IMAGE_TAG="${PLATFORM_API_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+PROXY_IMAGE_TAG="${PROXY_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+K8S_AGENT_IMAGE_TAG="${K8S_AGENT_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
 TLS_CERT_PATH=/tmp/proxy-cert.pem
 TLS_KEY_PATH=/tmp/proxy-key.pem
 TLS_CA_CERT_PATH=/tmp/proxy-ca.pem
@@ -98,6 +98,7 @@ KEYCLOAK_DB_SECRET_NAME=${KEYCLOAK_DB_SECRET_NAME:-keycloak-db-secret}
 KEYCLOAK_CLIENT_SECRET_NAME=${KEYCLOAK_CLIENT_SECRET_NAME:-keycloak-backstage-client-secret}
 KEYCLOAK_TLS_SECRET_NAME=${KEYCLOAK_TLS_SECRET_NAME:-keycloak-tls}
 KEYCLOAK_INTERNAL_PORT=${KEYCLOAK_INTERNAL_PORT:-8443}
+SPOKE_OIDC_CLIENT_SECRET=${SPOKE_OIDC_CLIENT_SECRET:-$(cd "${SCRIPT_DIR}" && terraform output -raw spoke_oidc_client_secret 2>/dev/null || echo "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB")}
 
 IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG}")"
 IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG}")"
@@ -373,7 +374,7 @@ fi
 
 
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
-  echo "   ⚠️  Skipping migration placeholder (handled externally)"
+  echo "   ℹ️  Using in-cluster Postgres — migrations will run after Helm install (Step 6b)"
 else
 # Run migrations using an in-cluster Job so RDS schema exists before tests
 echo "   ⚙️  Applying database schema via Kubernetes Job"
@@ -579,7 +580,7 @@ OVERRIDE_FILE=$(mktemp)
   echo "  env:"
   echo "    DATABASE_URL: \"${DB_URL}\""
   echo "    OIDC_ISSUER_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis\""
-  echo "    OIDC_AUDIENCE: \"backstage\""
+  echo "    OIDC_AUDIENCE: \"backstage,aegis-platform\""
   echo "    OIDC_JWKS_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/certs\""
   if [[ -n "${DNS_PROXY}" ]]; then
     echo "    AEGIS_PROXY_BASE_URL: \"wss://${DNS_PROXY}:8080\""
@@ -685,6 +686,39 @@ kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak -
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak-postgres -n "${K8S_NAMESPACE}" --timeout=5m >/dev/null 2>&1 || \
   echo "   ⚠️  Keycloak Postgres pods not ready within timeout"
 
+# Step 6b: Run in-cluster Postgres migrations (when SKIP_MIGRATION_PLACEHOLDER=1)
+if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
+  echo ""
+  echo "   ⚙️  Running in-cluster Postgres migrations..."
+
+  MIGRATIONS_DIR="${SCRIPT_DIR}/../services/platform-api/migrations"
+  if [ ! -f "${MIGRATIONS_DIR}/0001_init.sql" ]; then
+    echo "   ⚠️  No migration files found; skipping"
+  else
+    # Wait for postgres pod
+    echo "   ⏳ Waiting for platform-postgres to be ready..."
+    kubectl -n "${K8S_NAMESPACE}" wait --for=condition=ready pod -l app.kubernetes.io/name=platform-postgres --timeout=120s 2>/dev/null || true
+    PG_POD=$(kubectl -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/name=platform-postgres -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [[ -n "${PG_POD}" ]]; then
+      # Extract Up-only migration SQL
+      ALL_UP=$(mktemp)
+      for mig in "${MIGRATIONS_DIR}"/*.sql; do
+        awk '/^--[[:space:]]+\+migrate[[:space:]]+Down/{exit} {print}' "$mig" >> "$ALL_UP"
+        echo "" >> "$ALL_UP"
+      done
+
+      kubectl cp "$ALL_UP" "${K8S_NAMESPACE}/${PG_POD}:/tmp/all_migrations.sql"
+      kubectl exec -n "${K8S_NAMESPACE}" "${PG_POD}" -- \
+        psql -U aegis_platform -d aegis_platform -v ON_ERROR_STOP=1 -f /tmp/all_migrations.sql
+      rm -f "$ALL_UP"
+      echo "   ✅ In-cluster migrations applied"
+    else
+      echo "   ⚠️  platform-postgres pod not found; skipping migrations"
+    fi
+  fi
+fi
+
 # Step 7: Wait for Load Balancers
 echo ""
 echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
@@ -736,58 +770,126 @@ if [ -n "${PROXY_LB}" ]; then
   done
 fi
 
+UI_LB=""
+if [ -d "${AEGIS_UI_DIR:-$HOME/code/aegis-ui}" ]; then
+  echo ""
+  echo "   Waiting for aegis-ui Load Balancer..."
+  for i in {1..60}; do
+    UI_LB=$(kubectl get svc aegis-ui -n "${K8S_NAMESPACE}" \
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "${UI_LB}" ]; then
+      echo "   ✅ aegis-ui Load Balancer ready: ${UI_LB}"
+      break
+    fi
+    echo -n "."
+    sleep 2
+  done
+fi
+
 if [ -n "${PROXY_LB}" ]; then
   echo ""
   echo "   ℹ️  Proxy endpoint configured via Helm: wss://${DNS_PROXY}:8080"
   echo "   (No kubectl set env needed - Helm manages AEGIS_PROXY_BASE_URL)"
 fi
 
-# Update Route53 DNS records with actual LoadBalancer hostnames
+# Update DNS records with actual LoadBalancer hostnames (direct API calls)
+# This bypasses Terraform to avoid conflicts with lifecycle.ignore_changes
 echo ""
-echo "   🌐 Updating Route53 DNS records with LoadBalancer hostnames..."
+echo "   🌐 Updating DNS records with LoadBalancer hostnames..."
 if [[ "${SKIP_ROUTE53_UPDATE}" == "1" ]]; then
-  echo "   ⚠️  SKIP_ROUTE53_UPDATE=1, skipping Route53 changes"
+  echo "   ⚠️  SKIP_ROUTE53_UPDATE=1, skipping DNS changes"
 elif [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
   cd "${SCRIPT_DIR}"
-  terraform apply -auto-approve \
-    -var="platform_api_lb_hostname=${PLATFORM_API_LB}" \
-    -var="proxy_lb_hostname=${PROXY_LB}" \
-    -target=aws_route53_record.platform_api_grpc \
-    -target=aws_route53_record.platform_api_http \
-    -target=aws_route53_record.proxy >/dev/null 2>&1 \
-    && echo "   ✅ Route53 records updated" \
-    || echo "   ⚠️  Route53 update failed; update manually"
+
+  # Update Cloudflare DNS (aegis-platform.tech)
+  CF_ZONE_ID=$(terraform output -raw cloudflare_zone_id 2>/dev/null || echo "")
+  CF_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+  if [[ -z "${CF_API_TOKEN}" ]]; then
+    echo "   ⚠️  CLOUDFLARE_API_TOKEN not set; export it or pass via environment to update Cloudflare DNS"
+  fi
+
+  if [[ -n "${CF_ZONE_ID}" && -n "${CF_API_TOKEN}" ]]; then
+    for record_info in "api:${PLATFORM_API_LB}" "keycloak:${PLATFORM_API_LB}" "proxy:${PROXY_LB}"; do
+      record_name="${record_info%%:*}"
+      lb_host="${record_info#*:}"
+      RECORD_ID=$(curl -sS "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${record_name}.aegis-platform.tech&type=CNAME" \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id // empty')
+      if [[ -n "${RECORD_ID}" ]]; then
+        curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+          -H "Authorization: Bearer ${CF_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          --data "{\"content\":\"${lb_host}\"}" >/dev/null
+      fi
+    done
+    # Update UI record if available
+    if [[ -n "${UI_LB}" ]]; then
+      UI_RECORD_ID=$(curl -sS "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=ui.aegis-platform.tech&type=CNAME" \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id // empty')
+      if [[ -n "${UI_RECORD_ID}" ]]; then
+        curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${UI_RECORD_ID}" \
+          -H "Authorization: Bearer ${CF_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          --data "{\"content\":\"${UI_LB}\"}" >/dev/null
+      fi
+    fi
+    echo "   ✅ Cloudflare DNS updated"
+  else
+    echo "   ⚠️  Cloudflare zone ID or API token not available; skipping Cloudflare update"
+  fi
+
+  # Update Route53 DNS (aegist.dev)
+  R53_ZONE_ID=$(terraform output -raw route53_zone_id 2>/dev/null || echo "")
+  if [[ -n "${R53_ZONE_ID}" ]]; then
+    AWS_CLI_PROFILE="${AWS_PROFILE:-aegis-new}"
+    aws route53 change-resource-record-sets \
+      --hosted-zone-id "${R53_ZONE_ID}" \
+      --profile "${AWS_CLI_PROFILE}" \
+      --change-batch "{
+        \"Changes\": [
+          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"platform-api-grpc.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PLATFORM_API_LB}\"}]}},
+          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"platform-api.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PLATFORM_API_LB}\"}]}},
+          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"proxy.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PROXY_LB}\"}]}}
+        ]
+      }" >/dev/null 2>&1 \
+      && echo "   ✅ Route53 DNS updated" \
+      || echo "   ⚠️  Route53 update failed; update manually"
+  else
+    echo "   ⚠️  Route53 zone ID not available; skipping Route53 update"
+  fi
 
   echo "   📋 DNS Records:"
   echo "      platform-api-grpc.aegist.dev → ${PLATFORM_API_LB}"
   echo "      platform-api.aegist.dev      → ${PLATFORM_API_LB}"
   echo "      proxy.aegist.dev             → ${PROXY_LB}"
 
-  # Update /etc/hosts for local DNS resolution
+  # Update /etc/hosts for local DNS resolution (non-fatal — requires sudo)
   echo ""
   echo "   🖥️  Updating /etc/hosts for local DNS resolution..."
-  # Get ALL IPs from Network Load Balancers (NLBs have multiple IPs)
-  PLATFORM_API_IPS=$(dig +short "${PLATFORM_API_LB}" | grep '^[0-9]' | tr '\n' ' ')
-  PROXY_IPS=$(dig +short "${PROXY_LB}" | grep '^[0-9]' | tr '\n' ' ')
-  # Use first IP for /etc/hosts entry
-  PLATFORM_API_IP=$(echo "${PLATFORM_API_IPS}" | awk '{print $1}')
-  PROXY_IP=$(echo "${PROXY_IPS}" | awk '{print $1}')
+  (
+    set +e  # sudo may fail in non-interactive environments
+    # Get ALL IPs from Network Load Balancers (NLBs have multiple IPs)
+    PLATFORM_API_IPS=$(dig +short "${PLATFORM_API_LB}" | grep '^[0-9]' | tr '\n' ' ')
+    PROXY_IPS=$(dig +short "${PROXY_LB}" | grep '^[0-9]' | tr '\n' ' ')
+    # Use first IP for /etc/hosts entry
+    PLATFORM_API_IP=$(echo "${PLATFORM_API_IPS}" | awk '{print $1}')
+    PROXY_IP=$(echo "${PROXY_IPS}" | awk '{print $1}')
 
-  if [ -n "${PLATFORM_API_IP}" ] && [ -n "${PROXY_IP}" ]; then
-    # Remove old aegist.dev entries
-    sudo sed -i.bak '/aegist\.dev/d' /etc/hosts 2>/dev/null || true
+    if [ -n "${PLATFORM_API_IP}" ] && [ -n "${PROXY_IP}" ]; then
+      # Remove old aegist.dev entries
+      sudo sed -i.bak '/aegist\.dev/d' /etc/hosts 2>/dev/null || true
 
-    # Add new entries (using first IP from NLB)
-    echo "${PLATFORM_API_IP} platform-api-grpc.aegist.dev platform-api.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
-    echo "${PROXY_IP} proxy.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
+      # Add new entries (using first IP from NLB)
+      echo "${PLATFORM_API_IP} platform-api-grpc.aegist.dev platform-api.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
+      echo "${PROXY_IP} proxy.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
 
-    echo "   ✅ /etc/hosts updated:"
-    echo "      ${PLATFORM_API_IP} → platform-api-grpc.aegist.dev, platform-api.aegist.dev"
-    echo "      ${PROXY_IP} → proxy.aegist.dev"
-    echo "   📝 Note: NLB IPs (all): platform-api=${PLATFORM_API_IPS}, proxy=${PROXY_IPS}"
-  else
-    echo "   ⚠️  Could not resolve LoadBalancer IPs; /etc/hosts not updated"
-  fi
+      echo "   ✅ /etc/hosts updated:"
+      echo "      ${PLATFORM_API_IP} → platform-api-grpc.aegist.dev, platform-api.aegist.dev"
+      echo "      ${PROXY_IP} → proxy.aegist.dev"
+      echo "   📝 Note: NLB IPs (all): platform-api=${PLATFORM_API_IPS}, proxy=${PROXY_IPS}"
+    else
+      echo "   ⚠️  Could not resolve LoadBalancer IPs; /etc/hosts not updated"
+    fi
+  ) || echo "   ⚠️  /etc/hosts update failed (non-fatal — sudo may not be available)"
 
   cd "${OUTPUT_DIR}"
 else
@@ -819,15 +921,20 @@ proxy:
 EOF_BACKSTAGE
 )
 
-  # Write to both cloud config files for convenience
-  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.cloud.yaml"
-  echo "   ✅ Updated: aegis-platform/app-config.cloud.yaml"
+  # Write to Backstage (aegis-ui) cloud config files
+  AEGIS_UI_DIR="${AEGIS_UI_DIR:-$HOME/code/aegis-ui}"
+  if [ -d "$AEGIS_UI_DIR" ]; then
+    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.cloud.yaml"
+    echo "   ✅ Updated: aegis-ui/app-config.cloud.yaml"
 
-  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.cloud-tls.yaml"
-  echo "   ✅ Updated: aegis-platform/app-config.cloud-tls.yaml"
+    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.cloud-tls.yaml"
+    echo "   ✅ Updated: aegis-ui/app-config.cloud-tls.yaml"
 
-  echo "${BACKSTAGE_CONFIG}" > "${OUTPUT_DIR}/../aegis-platform/app-config.local.yaml"
-  echo "   ✅ Updated: aegis-platform/app-config.local.yaml"
+    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.local.yaml"
+    echo "   ✅ Updated: aegis-ui/app-config.local.yaml"
+  else
+    echo "   ⚠️  $AEGIS_UI_DIR not found; skipping Backstage config update"
+  fi
 fi
 
 # Step 8: Deploy k8s-agent (aegis-spoke)
@@ -850,6 +957,10 @@ SPOKE_HELM_ARGS+=(
   --set k8sAgent.trustBundle.enabled=true
   --set k8sAgent.trustBundle.secretName=aegis-trust-bundle
   --set proxy.enabled=false
+  --set "k8sAgent.env.AEGIS_CP_OIDC_TOKEN_URL=https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/token"
+  --set "k8sAgent.env.AEGIS_CP_OIDC_CLIENT_ID=spoke-agent"
+  --set "k8sAgent.env.AEGIS_CP_OIDC_CLIENT_SECRET=${SPOKE_OIDC_CLIENT_SECRET}"
+  --set "k8sAgent.env.AEGIS_CP_OIDC_AUDIENCE=aegis-platform"
   --namespace "${SPOKE_NAMESPACE}"
   --create-namespace
   --timeout 5m
@@ -891,6 +1002,59 @@ helm "${SPOKE_HELM_ARGS[@]}"
 
 echo "   ✅ k8s-agent deployed"
 
+# Step 9: Deploy aegis-ui (Backstage) — non-fatal
+echo ""
+echo "9️⃣  Deploying aegis-ui (Backstage)..."
+
+AEGIS_UI_DIR="${AEGIS_UI_DIR:-$HOME/code/aegis-ui}"
+
+if [ -d "$AEGIS_UI_DIR" ]; then
+  (
+    set +e  # UI failure should not abort the script
+
+    cd "${SCRIPT_DIR}"
+    AWS_ECR_REGISTRY=$(terraform output -raw ecr_registry_url 2>/dev/null | sed 's|/aegis/.*||')
+    IMAGE_TAG="${PLATFORM_API_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+    CLOUD_UI_IMAGE="${AWS_ECR_REGISTRY}/aegis/ui:${IMAGE_TAG}"
+
+    # Build and push UI image
+    echo "   Building aegis-ui image: $CLOUD_UI_IMAGE"
+    docker build --platform linux/amd64 \
+      -t "$CLOUD_UI_IMAGE" \
+      -f "$AEGIS_UI_DIR/packages/backend/Dockerfile.cloud" \
+      "$AEGIS_UI_DIR"
+    docker push "$CLOUD_UI_IMAGE"
+
+    # Clear stale Backstage migration locks (safe — only affects lock rows)
+    PG_POD=$(kubectl -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/name=platform-postgres \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [[ -n "${PG_POD}" ]]; then
+      for db in backstage_plugin_catalog backstage_plugin_auth backstage_plugin_scaffolder; do
+        kubectl exec -n "${K8S_NAMESPACE}" "${PG_POD}" -- \
+          psql -U aegis_platform -d "$db" -c "UPDATE knex_migrations_lock SET is_locked = 0 WHERE is_locked = 1;" 2>/dev/null || true
+      done
+    fi
+
+    # Get keycloak client secret and generate backend secret
+    KC_CLIENT_SECRET=$(kubectl get secret keycloak-backstage-client-secret \
+      -n aegis-system -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d)
+    BACKEND_SECRET=$(openssl rand -hex 32)
+
+    # Deploy via Helm
+    helm upgrade --install aegis-ui "$AEGIS_UI_DIR/charts/aegis-ui" \
+      -n aegis-system \
+      -f "$AEGIS_UI_DIR/charts/aegis-ui/values-cloud.yaml" \
+      --set image.tag="$IMAGE_TAG" \
+      --set env.BACKEND_SECRET="$BACKEND_SECRET" \
+      --set keycloak.clientSecret="$KC_CLIENT_SECRET" \
+      --wait --timeout 5m
+
+    echo "   ✅ aegis-ui deployed"
+  ) || echo "   ⚠️  aegis-ui deployment failed (non-fatal)"
+else
+  echo "   ⚠️  $AEGIS_UI_DIR not found, skipping aegis-ui deployment"
+fi
+
 # Summary
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -901,10 +1065,16 @@ echo "📊 Service URLs:"
 echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API_HTTP}:8080"
 echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API_GRPC}:8081"
 echo "   Proxy (WSS):                 wss://${DNS_PROXY}:8080"
+if [ -n "${UI_LB:-}" ]; then
+echo "   Backstage UI:                http://ui.aegis-platform.tech:7007"
+fi
 echo ""
 echo "🌐 LoadBalancer Endpoints:"
 echo "   Platform API: ${PLATFORM_API_LB}"
 echo "   Proxy:        ${PROXY_LB}"
+if [ -n "${UI_LB:-}" ]; then
+echo "   UI:           ${UI_LB}"
+fi
 echo ""
 echo "📝 Check deployment status:"
 echo "   kubectl get pods -n ${K8S_NAMESPACE}"

@@ -15,6 +15,16 @@ This guide summarizes the most common `make` targets in the repository so you do
 | `make workspace-image` | Build the workspace VS Code image. |
 | `make workspace-image-push` | Push the workspace image to the registry. |
 | `make preview` | Run the full preview workflow locally (terraform + helm + smoke tests). |
+| `make ecr-login` | Authenticate Docker to AWS ECR (`AWS_PROFILE=aegis-new`). |
+| `make push-cloud-images` | Build + push all 4 service images to ECR with `CLOUD_IMAGE_TAG` (default: git SHA). |
+| `make deploy-cloud` | Deploy hub to cloud EKS (runs `generate-cloud-deployment.sh --non-interactive`). Images must already be in ECR. |
+| `make deploy-cloud-full` | One-shot cloud deploy: ECR login + push images + terraform apply + full deploy (Steps 1-9). |
+| `make build-ui-cloud` | Build aegis-ui Docker image for linux/amd64. |
+| `make push-ui-cloud` | Build + push aegis-ui image to ECR. |
+| `make build-local-all` | Build all 3 service images for local Docker Desktop (native arch). |
+| `make build-platform-local` | Build platform-api image for local Docker Desktop. |
+| `make build-proxy-local` | Build proxy image for local Docker Desktop. |
+| `make build-agent-local` | Build k8s-agent image for local Docker Desktop. |
 | `make preview-clean` | Tear down the preview infrastructure locally. |
 | `make rerun-preview-failures` | Rerun only the failed jobs from the latest preview GitHub Actions run. If the workflow definition changed, it automatically dispatches a `tests-only` run using the current workflow (see `scripts/rerun-preview-failures.sh`). |
 

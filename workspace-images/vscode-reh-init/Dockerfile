@@ -37,6 +37,6 @@ RUN mkdir -p /reh/bin/current && \
 USER 65534
 
 # When used as init container, the command is overridden to:
-#   cp -a /reh/. /shared/reh/
-# This copies the REH binary to the shared emptyDir volume.
-ENTRYPOINT ["cp", "-a", "/reh/.", "/shared/reh/"]
+#   cp -r /reh/. /shared/reh/
+# Uses -r instead of -a because non-root users cannot preserve timestamps.
+ENTRYPOINT ["cp", "-r", "/reh/.", "/shared/reh/"]

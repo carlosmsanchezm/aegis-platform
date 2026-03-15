@@ -321,7 +321,7 @@ fi
 		rehInit := corev1.Container{
 			Name:    "aegis-vscode-reh-init",
 			Image:   opts.VSCodeREHInitImage,
-			Command: []string{"cp", "-a", "/reh/.", "/shared/reh/"},
+			Command: []string{"cp", "-r", "/reh/.", "/shared/reh/"},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: rehVolumeName, MountPath: "/shared/reh"},
 			},

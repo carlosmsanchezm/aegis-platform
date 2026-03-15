@@ -8,7 +8,7 @@ set -e
 NON_INTERACTIVE=0
 K8S_NAMESPACE=${K8S_NAMESPACE:-aegis-system}
 HELM_RELEASE=${HELM_RELEASE:-aegis}
-SKIP_ROUTE53_UPDATE=${SKIP_ROUTE53_UPDATE:-0}
+SKIP_DNS_UPDATE=${SKIP_DNS_UPDATE:-${SKIP_ROUTE53_UPDATE:-0}}
 
 # Helper to split an image reference into repository and tag components
 parse_image_ref() {
@@ -20,6 +20,123 @@ parse_image_ref() {
     tag="${ref##*:}"
   fi
   printf '%s|%s' "$repo" "$tag"
+}
+
+require_image_ref() {
+  local var_name="$1"
+  local value="$2"
+  if [[ -z "${value}" ]]; then
+    echo "❌ ${var_name} must be set to a prebuilt image reference (for example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/ui:abc1234)" >&2
+    exit 1
+  fi
+  if [[ "${value}" != *:* ]]; then
+    echo "❌ ${var_name} must include an explicit tag in repo:tag form: ${value}" >&2
+    exit 1
+  fi
+}
+
+ecr_repo_name() {
+  local repo="$1"
+  local trimmed="${repo#*.amazonaws.com/}"
+  if [[ "${trimmed}" == "${repo}" ]]; then
+    printf '%s' ""
+    return
+  fi
+  printf '%s' "${trimmed}"
+}
+
+verify_ecr_image() {
+  local image_ref="$1"
+  local repo tag repo_name
+  IFS='|' read -r repo tag <<< "$(parse_image_ref "${image_ref}")"
+  repo_name="$(ecr_repo_name "${repo}")"
+  if [[ -z "${repo_name}" || -z "${tag}" ]]; then
+    echo "❌ Unable to validate ECR image reference: ${image_ref}" >&2
+    exit 1
+  fi
+  if ! aws ecr describe-images \
+    --repository-name "${repo_name}" \
+    --image-ids imageTag="${tag}" \
+    --region "${AWS_REGION}" \
+    --profile "${AWS_PROFILE}" >/dev/null 2>&1; then
+    echo "❌ ECR image not found: ${image_ref}" >&2
+    exit 1
+  fi
+}
+
+cloudflare_record_id() {
+  local record_name="$1"
+  curl -sS "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${record_name}&type=CNAME" \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id // empty'
+}
+
+update_cloudflare_cname() {
+  local record_name="$1"
+  local lb_host="$2"
+  local record_id
+  record_id="$(cloudflare_record_id "${record_name}")"
+  if [[ -z "${record_id}" ]]; then
+    echo "❌ Cloudflare record not found: ${record_name}" >&2
+    exit 1
+  fi
+  curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${record_id}" \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "{\"content\":\"${lb_host}\"}" >/dev/null
+}
+
+wait_for_lb_hostname() {
+  local description="$1"
+  local resource="$2"
+  local namespace="$3"
+  local outvar="$4"
+  local value=""
+  echo "   Waiting for ${description} Load Balancer..."
+  for _ in {1..60}; do
+    value=$(kubectl get "${resource}" -n "${namespace}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [[ -n "${value}" ]]; then
+      echo "   ✅ ${description} Load Balancer ready: ${value}"
+      printf -v "${outvar}" '%s' "${value}"
+      return 0
+    fi
+    echo -n "."
+    sleep 2
+  done
+  echo ""
+  echo "❌ Timed out waiting for ${description} Load Balancer" >&2
+  exit 1
+}
+
+wait_for_lb_dns() {
+  local hostname="$1"
+  echo "   Waiting for DNS propagation for ${hostname}..."
+  for _ in {1..30}; do
+    if dig +short "${hostname}" | grep -q '^[0-9]'; then
+      echo "   ✅ DNS resolved: $(dig +short "${hostname}" | head -1)"
+      return 0
+    fi
+    echo -n "."
+    sleep 2
+  done
+  echo ""
+  echo "❌ Timed out waiting for DNS resolution for ${hostname}" >&2
+  exit 1
+}
+
+wait_for_public_dns() {
+  local hostname="$1"
+  echo "   Waiting for public DNS propagation for ${hostname}..."
+  for _ in {1..30}; do
+    if [[ -n "$(dig @1.1.1.1 +short "${hostname}")" ]]; then
+      echo "   ✅ Public DNS resolved: $(dig @1.1.1.1 +short "${hostname}" | head -1)"
+      return 0
+    fi
+    echo -n "."
+    sleep 2
+  done
+  echo ""
+  echo "❌ Timed out waiting for public DNS resolution for ${hostname}" >&2
+  exit 1
 }
 
 # Derive common resource names based on the Helm release (aligned with Helm's truncation logic)
@@ -68,9 +185,12 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/../charts"
-PLATFORM_API_IMAGE_TAG="${PLATFORM_API_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
-PROXY_IMAGE_TAG="${PROXY_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
-K8S_AGENT_IMAGE_TAG="${K8S_AGENT_IMAGE_TAG:-$(git rev-parse --short HEAD)}"
+AWS_PROFILE="${AWS_PROFILE:-aegis-new}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+PLATFORM_API_IMAGE_TAG="${PLATFORM_API_IMAGE_TAG:-}"
+PROXY_IMAGE_TAG="${PROXY_IMAGE_TAG:-}"
+K8S_AGENT_IMAGE_TAG="${K8S_AGENT_IMAGE_TAG:-}"
+UI_IMAGE_TAG="${UI_IMAGE_TAG:-}"
 TLS_CERT_PATH=/tmp/proxy-cert.pem
 TLS_KEY_PATH=/tmp/proxy-key.pem
 TLS_CA_CERT_PATH=/tmp/proxy-ca.pem
@@ -84,6 +204,8 @@ KEYCLOAK_CERT_CSR_PATH=/tmp/keycloak-cert.csr
 KEYCLOAK_CERT_EXT_PATH=/tmp/keycloak-cert-ext.cnf
 KEYCLOAK_CERT_CHAIN_PATH=/tmp/keycloak-cert-chain.pem
 PLATFORM_API_SERVICE_ACCOUNT=${PLATFORM_API_SERVICE_ACCOUNT:-aegis-platform-api}
+LEGACY_UI_RELEASE=${LEGACY_UI_RELEASE:-aegis-ui}
+REMOVE_LEGACY_UI_RELEASE=${REMOVE_LEGACY_UI_RELEASE:-1}
 CA_BUNDLE="${HOME}/aegis-platform-api-ca.crt"
 OVERRIDE_FILE=""
 TLS_OVERRIDE_FILE=""
@@ -99,10 +221,22 @@ KEYCLOAK_CLIENT_SECRET_NAME=${KEYCLOAK_CLIENT_SECRET_NAME:-keycloak-backstage-cl
 KEYCLOAK_TLS_SECRET_NAME=${KEYCLOAK_TLS_SECRET_NAME:-keycloak-tls}
 KEYCLOAK_INTERNAL_PORT=${KEYCLOAK_INTERNAL_PORT:-8443}
 SPOKE_OIDC_CLIENT_SECRET=${SPOKE_OIDC_CLIENT_SECRET:-$(cd "${SCRIPT_DIR}" && terraform output -raw spoke_oidc_client_secret 2>/dev/null || echo "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB")}
+PLATFORM_API_PUBLIC_HOST=${PLATFORM_API_PUBLIC_HOST:-platform-api.aegis-platform.tech}
+KEYCLOAK_PUBLIC_HOST=${KEYCLOAK_PUBLIC_HOST:-keycloak.aegis-platform.tech}
+PROXY_PUBLIC_HOST=${PROXY_PUBLIC_HOST:-proxy.aegis-platform.tech}
+UI_PUBLIC_HOST=${UI_PUBLIC_HOST:-ui.aegis-platform.tech}
+CF_ZONE_ID=""
+CF_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 
 IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG}")"
 IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG}")"
 IFS='|' read -r K8S_AGENT_IMAGE_REPO K8S_AGENT_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${K8S_AGENT_IMAGE_TAG}")"
+IFS='|' read -r UI_IMAGE_REPO UI_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${UI_IMAGE_TAG}")"
+
+require_image_ref "PLATFORM_API_IMAGE_TAG" "${PLATFORM_API_IMAGE_TAG}"
+require_image_ref "PROXY_IMAGE_TAG" "${PROXY_IMAGE_TAG}"
+require_image_ref "K8S_AGENT_IMAGE_TAG" "${K8S_AGENT_IMAGE_TAG}"
+require_image_ref "UI_IMAGE_TAG" "${UI_IMAGE_TAG}"
 
 cleanup() {
   rm -f "${OVERRIDE_FILE}" "${TLS_OVERRIDE_FILE}" \
@@ -120,6 +254,9 @@ echo "🚀 Generating Helm values from Terraform outputs..."
 echo "📖 See DEPLOYMENT_AND_TESTING_GUIDE.md for complete deployment guide"
 echo ""
 
+# Run Terraform commands from the Terraform root regardless of caller cwd.
+cd "${SCRIPT_DIR}"
+
 # Check if terraform is initialized
 if [ ! -d "${SCRIPT_DIR}/.terraform" ]; then
     echo "❌ Terraform not initialized. Run 'terraform init' first."
@@ -132,9 +269,41 @@ if [ ! -f "${SCRIPT_DIR}/terraform.tfstate" ]; then
     exit 1
 fi
 
+if [[ -n "${SKIP_ROUTE53_UPDATE:-}" ]]; then
+  echo "⚠️  SKIP_ROUTE53_UPDATE is deprecated; use SKIP_DNS_UPDATE instead."
+fi
+
+CF_ZONE_ID=$(terraform output -raw cloudflare_zone_id 2>/dev/null || echo "")
+if [[ "${SKIP_DNS_UPDATE}" != "1" ]]; then
+  if [[ -z "${CF_API_TOKEN}" ]]; then
+    echo "❌ CLOUDFLARE_API_TOKEN must be set for cloud deployment." >&2
+    exit 1
+  fi
+  if [[ -z "${CF_ZONE_ID}" ]]; then
+    echo "❌ Cloudflare zone output not available. Run 'terraform apply' first." >&2
+    exit 1
+  fi
+  for record in \
+    "${PLATFORM_API_PUBLIC_HOST}" \
+    "${KEYCLOAK_PUBLIC_HOST}" \
+    "${PROXY_PUBLIC_HOST}" \
+    "${UI_PUBLIC_HOST}"; do
+    if [[ -z "$(cloudflare_record_id "${record}")" ]]; then
+      echo "❌ Required Cloudflare record not found: ${record}" >&2
+      exit 1
+    fi
+  done
+fi
+
+echo "🔎 Verifying required images exist in ECR..."
+verify_ecr_image "${PLATFORM_API_IMAGE_TAG}"
+verify_ecr_image "${PROXY_IMAGE_TAG}"
+verify_ecr_image "${K8S_AGENT_IMAGE_TAG}"
+verify_ecr_image "${UI_IMAGE_TAG}"
+echo "   ✅ All required images found"
+
 # Generate aegis-services values
 echo "📝 Generating aegis-services values..."
-cd "${SCRIPT_DIR}"
 terraform output -raw helm_values_aegis_services > "${OUTPUT_DIR}/aegis-services/values-cloud-generated.yaml"
 echo "   ✅ Created: ${OUTPUT_DIR}/aegis-services/values-cloud-generated.yaml"
 
@@ -313,23 +482,34 @@ echo "3️⃣  Running database migrations..."
 # URL-encode the DB password for DATABASE_URL
 DB_PASSWORD_RAW=$(terraform output -raw db_password_secret_value)
 DB_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${DB_PASSWORD_RAW}', safe=''))")
-DB_ENDPOINT=$(terraform output -raw rds_endpoint)
-if [[ "${DB_ENDPOINT}" == *:* ]]; then
-  DB_HOST=${DB_ENDPOINT%%:*}
-  DB_PORT=${DB_ENDPOINT##*:}
-else
-  DB_HOST=${DB_ENDPOINT}
-  DB_PORT=$(terraform output -raw rds_port 2>/dev/null || echo "5432")
-fi
-DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo "aegis")
-DB_USER_FALLBACK="aegis_api"
+DB_ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "")
+DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo "aegis_platform")
+DB_USER_FALLBACK="aegis_platform"
 if terraform output -raw rds_username >/tmp/rds_user 2>/dev/null; then
   DB_USER=$(cat /tmp/rds_user)
   rm -f /tmp/rds_user
 else
   DB_USER=${DB_USER_FALLBACK}
 fi
-DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
+DB_SSLMODE="require"
+USING_RDS=1
+if [[ -n "${DB_ENDPOINT}" ]]; then
+  if [[ "${DB_ENDPOINT}" == *:* ]]; then
+    DB_HOST=${DB_ENDPOINT%%:*}
+    DB_PORT=${DB_ENDPOINT##*:}
+  else
+    DB_HOST=${DB_ENDPOINT}
+    DB_PORT=$(terraform output -raw rds_port 2>/dev/null || echo "5432")
+  fi
+else
+  USING_RDS=0
+  DB_HOST="platform-postgres.${K8S_NAMESPACE}.svc.cluster.local"
+  DB_PORT="5432"
+  DB_SSLMODE="disable"
+  SKIP_MIGRATION_PLACEHOLDER=1
+  echo "   ℹ️  No RDS endpoint configured; using in-cluster Postgres"
+fi
+DB_URL="postgres://${DB_USER}:${DB_PASSWORD_ENCODED}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
 
 if [[ -z "${AWS_REGION:-}" ]]; then
   AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
@@ -341,35 +521,36 @@ if [[ -z "${AWS_REGION}" ]]; then
 fi
 
 RDS_CA_BUNDLE_URL="https://truststore.pki.rds.amazonaws.com/${AWS_REGION}/${AWS_REGION}-bundle.pem"
-NODE_SECURITY_GROUP="$(terraform output -raw node_security_group_id 2>/dev/null || echo "")"
-CLUSTER_SECURITY_GROUP="$(terraform output -raw cluster_security_group_id 2>/dev/null || echo "")"
-EKS_CLUSTER_MANAGED_SECURITY_GROUP="$(terraform output -raw eks_cluster_security_group_id 2>/dev/null || echo "")"
-SECURITY_GROUPS_LIST=()
-if [[ -n "${NODE_SECURITY_GROUP}" ]]; then
-  SECURITY_GROUPS_LIST+=("${NODE_SECURITY_GROUP}")
-fi
-if [[ -n "${CLUSTER_SECURITY_GROUP}" ]]; then
-  SECURITY_GROUPS_LIST+=("${CLUSTER_SECURITY_GROUP}")
-fi
-if [[ -n "${EKS_CLUSTER_MANAGED_SECURITY_GROUP}" ]]; then
-  SECURITY_GROUPS_LIST+=("${EKS_CLUSTER_MANAGED_SECURITY_GROUP}")
-fi
+JOB_ANNOTATIONS_BLOCK=""
+POD_ANNOTATIONS_BLOCK=""
+if [[ "${USING_RDS}" == "1" ]]; then
+  NODE_SECURITY_GROUP="$(terraform output -raw node_security_group_id 2>/dev/null || echo "")"
+  CLUSTER_SECURITY_GROUP="$(terraform output -raw cluster_security_group_id 2>/dev/null || echo "")"
+  EKS_CLUSTER_MANAGED_SECURITY_GROUP="$(terraform output -raw eks_cluster_security_group_id 2>/dev/null || echo "")"
+  SECURITY_GROUPS_LIST=()
+  if [[ -n "${NODE_SECURITY_GROUP}" ]]; then
+    SECURITY_GROUPS_LIST+=("${NODE_SECURITY_GROUP}")
+  fi
+  if [[ -n "${CLUSTER_SECURITY_GROUP}" ]]; then
+    SECURITY_GROUPS_LIST+=("${CLUSTER_SECURITY_GROUP}")
+  fi
+  if [[ -n "${EKS_CLUSTER_MANAGED_SECURITY_GROUP}" ]]; then
+    SECURITY_GROUPS_LIST+=("${EKS_CLUSTER_MANAGED_SECURITY_GROUP}")
+  fi
 
-if (( ${#SECURITY_GROUPS_LIST[@]} > 0 )); then
-  SECURITY_GROUPS=$(IFS=','; echo "${SECURITY_GROUPS_LIST[*]}")
-  JOB_ANNOTATIONS_BLOCK=$(cat <<EOF
+  if (( ${#SECURITY_GROUPS_LIST[@]} > 0 )); then
+    SECURITY_GROUPS=$(IFS=','; echo "${SECURITY_GROUPS_LIST[*]}")
+    JOB_ANNOTATIONS_BLOCK=$(cat <<EOF
   annotations:
     vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
 EOF
 )
-  POD_ANNOTATIONS_BLOCK=$(cat <<EOF
+    POD_ANNOTATIONS_BLOCK=$(cat <<EOF
       annotations:
         vpc.amazonaws.com/security-groups: "${SECURITY_GROUPS}"
 EOF
 )
-else
-  JOB_ANNOTATIONS_BLOCK=""
-  POD_ANNOTATIONS_BLOCK=""
+  fi
 fi
 
 
@@ -517,19 +698,31 @@ if kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
   fi
 fi
 
+if helm status "${LEGACY_UI_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+  if [[ "${REMOVE_LEGACY_UI_RELEASE}" == "1" ]]; then
+    echo "   ℹ️  Removing legacy UI release ${LEGACY_UI_RELEASE} to avoid conflicting cloud UI state"
+    helm uninstall "${LEGACY_UI_RELEASE}" -n "${K8S_NAMESPACE}" >/dev/null 2>&1 || true
+  else
+    echo "❌ Legacy UI release ${LEGACY_UI_RELEASE} exists in namespace ${K8S_NAMESPACE}. Remove it or set REMOVE_LEGACY_UI_RELEASE=1." >&2
+    exit 1
+  fi
+fi
+
 # Step 4: Ensure internal PKI (step-ca + cert-manager) and refresh CA bundle
 echo ""
 echo "4️⃣  Ensuring internal PKI (step-ca + cert-manager)..."
 
-# Get DNS hostnames from Terraform outputs (used for Certificate SANs)
-DNS_PLATFORM_API_GRPC=$(terraform output -raw dns_platform_api_grpc 2>/dev/null || echo "platform-api-grpc.aegist.dev")
-DNS_PLATFORM_API_HTTP=$(terraform output -raw dns_platform_api_http 2>/dev/null || echo "platform-api.aegist.dev")
-DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "proxy.aegist.dev")
+# Get canonical public DNS hostnames (used for certificates and deployment verification)
+DNS_PLATFORM_API=$(terraform output -raw dns_platform_api 2>/dev/null || echo "${PLATFORM_API_PUBLIC_HOST}")
+DNS_KEYCLOAK=$(terraform output -raw dns_keycloak 2>/dev/null || echo "${KEYCLOAK_PUBLIC_HOST}")
+DNS_PROXY=$(terraform output -raw dns_proxy 2>/dev/null || echo "${PROXY_PUBLIC_HOST}")
+DNS_UI=$(terraform output -raw dns_ui 2>/dev/null || echo "${UI_PUBLIC_HOST}")
 
 echo "   📋 DNS hostnames:"
-echo "      Platform API gRPC: ${DNS_PLATFORM_API_GRPC}"
-echo "      Platform API HTTP: ${DNS_PLATFORM_API_HTTP}"
+echo "      Platform API:      ${DNS_PLATFORM_API}"
+echo "      Keycloak:          ${DNS_KEYCLOAK}"
 echo "      Proxy:             ${DNS_PROXY}"
+echo "      UI:                ${DNS_UI}"
 
 PKI_NAMESPACE=${PKI_NAMESPACE:-aegis-pki}
 CERT_MANAGER_NAMESPACE=${CERT_MANAGER_NAMESPACE:-cert-manager}
@@ -562,13 +755,22 @@ echo "   ✅ CRDs synced"
 
 # Step 6: Deploy aegis-services using Helm (FULL deployment)
 echo ""
-echo "6️⃣  Deploying aegis-services (platform-api + proxy) with Helm..."
+echo "6️⃣  Deploying aegis-services (platform-api + proxy + keycloak + backstage) with Helm..."
 
 # Get JWT secret for proxy
 JWT_SECRET=$(terraform output -raw jwt_secret_value)
+BACKEND_SECRET=$(openssl rand -hex 32)
 
 OVERRIDE_FILE=$(mktemp)
 {
+  echo "ingressController:"
+  echo "  enabled: true"
+  echo "ingress-nginx:"
+  echo "  controller:"
+  echo "    service:"
+  echo "      annotations:"
+  echo "        service.beta.kubernetes.io/aws-load-balancer-type: \"nlb\""
+  echo "        service.beta.kubernetes.io/aws-load-balancer-scheme: \"internet-facing\""
   echo "platformApi:"
   echo "  image:"
   if [[ -n "${PLATFORM_API_IMAGE_REPO}" ]]; then
@@ -579,12 +781,26 @@ OVERRIDE_FILE=$(mktemp)
   fi
   echo "  env:"
   echo "    DATABASE_URL: \"${DB_URL}\""
-  echo "    OIDC_ISSUER_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis\""
+  echo "    OIDC_ISSUER_URL: \"https://${DNS_KEYCLOAK}/realms/aegis\""
   echo "    OIDC_AUDIENCE: \"backstage,aegis-platform\""
-  echo "    OIDC_JWKS_URL: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/certs\""
+  echo "    OIDC_JWKS_URL: \"https://${DNS_KEYCLOAK}/realms/aegis/protocol/openid-connect/certs\""
   if [[ -n "${DNS_PROXY}" ]]; then
     echo "    AEGIS_PROXY_BASE_URL: \"wss://${DNS_PROXY}:8080\""
   fi
+  # Spoke provisioning env vars: image tag and dynamic endpoints
+  echo "    AEGIS_PLATFORM_API_ENDPOINT: \"${DNS_PLATFORM_API}:8081\""
+  echo "    AEGIS_PLATFORM_API_GRPC_INSECURE: \"false\""
+  if [[ -n "${K8S_AGENT_IMAGE_REPO}" ]]; then
+    echo "    AEGIS_SPOKE_IMAGE_REPO: \"${K8S_AGENT_IMAGE_REPO}\""
+  fi
+  if [[ -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
+    echo "    AEGIS_SPOKE_IMAGE_TAG: \"${K8S_AGENT_IMAGE_TAG_VALUE}\""
+  fi
+  echo "    AEGIS_SPOKE_OIDC_TOKEN_URL: \"https://${DNS_KEYCLOAK}/realms/aegis/protocol/openid-connect/token\""
+  echo "    AEGIS_SPOKE_OIDC_CLIENT_ID: \"spoke-agent\""
+  echo "    AEGIS_SPOKE_OIDC_CLIENT_SECRET: \"${SPOKE_OIDC_CLIENT_SECRET}\""
+  echo "    AEGIS_SPOKE_OIDC_AUDIENCE: \"aegis-platform\""
+  echo "    AEGIS_SPOKE_VALUES_FILE: \"/root/charts/aegis-spoke/values-cloud-remote.yaml\""
   echo "  secrets:"
   echo "    db-password: \"${DB_PASSWORD}\""
   echo "    proxy-jwt-secret: \"${JWT_SECRET}\""
@@ -592,16 +808,7 @@ OVERRIDE_FILE=$(mktemp)
   echo "    certManager:"
   echo "      enabled: true"
   echo "      dnsNames:"
-  echo "        - \"${DNS_PLATFORM_API_GRPC}\""
-  echo "        - \"${DNS_PLATFORM_API_HTTP}\""
-  echo "  auth:"
-  echo "    oidc:"
-  echo "      caBundle:"
-  echo "        create: false"
-  echo "        secretName: aegis-trust-bundle"
-  echo "        key: ca.crt"
-  echo "        fileName: ca.crt"
-  echo "        mountPath: /etc/aegis-platform-api/oidc"
+  echo "        - \"${DNS_PLATFORM_API}\""
   echo "proxy:"
   if [[ -n "${DNS_PROXY}" ]]; then
     echo "  publicHost: \"${DNS_PROXY}\""
@@ -620,18 +827,71 @@ OVERRIDE_FILE=$(mktemp)
   echo "      enabled: true"
   echo "      dnsNames:"
   echo "        - \"${DNS_PROXY}\""
+  echo "backstage:"
+  echo "  enabled: true"
+  echo "  replicaCount: 1"
+  echo "  service:"
+  echo "    type: ClusterIP"
+  echo "    port: 7007"
+  echo "  ingress:"
+  echo "    enabled: true"
+  echo "    className: ingress-nginx"
+  echo "    annotations:"
+  echo "      nginx.ingress.kubernetes.io/ssl-redirect: \"true\""
+  echo "    hosts:"
+  echo "      - host: \"${DNS_UI}\""
+  echo "        paths:"
+  echo "          - path: /"
+  echo "            pathType: Prefix"
+  echo "    tls:"
+  echo "      - secretName: ${HELM_RELEASE}-backstage-tls"
+  echo "        hosts:"
+  echo "          - \"${DNS_UI}\""
+  echo "  tls:"
+  echo "    certManager:"
+  echo "      enabled: true"
+  echo "      dnsNames:"
+  echo "        - \"${DNS_UI}\""
+  echo "  image:"
+  if [[ -n "${UI_IMAGE_REPO}" ]]; then
+    echo "    repository: ${UI_IMAGE_REPO}"
+  fi
+  if [[ -n "${UI_IMAGE_TAG_VALUE}" ]]; then
+    echo "    tag: \"${UI_IMAGE_TAG_VALUE}\""
+  fi
+  echo "  appConfig:"
+  echo "    appBaseUrl: \"https://${DNS_UI}\""
+  echo "    backendBaseUrl: \"https://${DNS_UI}\""
+  echo "  postgres:"
+  echo "    host: \"platform-postgres.${K8S_NAMESPACE}.svc.cluster.local\""
+  echo "    port: \"5432\""
+  echo "    user: \"aegis_platform\""
+  echo "  keycloak:"
+  echo "    baseUrl: \"https://${DNS_KEYCLOAK}\""
+  echo "    realm: \"aegis\""
+  echo "    clientId: \"backstage\""
+  echo "    clientSecret:"
+  echo "      secretName: ${KEYCLOAK_CLIENT_SECRET_NAME}"
+  echo "      key: clientSecret"
+  echo "  secrets:"
+  echo "    create: true"
+  echo "    backendSecret: \"${BACKEND_SECRET}\""
   echo "keycloak:"
   echo "  enabled: true"
   echo "  forceRender: true"
   echo "  namespace: ${K8S_NAMESPACE}"
   echo "  hostname:"
-    echo "    hostname: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
-  echo "    admin: \"https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}\""
+  echo "    hostname: \"https://${DNS_KEYCLOAK}\""
+  echo "    admin: \"https://${DNS_KEYCLOAK}\""
   echo "    strict: false"
   echo "  ingress:"
   echo "    enabled: false"
   echo "  customIngress:"
-  echo "    enabled: false"
+  echo "    enabled: true"
+  echo "    className: ingress-nginx"
+  echo "    annotations:"
+  echo "      nginx.ingress.kubernetes.io/backend-protocol: \"HTTPS\""
+  echo "      nginx.ingress.kubernetes.io/ssl-redirect: \"true\""
   echo "  http:"
   echo "    httpEnabled: false"
   echo "  admin:"
@@ -653,6 +913,8 @@ OVERRIDE_FILE=$(mktemp)
   echo "      create: false"
   echo "    certManager:"
   echo "      enabled: true"
+  echo "      dnsNames:"
+  echo "        - \"${DNS_KEYCLOAK}\""
 } > "${OVERRIDE_FILE}"
 
 cd "${OUTPUT_DIR}"
@@ -673,18 +935,54 @@ helm "${HELM_ARGS[@]}"
 
 
 echo "   ✅ aegis-services deployed"
-echo "   🔄 Restarting workloads to pick up latest configuration"
-kubectl rollout restart "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" >/dev/null
-kubectl rollout restart "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" >/dev/null
-
 echo "   ⏳ Waiting for deployments to become ready"
 kubectl rollout status "deployment/${HELM_RELEASE}-platform-api" -n "${K8S_NAMESPACE}" --timeout=5m
 kubectl rollout status "deployment/${HELM_RELEASE}-proxy" -n "${K8S_NAMESPACE}" --timeout=5m
 echo "   ⏳ Waiting for Keycloak components to become ready"
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak -n "${K8S_NAMESPACE}" --timeout=5m >/dev/null 2>&1 || \
-  echo "   ⚠️  Keycloak pods not ready within timeout"
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=keycloak-postgres -n "${K8S_NAMESPACE}" --timeout=5m >/dev/null 2>&1 || \
-  echo "   ⚠️  Keycloak Postgres pods not ready within timeout"
+kubectl rollout status "statefulset/${HELM_RELEASE}-keycloak-db" -n "${K8S_NAMESPACE}" --timeout=10m || \
+  { echo "❌ Keycloak Postgres StatefulSet not ready within timeout" >&2; exit 1; }
+kubectl rollout status "statefulset/${HELM_RELEASE}-keycloak" -n "${K8S_NAMESPACE}" --timeout=10m || \
+  { echo "❌ Keycloak StatefulSet not ready within timeout" >&2; exit 1; }
+
+# Step 6a: Verify spoke provisioning env vars in platform-api deployment
+echo ""
+echo "   🔍 Verifying platform-api spoke provisioning configuration..."
+
+verify_pod_env() {
+  local var_name="$1"
+  local required="$2"
+  local value
+  value=$(kubectl -n "${K8S_NAMESPACE}" get deployment "${HELM_RELEASE}-platform-api" \
+    -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"${var_name}\")].value}" 2>/dev/null || echo "")
+  if [[ -z "${value}" ]]; then
+    if [[ "${required}" == "required" ]]; then
+      echo "   ❌ FATAL: platform-api missing required env var: ${var_name}" >&2
+      return 1
+    else
+      echo "   ⚠️  Optional env var not set: ${var_name}"
+    fi
+  else
+    local display="${value:0:50}"
+    [[ ${#value} -gt 50 ]] && display="${display}..."
+    echo "   ✅ ${var_name} = ${display}"
+  fi
+}
+
+SPOKE_ENV_OK=true
+verify_pod_env "AEGIS_SPOKE_IMAGE_REPO" "required"      || SPOKE_ENV_OK=false
+verify_pod_env "AEGIS_PLATFORM_API_ENDPOINT" "required"  || SPOKE_ENV_OK=false
+verify_pod_env "AEGIS_SPOKE_VALUES_FILE" "required"      || SPOKE_ENV_OK=false
+verify_pod_env "AEGIS_SPOKE_OIDC_TOKEN_URL" "optional"
+verify_pod_env "AEGIS_SPOKE_IMAGE_TAG" "optional"
+
+if [[ "${SPOKE_ENV_OK}" != "true" ]]; then
+  echo "" >&2
+  echo "   ❌ FATAL: platform-api is missing critical spoke provisioning env vars." >&2
+  echo "   Spoke cluster provisioning will fail silently with wrong defaults." >&2
+  echo "   Fix Helm values (cloud.yaml or deploy script override) and re-deploy." >&2
+  exit 1
+fi
+echo "   ✅ Spoke provisioning config verified"
 
 # Step 6b: Run in-cluster Postgres migrations (when SKIP_MIGRATION_PLACEHOLDER=1)
 if [[ "${SKIP_MIGRATION_PLACEHOLDER:-0}" == "1" ]]; then
@@ -722,220 +1020,51 @@ fi
 # Step 7: Wait for Load Balancers
 echo ""
 echo "7️⃣  Waiting for Load Balancers to provision (this takes ~2 minutes)..."
+PLATFORM_API_LB=""
+PROXY_LB=""
+PUBLIC_INGRESS_LB=""
 
-echo "   Waiting for platform-api Load Balancer..."
-for i in {1..60}; do
-  PLATFORM_API_LB=$(kubectl get svc "${PLATFORM_API_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-  if [ -n "${PLATFORM_API_LB}" ]; then
-    echo "   ✅ Platform API Load Balancer ready: ${PLATFORM_API_LB}"
-    break
-  fi
-  echo -n "."
-  sleep 2
-done
+wait_for_lb_hostname "platform-api" "svc/${PLATFORM_API_RELEASE_NAME}" "${K8S_NAMESPACE}" PLATFORM_API_LB
+wait_for_lb_dns "${PLATFORM_API_LB}"
+echo ""
+wait_for_lb_hostname "proxy" "svc/${PROXY_RELEASE_NAME}" "${K8S_NAMESPACE}" PROXY_LB
+wait_for_lb_dns "${PROXY_LB}"
 
-if [ -n "${PLATFORM_API_LB}" ]; then
-  echo "   Waiting for DNS propagation for ${PLATFORM_API_LB}..."
-  for i in {1..30}; do
-    if dig +short "${PLATFORM_API_LB}" | grep -q '^[0-9]'; then
-      echo "   ✅ DNS resolved: $(dig +short ${PLATFORM_API_LB} | head -1)"
-      break
-    fi
-    echo -n "."
-    sleep 2
-  done
+INGRESS_CONTROLLER_SERVICE=$(kubectl get svc -n "${K8S_NAMESPACE}" \
+  -l app.kubernetes.io/component=controller,app.kubernetes.io/name=ingress-nginx \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [[ -z "${INGRESS_CONTROLLER_SERVICE}" ]]; then
+  echo "❌ ingress-nginx controller service not found in namespace ${K8S_NAMESPACE}" >&2
+  exit 1
 fi
+echo ""
+wait_for_lb_hostname "public ingress" "svc/${INGRESS_CONTROLLER_SERVICE}" "${K8S_NAMESPACE}" PUBLIC_INGRESS_LB
+wait_for_lb_dns "${PUBLIC_INGRESS_LB}"
 
 echo ""
-echo "   Waiting for proxy Load Balancer..."
-for i in {1..60}; do
-  PROXY_LB=$(kubectl get svc "${PROXY_RELEASE_NAME}" -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-  if [ -n "${PROXY_LB}" ]; then
-    echo "   ✅ Proxy Load Balancer ready: ${PROXY_LB}"
-    break
-  fi
-  echo -n "."
-  sleep 2
-done
+echo "   ℹ️  Proxy endpoint configured via Helm: wss://${DNS_PROXY}:8080"
 
-if [ -n "${PROXY_LB}" ]; then
-  echo "   Waiting for DNS propagation for ${PROXY_LB}..."
-  for i in {1..30}; do
-    if dig +short "${PROXY_LB}" | grep -q '^[0-9]'; then
-      echo "   ✅ DNS resolved: $(dig +short ${PROXY_LB} | head -1)"
-      break
-    fi
-    echo -n "."
-    sleep 2
-  done
-fi
-
-UI_LB=""
-if [ -d "${AEGIS_UI_DIR:-$HOME/code/aegis-ui}" ]; then
-  echo ""
-  echo "   Waiting for aegis-ui Load Balancer..."
-  for i in {1..60}; do
-    UI_LB=$(kubectl get svc aegis-ui -n "${K8S_NAMESPACE}" \
-      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-    if [ -n "${UI_LB}" ]; then
-      echo "   ✅ aegis-ui Load Balancer ready: ${UI_LB}"
-      break
-    fi
-    echo -n "."
-    sleep 2
-  done
-fi
-
-if [ -n "${PROXY_LB}" ]; then
-  echo ""
-  echo "   ℹ️  Proxy endpoint configured via Helm: wss://${DNS_PROXY}:8080"
-  echo "   (No kubectl set env needed - Helm manages AEGIS_PROXY_BASE_URL)"
-fi
-
-# Update DNS records with actual LoadBalancer hostnames (direct API calls)
-# This bypasses Terraform to avoid conflicts with lifecycle.ignore_changes
 echo ""
-echo "   🌐 Updating DNS records with LoadBalancer hostnames..."
-if [[ "${SKIP_ROUTE53_UPDATE}" == "1" ]]; then
-  echo "   ⚠️  SKIP_ROUTE53_UPDATE=1, skipping DNS changes"
-elif [ -n "${PLATFORM_API_LB}" ] && [ -n "${PROXY_LB}" ]; then
-  cd "${SCRIPT_DIR}"
-
-  # Update Cloudflare DNS (aegis-platform.tech)
-  CF_ZONE_ID=$(terraform output -raw cloudflare_zone_id 2>/dev/null || echo "")
-  CF_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
-  if [[ -z "${CF_API_TOKEN}" ]]; then
-    echo "   ⚠️  CLOUDFLARE_API_TOKEN not set; export it or pass via environment to update Cloudflare DNS"
-  fi
-
-  if [[ -n "${CF_ZONE_ID}" && -n "${CF_API_TOKEN}" ]]; then
-    for record_info in "api:${PLATFORM_API_LB}" "keycloak:${PLATFORM_API_LB}" "proxy:${PROXY_LB}"; do
-      record_name="${record_info%%:*}"
-      lb_host="${record_info#*:}"
-      RECORD_ID=$(curl -sS "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${record_name}.aegis-platform.tech&type=CNAME" \
-        -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id // empty')
-      if [[ -n "${RECORD_ID}" ]]; then
-        curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
-          -H "Authorization: Bearer ${CF_API_TOKEN}" \
-          -H "Content-Type: application/json" \
-          --data "{\"content\":\"${lb_host}\"}" >/dev/null
-      fi
-    done
-    # Update UI record if available
-    if [[ -n "${UI_LB}" ]]; then
-      UI_RECORD_ID=$(curl -sS "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=ui.aegis-platform.tech&type=CNAME" \
-        -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id // empty')
-      if [[ -n "${UI_RECORD_ID}" ]]; then
-        curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${UI_RECORD_ID}" \
-          -H "Authorization: Bearer ${CF_API_TOKEN}" \
-          -H "Content-Type: application/json" \
-          --data "{\"content\":\"${UI_LB}\"}" >/dev/null
-      fi
-    fi
-    echo "   ✅ Cloudflare DNS updated"
-  else
-    echo "   ⚠️  Cloudflare zone ID or API token not available; skipping Cloudflare update"
-  fi
-
-  # Update Route53 DNS (aegist.dev)
-  R53_ZONE_ID=$(terraform output -raw route53_zone_id 2>/dev/null || echo "")
-  if [[ -n "${R53_ZONE_ID}" ]]; then
-    AWS_CLI_PROFILE="${AWS_PROFILE:-aegis-new}"
-    aws route53 change-resource-record-sets \
-      --hosted-zone-id "${R53_ZONE_ID}" \
-      --profile "${AWS_CLI_PROFILE}" \
-      --change-batch "{
-        \"Changes\": [
-          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"platform-api-grpc.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PLATFORM_API_LB}\"}]}},
-          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"platform-api.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PLATFORM_API_LB}\"}]}},
-          {\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"proxy.aegist.dev\",\"Type\":\"CNAME\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"${PROXY_LB}\"}]}}
-        ]
-      }" >/dev/null 2>&1 \
-      && echo "   ✅ Route53 DNS updated" \
-      || echo "   ⚠️  Route53 update failed; update manually"
-  else
-    echo "   ⚠️  Route53 zone ID not available; skipping Route53 update"
-  fi
-
-  echo "   📋 DNS Records:"
-  echo "      platform-api-grpc.aegist.dev → ${PLATFORM_API_LB}"
-  echo "      platform-api.aegist.dev      → ${PLATFORM_API_LB}"
-  echo "      proxy.aegist.dev             → ${PROXY_LB}"
-
-  # Update /etc/hosts for local DNS resolution (non-fatal — requires sudo)
-  echo ""
-  echo "   🖥️  Updating /etc/hosts for local DNS resolution..."
-  (
-    set +e  # sudo may fail in non-interactive environments
-    # Get ALL IPs from Network Load Balancers (NLBs have multiple IPs)
-    PLATFORM_API_IPS=$(dig +short "${PLATFORM_API_LB}" | grep '^[0-9]' | tr '\n' ' ')
-    PROXY_IPS=$(dig +short "${PROXY_LB}" | grep '^[0-9]' | tr '\n' ' ')
-    # Use first IP for /etc/hosts entry
-    PLATFORM_API_IP=$(echo "${PLATFORM_API_IPS}" | awk '{print $1}')
-    PROXY_IP=$(echo "${PROXY_IPS}" | awk '{print $1}')
-
-    if [ -n "${PLATFORM_API_IP}" ] && [ -n "${PROXY_IP}" ]; then
-      # Remove old aegist.dev entries
-      sudo sed -i.bak '/aegist\.dev/d' /etc/hosts 2>/dev/null || true
-
-      # Add new entries (using first IP from NLB)
-      echo "${PLATFORM_API_IP} platform-api-grpc.aegist.dev platform-api.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
-      echo "${PROXY_IP} proxy.aegist.dev" | sudo tee -a /etc/hosts >/dev/null
-
-      echo "   ✅ /etc/hosts updated:"
-      echo "      ${PLATFORM_API_IP} → platform-api-grpc.aegist.dev, platform-api.aegist.dev"
-      echo "      ${PROXY_IP} → proxy.aegist.dev"
-      echo "   📝 Note: NLB IPs (all): platform-api=${PLATFORM_API_IPS}, proxy=${PROXY_IPS}"
-    else
-      echo "   ⚠️  Could not resolve LoadBalancer IPs; /etc/hosts not updated"
-    fi
-  ) || echo "   ⚠️  /etc/hosts update failed (non-fatal — sudo may not be available)"
-
-  cd "${OUTPUT_DIR}"
+echo "   🌐 Updating Cloudflare DNS records with LoadBalancer hostnames..."
+if [[ "${SKIP_DNS_UPDATE}" == "1" ]]; then
+  echo "   ⚠️  SKIP_DNS_UPDATE=1, skipping DNS changes"
 else
-  echo "   ⚠️  LoadBalancers not ready; skip Route53 update"
+  update_cloudflare_cname "${DNS_PLATFORM_API}" "${PLATFORM_API_LB}"
+  update_cloudflare_cname "${DNS_PROXY}" "${PROXY_LB}"
+  update_cloudflare_cname "${DNS_UI}" "${PUBLIC_INGRESS_LB}"
+  update_cloudflare_cname "${DNS_KEYCLOAK}" "${PUBLIC_INGRESS_LB}"
+  echo "   ✅ Cloudflare DNS updated"
+  echo "   📋 DNS Records:"
+  echo "      ${DNS_PLATFORM_API} → ${PLATFORM_API_LB}"
+  echo "      ${DNS_PROXY} → ${PROXY_LB}"
+  echo "      ${DNS_UI} → ${PUBLIC_INGRESS_LB}"
+  echo "      ${DNS_KEYCLOAK} → ${PUBLIC_INGRESS_LB}"
 fi
 
-# Step 7: Update Backstage configuration
 echo ""
-echo "7️⃣  Updating Backstage configuration..."
-
-if [ -n "${PLATFORM_API_LB}" ]; then
-  APP_TARGET="http://${DNS_PLATFORM_API_HTTP}:8080"
-  SECURE_FLAG=false
-
-  # Generate Backstage proxy configuration
-  BACKSTAGE_CONFIG=$(cat <<EOF_BACKSTAGE
-# Backstage override configuration for your cloud deployment
-
-proxy:
-  endpoints:
-    '/aegis':
-      target: '${APP_TARGET}'
-      changeOrigin: true
-      credentials: forward
-      secure: ${SECURE_FLAG}
-      allowedHeaders:
-        - authorization
-        - Authorization
-EOF_BACKSTAGE
-)
-
-  # Write to Backstage (aegis-ui) cloud config files
-  AEGIS_UI_DIR="${AEGIS_UI_DIR:-$HOME/code/aegis-ui}"
-  if [ -d "$AEGIS_UI_DIR" ]; then
-    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.cloud.yaml"
-    echo "   ✅ Updated: aegis-ui/app-config.cloud.yaml"
-
-    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.cloud-tls.yaml"
-    echo "   ✅ Updated: aegis-ui/app-config.cloud-tls.yaml"
-
-    echo "${BACKSTAGE_CONFIG}" > "${AEGIS_UI_DIR}/app-config.local.yaml"
-    echo "   ✅ Updated: aegis-ui/app-config.local.yaml"
-  else
-    echo "   ⚠️  $AEGIS_UI_DIR not found; skipping Backstage config update"
-  fi
-fi
+echo "   🔄 Restarting Backstage after public DNS update"
+kubectl rollout restart "deployment/${HELM_RELEASE}-backstage" -n "${K8S_NAMESPACE}" >/dev/null
+kubectl rollout status "deployment/${HELM_RELEASE}-backstage" -n "${K8S_NAMESPACE}" --timeout=10m
 
 # Step 8: Deploy k8s-agent (aegis-spoke)
 echo ""
@@ -973,6 +1102,13 @@ if [[ -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
   SPOKE_HELM_ARGS+=( --set k8sAgent.image.tag=${K8S_AGENT_IMAGE_TAG_VALUE} )
 fi
 
+# VS Code REH init container — uses same repo prefix and tag as k8s-agent
+if [[ -n "${K8S_AGENT_IMAGE_REPO}" && -n "${K8S_AGENT_IMAGE_TAG_VALUE}" ]]; then
+  VSCODE_REH_INIT_REPO="${K8S_AGENT_IMAGE_REPO/aegis\/k8s-agent/aegis\/vscode-reh-init}"
+  SPOKE_HELM_ARGS+=( --set "k8sAgent.env.AEGIS_VSCODE_REH_INIT_IMAGE=${VSCODE_REH_INIT_REPO}:${K8S_AGENT_IMAGE_TAG_VALUE}" )
+  echo "   ℹ️  VS Code REH init container: ${VSCODE_REH_INIT_REPO}:${K8S_AGENT_IMAGE_TAG_VALUE}"
+fi
+
 echo "   🔧 Ensuring existing CRDs are adoptable by Helm..."
 SPOKE_CRDS=( \
   aegisworkloads.aegis.yourorg.dev \
@@ -1002,58 +1138,115 @@ helm "${SPOKE_HELM_ARGS[@]}"
 
 echo "   ✅ k8s-agent deployed"
 
-# Step 9: Deploy aegis-ui (Backstage) — non-fatal
+# Step 8b: Register in-cluster kubeconfig for co-located spoke
 echo ""
-echo "9️⃣  Deploying aegis-ui (Backstage)..."
+echo "8️⃣ b Registering in-cluster kubeconfig for spoke cluster..."
+SPOKE_CLUSTER_ID="$(kubectl get deploy -n "${SPOKE_NAMESPACE}" -l app.kubernetes.io/name=k8s-agent \
+  -o jsonpath='{.items[0].spec.template.spec.containers[0].env[?(@.name=="AEGIS_CLUSTER_ID")].value}' 2>/dev/null || true)"
 
-AEGIS_UI_DIR="${AEGIS_UI_DIR:-$HOME/code/aegis-ui}"
+if [[ -n "${SPOKE_CLUSTER_ID}" ]]; then
+  IN_CLUSTER_KC=$(cat <<EOKC
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    server: https://kubernetes.default.svc
+  name: ${SPOKE_CLUSTER_ID}
+contexts:
+- context:
+    cluster: ${SPOKE_CLUSTER_ID}
+    user: ${SPOKE_CLUSTER_ID}
+  name: ${SPOKE_CLUSTER_ID}
+current-context: ${SPOKE_CLUSTER_ID}
+kind: Config
+users:
+- name: ${SPOKE_CLUSTER_ID}
+  user:
+    tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+EOKC
+)
+  KC_B64=$(echo "${IN_CLUSTER_KC}" | base64 | tr -d '\n')
+  KC_KEY="${SPOKE_CLUSTER_ID}.kubeconfig"
 
-if [ -d "$AEGIS_UI_DIR" ]; then
-  (
-    set +e  # UI failure should not abort the script
+  # Create or update the kubeconfigs secret
+  if kubectl -n "${K8S_NAMESPACE}" get secret aegis-kubeconfigs >/dev/null 2>&1; then
+    kubectl -n "${K8S_NAMESPACE}" patch secret aegis-kubeconfigs --type=json \
+      -p "[{\"op\":\"add\",\"path\":\"/data/${KC_KEY}\",\"value\":\"${KC_B64}\"}]" >/dev/null 2>&1 || true
+  else
+    kubectl -n "${K8S_NAMESPACE}" create secret generic aegis-kubeconfigs \
+      --from-literal="${KC_KEY}=$(echo "${IN_CLUSTER_KC}")" >/dev/null
+  fi
+  echo "   ✅ Kubeconfig registered for cluster '${SPOKE_CLUSTER_ID}'"
 
-    cd "${SCRIPT_DIR}"
-    AWS_ECR_REGISTRY=$(terraform output -raw ecr_registry_url 2>/dev/null | sed 's|/aegis/.*||')
-    IMAGE_TAG="${PLATFORM_API_IMAGE_TAG_VALUE:-$(git rev-parse --short HEAD)}"
-    CLOUD_UI_IMAGE="${AWS_ECR_REGISTRY}/aegis/ui:${IMAGE_TAG}"
-
-    # Build and push UI image
-    echo "   Building aegis-ui image: $CLOUD_UI_IMAGE"
-    docker build --platform linux/amd64 \
-      -t "$CLOUD_UI_IMAGE" \
-      -f "$AEGIS_UI_DIR/packages/backend/Dockerfile.cloud" \
-      "$AEGIS_UI_DIR"
-    docker push "$CLOUD_UI_IMAGE"
-
-    # Clear stale Backstage migration locks (safe — only affects lock rows)
-    PG_POD=$(kubectl -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/name=platform-postgres \
-      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    if [[ -n "${PG_POD}" ]]; then
-      for db in backstage_plugin_catalog backstage_plugin_auth backstage_plugin_scaffolder; do
-        kubectl exec -n "${K8S_NAMESPACE}" "${PG_POD}" -- \
-          psql -U aegis_platform -d "$db" -c "UPDATE knex_migrations_lock SET is_locked = 0 WHERE is_locked = 1;" 2>/dev/null || true
-      done
-    fi
-
-    # Get keycloak client secret and generate backend secret
-    KC_CLIENT_SECRET=$(kubectl get secret keycloak-backstage-client-secret \
-      -n aegis-system -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d)
-    BACKEND_SECRET=$(openssl rand -hex 32)
-
-    # Deploy via Helm
-    helm upgrade --install aegis-ui "$AEGIS_UI_DIR/charts/aegis-ui" \
-      -n aegis-system \
-      -f "$AEGIS_UI_DIR/charts/aegis-ui/values-cloud.yaml" \
-      --set image.tag="$IMAGE_TAG" \
-      --set env.BACKEND_SECRET="$BACKEND_SECRET" \
-      --set keycloak.clientSecret="$KC_CLIENT_SECRET" \
-      --wait --timeout 5m
-
-    echo "   ✅ aegis-ui deployed"
-  ) || echo "   ⚠️  aegis-ui deployment failed (non-fatal)"
+  # Update database with kubeconfig_secret_ref (idempotent)
+  POSTGRES_POD="$(kubectl -n "${K8S_NAMESPACE}" get pods -l app=postgres -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -n "${POSTGRES_POD}" ]]; then
+    kubectl -n "${K8S_NAMESPACE}" exec "${POSTGRES_POD}" -- \
+      psql -U aegis_platform -d aegis_platform -c \
+      "UPDATE clusters SET kubeconfig_secret_ref = '${K8S_NAMESPACE}/aegis-kubeconfigs:${KC_KEY}', project_id = COALESCE(NULLIF(project_id, ''), 'default') WHERE id = '${SPOKE_CLUSTER_ID}' AND deleted_at IS NULL;" \
+      >/dev/null 2>&1 || echo "   ⚠️  DB update skipped (cluster may not be registered yet — will auto-resolve on next heartbeat)"
+  fi
 else
-  echo "   ⚠️  $AEGIS_UI_DIR not found, skipping aegis-ui deployment"
+  echo "   ⚠️  Could not determine AEGIS_CLUSTER_ID from spoke deployment — skipping kubeconfig registration"
 fi
+
+# Step 8c: Bootstrap default project with policy regions
+echo ""
+echo "8️⃣ c Bootstrapping default project..."
+BOOTSTRAP_TOKEN=$(curl -sk -X POST "https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/token" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=spoke-agent" \
+  -d "client_secret=${SPOKE_OIDC_CLIENT_SECRET}" 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+
+if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
+  # Port-forward to platform-api for gRPC call
+  kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${HELM_RELEASE}-platform-api" 18081:8081 &
+  PF_PID=$!
+  sleep 3
+
+  DEPLOY_REGION="$(cd "${SCRIPT_DIR}" && terraform output -raw aws_region 2>/dev/null || echo "us-east-1")"
+  grpcurl -insecure -H "authorization: Bearer ${BOOTSTRAP_TOKEN}" \
+    -d "{\"project\":{\"id\":\"default\",\"display_name\":\"Default Project\",\"policy\":{\"regions\":[\"${DEPLOY_REGION}\"]}}}" \
+    localhost:18081 aegis.v1.AegisPlatform/CreateProject >/dev/null 2>&1 && \
+    echo "   ✅ Default project created with region '${DEPLOY_REGION}'" || \
+    echo "   ⚠️  Project bootstrap skipped (grpcurl may not be installed or platform-api not ready)"
+
+  kill ${PF_PID} 2>/dev/null || true
+  wait ${PF_PID} 2>/dev/null || true
+else
+  echo "   ⚠️  Could not obtain Keycloak token — project bootstrap skipped"
+fi
+
+# Step 9: Verify canonical public endpoints
+echo ""
+echo "9️⃣  Verifying canonical public endpoints..."
+
+for host in "${DNS_PLATFORM_API}" "${DNS_PROXY}" "${DNS_UI}" "${DNS_KEYCLOAK}"; do
+  wait_for_public_dns "${host}"
+done
+
+curl -fsS --max-time 20 "http://${DNS_PLATFORM_API}:8080/healthz" >/dev/null || {
+  echo "❌ Platform API health check failed: http://${DNS_PLATFORM_API}:8080/healthz" >&2
+  exit 1
+}
+curl -fsS --max-time 20 "http://${DNS_PROXY}:8080/healthz" >/dev/null || {
+  echo "❌ Proxy health check failed: http://${DNS_PROXY}:8080/healthz" >&2
+  exit 1
+}
+curl -fsS --max-time 20 "https://${DNS_UI}/healthcheck" >/dev/null || {
+  echo "❌ Backstage health check failed: https://${DNS_UI}/healthcheck" >&2
+  exit 1
+}
+curl -fsS --max-time 20 "https://${DNS_UI}/" >/dev/null || {
+  echo "❌ Backstage root endpoint failed: https://${DNS_UI}/" >&2
+  exit 1
+}
+curl -fsS --max-time 20 "https://${DNS_KEYCLOAK}/realms/aegis/.well-known/openid-configuration" >/dev/null || {
+  echo "❌ Keycloak discovery failed: https://${DNS_KEYCLOAK}/realms/aegis/.well-known/openid-configuration" >&2
+  exit 1
+}
+echo "   ✅ Canonical public endpoints verified"
 
 # Summary
 echo ""
@@ -1062,19 +1255,16 @@ echo ""
 echo "🎉 Deployment Complete!"
 echo ""
 echo "📊 Service URLs:"
-echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API_HTTP}:8080"
-echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API_GRPC}:8081"
+echo "   Platform API (HTTP gateway): http://${DNS_PLATFORM_API}:8080"
+echo "   Platform API (gRPC/TLS):     ${DNS_PLATFORM_API}:8081"
+echo "   Keycloak:                    https://${DNS_KEYCLOAK}"
 echo "   Proxy (WSS):                 wss://${DNS_PROXY}:8080"
-if [ -n "${UI_LB:-}" ]; then
-echo "   Backstage UI:                http://ui.aegis-platform.tech:7007"
-fi
+echo "   Backstage UI:                https://${DNS_UI}"
 echo ""
 echo "🌐 LoadBalancer Endpoints:"
 echo "   Platform API: ${PLATFORM_API_LB}"
 echo "   Proxy:        ${PROXY_LB}"
-if [ -n "${UI_LB:-}" ]; then
-echo "   UI:           ${UI_LB}"
-fi
+echo "   Public Ingress (UI/Keycloak): ${PUBLIC_INGRESS_LB}"
 echo ""
 echo "📝 Check deployment status:"
 echo "   kubectl get pods -n ${K8S_NAMESPACE}"
@@ -1084,7 +1274,7 @@ echo "🔍 View logs:"
 echo "   kubectl logs -n ${K8S_NAMESPACE} -l app.kubernetes.io/component=platform-api -f"
 echo ""
 echo "🔐 Test gRPC with grpcurl:"
-echo "   export GRPC_HOST=${DNS_PLATFORM_API_GRPC}"
+echo "   export GRPC_HOST=${DNS_PLATFORM_API}"
 echo "   export CA_BUNDLE=${CA_BUNDLE}"
 echo ""
 echo "   grpcurl -cacert \"\$CA_BUNDLE\" \\"
@@ -1092,13 +1282,13 @@ echo "     -d '{\"project\":{\"id\":\"p-demo\",\"displayName\":\"Demo\",\"ownerG
 echo "     \${GRPC_HOST}:8081 aegis.v1.AegisPlatform/CreateProject"
 echo ""
 echo "📱 VSCode Extension Configuration:"
-echo "   grpcEndpoint: \"${DNS_PLATFORM_API_GRPC}:8081\""
+echo "   grpcEndpoint: \"${DNS_PLATFORM_API}:8081\""
 echo "   caPath: \"${CA_BUNDLE}\""
 echo ""
 echo "🚀 Next steps:"
-echo "   1. Start Backstage UI: cd aegis-platform && yarn dev:cloud-tls"
-echo "   2. Access at: http://localhost:3000"
-echo "   3. Backstage proxy will use the configuration generated above"
+echo "   1. Open Backstage at: https://${DNS_UI}"
+echo "   2. Verify login redirects to: https://${DNS_KEYCLOAK}"
+echo "   3. Test UI workflows against platform-api/proxy on aegis-platform.tech"
 echo ""
 echo "🔐 TLS mode: gRPC clients must trust ${CA_BUNDLE}"
 echo ""

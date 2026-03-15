@@ -1,0 +1,38 @@
+## REFERENCE: vault-csi-provider hardening manifest
+## Source: repo1.dso.mil/dsop/hashicorp/vault-csi-provider
+---
+apiVersion: v1
+
+name: "hashicorp/vault-csi-provider"
+
+tags:
+- "v1.7.0"
+- "latest"
+
+args:
+  BASE_IMAGE: "google/distroless/static"
+  BASE_TAG: "nonroot"
+
+labels:
+  org.opencontainers.image.title: "vault-csi-provider"
+  org.opencontainers.image.description: "vault-csi-provider allows you to get secrets stored in Vault and mount them into Kubernetes pods."
+  org.opencontainers.image.licenses: "MPL-2.0"
+  org.opencontainers.image.url: "https://github.com/hashicorp/vault-csi-provider"
+  org.opencontainers.image.vendor: "Iron Bank"
+  org.opencontainers.image.version: "v1.7.0"
+  mil.dso.ironbank.image.keywords: "csi,secrets,vault"
+  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.product.name: "vault-csi-provider"
+
+resources:
+- filename: vault-csi-provider.tar.gz
+  url: https://github.com/hashicorp/vault-csi-provider/archive/refs/tags/v1.7.0.tar.gz
+  validation:
+    type: sha256
+    value: b7c4a353e040fcbeff10c6bd1e8f5a03bcc7b777951392a1eba86125af1fbfe1
+
+maintainers:
+- name: "Patrick Einheber"
+  username: "einheber"
+  email: "ironbank@dsop.io"
+  cht_member: true

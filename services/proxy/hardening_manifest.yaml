@@ -1,0 +1,38 @@
+---
+apiVersion: v1
+
+name: "aegis/proxy"
+
+tags:
+  - "1.0.0"
+  - "latest"
+
+args:
+  BASE_IMAGE: "google/distroless/static"
+  BASE_TAG: "nonroot"
+
+labels:
+  org.opencontainers.image.title: "aegis-proxy"
+  org.opencontainers.image.description: "Aegis Platform reverse proxy for secure WebSocket workspace tunneling with JWT session validation"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.url: "https://github.com/aegis-platform/aegis-platform"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "proxy,websocket,gpu,workspace,security"
+  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.product.name: "aegis-proxy"
+
+resources:
+  # Aegis proxy source (Go workspace — includes proto, pkg, and proxy service)
+  # Update URL and hash when tagging a new release
+  - filename: aegis-proxy-src.tar.gz
+    url: https://github.com/aegis-platform/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
+    validation:
+      type: sha256
+      value: "PLACEHOLDER_UPDATE_WITH_ACTUAL_SHA256_ON_RELEASE"
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "REPLACE_WITH_REPO1_USERNAME"
+    email: "REPLACE_WITH_EMAIL"
+    cht_member: false

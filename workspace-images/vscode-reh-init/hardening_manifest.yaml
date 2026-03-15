@@ -1,0 +1,46 @@
+---
+apiVersion: v1
+
+name: "aegis/vscode-reh-init"
+
+tags:
+  - "1.0.0"
+  - "latest"
+
+args:
+  BASE_IMAGE: "redhat/ubi/ubi9-minimal"
+  BASE_TAG: "9.7"
+
+labels:
+  org.opencontainers.image.title: "aegis-vscode-reh-init"
+  org.opencontainers.image.description: "Init container providing pre-downloaded VS Code Remote Extension Host for Aegis workspace pods"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.url: "https://github.com/aegis-platform/aegis-platform"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "vscode,init-container,workspace,remote-development"
+  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.product.name: "aegis-vscode-reh-init"
+
+resources:
+  # VS Code Remote Extension Host (REH) server binary
+  # Pinned to a specific stable commit. Update commit hash and SHA256 when
+  # upgrading VS Code version.
+  #
+  # To find the current stable commit:
+  #   curl -sI https://update.code.visualstudio.com/latest/server-linux-x64/stable | grep location
+  #
+  # To compute SHA256:
+  #   curl -fsSL <url> -o vscode-server-linux-x64.tar.gz && sha256sum vscode-server-linux-x64.tar.gz
+  #
+  - filename: vscode-server-linux-x64.tar.gz
+    url: https://vscode.download.prss.microsoft.com/dbazure/download/stable/ce099c1ed25d9eb3076c11e4a280f3eb52b4fbeb/vscode-server-linux-x64.tar.gz
+    validation:
+      type: sha256
+      value: d1f1324b9fc5b5405513a27c3468212884ed22ae98ca4ca2e55b7c4b6d0834ff
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "REPLACE_WITH_REPO1_USERNAME"
+    email: "REPLACE_WITH_EMAIL"
+    cht_member: false

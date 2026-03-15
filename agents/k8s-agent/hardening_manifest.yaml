@@ -1,0 +1,37 @@
+---
+apiVersion: v1
+
+name: "aegis/k8s-agent"
+
+tags:
+  - "1.0.0"
+  - "latest"
+
+args:
+  BASE_IMAGE: "google/distroless/static"
+  BASE_TAG: "nonroot"
+
+labels:
+  org.opencontainers.image.title: "aegis-k8s-agent"
+  org.opencontainers.image.description: "Aegis Platform Kubernetes operator agent for spoke cluster workload reconciliation and heartbeat reporting"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.url: "https://github.com/aegis-platform/aegis-platform"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "kubernetes,operator,agent,gpu,workload,spoke"
+  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.product.name: "aegis-k8s-agent"
+
+resources:
+  # Aegis k8s-agent source (Go modules — includes proto, pkg, and agent)
+  - filename: aegis-k8s-agent-src.tar.gz
+    url: https://github.com/aegis-platform/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
+    validation:
+      type: sha256
+      value: "PLACEHOLDER_UPDATE_WITH_ACTUAL_SHA256_ON_RELEASE"
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "REPLACE_WITH_REPO1_USERNAME"
+    email: "REPLACE_WITH_EMAIL"
+    cht_member: false

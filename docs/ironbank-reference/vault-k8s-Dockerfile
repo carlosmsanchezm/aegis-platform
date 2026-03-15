@@ -1,0 +1,37 @@
+## REFERENCE: vault-k8s Iron Bank Dockerfile
+## Source: repo1.dso.mil/dsop/hashicorp/vault-k8s
+## Pattern: Go binary compiled in Iron Bank golang builder, deployed on UBI9-minimal
+## This is the pattern closest to Aegis's platform-api
+
+ARG BASE_REGISTRY=registry1.dso.mil
+ARG BASE_IMAGE=ironbank/redhat/ubi/ubi9-minimal
+ARG BASE_TAG=9.7
+
+ARG VAULT_VERSION=0
+
+FROM registry1.dso.mil/ironbank/google/golang/ubi9/golang-1.22:1.22.12 as builder
+
+USER 0
+WORKDIR /
+COPY vault-k8s.tar.gz /
+
+RUN microdnf upgrade -y && \
+    groupadd -g 1000 vault && \
+    useradd -r -u 1000 -m -s /sbin/nologin -g vault vault && \
+    tar -xzf /vault-k8s.tar.gz --strip-components=1 && \
+    sed -i 's/Version = "0.0.0"/Version = "${VAULT_VERSION}:IB"/g' /version/version.go && \
+    go build && \
+    mv /vault-k8s /bin/
+
+FROM ${BASE_REGISTRY}/${BASE_IMAGE}:${BASE_TAG}
+
+RUN microdnf upgrade -y && \
+    groupadd -g 1000 vault && \
+    useradd -r -u 1000 -m -s /sbin/nologin -g vault vault && \
+    microdnf clean all
+
+COPY --from=builder /bin/vault-k8s /bin/
+
+USER vault
+
+ENTRYPOINT ["/bin/vault-k8s"]

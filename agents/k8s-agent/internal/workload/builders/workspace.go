@@ -43,6 +43,7 @@ type WorkspaceOptions struct {
 	InteractivePorts        []int32
 	SSHSecretName           string
 	SSHBootstrapImage       string
+	VSCodeREHInitImage      string // Iron Bank init container that injects VS Code REH binary
 	ActiveDeadlineSeconds   *int64
 	TTLSecondsAfterFinished *int32
 }
@@ -303,6 +304,34 @@ fi
 		corev1.VolumeMount{Name: sshConfigVolume, MountPath: "/config/sshd", SubPath: "config"},
 	)
 	main.Env = append(main.Env, corev1.EnvVar{Name: "AEGIS_SSH_CONFIG_DIR", Value: "/aegis-ssh"})
+
+	// VS Code REH init container: injects pre-built VS Code server binary from
+	// a separate Iron Bank image into a shared emptyDir volume at /reh.
+	// The workspace entrypoint expects to find the server at /reh/bin/current/.
+	if opts.VSCodeREHInitImage != "" {
+		const rehVolumeName = "aegis-vscode-reh"
+
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: rehVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+
+		rehInit := corev1.Container{
+			Name:    "aegis-vscode-reh-init",
+			Image:   opts.VSCodeREHInitImage,
+			Command: []string{"cp", "-a", "/reh/.", "/shared/reh/"},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: rehVolumeName, MountPath: "/shared/reh"},
+			},
+		}
+		podSpec.InitContainers = append(podSpec.InitContainers, rehInit)
+
+		main.VolumeMounts = append(main.VolumeMounts,
+			corev1.VolumeMount{Name: rehVolumeName, MountPath: "/reh"},
+		)
+	}
 }
 
 func gpuResourceRequests(opts WorkspaceOptions) corev1.ResourceList {

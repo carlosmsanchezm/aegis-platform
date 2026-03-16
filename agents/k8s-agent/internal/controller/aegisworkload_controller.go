@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -218,6 +219,24 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	err := r.Get(ctx, jobKey, &job)
 	if apierrors.IsNotFound(err) {
 		mergedEnv := workspacecfg.MergeEnv(spec.Env, r.workspaceEnvDefaults)
+
+		// Convert CRD storage spec to builder storage options.
+		var storageOpts *builders.StorageOptions
+		if spec.Storage != nil && spec.Storage.Persistent {
+			storageOpts = &builders.StorageOptions{
+				Persistent:        spec.Storage.Persistent,
+				StorageClass:      spec.Storage.StorageClass,
+				Size:              spec.Storage.Size,
+				MountPath:         spec.Storage.MountPath,
+				ExistingClaimName: spec.Storage.ExistingClaimName,
+			}
+			// Ensure PVC exists before creating the Job.
+			if err := r.ensureWorkspacePVC(ctx, aw, storageOpts); err != nil {
+				log.Error(err, "failed to ensure workspace PVC")
+				return ctrl.Result{}, err
+			}
+		}
+
 		opts := builders.WorkspaceOptions{
 			Namespace:               aw.Namespace,
 			JobName:                 jobName,
@@ -229,6 +248,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			Flavor:                  flavor,
 			Queue:                   aw.Spec.Queue,
 			Hints:                   convertSpecHints(aw.Spec.Hints),
+			Storage:                 storageOpts,
 			DryRun:                  r.dryRun,
 			KueueEnabled:            r.kueueEnabled,
 			KueueQueue:              r.kueueQueue,
@@ -690,6 +710,13 @@ func (r *AegisWorkloadReconciler) buildProxyURLUncached() string {
 		}
 	}
 	if host == "" {
+		// Last fallback: use hub proxy URL suggested via heartbeat ack.
+		// This handles co-located spokes (spoke on same cluster as hub, no LB).
+		if r.cpClient != nil {
+			if suggested := r.cpClient.SuggestedProxyURL(); suggested != "" {
+				return suggested
+			}
+		}
 		return ""
 	}
 	// If no scheme specified, default to wss://
@@ -1494,4 +1521,58 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Named("aegisworkload").
 		Complete(r)
+}
+
+// ensureWorkspacePVC creates a PVC for workspace persistent storage if one does not already exist.
+// PVCs are named based on the workload ID so they can be reused across workspace restarts.
+func (r *AegisWorkloadReconciler) ensureWorkspacePVC(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, storage *builders.StorageOptions) error {
+	pvcName := storage.ExistingClaimName
+	if pvcName == "" {
+		pvcName = fmt.Sprintf("aegis-ws-%s", aw.Name)
+	}
+
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: aw.Namespace}, existing)
+	if err == nil {
+		return nil // PVC already exists — reuse for session continuity
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check existing PVC %s: %w", pvcName, err)
+	}
+
+	size := storage.Size
+	if size == "" {
+		size = "50Gi"
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: aw.Namespace,
+			Labels: map[string]string{
+				"aegis.yourorg.dev/workload": aw.Name,
+				"aegis.yourorg.dev/project":  aw.Spec.ProjectID,
+				"app.kubernetes.io/managed-by": "aegis",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(size),
+				},
+			},
+		},
+	}
+
+	if storage.StorageClass != "" {
+		pvc.Spec.StorageClassName = &storage.StorageClass
+	}
+
+	if err := r.Create(ctx, pvc); err != nil {
+		return fmt.Errorf("create workspace PVC %s: %w", pvcName, err)
+	}
+
+	ctrl.LoggerFrom(ctx).Info("workspace PVC created", "pvc", pvcName, "size", size)
+	return nil
 }

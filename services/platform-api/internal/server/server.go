@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"sort"
@@ -505,7 +506,10 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 		zap.Strings("available_flavors", flavorNames),
 		zap.String("proxy_url", hb.GetProxyUrl()),
 	)
-	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
+	return &aegis.ClusterHeartbeatAck{
+		Ok:                true,
+		SuggestedProxyUrl: s.proxyBaseURL, // Hub proxy URL for spokes that can't discover their own
+	}, nil
 }
 
 func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersRequest) (*aegis.ListClustersResponse, error) {
@@ -2111,6 +2115,21 @@ func deriveSSHUser(workspace *aegis.WorkspaceSpec, subject string) string {
 func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	grpcEndpoint := os.Getenv("AEGIS_DISCOVERY_GRPC_ENDPOINT")
 	if grpcEndpoint == "" {
+		// Auto-derive from OIDC issuer URL domain pattern.
+		// If keycloak is at keycloak.aegis-platform.tech, platform-api is at platform-api.aegis-platform.tech.
+		if issuer := os.Getenv("OIDC_ISSUER_URL"); issuer != "" {
+			if u, err := url.Parse(issuer); err == nil && u.Host != "" {
+				host := u.Hostname()
+				// Replace keycloak prefix with platform-api
+				if strings.HasPrefix(host, "keycloak.") {
+					domain := strings.TrimPrefix(host, "keycloak.")
+					grpcEndpoint = "platform-api." + domain + ":8081"
+				}
+			}
+		}
+	}
+	if grpcEndpoint == "" {
+		// Final fallback: use request Host
 		grpcEndpoint = r.Host
 		if !strings.Contains(grpcEndpoint, ":") {
 			grpcEndpoint += ":8081"

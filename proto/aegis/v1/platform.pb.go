@@ -1641,10 +1641,11 @@ func (x *ClusterHeartbeat) GetProxyUrl() string {
 }
 
 type ClusterHeartbeatAck struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Ok                bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	SuggestedProxyUrl string                 `protobuf:"bytes,2,opt,name=suggested_proxy_url,json=suggestedProxyUrl,proto3" json:"suggested_proxy_url,omitempty"` // Hub proxy URL for spokes that can't discover their own
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ClusterHeartbeatAck) Reset() {
@@ -1682,6 +1683,13 @@ func (x *ClusterHeartbeatAck) GetOk() bool {
 		return x.Ok
 	}
 	return false
+}
+
+func (x *ClusterHeartbeatAck) GetSuggestedProxyUrl() string {
+	if x != nil {
+		return x.SuggestedProxyUrl
+	}
+	return ""
 }
 
 // Cluster listing
@@ -4968,9 +4976,10 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12-\n" +
 	"\x13ttf_gpu_seconds_p50\x18\x02 \x01(\x01R\x10ttfGpuSecondsP50\x12=\n" +
 	"\x11available_flavors\x18\x03 \x03(\v2\x10.aegis.v1.FlavorR\x10availableFlavors\x12\x1b\n" +
-	"\tproxy_url\x18\x04 \x01(\tR\bproxyUrl\"%\n" +
+	"\tproxy_url\x18\x04 \x01(\tR\bproxyUrl\"U\n" +
 	"\x13ClusterHeartbeatAck\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"L\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12.\n" +
+	"\x13suggested_proxy_url\x18\x02 \x01(\tR\x11suggestedProxyUrl\"L\n" +
 	"\x13ListClustersRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x16\n" +

@@ -156,7 +156,10 @@ message ClusterHeartbeat {
   repeated Flavor available_flavors = 3;
   string proxy_url = 4; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
 }
-message ClusterHeartbeatAck { bool ok = 1; }
+message ClusterHeartbeatAck {
+  bool ok = 1;
+  string suggested_proxy_url = 2; // Hub proxy URL for spokes that can't discover their own
+}
 
 // Cluster listing
 message ListClustersRequest {

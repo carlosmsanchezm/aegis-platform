@@ -27,8 +27,19 @@ import (
 )
 
 type Client struct {
-	api  aegis.AegisPlatformClient
-	conn *grpc.ClientConn
+	api               aegis.AegisPlatformClient
+	conn              *grpc.ClientConn
+	mu                sync.Mutex
+	suggestedProxyURL string // Hub proxy URL received via heartbeat ack
+}
+
+// SuggestedProxyURL returns the hub proxy URL suggested by the platform API
+// via the heartbeat acknowledgment. Used as a fallback when the agent can't
+// discover its own spoke proxy URL (e.g., co-located spoke with ClusterIP service).
+func (c *Client) SuggestedProxyURL() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.suggestedProxyURL
 }
 
 func New(endpoint string) (*Client, error) {
@@ -162,7 +173,8 @@ func (c *Client) Close() error {
 }
 
 // HeartbeatLoop continuously reports cluster health, advertised flavors, and spoke proxy URL.
-func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterID string, flavors []*aegis.Flavor, proxyURL string) {
+// proxyURLFn is called each tick so the URL can refresh (e.g. after NLB provisioning).
+func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterID string, flavors []*aegis.Flavor, proxyURLFn func() string) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -173,7 +185,7 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 		}
 	}
 
-	logger.Info("starting heartbeat loop", zap.String("cluster_id", clusterID), zap.Int("flavor_count", len(flavors)), zap.Float64("ttfg_p50_sec", ttf), zap.String("proxy_url", proxyURL))
+	logger.Info("starting heartbeat loop", zap.String("cluster_id", clusterID), zap.Int("flavor_count", len(flavors)), zap.Float64("ttfg_p50_sec", ttf))
 
 	for {
 		select {
@@ -181,15 +193,23 @@ func (c *Client) HeartbeatLoop(ctx context.Context, logger *zap.Logger, clusterI
 			logger.Info("heartbeat loop context canceled", zap.String("cluster_id", clusterID))
 			return
 		case <-ticker.C:
-			logger.Debug("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)), zap.String("proxy_url", proxyURL))
-			if _, err := c.api.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+			currentProxyURL := proxyURLFn()
+			logger.Debug("sending heartbeat", zap.String("cluster_id", clusterID), zap.Float64("ttfg_p50_sec", ttf), zap.Int("flavor_count", len(flavors)), zap.String("proxy_url", currentProxyURL))
+			ack, err := c.api.Heartbeat(ctx, &aegis.ClusterHeartbeat{
 				ClusterId:        clusterID,
 				TtfGpuSecondsP50: ttf,
 				AvailableFlavors: flavors,
-				ProxyUrl:         proxyURL,
-			}); err != nil {
+				ProxyUrl:         currentProxyURL,
+			})
+			if err != nil {
 				logger.Warn("heartbeat failed", zap.String("cluster_id", clusterID), zap.Error(err))
 				continue
+			}
+			// Store suggested proxy URL from hub for spokes that can't discover their own
+			if ack.GetSuggestedProxyUrl() != "" {
+				c.mu.Lock()
+				c.suggestedProxyURL = ack.GetSuggestedProxyUrl()
+				c.mu.Unlock()
 			}
 			logger.Debug("heartbeat acknowledged", zap.String("cluster_id", clusterID))
 		}

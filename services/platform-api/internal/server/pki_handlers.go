@@ -149,6 +149,39 @@ func (s *Server) loadRootCA() (string, error) {
 		return string(data), nil
 	}
 
+	// Auto-load from mounted TLS secret (platform-api's own cert chain).
+	// The TLS secret contains:
+	//   ca.crt  = root CA
+	//   tls.crt = server cert + intermediate CA
+	// Combine root + intermediate for a complete trust chain.
+	tlsMountPath := os.Getenv("AEGIS_TLS_MOUNT_PATH")
+	if tlsMountPath == "" {
+		tlsMountPath = "/etc/aegis-platform-api/tls"
+	}
+	rootCAPath := tlsMountPath + "/ca.crt"
+	tlsCertPath := tlsMountPath + "/tls.crt"
+
+	rootCA, rootErr := os.ReadFile(rootCAPath)
+	if rootErr == nil && len(rootCA) > 0 {
+		// Try to extract intermediate CA from tls.crt (second cert in chain)
+		tlsCert, tlsErr := os.ReadFile(tlsCertPath)
+		if tlsErr == nil {
+			certs := extractPEMCerts(string(tlsCert))
+			if len(certs) > 1 {
+				// Combine root + intermediate
+				combined := strings.TrimSpace(string(rootCA)) + "\n" + strings.TrimSpace(certs[1]) + "\n"
+				s.log.Info("auto-loaded CA chain from TLS mount",
+					zap.String("path", tlsMountPath),
+					zap.Int("cert_count", strings.Count(combined, "BEGIN CERTIFICATE")),
+				)
+				return combined, nil
+			}
+		}
+		// Return root CA alone if intermediate not available
+		s.log.Info("auto-loaded root CA from TLS mount", zap.String("path", rootCAPath))
+		return string(rootCA), nil
+	}
+
 	return "", &pkiNotConfiguredError{}
 }
 
@@ -156,6 +189,27 @@ type pkiNotConfiguredError struct{}
 
 func (e *pkiNotConfiguredError) Error() string {
 	return "PKI not configured. Set AEGIS_STEP_CA_ROOT_CA_B64 or AEGIS_STEP_CA_ROOT_CA_FILE"
+}
+
+// extractPEMCerts splits a PEM bundle into individual certificates.
+func extractPEMCerts(pem string) []string {
+	var certs []string
+	var current []string
+	inCert := false
+	for _, line := range strings.Split(pem, "\n") {
+		if strings.Contains(line, "BEGIN CERTIFICATE") {
+			inCert = true
+			current = nil
+		}
+		if inCert {
+			current = append(current, line)
+		}
+		if strings.Contains(line, "END CERTIFICATE") {
+			inCert = false
+			certs = append(certs, strings.Join(current, "\n"))
+		}
+	}
+	return certs
 }
 
 func getEnvOrDefault(key, defaultVal string) string {

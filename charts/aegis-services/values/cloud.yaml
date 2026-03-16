@@ -165,12 +165,9 @@ platformApi:
             topologyKey: topology.kubernetes.io/zone
 
   postgres:
-    # Iron Bank PostgreSQL image for platform-api database
-    # For testing without registry1 auth: docker.io/postgres:16
-    image:
-      repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
-      tag: "16"
-      pullPolicy: Always
+    # Iron Bank PostgreSQL (requires registry1 auth):
+    #   repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
+    # Using public image until registry1 auth is configured:
     storage:
       className: ebs-gp3
 
@@ -312,14 +309,10 @@ keycloak:
   createNamespace: false
   namespace: null
   forceRender: true
-  # Iron Bank images for Keycloak and its operator
-  # For testing without registry1 auth, these public equivalents work:
-  #   operator.image: quay.io/keycloak/keycloak-operator:26.1
-  #   image: quay.io/keycloak/keycloak:26.1
-  operator:
-    image: "registry1.dso.mil/ironbank/opensource/keycloak/keycloak-operator:26.1"
-    keycloakImage: "registry1.dso.mil/ironbank/opensource/keycloak/keycloak:26.1"
-  image: "registry1.dso.mil/ironbank/opensource/keycloak/keycloak:26.1"
+  # Iron Bank images for Keycloak (requires registry1.dso.mil auth):
+  #   operator.image: registry1.dso.mil/ironbank/opensource/keycloak/keycloak-operator:26.1
+  #   image: registry1.dso.mil/ironbank/opensource/keycloak/keycloak:26.1
+  # Using public images until registry1 auth is configured on cluster:
   http:
     httpEnabled: false
   ingress:
@@ -339,12 +332,12 @@ keycloak:
       name: keycloak-db-secret
       create: false
   postgres:
-    # Iron Bank PostgreSQL image
-    # For testing without registry1 auth: docker.io/postgres:16
+    # Iron Bank PostgreSQL (requires registry1 auth):
+    #   repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
+    # Using public image until registry1 auth is configured:
     image:
-      repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
+      repository: docker.io/postgres
       tag: "16"
-    initImage: registry1.dso.mil/ironbank/redhat/ubi/ubi9-minimal:9.7
     storage:
       className: ebs-gp3
   realm:
@@ -365,12 +358,11 @@ keycloak:
 #################################################################
 # Ingress NGINX - Iron Bank Image Override
 #################################################################
-# For testing without registry1 auth, comment out this section
-# and the default registry.k8s.io image will be used.
-ingress-nginx:
-  controller:
-    image:
-      registry: registry1.dso.mil
-      image: ironbank/opensource/kubernetes/ingress-nginx/controller
-      tag: "v1.11.3"
-      pullPolicy: Always
+# Iron Bank ingress-nginx (requires registry1.dso.mil auth):
+#   ingress-nginx:
+#     controller:
+#       image:
+#         registry: registry1.dso.mil
+#         image: ironbank/opensource/kubernetes/ingress-nginx/controller
+#         tag: "v1.11.3"
+# Using default public registry.k8s.io images until registry1 auth is configured.

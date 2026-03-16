@@ -2646,6 +2646,9 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	}))
 	root.Handle("/api/v1/platform/config", http.HandlerFunc(handleGetPlatformConfig))
 	root.Handle("/api/v1/discovery", http.HandlerFunc(svc.handleDiscovery))
+	// PKI root CA is public — clients need it to bootstrap TLS trust before authenticating.
+	// Same security model as the discovery endpoint: public metadata, no secrets exposed.
+	root.Handle("/api/v1/pki/root-ca", http.HandlerFunc(svc.handleGetRootCA))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}

@@ -2101,12 +2101,16 @@ func deriveSSHUser(workspace *aegis.WorkspaceSpec, subject string) string {
 
 // handleDiscovery serves the platform discovery document — public metadata
 // for client auto-configuration. No authentication required.
-// Security: returns only DNS-resolvable endpoint URLs and version info.
-// No secrets, credentials, or internal state is exposed.
+//
+// Security model:
+//   - Returns only public metadata: DNS-resolvable endpoint URLs, auth issuer, and root CA PEM.
+//   - The root CA is a public key (trust anchor). Knowing it does not help an attacker —
+//     they cannot forge certificates without the CA's private key. This is the same model
+//     as OIDC .well-known/openid-configuration including JWKS (public keys) inline.
+//   - No secrets, credentials, tokens, or internal state is exposed.
 func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	grpcEndpoint := os.Getenv("AEGIS_DISCOVERY_GRPC_ENDPOINT")
 	if grpcEndpoint == "" {
-		// Fallback: derive from request host
 		grpcEndpoint = r.Host
 		if !strings.Contains(grpcEndpoint, ":") {
 			grpcEndpoint += ":8081"
@@ -2119,6 +2123,11 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		authClientID = "vscode-extension"
 	}
 
+	pkiData := map[string]string{}
+	if rootCA, err := s.loadRootCA(); err == nil && rootCA != "" {
+		pkiData["root_ca_pem"] = rootCA
+	}
+
 	discovery := map[string]interface{}{
 		"platform_version": "1.0.0",
 		"grpc_endpoint":    grpcEndpoint,
@@ -2126,13 +2135,11 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 			"authority": authAuthority,
 			"client_id": authClientID,
 		},
-		"pki": map[string]string{
-			"root_ca_url": fmt.Sprintf("https://%s/api/v1/pki/root-ca", r.Host),
-		},
+		"pki": pkiData,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=300") // Cache for 5 minutes
+	w.Header().Set("Cache-Control", "public, max-age=300")
 	json.NewEncoder(w).Encode(discovery)
 }
 
@@ -2638,7 +2645,6 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	registerObservabilityRoutes(mux, svc)
 	registerProvisioningRoutes(mux, svc)
 	registerPKIRoutes(mux, svc)
-	registerExtensionRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2646,9 +2652,10 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	}))
 	root.Handle("/api/v1/platform/config", http.HandlerFunc(handleGetPlatformConfig))
 	root.Handle("/api/v1/discovery", http.HandlerFunc(svc.handleDiscovery))
-	// PKI root CA is public — clients need it to bootstrap TLS trust before authenticating.
-	// Same security model as the discovery endpoint: public metadata, no secrets exposed.
-	root.Handle("/api/v1/pki/root-ca", http.HandlerFunc(svc.handleGetRootCA))
+	// Extension endpoints are unauthenticated — users download VSIX and setup script without a token.
+	root.Handle("/api/v1/extension/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(w, r)
+	}))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}

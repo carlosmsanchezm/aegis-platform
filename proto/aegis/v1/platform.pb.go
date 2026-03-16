@@ -500,6 +500,7 @@ type WorkspaceSpec struct {
 	MaxDurationSeconds int64                  `protobuf:"varint,5,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
 	Interactive        bool                   `protobuf:"varint,6,opt,name=interactive,proto3" json:"interactive,omitempty"`
 	Ports              []int32                `protobuf:"varint,7,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Storage            *WorkspaceStorage      `protobuf:"bytes,8,opt,name=storage,proto3" json:"storage,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -583,6 +584,93 @@ func (x *WorkspaceSpec) GetPorts() []int32 {
 	return nil
 }
 
+func (x *WorkspaceSpec) GetStorage() *WorkspaceStorage {
+	if x != nil {
+		return x.Storage
+	}
+	return nil
+}
+
+// WorkspaceStorage configures persistent storage for a workspace pod.
+// When persistent=true, the k8s-agent creates a PVC and mounts it into the
+// workspace container. Data survives workspace restarts within the same project.
+// When omitted, the platform-api applies defaults (persistent=true, 50Gi, /home/coder).
+type WorkspaceStorage struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Persistent        bool                   `protobuf:"varint,1,opt,name=persistent,proto3" json:"persistent,omitempty"`                                         // true = create/attach PVC, false = ephemeral only
+	StorageClass      string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`                  // Kubernetes StorageClass name (e.g. "gp3"). Empty = cluster default.
+	Size              string                 `protobuf:"bytes,3,opt,name=size,proto3" json:"size,omitempty"`                                                      // Storage size as K8s quantity (e.g. "50Gi", "100Gi")
+	MountPath         string                 `protobuf:"bytes,4,opt,name=mount_path,json=mountPath,proto3" json:"mount_path,omitempty"`                           // Mount path inside the container. Default: "/home/coder"
+	ExistingClaimName string                 `protobuf:"bytes,5,opt,name=existing_claim_name,json=existingClaimName,proto3" json:"existing_claim_name,omitempty"` // Reuse an existing PVC by name (for session continuity)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WorkspaceStorage) Reset() {
+	*x = WorkspaceStorage{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStorage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStorage) ProtoMessage() {}
+
+func (x *WorkspaceStorage) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStorage.ProtoReflect.Descriptor instead.
+func (*WorkspaceStorage) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WorkspaceStorage) GetPersistent() bool {
+	if x != nil {
+		return x.Persistent
+	}
+	return false
+}
+
+func (x *WorkspaceStorage) GetStorageClass() string {
+	if x != nil {
+		return x.StorageClass
+	}
+	return ""
+}
+
+func (x *WorkspaceStorage) GetSize() string {
+	if x != nil {
+		return x.Size
+	}
+	return ""
+}
+
+func (x *WorkspaceStorage) GetMountPath() string {
+	if x != nil {
+		return x.MountPath
+	}
+	return ""
+}
+
+func (x *WorkspaceStorage) GetExistingClaimName() string {
+	if x != nil {
+		return x.ExistingClaimName
+	}
+	return ""
+}
+
 type TrainingSpec struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Flavor             string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
@@ -598,7 +686,7 @@ type TrainingSpec struct {
 
 func (x *TrainingSpec) Reset() {
 	*x = TrainingSpec{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[7]
+	mi := &file_aegis_v1_platform_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -610,7 +698,7 @@ func (x *TrainingSpec) String() string {
 func (*TrainingSpec) ProtoMessage() {}
 
 func (x *TrainingSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[7]
+	mi := &file_aegis_v1_platform_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -623,7 +711,7 @@ func (x *TrainingSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrainingSpec.ProtoReflect.Descriptor instead.
 func (*TrainingSpec) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{7}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TrainingSpec) GetFlavor() string {
@@ -689,7 +777,7 @@ type ResourceHints struct {
 
 func (x *ResourceHints) Reset() {
 	*x = ResourceHints{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[8]
+	mi := &file_aegis_v1_platform_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +789,7 @@ func (x *ResourceHints) String() string {
 func (*ResourceHints) ProtoMessage() {}
 
 func (x *ResourceHints) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[8]
+	mi := &file_aegis_v1_platform_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -714,7 +802,7 @@ func (x *ResourceHints) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceHints.ProtoReflect.Descriptor instead.
 func (*ResourceHints) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{8}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ResourceHints) GetResourceName() string {
@@ -772,7 +860,7 @@ type Workload struct {
 
 func (x *Workload) Reset() {
 	*x = Workload{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[9]
+	mi := &file_aegis_v1_platform_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -784,7 +872,7 @@ func (x *Workload) String() string {
 func (*Workload) ProtoMessage() {}
 
 func (x *Workload) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[9]
+	mi := &file_aegis_v1_platform_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -797,7 +885,7 @@ func (x *Workload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workload.ProtoReflect.Descriptor instead.
 func (*Workload) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{9}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Workload) GetId() string {
@@ -948,7 +1036,7 @@ type GetWorkspaceConnectionDetailsRequest struct {
 
 func (x *GetWorkspaceConnectionDetailsRequest) Reset() {
 	*x = GetWorkspaceConnectionDetailsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[10]
+	mi := &file_aegis_v1_platform_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -960,7 +1048,7 @@ func (x *GetWorkspaceConnectionDetailsRequest) String() string {
 func (*GetWorkspaceConnectionDetailsRequest) ProtoMessage() {}
 
 func (x *GetWorkspaceConnectionDetailsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[10]
+	mi := &file_aegis_v1_platform_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -973,7 +1061,7 @@ func (x *GetWorkspaceConnectionDetailsRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use GetWorkspaceConnectionDetailsRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkspaceConnectionDetailsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{10}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetWorkspaceConnectionDetailsRequest) GetId() string {
@@ -998,7 +1086,7 @@ type GetWorkspaceConnectionDetailsResponse struct {
 
 func (x *GetWorkspaceConnectionDetailsResponse) Reset() {
 	*x = GetWorkspaceConnectionDetailsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[11]
+	mi := &file_aegis_v1_platform_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1098,7 @@ func (x *GetWorkspaceConnectionDetailsResponse) String() string {
 func (*GetWorkspaceConnectionDetailsResponse) ProtoMessage() {}
 
 func (x *GetWorkspaceConnectionDetailsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[11]
+	mi := &file_aegis_v1_platform_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1111,7 @@ func (x *GetWorkspaceConnectionDetailsResponse) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use GetWorkspaceConnectionDetailsResponse.ProtoReflect.Descriptor instead.
 func (*GetWorkspaceConnectionDetailsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{11}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetWorkspaceConnectionDetailsResponse) GetProxyUrl() string {
@@ -1085,7 +1173,7 @@ type CreateConnectionSessionRequest struct {
 
 func (x *CreateConnectionSessionRequest) Reset() {
 	*x = CreateConnectionSessionRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[12]
+	mi := &file_aegis_v1_platform_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1185,7 @@ func (x *CreateConnectionSessionRequest) String() string {
 func (*CreateConnectionSessionRequest) ProtoMessage() {}
 
 func (x *CreateConnectionSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[12]
+	mi := &file_aegis_v1_platform_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1198,7 @@ func (x *CreateConnectionSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateConnectionSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateConnectionSessionRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{12}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CreateConnectionSessionRequest) GetWorkloadId() string {
@@ -1138,13 +1226,15 @@ type ConnectionSession struct {
 	ProxyUrl      string                 `protobuf:"bytes,7,opt,name=proxy_url,json=proxyUrl,proto3" json:"proxy_url,omitempty"`               // https://proxy.cluster/proxy/<workload-id>
 	ExpiresAtUtc  string                 `protobuf:"bytes,8,opt,name=expires_at_utc,json=expiresAtUtc,proto3" json:"expires_at_utc,omitempty"`
 	OneTime       bool                   `protobuf:"varint,9,opt,name=one_time,json=oneTime,proto3" json:"one_time,omitempty"`
+	ProxyCaPem    string                 `protobuf:"bytes,10,opt,name=proxy_ca_pem,json=proxyCaPem,proto3" json:"proxy_ca_pem,omitempty"`        // PEM-encoded CA cert for the spoke-proxy TLS certificate
+	WorkspaceRoot string                 `protobuf:"bytes,11,opt,name=workspace_root,json=workspaceRoot,proto3" json:"workspace_root,omitempty"` // filesystem path for VS Code to open (e.g., "/home/aegis/work")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConnectionSession) Reset() {
 	*x = ConnectionSession{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[13]
+	mi := &file_aegis_v1_platform_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1246,7 @@ func (x *ConnectionSession) String() string {
 func (*ConnectionSession) ProtoMessage() {}
 
 func (x *ConnectionSession) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[13]
+	mi := &file_aegis_v1_platform_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1259,7 @@ func (x *ConnectionSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionSession.ProtoReflect.Descriptor instead.
 func (*ConnectionSession) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{13}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ConnectionSession) GetSessionId() string {
@@ -1235,6 +1325,20 @@ func (x *ConnectionSession) GetOneTime() bool {
 	return false
 }
 
+func (x *ConnectionSession) GetProxyCaPem() string {
+	if x != nil {
+		return x.ProxyCaPem
+	}
+	return ""
+}
+
+func (x *ConnectionSession) GetWorkspaceRoot() string {
+	if x != nil {
+		return x.WorkspaceRoot
+	}
+	return ""
+}
+
 type RenewConnectionSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -1244,7 +1348,7 @@ type RenewConnectionSessionRequest struct {
 
 func (x *RenewConnectionSessionRequest) Reset() {
 	*x = RenewConnectionSessionRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[14]
+	mi := &file_aegis_v1_platform_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1256,7 +1360,7 @@ func (x *RenewConnectionSessionRequest) String() string {
 func (*RenewConnectionSessionRequest) ProtoMessage() {}
 
 func (x *RenewConnectionSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[14]
+	mi := &file_aegis_v1_platform_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1269,7 +1373,7 @@ func (x *RenewConnectionSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewConnectionSessionRequest.ProtoReflect.Descriptor instead.
 func (*RenewConnectionSessionRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{14}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RenewConnectionSessionRequest) GetSessionId() string {
@@ -1288,7 +1392,7 @@ type RevokeConnectionSessionRequest struct {
 
 func (x *RevokeConnectionSessionRequest) Reset() {
 	*x = RevokeConnectionSessionRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[15]
+	mi := &file_aegis_v1_platform_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1300,7 +1404,7 @@ func (x *RevokeConnectionSessionRequest) String() string {
 func (*RevokeConnectionSessionRequest) ProtoMessage() {}
 
 func (x *RevokeConnectionSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[15]
+	mi := &file_aegis_v1_platform_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1313,7 +1417,7 @@ func (x *RevokeConnectionSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeConnectionSessionRequest.ProtoReflect.Descriptor instead.
 func (*RevokeConnectionSessionRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{15}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RevokeConnectionSessionRequest) GetSessionId() string {
@@ -1331,14 +1435,15 @@ type ClusterRegisterRequest struct {
 	Region        string                 `protobuf:"bytes,3,opt,name=region,proto3" json:"region,omitempty"`
 	IlLevel       string                 `protobuf:"bytes,4,opt,name=il_level,json=ilLevel,proto3" json:"il_level,omitempty"`
 	Labels        map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ProxyUrl      string                 `protobuf:"bytes,6,opt,name=proxy_url,json=proxyUrl,proto3" json:"proxy_url,omitempty"` // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+	ProxyUrl      string                 `protobuf:"bytes,6,opt,name=proxy_url,json=proxyUrl,proto3" json:"proxy_url,omitempty"`         // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+	ProxyCaPem    string                 `protobuf:"bytes,7,opt,name=proxy_ca_pem,json=proxyCaPem,proto3" json:"proxy_ca_pem,omitempty"` // PEM-encoded spoke-proxy CA certificate
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ClusterRegisterRequest) Reset() {
 	*x = ClusterRegisterRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[16]
+	mi := &file_aegis_v1_platform_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1350,7 +1455,7 @@ func (x *ClusterRegisterRequest) String() string {
 func (*ClusterRegisterRequest) ProtoMessage() {}
 
 func (x *ClusterRegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[16]
+	mi := &file_aegis_v1_platform_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1363,7 +1468,7 @@ func (x *ClusterRegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterRegisterRequest.ProtoReflect.Descriptor instead.
 func (*ClusterRegisterRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{16}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ClusterRegisterRequest) GetClusterId() string {
@@ -1408,6 +1513,13 @@ func (x *ClusterRegisterRequest) GetProxyUrl() string {
 	return ""
 }
 
+func (x *ClusterRegisterRequest) GetProxyCaPem() string {
+	if x != nil {
+		return x.ProxyCaPem
+	}
+	return ""
+}
+
 type ClusterRegisterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -1418,7 +1530,7 @@ type ClusterRegisterResponse struct {
 
 func (x *ClusterRegisterResponse) Reset() {
 	*x = ClusterRegisterResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[17]
+	mi := &file_aegis_v1_platform_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1430,7 +1542,7 @@ func (x *ClusterRegisterResponse) String() string {
 func (*ClusterRegisterResponse) ProtoMessage() {}
 
 func (x *ClusterRegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[17]
+	mi := &file_aegis_v1_platform_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1443,7 +1555,7 @@ func (x *ClusterRegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterRegisterResponse.ProtoReflect.Descriptor instead.
 func (*ClusterRegisterResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{17}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ClusterRegisterResponse) GetOk() bool {
@@ -1472,7 +1584,7 @@ type ClusterHeartbeat struct {
 
 func (x *ClusterHeartbeat) Reset() {
 	*x = ClusterHeartbeat{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[18]
+	mi := &file_aegis_v1_platform_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1484,7 +1596,7 @@ func (x *ClusterHeartbeat) String() string {
 func (*ClusterHeartbeat) ProtoMessage() {}
 
 func (x *ClusterHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[18]
+	mi := &file_aegis_v1_platform_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1497,7 +1609,7 @@ func (x *ClusterHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterHeartbeat.ProtoReflect.Descriptor instead.
 func (*ClusterHeartbeat) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{18}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ClusterHeartbeat) GetClusterId() string {
@@ -1537,7 +1649,7 @@ type ClusterHeartbeatAck struct {
 
 func (x *ClusterHeartbeatAck) Reset() {
 	*x = ClusterHeartbeatAck{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[19]
+	mi := &file_aegis_v1_platform_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1549,7 +1661,7 @@ func (x *ClusterHeartbeatAck) String() string {
 func (*ClusterHeartbeatAck) ProtoMessage() {}
 
 func (x *ClusterHeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[19]
+	mi := &file_aegis_v1_platform_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1562,7 +1674,7 @@ func (x *ClusterHeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterHeartbeatAck.ProtoReflect.Descriptor instead.
 func (*ClusterHeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{19}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ClusterHeartbeatAck) GetOk() bool {
@@ -1583,7 +1695,7 @@ type ListClustersRequest struct {
 
 func (x *ListClustersRequest) Reset() {
 	*x = ListClustersRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[20]
+	mi := &file_aegis_v1_platform_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1595,7 +1707,7 @@ func (x *ListClustersRequest) String() string {
 func (*ListClustersRequest) ProtoMessage() {}
 
 func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[20]
+	mi := &file_aegis_v1_platform_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1608,7 +1720,7 @@ func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersRequest.ProtoReflect.Descriptor instead.
 func (*ListClustersRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{20}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListClustersRequest) GetProjectId() string {
@@ -1641,7 +1753,7 @@ type ClusterSummary struct {
 
 func (x *ClusterSummary) Reset() {
 	*x = ClusterSummary{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[21]
+	mi := &file_aegis_v1_platform_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1653,7 +1765,7 @@ func (x *ClusterSummary) String() string {
 func (*ClusterSummary) ProtoMessage() {}
 
 func (x *ClusterSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[21]
+	mi := &file_aegis_v1_platform_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1666,7 +1778,7 @@ func (x *ClusterSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterSummary.ProtoReflect.Descriptor instead.
 func (*ClusterSummary) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{21}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ClusterSummary) GetId() string {
@@ -1734,7 +1846,7 @@ type ListClustersResponse struct {
 
 func (x *ListClustersResponse) Reset() {
 	*x = ListClustersResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[22]
+	mi := &file_aegis_v1_platform_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1746,7 +1858,7 @@ func (x *ListClustersResponse) String() string {
 func (*ListClustersResponse) ProtoMessage() {}
 
 func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[22]
+	mi := &file_aegis_v1_platform_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1759,7 +1871,7 @@ func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersResponse.ProtoReflect.Descriptor instead.
 func (*ListClustersResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{22}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListClustersResponse) GetItems() []*ClusterSummary {
@@ -1790,7 +1902,7 @@ type ImportClusterRequest struct {
 
 func (x *ImportClusterRequest) Reset() {
 	*x = ImportClusterRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[23]
+	mi := &file_aegis_v1_platform_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1802,7 +1914,7 @@ func (x *ImportClusterRequest) String() string {
 func (*ImportClusterRequest) ProtoMessage() {}
 
 func (x *ImportClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[23]
+	mi := &file_aegis_v1_platform_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1815,7 +1927,7 @@ func (x *ImportClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportClusterRequest.ProtoReflect.Descriptor instead.
 func (*ImportClusterRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{23}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ImportClusterRequest) GetClusterId() string {
@@ -1890,7 +2002,7 @@ type K8SAgentHelmValues struct {
 
 func (x *K8SAgentHelmValues) Reset() {
 	*x = K8SAgentHelmValues{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[24]
+	mi := &file_aegis_v1_platform_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1902,7 +2014,7 @@ func (x *K8SAgentHelmValues) String() string {
 func (*K8SAgentHelmValues) ProtoMessage() {}
 
 func (x *K8SAgentHelmValues) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[24]
+	mi := &file_aegis_v1_platform_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1915,7 +2027,7 @@ func (x *K8SAgentHelmValues) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAgentHelmValues.ProtoReflect.Descriptor instead.
 func (*K8SAgentHelmValues) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{24}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *K8SAgentHelmValues) GetEnv() map[string]string {
@@ -1934,7 +2046,7 @@ type HelmValues struct {
 
 func (x *HelmValues) Reset() {
 	*x = HelmValues{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[25]
+	mi := &file_aegis_v1_platform_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1946,7 +2058,7 @@ func (x *HelmValues) String() string {
 func (*HelmValues) ProtoMessage() {}
 
 func (x *HelmValues) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[25]
+	mi := &file_aegis_v1_platform_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1959,7 +2071,7 @@ func (x *HelmValues) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelmValues.ProtoReflect.Descriptor instead.
 func (*HelmValues) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{25}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HelmValues) GetK8SAgent() *K8SAgentHelmValues {
@@ -1984,7 +2096,7 @@ type ImportClusterResponse struct {
 
 func (x *ImportClusterResponse) Reset() {
 	*x = ImportClusterResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[26]
+	mi := &file_aegis_v1_platform_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1996,7 +2108,7 @@ func (x *ImportClusterResponse) String() string {
 func (*ImportClusterResponse) ProtoMessage() {}
 
 func (x *ImportClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[26]
+	mi := &file_aegis_v1_platform_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2009,7 +2121,7 @@ func (x *ImportClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportClusterResponse.ProtoReflect.Descriptor instead.
 func (*ImportClusterResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{26}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ImportClusterResponse) GetClusterId() string {
@@ -2064,7 +2176,7 @@ type CreateProjectRequest struct {
 
 func (x *CreateProjectRequest) Reset() {
 	*x = CreateProjectRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[27]
+	mi := &file_aegis_v1_platform_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2188,7 @@ func (x *CreateProjectRequest) String() string {
 func (*CreateProjectRequest) ProtoMessage() {}
 
 func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[27]
+	mi := &file_aegis_v1_platform_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2201,7 @@ func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProjectRequest.ProtoReflect.Descriptor instead.
 func (*CreateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{27}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CreateProjectRequest) GetProject() *Project {
@@ -2108,7 +2220,7 @@ type UpsertBudgetRequest struct {
 
 func (x *UpsertBudgetRequest) Reset() {
 	*x = UpsertBudgetRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[28]
+	mi := &file_aegis_v1_platform_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2120,7 +2232,7 @@ func (x *UpsertBudgetRequest) String() string {
 func (*UpsertBudgetRequest) ProtoMessage() {}
 
 func (x *UpsertBudgetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[28]
+	mi := &file_aegis_v1_platform_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2133,7 +2245,7 @@ func (x *UpsertBudgetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertBudgetRequest.ProtoReflect.Descriptor instead.
 func (*UpsertBudgetRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{28}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *UpsertBudgetRequest) GetBudget() *Budget {
@@ -2152,7 +2264,7 @@ type UpsertFlavorRequest struct {
 
 func (x *UpsertFlavorRequest) Reset() {
 	*x = UpsertFlavorRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[29]
+	mi := &file_aegis_v1_platform_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2164,7 +2276,7 @@ func (x *UpsertFlavorRequest) String() string {
 func (*UpsertFlavorRequest) ProtoMessage() {}
 
 func (x *UpsertFlavorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[29]
+	mi := &file_aegis_v1_platform_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2177,7 +2289,7 @@ func (x *UpsertFlavorRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertFlavorRequest.ProtoReflect.Descriptor instead.
 func (*UpsertFlavorRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{29}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *UpsertFlavorRequest) GetFlavor() *Flavor {
@@ -2196,7 +2308,7 @@ type UpsertQueueRequest struct {
 
 func (x *UpsertQueueRequest) Reset() {
 	*x = UpsertQueueRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[30]
+	mi := &file_aegis_v1_platform_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2208,7 +2320,7 @@ func (x *UpsertQueueRequest) String() string {
 func (*UpsertQueueRequest) ProtoMessage() {}
 
 func (x *UpsertQueueRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[30]
+	mi := &file_aegis_v1_platform_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2221,7 +2333,7 @@ func (x *UpsertQueueRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertQueueRequest.ProtoReflect.Descriptor instead.
 func (*UpsertQueueRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{30}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *UpsertQueueRequest) GetQueue() *Queue {
@@ -2240,7 +2352,7 @@ type SubmitWorkloadRequest struct {
 
 func (x *SubmitWorkloadRequest) Reset() {
 	*x = SubmitWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[31]
+	mi := &file_aegis_v1_platform_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2252,7 +2364,7 @@ func (x *SubmitWorkloadRequest) String() string {
 func (*SubmitWorkloadRequest) ProtoMessage() {}
 
 func (x *SubmitWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[31]
+	mi := &file_aegis_v1_platform_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2265,7 +2377,7 @@ func (x *SubmitWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*SubmitWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{31}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SubmitWorkloadRequest) GetWorkload() *Workload {
@@ -2284,7 +2396,7 @@ type GetWorkloadRequest struct {
 
 func (x *GetWorkloadRequest) Reset() {
 	*x = GetWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[32]
+	mi := &file_aegis_v1_platform_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2296,7 +2408,7 @@ func (x *GetWorkloadRequest) String() string {
 func (*GetWorkloadRequest) ProtoMessage() {}
 
 func (x *GetWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[32]
+	mi := &file_aegis_v1_platform_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2309,7 +2421,7 @@ func (x *GetWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{32}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetWorkloadRequest) GetId() string {
@@ -2328,7 +2440,7 @@ type ListWorkloadsRequest struct {
 
 func (x *ListWorkloadsRequest) Reset() {
 	*x = ListWorkloadsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[33]
+	mi := &file_aegis_v1_platform_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2340,7 +2452,7 @@ func (x *ListWorkloadsRequest) String() string {
 func (*ListWorkloadsRequest) ProtoMessage() {}
 
 func (x *ListWorkloadsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[33]
+	mi := &file_aegis_v1_platform_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2353,7 +2465,7 @@ func (x *ListWorkloadsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkloadsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkloadsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{33}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListWorkloadsRequest) GetProjectId() string {
@@ -2372,7 +2484,7 @@ type ListWorkloadsResponse struct {
 
 func (x *ListWorkloadsResponse) Reset() {
 	*x = ListWorkloadsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[34]
+	mi := &file_aegis_v1_platform_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2384,7 +2496,7 @@ func (x *ListWorkloadsResponse) String() string {
 func (*ListWorkloadsResponse) ProtoMessage() {}
 
 func (x *ListWorkloadsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[34]
+	mi := &file_aegis_v1_platform_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2397,7 +2509,7 @@ func (x *ListWorkloadsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkloadsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkloadsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{34}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListWorkloadsResponse) GetItems() []*Workload {
@@ -2416,7 +2528,7 @@ type ResumeWorkloadRequest struct {
 
 func (x *ResumeWorkloadRequest) Reset() {
 	*x = ResumeWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[35]
+	mi := &file_aegis_v1_platform_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2428,7 +2540,7 @@ func (x *ResumeWorkloadRequest) String() string {
 func (*ResumeWorkloadRequest) ProtoMessage() {}
 
 func (x *ResumeWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[35]
+	mi := &file_aegis_v1_platform_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2441,7 +2553,7 @@ func (x *ResumeWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*ResumeWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{35}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ResumeWorkloadRequest) GetId() string {
@@ -2461,7 +2573,7 @@ type TerminateWorkloadRequest struct {
 
 func (x *TerminateWorkloadRequest) Reset() {
 	*x = TerminateWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[36]
+	mi := &file_aegis_v1_platform_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2473,7 +2585,7 @@ func (x *TerminateWorkloadRequest) String() string {
 func (*TerminateWorkloadRequest) ProtoMessage() {}
 
 func (x *TerminateWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[36]
+	mi := &file_aegis_v1_platform_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2486,7 +2598,7 @@ func (x *TerminateWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminateWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*TerminateWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{36}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *TerminateWorkloadRequest) GetId() string {
@@ -2513,7 +2625,7 @@ type LeaseWorkloadRequest struct {
 
 func (x *LeaseWorkloadRequest) Reset() {
 	*x = LeaseWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[37]
+	mi := &file_aegis_v1_platform_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2525,7 +2637,7 @@ func (x *LeaseWorkloadRequest) String() string {
 func (*LeaseWorkloadRequest) ProtoMessage() {}
 
 func (x *LeaseWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[37]
+	mi := &file_aegis_v1_platform_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2538,7 +2650,7 @@ func (x *LeaseWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaseWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*LeaseWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{37}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *LeaseWorkloadRequest) GetClusterId() string {
@@ -2564,7 +2676,7 @@ type LeaseWorkloadResponse struct {
 
 func (x *LeaseWorkloadResponse) Reset() {
 	*x = LeaseWorkloadResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[38]
+	mi := &file_aegis_v1_platform_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2576,7 +2688,7 @@ func (x *LeaseWorkloadResponse) String() string {
 func (*LeaseWorkloadResponse) ProtoMessage() {}
 
 func (x *LeaseWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[38]
+	mi := &file_aegis_v1_platform_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2589,7 +2701,7 @@ func (x *LeaseWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaseWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*LeaseWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{38}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *LeaseWorkloadResponse) GetItems() []*Workload {
@@ -2608,7 +2720,7 @@ type ListClusterWorkloadIDsRequest struct {
 
 func (x *ListClusterWorkloadIDsRequest) Reset() {
 	*x = ListClusterWorkloadIDsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[39]
+	mi := &file_aegis_v1_platform_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2620,7 +2732,7 @@ func (x *ListClusterWorkloadIDsRequest) String() string {
 func (*ListClusterWorkloadIDsRequest) ProtoMessage() {}
 
 func (x *ListClusterWorkloadIDsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[39]
+	mi := &file_aegis_v1_platform_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2633,7 +2745,7 @@ func (x *ListClusterWorkloadIDsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClusterWorkloadIDsRequest.ProtoReflect.Descriptor instead.
 func (*ListClusterWorkloadIDsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{39}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ListClusterWorkloadIDsRequest) GetClusterId() string {
@@ -2652,7 +2764,7 @@ type ListClusterWorkloadIDsResponse struct {
 
 func (x *ListClusterWorkloadIDsResponse) Reset() {
 	*x = ListClusterWorkloadIDsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[40]
+	mi := &file_aegis_v1_platform_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2664,7 +2776,7 @@ func (x *ListClusterWorkloadIDsResponse) String() string {
 func (*ListClusterWorkloadIDsResponse) ProtoMessage() {}
 
 func (x *ListClusterWorkloadIDsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[40]
+	mi := &file_aegis_v1_platform_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2677,7 +2789,7 @@ func (x *ListClusterWorkloadIDsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClusterWorkloadIDsResponse.ProtoReflect.Descriptor instead.
 func (*ListClusterWorkloadIDsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{40}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListClusterWorkloadIDsResponse) GetWorkloadIds() []string {
@@ -2699,7 +2811,7 @@ type AckWorkloadRequest struct {
 
 func (x *AckWorkloadRequest) Reset() {
 	*x = AckWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	mi := &file_aegis_v1_platform_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2711,7 +2823,7 @@ func (x *AckWorkloadRequest) String() string {
 func (*AckWorkloadRequest) ProtoMessage() {}
 
 func (x *AckWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[41]
+	mi := &file_aegis_v1_platform_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2724,7 +2836,7 @@ func (x *AckWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*AckWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{41}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *AckWorkloadRequest) GetId() string {
@@ -2764,7 +2876,7 @@ type AckWorkloadResponse struct {
 
 func (x *AckWorkloadResponse) Reset() {
 	*x = AckWorkloadResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[42]
+	mi := &file_aegis_v1_platform_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2776,7 +2888,7 @@ func (x *AckWorkloadResponse) String() string {
 func (*AckWorkloadResponse) ProtoMessage() {}
 
 func (x *AckWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[42]
+	mi := &file_aegis_v1_platform_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2789,7 +2901,7 @@ func (x *AckWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*AckWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{42}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *AckWorkloadResponse) GetWorkload() *Workload {
@@ -2809,7 +2921,7 @@ type StartWorkloadRequest struct {
 
 func (x *StartWorkloadRequest) Reset() {
 	*x = StartWorkloadRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[43]
+	mi := &file_aegis_v1_platform_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2821,7 +2933,7 @@ func (x *StartWorkloadRequest) String() string {
 func (*StartWorkloadRequest) ProtoMessage() {}
 
 func (x *StartWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[43]
+	mi := &file_aegis_v1_platform_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2834,7 +2946,7 @@ func (x *StartWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*StartWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{43}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *StartWorkloadRequest) GetId() string {
@@ -2860,7 +2972,7 @@ type StartWorkloadResponse struct {
 
 func (x *StartWorkloadResponse) Reset() {
 	*x = StartWorkloadResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[44]
+	mi := &file_aegis_v1_platform_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2872,7 +2984,7 @@ func (x *StartWorkloadResponse) String() string {
 func (*StartWorkloadResponse) ProtoMessage() {}
 
 func (x *StartWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[44]
+	mi := &file_aegis_v1_platform_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2885,7 +2997,7 @@ func (x *StartWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*StartWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{44}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *StartWorkloadResponse) GetWorkload() *Workload {
@@ -2905,7 +3017,7 @@ type GetBudgetRequest struct {
 
 func (x *GetBudgetRequest) Reset() {
 	*x = GetBudgetRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[45]
+	mi := &file_aegis_v1_platform_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2917,7 +3029,7 @@ func (x *GetBudgetRequest) String() string {
 func (*GetBudgetRequest) ProtoMessage() {}
 
 func (x *GetBudgetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[45]
+	mi := &file_aegis_v1_platform_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2930,7 +3042,7 @@ func (x *GetBudgetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBudgetRequest.ProtoReflect.Descriptor instead.
 func (*GetBudgetRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{45}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetBudgetRequest) GetProjectId() string {
@@ -2960,7 +3072,7 @@ type BudgetUsage struct {
 
 func (x *BudgetUsage) Reset() {
 	*x = BudgetUsage{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[46]
+	mi := &file_aegis_v1_platform_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2972,7 +3084,7 @@ func (x *BudgetUsage) String() string {
 func (*BudgetUsage) ProtoMessage() {}
 
 func (x *BudgetUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[46]
+	mi := &file_aegis_v1_platform_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2985,7 +3097,7 @@ func (x *BudgetUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BudgetUsage.ProtoReflect.Descriptor instead.
 func (*BudgetUsage) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{46}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *BudgetUsage) GetActualUsd() float64 {
@@ -3033,7 +3145,7 @@ type GetBudgetResponse struct {
 
 func (x *GetBudgetResponse) Reset() {
 	*x = GetBudgetResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[47]
+	mi := &file_aegis_v1_platform_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3045,7 +3157,7 @@ func (x *GetBudgetResponse) String() string {
 func (*GetBudgetResponse) ProtoMessage() {}
 
 func (x *GetBudgetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[47]
+	mi := &file_aegis_v1_platform_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3058,7 +3170,7 @@ func (x *GetBudgetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBudgetResponse.ProtoReflect.Descriptor instead.
 func (*GetBudgetResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{47}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *GetBudgetResponse) GetBudget() *Budget {
@@ -3084,7 +3196,7 @@ type ListBudgetsRequest struct {
 
 func (x *ListBudgetsRequest) Reset() {
 	*x = ListBudgetsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[48]
+	mi := &file_aegis_v1_platform_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3096,7 +3208,7 @@ func (x *ListBudgetsRequest) String() string {
 func (*ListBudgetsRequest) ProtoMessage() {}
 
 func (x *ListBudgetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[48]
+	mi := &file_aegis_v1_platform_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3109,7 +3221,7 @@ func (x *ListBudgetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBudgetsRequest.ProtoReflect.Descriptor instead.
 func (*ListBudgetsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{48}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ListBudgetsRequest) GetProjectId() string {
@@ -3129,7 +3241,7 @@ type BudgetWithUsage struct {
 
 func (x *BudgetWithUsage) Reset() {
 	*x = BudgetWithUsage{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[49]
+	mi := &file_aegis_v1_platform_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3141,7 +3253,7 @@ func (x *BudgetWithUsage) String() string {
 func (*BudgetWithUsage) ProtoMessage() {}
 
 func (x *BudgetWithUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[49]
+	mi := &file_aegis_v1_platform_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3154,7 +3266,7 @@ func (x *BudgetWithUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BudgetWithUsage.ProtoReflect.Descriptor instead.
 func (*BudgetWithUsage) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{49}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *BudgetWithUsage) GetBudget() *Budget {
@@ -3180,7 +3292,7 @@ type ListBudgetsResponse struct {
 
 func (x *ListBudgetsResponse) Reset() {
 	*x = ListBudgetsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[50]
+	mi := &file_aegis_v1_platform_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3192,7 +3304,7 @@ func (x *ListBudgetsResponse) String() string {
 func (*ListBudgetsResponse) ProtoMessage() {}
 
 func (x *ListBudgetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[50]
+	mi := &file_aegis_v1_platform_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3205,7 +3317,7 @@ func (x *ListBudgetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBudgetsResponse.ProtoReflect.Descriptor instead.
 func (*ListBudgetsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{50}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ListBudgetsResponse) GetItems() []*BudgetWithUsage {
@@ -3228,7 +3340,7 @@ type CreateWorkspaceRequest struct {
 
 func (x *CreateWorkspaceRequest) Reset() {
 	*x = CreateWorkspaceRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[51]
+	mi := &file_aegis_v1_platform_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3240,7 +3352,7 @@ func (x *CreateWorkspaceRequest) String() string {
 func (*CreateWorkspaceRequest) ProtoMessage() {}
 
 func (x *CreateWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[51]
+	mi := &file_aegis_v1_platform_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3253,7 +3365,7 @@ func (x *CreateWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{51}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *CreateWorkspaceRequest) GetProjectId() string {
@@ -3293,7 +3405,7 @@ type CreateWorkspaceResponse struct {
 
 func (x *CreateWorkspaceResponse) Reset() {
 	*x = CreateWorkspaceResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[52]
+	mi := &file_aegis_v1_platform_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3305,7 +3417,7 @@ func (x *CreateWorkspaceResponse) String() string {
 func (*CreateWorkspaceResponse) ProtoMessage() {}
 
 func (x *CreateWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[52]
+	mi := &file_aegis_v1_platform_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3318,7 +3430,7 @@ func (x *CreateWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{52}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *CreateWorkspaceResponse) GetWorkload() *Workload {
@@ -3339,7 +3451,7 @@ type ClusterProfileReference struct {
 
 func (x *ClusterProfileReference) Reset() {
 	*x = ClusterProfileReference{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[53]
+	mi := &file_aegis_v1_platform_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3351,7 +3463,7 @@ func (x *ClusterProfileReference) String() string {
 func (*ClusterProfileReference) ProtoMessage() {}
 
 func (x *ClusterProfileReference) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[53]
+	mi := &file_aegis_v1_platform_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3364,7 +3476,7 @@ func (x *ClusterProfileReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterProfileReference.ProtoReflect.Descriptor instead.
 func (*ClusterProfileReference) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{53}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ClusterProfileReference) GetId() string {
@@ -3401,7 +3513,7 @@ type CreateClusterRequest struct {
 
 func (x *CreateClusterRequest) Reset() {
 	*x = CreateClusterRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[54]
+	mi := &file_aegis_v1_platform_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3413,7 +3525,7 @@ func (x *CreateClusterRequest) String() string {
 func (*CreateClusterRequest) ProtoMessage() {}
 
 func (x *CreateClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[54]
+	mi := &file_aegis_v1_platform_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3426,7 +3538,7 @@ func (x *CreateClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateClusterRequest.ProtoReflect.Descriptor instead.
 func (*CreateClusterRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{54}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *CreateClusterRequest) GetProjectId() string {
@@ -3473,7 +3585,7 @@ type CreateClusterResponse struct {
 
 func (x *CreateClusterResponse) Reset() {
 	*x = CreateClusterResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[55]
+	mi := &file_aegis_v1_platform_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3485,7 +3597,7 @@ func (x *CreateClusterResponse) String() string {
 func (*CreateClusterResponse) ProtoMessage() {}
 
 func (x *CreateClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[55]
+	mi := &file_aegis_v1_platform_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3498,7 +3610,7 @@ func (x *CreateClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateClusterResponse.ProtoReflect.Descriptor instead.
 func (*CreateClusterResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{55}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *CreateClusterResponse) GetJob() *Job {
@@ -3517,7 +3629,7 @@ type GetClusterJobStatusRequest struct {
 
 func (x *GetClusterJobStatusRequest) Reset() {
 	*x = GetClusterJobStatusRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[56]
+	mi := &file_aegis_v1_platform_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3529,7 +3641,7 @@ func (x *GetClusterJobStatusRequest) String() string {
 func (*GetClusterJobStatusRequest) ProtoMessage() {}
 
 func (x *GetClusterJobStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[56]
+	mi := &file_aegis_v1_platform_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3542,7 +3654,7 @@ func (x *GetClusterJobStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterJobStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterJobStatusRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{56}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *GetClusterJobStatusRequest) GetJobId() string {
@@ -3561,7 +3673,7 @@ type GetClusterJobStatusResponse struct {
 
 func (x *GetClusterJobStatusResponse) Reset() {
 	*x = GetClusterJobStatusResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[57]
+	mi := &file_aegis_v1_platform_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3573,7 +3685,7 @@ func (x *GetClusterJobStatusResponse) String() string {
 func (*GetClusterJobStatusResponse) ProtoMessage() {}
 
 func (x *GetClusterJobStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[57]
+	mi := &file_aegis_v1_platform_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3586,7 +3698,7 @@ func (x *GetClusterJobStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterJobStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterJobStatusResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{57}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *GetClusterJobStatusResponse) GetJob() *Job {
@@ -3608,7 +3720,7 @@ type Job struct {
 
 func (x *Job) Reset() {
 	*x = Job{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[58]
+	mi := &file_aegis_v1_platform_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3620,7 +3732,7 @@ func (x *Job) String() string {
 func (*Job) ProtoMessage() {}
 
 func (x *Job) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[58]
+	mi := &file_aegis_v1_platform_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3633,7 +3745,7 @@ func (x *Job) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Job.ProtoReflect.Descriptor instead.
 func (*Job) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{58}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *Job) GetId() string {
@@ -3664,6 +3776,102 @@ func (x *Job) GetError() string {
 	return ""
 }
 
+type DestroyClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	ProjectId     string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestroyClusterRequest) Reset() {
+	*x = DestroyClusterRequest{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyClusterRequest) ProtoMessage() {}
+
+func (x *DestroyClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyClusterRequest.ProtoReflect.Descriptor instead.
+func (*DestroyClusterRequest) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *DestroyClusterRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *DestroyClusterRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+type DestroyClusterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Job           *Job                   `protobuf:"bytes,1,opt,name=job,proto3" json:"job,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestroyClusterResponse) Reset() {
+	*x = DestroyClusterResponse{}
+	mi := &file_aegis_v1_platform_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyClusterResponse) ProtoMessage() {}
+
+func (x *DestroyClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aegis_v1_platform_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyClusterResponse.ProtoReflect.Descriptor instead.
+func (*DestroyClusterResponse) Descriptor() ([]byte, []int) {
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *DestroyClusterResponse) GetJob() *Job {
+	if x != nil {
+		return x.Job
+	}
+	return nil
+}
+
 type ListProjectsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -3672,7 +3880,7 @@ type ListProjectsRequest struct {
 
 func (x *ListProjectsRequest) Reset() {
 	*x = ListProjectsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[59]
+	mi := &file_aegis_v1_platform_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3684,7 +3892,7 @@ func (x *ListProjectsRequest) String() string {
 func (*ListProjectsRequest) ProtoMessage() {}
 
 func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[59]
+	mi := &file_aegis_v1_platform_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3697,7 +3905,7 @@ func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsRequest.ProtoReflect.Descriptor instead.
 func (*ListProjectsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{59}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{62}
 }
 
 type ListProjectsResponse struct {
@@ -3709,7 +3917,7 @@ type ListProjectsResponse struct {
 
 func (x *ListProjectsResponse) Reset() {
 	*x = ListProjectsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[60]
+	mi := &file_aegis_v1_platform_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3721,7 +3929,7 @@ func (x *ListProjectsResponse) String() string {
 func (*ListProjectsResponse) ProtoMessage() {}
 
 func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[60]
+	mi := &file_aegis_v1_platform_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3734,7 +3942,7 @@ func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsResponse.ProtoReflect.Descriptor instead.
 func (*ListProjectsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{60}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ListProjectsResponse) GetItems() []*Project {
@@ -3758,7 +3966,7 @@ type CloudWatchMetricSample struct {
 
 func (x *CloudWatchMetricSample) Reset() {
 	*x = CloudWatchMetricSample{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[61]
+	mi := &file_aegis_v1_platform_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3770,7 +3978,7 @@ func (x *CloudWatchMetricSample) String() string {
 func (*CloudWatchMetricSample) ProtoMessage() {}
 
 func (x *CloudWatchMetricSample) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[61]
+	mi := &file_aegis_v1_platform_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3783,7 +3991,7 @@ func (x *CloudWatchMetricSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudWatchMetricSample.ProtoReflect.Descriptor instead.
 func (*CloudWatchMetricSample) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{61}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *CloudWatchMetricSample) GetName() string {
@@ -3839,7 +4047,7 @@ type ControlPlaneLogEntry struct {
 
 func (x *ControlPlaneLogEntry) Reset() {
 	*x = ControlPlaneLogEntry{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[62]
+	mi := &file_aegis_v1_platform_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3851,7 +4059,7 @@ func (x *ControlPlaneLogEntry) String() string {
 func (*ControlPlaneLogEntry) ProtoMessage() {}
 
 func (x *ControlPlaneLogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[62]
+	mi := &file_aegis_v1_platform_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3864,7 +4072,7 @@ func (x *ControlPlaneLogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlPlaneLogEntry.ProtoReflect.Descriptor instead.
 func (*ControlPlaneLogEntry) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{62}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ControlPlaneLogEntry) GetTimestamp() string {
@@ -3904,7 +4112,7 @@ type ControlPlaneSignals struct {
 
 func (x *ControlPlaneSignals) Reset() {
 	*x = ControlPlaneSignals{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[63]
+	mi := &file_aegis_v1_platform_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3916,7 +4124,7 @@ func (x *ControlPlaneSignals) String() string {
 func (*ControlPlaneSignals) ProtoMessage() {}
 
 func (x *ControlPlaneSignals) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[63]
+	mi := &file_aegis_v1_platform_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3929,7 +4137,7 @@ func (x *ControlPlaneSignals) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlPlaneSignals.ProtoReflect.Descriptor instead.
 func (*ControlPlaneSignals) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{63}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ControlPlaneSignals) GetStatus() string {
@@ -3999,7 +4207,7 @@ type ScalingEvent struct {
 
 func (x *ScalingEvent) Reset() {
 	*x = ScalingEvent{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[64]
+	mi := &file_aegis_v1_platform_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4011,7 +4219,7 @@ func (x *ScalingEvent) String() string {
 func (*ScalingEvent) ProtoMessage() {}
 
 func (x *ScalingEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[64]
+	mi := &file_aegis_v1_platform_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4024,7 +4232,7 @@ func (x *ScalingEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScalingEvent.ProtoReflect.Descriptor instead.
 func (*ScalingEvent) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{64}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *ScalingEvent) GetDescription() string {
@@ -4067,7 +4275,7 @@ type NodegroupSignal struct {
 
 func (x *NodegroupSignal) Reset() {
 	*x = NodegroupSignal{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[65]
+	mi := &file_aegis_v1_platform_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4079,7 +4287,7 @@ func (x *NodegroupSignal) String() string {
 func (*NodegroupSignal) ProtoMessage() {}
 
 func (x *NodegroupSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[65]
+	mi := &file_aegis_v1_platform_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4092,7 +4300,7 @@ func (x *NodegroupSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodegroupSignal.ProtoReflect.Descriptor instead.
 func (*NodegroupSignal) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{65}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *NodegroupSignal) GetName() string {
@@ -4184,7 +4392,7 @@ type TargetGroupHealth struct {
 
 func (x *TargetGroupHealth) Reset() {
 	*x = TargetGroupHealth{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[66]
+	mi := &file_aegis_v1_platform_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4196,7 +4404,7 @@ func (x *TargetGroupHealth) String() string {
 func (*TargetGroupHealth) ProtoMessage() {}
 
 func (x *TargetGroupHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[66]
+	mi := &file_aegis_v1_platform_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4209,7 +4417,7 @@ func (x *TargetGroupHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TargetGroupHealth.ProtoReflect.Descriptor instead.
 func (*TargetGroupHealth) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{66}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *TargetGroupHealth) GetArn() string {
@@ -4251,7 +4459,7 @@ type LoadBalancerAccessLog struct {
 
 func (x *LoadBalancerAccessLog) Reset() {
 	*x = LoadBalancerAccessLog{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[67]
+	mi := &file_aegis_v1_platform_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4263,7 +4471,7 @@ func (x *LoadBalancerAccessLog) String() string {
 func (*LoadBalancerAccessLog) ProtoMessage() {}
 
 func (x *LoadBalancerAccessLog) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[67]
+	mi := &file_aegis_v1_platform_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4276,7 +4484,7 @@ func (x *LoadBalancerAccessLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancerAccessLog.ProtoReflect.Descriptor instead.
 func (*LoadBalancerAccessLog) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{67}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *LoadBalancerAccessLog) GetEnabled() bool {
@@ -4321,7 +4529,7 @@ type LoadBalancerSignal struct {
 
 func (x *LoadBalancerSignal) Reset() {
 	*x = LoadBalancerSignal{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[68]
+	mi := &file_aegis_v1_platform_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4333,7 +4541,7 @@ func (x *LoadBalancerSignal) String() string {
 func (*LoadBalancerSignal) ProtoMessage() {}
 
 func (x *LoadBalancerSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[68]
+	mi := &file_aegis_v1_platform_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4346,7 +4554,7 @@ func (x *LoadBalancerSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancerSignal.ProtoReflect.Descriptor instead.
 func (*LoadBalancerSignal) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{68}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *LoadBalancerSignal) GetArn() string {
@@ -4452,7 +4660,7 @@ type GetAwsSignalsRequest struct {
 
 func (x *GetAwsSignalsRequest) Reset() {
 	*x = GetAwsSignalsRequest{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[69]
+	mi := &file_aegis_v1_platform_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4464,7 +4672,7 @@ func (x *GetAwsSignalsRequest) String() string {
 func (*GetAwsSignalsRequest) ProtoMessage() {}
 
 func (x *GetAwsSignalsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[69]
+	mi := &file_aegis_v1_platform_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4477,7 +4685,7 @@ func (x *GetAwsSignalsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAwsSignalsRequest.ProtoReflect.Descriptor instead.
 func (*GetAwsSignalsRequest) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{69}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *GetAwsSignalsRequest) GetProjectId() string {
@@ -4522,7 +4730,7 @@ type GetAwsSignalsResponse struct {
 
 func (x *GetAwsSignalsResponse) Reset() {
 	*x = GetAwsSignalsResponse{}
-	mi := &file_aegis_v1_platform_proto_msgTypes[70]
+	mi := &file_aegis_v1_platform_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4534,7 +4742,7 @@ func (x *GetAwsSignalsResponse) String() string {
 func (*GetAwsSignalsResponse) ProtoMessage() {}
 
 func (x *GetAwsSignalsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aegis_v1_platform_proto_msgTypes[70]
+	mi := &file_aegis_v1_platform_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4547,7 +4755,7 @@ func (x *GetAwsSignalsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAwsSignalsResponse.ProtoReflect.Descriptor instead.
 func (*GetAwsSignalsResponse) Descriptor() ([]byte, []int) {
-	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{70}
+	return file_aegis_v1_platform_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *GetAwsSignalsResponse) GetClusterId() string {
@@ -4646,7 +4854,7 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\x12#\n" +
 	"\rpriority_tier\x18\x03 \x01(\tR\fpriorityTier\x12'\n" +
 	"\x0fallowed_flavors\x18\x04 \x03(\tR\x0eallowedFlavors\x12?\n" +
-	"\x1cdefault_max_duration_seconds\x18\x05 \x01(\x03R\x19defaultMaxDurationSeconds\"\xad\x02\n" +
+	"\x1cdefault_max_duration_seconds\x18\x05 \x01(\x03R\x19defaultMaxDurationSeconds\"\xe3\x02\n" +
 	"\rWorkspaceSpec\x12\x16\n" +
 	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x122\n" +
@@ -4654,10 +4862,20 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\acommand\x18\x04 \x03(\tR\acommand\x120\n" +
 	"\x14max_duration_seconds\x18\x05 \x01(\x03R\x12maxDurationSeconds\x12 \n" +
 	"\vinteractive\x18\x06 \x01(\bR\vinteractive\x12\x14\n" +
-	"\x05ports\x18\a \x03(\x05R\x05ports\x1a6\n" +
+	"\x05ports\x18\a \x03(\x05R\x05ports\x124\n" +
+	"\astorage\x18\b \x01(\v2\x1a.aegis.v1.WorkspaceStorageR\astorage\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xde\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xba\x01\n" +
+	"\x10WorkspaceStorage\x12\x1e\n" +
+	"\n" +
+	"persistent\x18\x01 \x01(\bR\n" +
+	"persistent\x12#\n" +
+	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\tR\x04size\x12\x1d\n" +
+	"\n" +
+	"mount_path\x18\x04 \x01(\tR\tmountPath\x12.\n" +
+	"\x13existing_claim_name\x18\x05 \x01(\tR\x11existingClaimName\"\xde\x01\n" +
 	"\fTrainingSpec\x12\x16\n" +
 	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x18\n" +
 	"\aworkers\x18\x02 \x01(\x05R\aworkers\x12&\n" +
@@ -4705,7 +4923,7 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x1eCreateConnectionSessionRequest\x12\x1f\n" +
 	"\vworkload_id\x18\x01 \x01(\tR\n" +
 	"workloadId\x12\x16\n" +
-	"\x06client\x18\x02 \x01(\tR\x06client\"\xa5\x02\n" +
+	"\x06client\x18\x02 \x01(\tR\x06client\"\xee\x02\n" +
 	"\x11ConnectionSession\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
@@ -4718,13 +4936,17 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"ssh_config\x18\x06 \x01(\tR\tsshConfig\x12\x1b\n" +
 	"\tproxy_url\x18\a \x01(\tR\bproxyUrl\x12$\n" +
 	"\x0eexpires_at_utc\x18\b \x01(\tR\fexpiresAtUtc\x12\x19\n" +
-	"\bone_time\x18\t \x01(\bR\aoneTime\">\n" +
+	"\bone_time\x18\t \x01(\bR\aoneTime\x12 \n" +
+	"\fproxy_ca_pem\x18\n" +
+	" \x01(\tR\n" +
+	"proxyCaPem\x12%\n" +
+	"\x0eworkspace_root\x18\v \x01(\tR\rworkspaceRoot\">\n" +
 	"\x1dRenewConnectionSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"?\n" +
 	"\x1eRevokeConnectionSessionRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\xa4\x02\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\xc6\x02\n" +
 	"\x16ClusterRegisterRequest\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1a\n" +
@@ -4732,7 +4954,9 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x06region\x18\x03 \x01(\tR\x06region\x12\x19\n" +
 	"\bil_level\x18\x04 \x01(\tR\ailLevel\x12D\n" +
 	"\x06labels\x18\x05 \x03(\v2,.aegis.v1.ClusterRegisterRequest.LabelsEntryR\x06labels\x12\x1b\n" +
-	"\tproxy_url\x18\x06 \x01(\tR\bproxyUrl\x1a9\n" +
+	"\tproxy_url\x18\x06 \x01(\tR\bproxyUrl\x12 \n" +
+	"\fproxy_ca_pem\x18\a \x01(\tR\n" +
+	"proxyCaPem\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"C\n" +
@@ -4901,7 +5125,14 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1a\n" +
 	"\bprogress\x18\x03 \x01(\x05R\bprogress\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x15\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"U\n" +
+	"\x15DestroyClusterRequest\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x02 \x01(\tR\tprojectId\"9\n" +
+	"\x16DestroyClusterResponse\x12\x1f\n" +
+	"\x03job\x18\x01 \x01(\v2\r.aegis.v1.JobR\x03job\"\x15\n" +
 	"\x13ListProjectsRequest\"?\n" +
 	"\x14ListProjectsResponse\x12'\n" +
 	"\x05items\x18\x01 \x03(\v2\x11.aegis.v1.ProjectR\x05items\"\xb1\x01\n" +
@@ -4988,7 +5219,7 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"nodegroups\x18\x04 \x03(\v2\x19.aegis.v1.NodegroupSignalR\n" +
 	"nodegroups\x12C\n" +
 	"\x0eload_balancers\x18\x05 \x03(\v2\x1c.aegis.v1.LoadBalancerSignalR\rloadBalancers\x12\x1a\n" +
-	"\bwarnings\x18\x06 \x03(\tR\bwarnings2\xdf\x1b\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings2\xe7\x1c\n" +
 	"\rAegisPlatform\x12_\n" +
 	"\rCreateProject\x12\x1e.aegis.v1.CreateProjectRequest\x1a\x11.aegis.v1.Project\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/api/v1/projects\x12g\n" +
 	"\fListProjects\x12\x1d.aegis.v1.ListProjectsRequest\x1a\x1e.aegis.v1.ListProjectsResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/projects\x12x\n" +
@@ -5004,7 +5235,8 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\rListWorkloads\x12\x1e.aegis.v1.ListWorkloadsRequest\x1a\x1f.aegis.v1.ListWorkloadsResponse\"/\x82\xd3\xe4\x93\x02)\x12'/api/v1/projects/{project_id}/workloads\x12u\n" +
 	"\x0fCreateWorkspace\x12 .aegis.v1.CreateWorkspaceRequest\x1a!.aegis.v1.CreateWorkspaceResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/api/v1/workspaces\x12m\n" +
 	"\rCreateCluster\x12\x1e.aegis.v1.CreateClusterRequest\x1a\x1f.aegis.v1.CreateClusterResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/api/v1/clusters\x12t\n" +
-	"\rImportCluster\x12\x1e.aegis.v1.ImportClusterRequest\x1a\x1f.aegis.v1.ImportClusterResponse\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/api/v1/clusters/import\x12g\n" +
+	"\rImportCluster\x12\x1e.aegis.v1.ImportClusterRequest\x1a\x1f.aegis.v1.ImportClusterResponse\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/api/v1/clusters/import\x12\x85\x01\n" +
+	"\x0eDestroyCluster\x12\x1f.aegis.v1.DestroyClusterRequest\x1a .aegis.v1.DestroyClusterResponse\"0\x82\xd3\xe4\x93\x02*:\x01*\"%/api/v1/clusters/{cluster_id}/destroy\x12g\n" +
 	"\fListClusters\x12\x1d.aegis.v1.ListClustersRequest\x1a\x1e.aegis.v1.ListClustersResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/clusters\x12\x91\x01\n" +
 	"\x13GetClusterJobStatus\x12$.aegis.v1.GetClusterJobStatusRequest\x1a%.aegis.v1.GetClusterJobStatusResponse\"-\x82\xd3\xe4\x93\x02'\x12%/api/v1/clusters/jobs/{job_id}/status\x12\xb3\x01\n" +
 	"\x1dGetWorkspaceConnectionDetails\x12..aegis.v1.GetWorkspaceConnectionDetailsRequest\x1a/.aegis.v1.GetWorkspaceConnectionDetailsResponse\"1\x82\xd3\xe4\x93\x02+\x12)/api/v1/workloads/{id}/connection_details\x12\x88\x01\n" +
@@ -5032,7 +5264,7 @@ func file_aegis_v1_platform_proto_rawDescGZIP() []byte {
 	return file_aegis_v1_platform_proto_rawDescData
 }
 
-var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 77)
+var file_aegis_v1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 80)
 var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Project)(nil),                               // 0: aegis.v1.Project
 	(*ProjectAwsCredentials)(nil),                 // 1: aegis.v1.ProjectAwsCredentials
@@ -5041,185 +5273,192 @@ var file_aegis_v1_platform_proto_goTypes = []any{
 	(*Flavor)(nil),                                // 4: aegis.v1.Flavor
 	(*Queue)(nil),                                 // 5: aegis.v1.Queue
 	(*WorkspaceSpec)(nil),                         // 6: aegis.v1.WorkspaceSpec
-	(*TrainingSpec)(nil),                          // 7: aegis.v1.TrainingSpec
-	(*ResourceHints)(nil),                         // 8: aegis.v1.ResourceHints
-	(*Workload)(nil),                              // 9: aegis.v1.Workload
-	(*GetWorkspaceConnectionDetailsRequest)(nil),  // 10: aegis.v1.GetWorkspaceConnectionDetailsRequest
-	(*GetWorkspaceConnectionDetailsResponse)(nil), // 11: aegis.v1.GetWorkspaceConnectionDetailsResponse
-	(*CreateConnectionSessionRequest)(nil),        // 12: aegis.v1.CreateConnectionSessionRequest
-	(*ConnectionSession)(nil),                     // 13: aegis.v1.ConnectionSession
-	(*RenewConnectionSessionRequest)(nil),         // 14: aegis.v1.RenewConnectionSessionRequest
-	(*RevokeConnectionSessionRequest)(nil),        // 15: aegis.v1.RevokeConnectionSessionRequest
-	(*ClusterRegisterRequest)(nil),                // 16: aegis.v1.ClusterRegisterRequest
-	(*ClusterRegisterResponse)(nil),               // 17: aegis.v1.ClusterRegisterResponse
-	(*ClusterHeartbeat)(nil),                      // 18: aegis.v1.ClusterHeartbeat
-	(*ClusterHeartbeatAck)(nil),                   // 19: aegis.v1.ClusterHeartbeatAck
-	(*ListClustersRequest)(nil),                   // 20: aegis.v1.ListClustersRequest
-	(*ClusterSummary)(nil),                        // 21: aegis.v1.ClusterSummary
-	(*ListClustersResponse)(nil),                  // 22: aegis.v1.ListClustersResponse
-	(*ImportClusterRequest)(nil),                  // 23: aegis.v1.ImportClusterRequest
-	(*K8SAgentHelmValues)(nil),                    // 24: aegis.v1.K8sAgentHelmValues
-	(*HelmValues)(nil),                            // 25: aegis.v1.HelmValues
-	(*ImportClusterResponse)(nil),                 // 26: aegis.v1.ImportClusterResponse
-	(*CreateProjectRequest)(nil),                  // 27: aegis.v1.CreateProjectRequest
-	(*UpsertBudgetRequest)(nil),                   // 28: aegis.v1.UpsertBudgetRequest
-	(*UpsertFlavorRequest)(nil),                   // 29: aegis.v1.UpsertFlavorRequest
-	(*UpsertQueueRequest)(nil),                    // 30: aegis.v1.UpsertQueueRequest
-	(*SubmitWorkloadRequest)(nil),                 // 31: aegis.v1.SubmitWorkloadRequest
-	(*GetWorkloadRequest)(nil),                    // 32: aegis.v1.GetWorkloadRequest
-	(*ListWorkloadsRequest)(nil),                  // 33: aegis.v1.ListWorkloadsRequest
-	(*ListWorkloadsResponse)(nil),                 // 34: aegis.v1.ListWorkloadsResponse
-	(*ResumeWorkloadRequest)(nil),                 // 35: aegis.v1.ResumeWorkloadRequest
-	(*TerminateWorkloadRequest)(nil),              // 36: aegis.v1.TerminateWorkloadRequest
-	(*LeaseWorkloadRequest)(nil),                  // 37: aegis.v1.LeaseWorkloadRequest
-	(*LeaseWorkloadResponse)(nil),                 // 38: aegis.v1.LeaseWorkloadResponse
-	(*ListClusterWorkloadIDsRequest)(nil),         // 39: aegis.v1.ListClusterWorkloadIDsRequest
-	(*ListClusterWorkloadIDsResponse)(nil),        // 40: aegis.v1.ListClusterWorkloadIDsResponse
-	(*AckWorkloadRequest)(nil),                    // 41: aegis.v1.AckWorkloadRequest
-	(*AckWorkloadResponse)(nil),                   // 42: aegis.v1.AckWorkloadResponse
-	(*StartWorkloadRequest)(nil),                  // 43: aegis.v1.StartWorkloadRequest
-	(*StartWorkloadResponse)(nil),                 // 44: aegis.v1.StartWorkloadResponse
-	(*GetBudgetRequest)(nil),                      // 45: aegis.v1.GetBudgetRequest
-	(*BudgetUsage)(nil),                           // 46: aegis.v1.BudgetUsage
-	(*GetBudgetResponse)(nil),                     // 47: aegis.v1.GetBudgetResponse
-	(*ListBudgetsRequest)(nil),                    // 48: aegis.v1.ListBudgetsRequest
-	(*BudgetWithUsage)(nil),                       // 49: aegis.v1.BudgetWithUsage
-	(*ListBudgetsResponse)(nil),                   // 50: aegis.v1.ListBudgetsResponse
-	(*CreateWorkspaceRequest)(nil),                // 51: aegis.v1.CreateWorkspaceRequest
-	(*CreateWorkspaceResponse)(nil),               // 52: aegis.v1.CreateWorkspaceResponse
-	(*ClusterProfileReference)(nil),               // 53: aegis.v1.ClusterProfileReference
-	(*CreateClusterRequest)(nil),                  // 54: aegis.v1.CreateClusterRequest
-	(*CreateClusterResponse)(nil),                 // 55: aegis.v1.CreateClusterResponse
-	(*GetClusterJobStatusRequest)(nil),            // 56: aegis.v1.GetClusterJobStatusRequest
-	(*GetClusterJobStatusResponse)(nil),           // 57: aegis.v1.GetClusterJobStatusResponse
-	(*Job)(nil),                                   // 58: aegis.v1.Job
-	(*ListProjectsRequest)(nil),                   // 59: aegis.v1.ListProjectsRequest
-	(*ListProjectsResponse)(nil),                  // 60: aegis.v1.ListProjectsResponse
-	(*CloudWatchMetricSample)(nil),                // 61: aegis.v1.CloudWatchMetricSample
-	(*ControlPlaneLogEntry)(nil),                  // 62: aegis.v1.ControlPlaneLogEntry
-	(*ControlPlaneSignals)(nil),                   // 63: aegis.v1.ControlPlaneSignals
-	(*ScalingEvent)(nil),                          // 64: aegis.v1.ScalingEvent
-	(*NodegroupSignal)(nil),                       // 65: aegis.v1.NodegroupSignal
-	(*TargetGroupHealth)(nil),                     // 66: aegis.v1.TargetGroupHealth
-	(*LoadBalancerAccessLog)(nil),                 // 67: aegis.v1.LoadBalancerAccessLog
-	(*LoadBalancerSignal)(nil),                    // 68: aegis.v1.LoadBalancerSignal
-	(*GetAwsSignalsRequest)(nil),                  // 69: aegis.v1.GetAwsSignalsRequest
-	(*GetAwsSignalsResponse)(nil),                 // 70: aegis.v1.GetAwsSignalsResponse
-	nil,                                           // 71: aegis.v1.Project.AnnotationsEntry
-	nil,                                           // 72: aegis.v1.WorkspaceSpec.EnvEntry
-	nil,                                           // 73: aegis.v1.ClusterRegisterRequest.LabelsEntry
-	nil,                                           // 74: aegis.v1.ImportClusterRequest.LabelsEntry
-	nil,                                           // 75: aegis.v1.K8sAgentHelmValues.EnvEntry
-	nil,                                           // 76: aegis.v1.ClusterProfileReference.ParametersEntry
-	(*emptypb.Empty)(nil),                         // 77: google.protobuf.Empty
+	(*WorkspaceStorage)(nil),                      // 7: aegis.v1.WorkspaceStorage
+	(*TrainingSpec)(nil),                          // 8: aegis.v1.TrainingSpec
+	(*ResourceHints)(nil),                         // 9: aegis.v1.ResourceHints
+	(*Workload)(nil),                              // 10: aegis.v1.Workload
+	(*GetWorkspaceConnectionDetailsRequest)(nil),  // 11: aegis.v1.GetWorkspaceConnectionDetailsRequest
+	(*GetWorkspaceConnectionDetailsResponse)(nil), // 12: aegis.v1.GetWorkspaceConnectionDetailsResponse
+	(*CreateConnectionSessionRequest)(nil),        // 13: aegis.v1.CreateConnectionSessionRequest
+	(*ConnectionSession)(nil),                     // 14: aegis.v1.ConnectionSession
+	(*RenewConnectionSessionRequest)(nil),         // 15: aegis.v1.RenewConnectionSessionRequest
+	(*RevokeConnectionSessionRequest)(nil),        // 16: aegis.v1.RevokeConnectionSessionRequest
+	(*ClusterRegisterRequest)(nil),                // 17: aegis.v1.ClusterRegisterRequest
+	(*ClusterRegisterResponse)(nil),               // 18: aegis.v1.ClusterRegisterResponse
+	(*ClusterHeartbeat)(nil),                      // 19: aegis.v1.ClusterHeartbeat
+	(*ClusterHeartbeatAck)(nil),                   // 20: aegis.v1.ClusterHeartbeatAck
+	(*ListClustersRequest)(nil),                   // 21: aegis.v1.ListClustersRequest
+	(*ClusterSummary)(nil),                        // 22: aegis.v1.ClusterSummary
+	(*ListClustersResponse)(nil),                  // 23: aegis.v1.ListClustersResponse
+	(*ImportClusterRequest)(nil),                  // 24: aegis.v1.ImportClusterRequest
+	(*K8SAgentHelmValues)(nil),                    // 25: aegis.v1.K8sAgentHelmValues
+	(*HelmValues)(nil),                            // 26: aegis.v1.HelmValues
+	(*ImportClusterResponse)(nil),                 // 27: aegis.v1.ImportClusterResponse
+	(*CreateProjectRequest)(nil),                  // 28: aegis.v1.CreateProjectRequest
+	(*UpsertBudgetRequest)(nil),                   // 29: aegis.v1.UpsertBudgetRequest
+	(*UpsertFlavorRequest)(nil),                   // 30: aegis.v1.UpsertFlavorRequest
+	(*UpsertQueueRequest)(nil),                    // 31: aegis.v1.UpsertQueueRequest
+	(*SubmitWorkloadRequest)(nil),                 // 32: aegis.v1.SubmitWorkloadRequest
+	(*GetWorkloadRequest)(nil),                    // 33: aegis.v1.GetWorkloadRequest
+	(*ListWorkloadsRequest)(nil),                  // 34: aegis.v1.ListWorkloadsRequest
+	(*ListWorkloadsResponse)(nil),                 // 35: aegis.v1.ListWorkloadsResponse
+	(*ResumeWorkloadRequest)(nil),                 // 36: aegis.v1.ResumeWorkloadRequest
+	(*TerminateWorkloadRequest)(nil),              // 37: aegis.v1.TerminateWorkloadRequest
+	(*LeaseWorkloadRequest)(nil),                  // 38: aegis.v1.LeaseWorkloadRequest
+	(*LeaseWorkloadResponse)(nil),                 // 39: aegis.v1.LeaseWorkloadResponse
+	(*ListClusterWorkloadIDsRequest)(nil),         // 40: aegis.v1.ListClusterWorkloadIDsRequest
+	(*ListClusterWorkloadIDsResponse)(nil),        // 41: aegis.v1.ListClusterWorkloadIDsResponse
+	(*AckWorkloadRequest)(nil),                    // 42: aegis.v1.AckWorkloadRequest
+	(*AckWorkloadResponse)(nil),                   // 43: aegis.v1.AckWorkloadResponse
+	(*StartWorkloadRequest)(nil),                  // 44: aegis.v1.StartWorkloadRequest
+	(*StartWorkloadResponse)(nil),                 // 45: aegis.v1.StartWorkloadResponse
+	(*GetBudgetRequest)(nil),                      // 46: aegis.v1.GetBudgetRequest
+	(*BudgetUsage)(nil),                           // 47: aegis.v1.BudgetUsage
+	(*GetBudgetResponse)(nil),                     // 48: aegis.v1.GetBudgetResponse
+	(*ListBudgetsRequest)(nil),                    // 49: aegis.v1.ListBudgetsRequest
+	(*BudgetWithUsage)(nil),                       // 50: aegis.v1.BudgetWithUsage
+	(*ListBudgetsResponse)(nil),                   // 51: aegis.v1.ListBudgetsResponse
+	(*CreateWorkspaceRequest)(nil),                // 52: aegis.v1.CreateWorkspaceRequest
+	(*CreateWorkspaceResponse)(nil),               // 53: aegis.v1.CreateWorkspaceResponse
+	(*ClusterProfileReference)(nil),               // 54: aegis.v1.ClusterProfileReference
+	(*CreateClusterRequest)(nil),                  // 55: aegis.v1.CreateClusterRequest
+	(*CreateClusterResponse)(nil),                 // 56: aegis.v1.CreateClusterResponse
+	(*GetClusterJobStatusRequest)(nil),            // 57: aegis.v1.GetClusterJobStatusRequest
+	(*GetClusterJobStatusResponse)(nil),           // 58: aegis.v1.GetClusterJobStatusResponse
+	(*Job)(nil),                                   // 59: aegis.v1.Job
+	(*DestroyClusterRequest)(nil),                 // 60: aegis.v1.DestroyClusterRequest
+	(*DestroyClusterResponse)(nil),                // 61: aegis.v1.DestroyClusterResponse
+	(*ListProjectsRequest)(nil),                   // 62: aegis.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil),                  // 63: aegis.v1.ListProjectsResponse
+	(*CloudWatchMetricSample)(nil),                // 64: aegis.v1.CloudWatchMetricSample
+	(*ControlPlaneLogEntry)(nil),                  // 65: aegis.v1.ControlPlaneLogEntry
+	(*ControlPlaneSignals)(nil),                   // 66: aegis.v1.ControlPlaneSignals
+	(*ScalingEvent)(nil),                          // 67: aegis.v1.ScalingEvent
+	(*NodegroupSignal)(nil),                       // 68: aegis.v1.NodegroupSignal
+	(*TargetGroupHealth)(nil),                     // 69: aegis.v1.TargetGroupHealth
+	(*LoadBalancerAccessLog)(nil),                 // 70: aegis.v1.LoadBalancerAccessLog
+	(*LoadBalancerSignal)(nil),                    // 71: aegis.v1.LoadBalancerSignal
+	(*GetAwsSignalsRequest)(nil),                  // 72: aegis.v1.GetAwsSignalsRequest
+	(*GetAwsSignalsResponse)(nil),                 // 73: aegis.v1.GetAwsSignalsResponse
+	nil,                                           // 74: aegis.v1.Project.AnnotationsEntry
+	nil,                                           // 75: aegis.v1.WorkspaceSpec.EnvEntry
+	nil,                                           // 76: aegis.v1.ClusterRegisterRequest.LabelsEntry
+	nil,                                           // 77: aegis.v1.ImportClusterRequest.LabelsEntry
+	nil,                                           // 78: aegis.v1.K8sAgentHelmValues.EnvEntry
+	nil,                                           // 79: aegis.v1.ClusterProfileReference.ParametersEntry
+	(*emptypb.Empty)(nil),                         // 80: google.protobuf.Empty
 }
 var file_aegis_v1_platform_proto_depIdxs = []int32{
 	2,  // 0: aegis.v1.Project.policy:type_name -> aegis.v1.PolicyDomain
-	71, // 1: aegis.v1.Project.annotations:type_name -> aegis.v1.Project.AnnotationsEntry
+	74, // 1: aegis.v1.Project.annotations:type_name -> aegis.v1.Project.AnnotationsEntry
 	1,  // 2: aegis.v1.Project.aws:type_name -> aegis.v1.ProjectAwsCredentials
-	72, // 3: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
-	6,  // 4: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
-	7,  // 5: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
-	8,  // 6: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
-	73, // 7: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
-	4,  // 8: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
-	21, // 9: aegis.v1.ListClustersResponse.items:type_name -> aegis.v1.ClusterSummary
-	74, // 10: aegis.v1.ImportClusterRequest.labels:type_name -> aegis.v1.ImportClusterRequest.LabelsEntry
-	75, // 11: aegis.v1.K8sAgentHelmValues.env:type_name -> aegis.v1.K8sAgentHelmValues.EnvEntry
-	24, // 12: aegis.v1.HelmValues.k8s_agent:type_name -> aegis.v1.K8sAgentHelmValues
-	25, // 13: aegis.v1.ImportClusterResponse.helm_values:type_name -> aegis.v1.HelmValues
-	0,  // 14: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
-	3,  // 15: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
-	4,  // 16: aegis.v1.UpsertFlavorRequest.flavor:type_name -> aegis.v1.Flavor
-	5,  // 17: aegis.v1.UpsertQueueRequest.queue:type_name -> aegis.v1.Queue
-	9,  // 18: aegis.v1.SubmitWorkloadRequest.workload:type_name -> aegis.v1.Workload
-	9,  // 19: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
-	9,  // 20: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
-	9,  // 21: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
-	9,  // 22: aegis.v1.StartWorkloadResponse.workload:type_name -> aegis.v1.Workload
-	3,  // 23: aegis.v1.GetBudgetResponse.budget:type_name -> aegis.v1.Budget
-	46, // 24: aegis.v1.GetBudgetResponse.usage:type_name -> aegis.v1.BudgetUsage
-	3,  // 25: aegis.v1.BudgetWithUsage.budget:type_name -> aegis.v1.Budget
-	46, // 26: aegis.v1.BudgetWithUsage.usage:type_name -> aegis.v1.BudgetUsage
-	49, // 27: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
-	6,  // 28: aegis.v1.CreateWorkspaceRequest.workspace:type_name -> aegis.v1.WorkspaceSpec
-	9,  // 29: aegis.v1.CreateWorkspaceResponse.workload:type_name -> aegis.v1.Workload
-	76, // 30: aegis.v1.ClusterProfileReference.parameters:type_name -> aegis.v1.ClusterProfileReference.ParametersEntry
-	53, // 31: aegis.v1.CreateClusterRequest.profile:type_name -> aegis.v1.ClusterProfileReference
-	58, // 32: aegis.v1.CreateClusterResponse.job:type_name -> aegis.v1.Job
-	58, // 33: aegis.v1.GetClusterJobStatusResponse.job:type_name -> aegis.v1.Job
-	0,  // 34: aegis.v1.ListProjectsResponse.items:type_name -> aegis.v1.Project
-	61, // 35: aegis.v1.ControlPlaneSignals.api_server_latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
-	61, // 36: aegis.v1.ControlPlaneSignals.api_server_5xx_rate:type_name -> aegis.v1.CloudWatchMetricSample
-	62, // 37: aegis.v1.ControlPlaneSignals.log_samples:type_name -> aegis.v1.ControlPlaneLogEntry
-	64, // 38: aegis.v1.NodegroupSignal.scaling_events:type_name -> aegis.v1.ScalingEvent
-	61, // 39: aegis.v1.LoadBalancerSignal.latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
-	66, // 40: aegis.v1.LoadBalancerSignal.target_groups:type_name -> aegis.v1.TargetGroupHealth
-	67, // 41: aegis.v1.LoadBalancerSignal.access_logs:type_name -> aegis.v1.LoadBalancerAccessLog
-	63, // 42: aegis.v1.GetAwsSignalsResponse.control_plane:type_name -> aegis.v1.ControlPlaneSignals
-	65, // 43: aegis.v1.GetAwsSignalsResponse.nodegroups:type_name -> aegis.v1.NodegroupSignal
-	68, // 44: aegis.v1.GetAwsSignalsResponse.load_balancers:type_name -> aegis.v1.LoadBalancerSignal
-	27, // 45: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
-	59, // 46: aegis.v1.AegisPlatform.ListProjects:input_type -> aegis.v1.ListProjectsRequest
-	28, // 47: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
-	45, // 48: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
-	48, // 49: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
-	29, // 50: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
-	30, // 51: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
-	31, // 52: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
-	32, // 53: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
-	35, // 54: aegis.v1.AegisPlatform.ResumeWorkload:input_type -> aegis.v1.ResumeWorkloadRequest
-	36, // 55: aegis.v1.AegisPlatform.TerminateWorkload:input_type -> aegis.v1.TerminateWorkloadRequest
-	33, // 56: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
-	51, // 57: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
-	54, // 58: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
-	23, // 59: aegis.v1.AegisPlatform.ImportCluster:input_type -> aegis.v1.ImportClusterRequest
-	20, // 60: aegis.v1.AegisPlatform.ListClusters:input_type -> aegis.v1.ListClustersRequest
-	56, // 61: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
-	10, // 62: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
-	12, // 63: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
-	14, // 64: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
-	15, // 65: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
-	37, // 66: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
-	39, // 67: aegis.v1.AegisPlatform.ListClusterWorkloadIDs:input_type -> aegis.v1.ListClusterWorkloadIDsRequest
-	43, // 68: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
-	41, // 69: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
-	16, // 70: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
-	18, // 71: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
-	69, // 72: aegis.v1.AegisPlatform.GetAwsClusterSignals:input_type -> aegis.v1.GetAwsSignalsRequest
-	0,  // 73: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
-	60, // 74: aegis.v1.AegisPlatform.ListProjects:output_type -> aegis.v1.ListProjectsResponse
-	3,  // 75: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
-	47, // 76: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
-	50, // 77: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
-	4,  // 78: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
-	5,  // 79: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
-	9,  // 80: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
-	9,  // 81: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
-	9,  // 82: aegis.v1.AegisPlatform.ResumeWorkload:output_type -> aegis.v1.Workload
-	9,  // 83: aegis.v1.AegisPlatform.TerminateWorkload:output_type -> aegis.v1.Workload
-	34, // 84: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
-	52, // 85: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
-	55, // 86: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
-	26, // 87: aegis.v1.AegisPlatform.ImportCluster:output_type -> aegis.v1.ImportClusterResponse
-	22, // 88: aegis.v1.AegisPlatform.ListClusters:output_type -> aegis.v1.ListClustersResponse
-	57, // 89: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
-	11, // 90: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
-	13, // 91: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
-	13, // 92: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
-	77, // 93: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
-	38, // 94: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
-	40, // 95: aegis.v1.AegisPlatform.ListClusterWorkloadIDs:output_type -> aegis.v1.ListClusterWorkloadIDsResponse
-	44, // 96: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
-	42, // 97: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
-	17, // 98: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
-	19, // 99: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
-	70, // 100: aegis.v1.AegisPlatform.GetAwsClusterSignals:output_type -> aegis.v1.GetAwsSignalsResponse
-	73, // [73:101] is the sub-list for method output_type
-	45, // [45:73] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	75, // 3: aegis.v1.WorkspaceSpec.env:type_name -> aegis.v1.WorkspaceSpec.EnvEntry
+	7,  // 4: aegis.v1.WorkspaceSpec.storage:type_name -> aegis.v1.WorkspaceStorage
+	6,  // 5: aegis.v1.Workload.workspace:type_name -> aegis.v1.WorkspaceSpec
+	8,  // 6: aegis.v1.Workload.training:type_name -> aegis.v1.TrainingSpec
+	9,  // 7: aegis.v1.Workload.hints:type_name -> aegis.v1.ResourceHints
+	76, // 8: aegis.v1.ClusterRegisterRequest.labels:type_name -> aegis.v1.ClusterRegisterRequest.LabelsEntry
+	4,  // 9: aegis.v1.ClusterHeartbeat.available_flavors:type_name -> aegis.v1.Flavor
+	22, // 10: aegis.v1.ListClustersResponse.items:type_name -> aegis.v1.ClusterSummary
+	77, // 11: aegis.v1.ImportClusterRequest.labels:type_name -> aegis.v1.ImportClusterRequest.LabelsEntry
+	78, // 12: aegis.v1.K8sAgentHelmValues.env:type_name -> aegis.v1.K8sAgentHelmValues.EnvEntry
+	25, // 13: aegis.v1.HelmValues.k8s_agent:type_name -> aegis.v1.K8sAgentHelmValues
+	26, // 14: aegis.v1.ImportClusterResponse.helm_values:type_name -> aegis.v1.HelmValues
+	0,  // 15: aegis.v1.CreateProjectRequest.project:type_name -> aegis.v1.Project
+	3,  // 16: aegis.v1.UpsertBudgetRequest.budget:type_name -> aegis.v1.Budget
+	4,  // 17: aegis.v1.UpsertFlavorRequest.flavor:type_name -> aegis.v1.Flavor
+	5,  // 18: aegis.v1.UpsertQueueRequest.queue:type_name -> aegis.v1.Queue
+	10, // 19: aegis.v1.SubmitWorkloadRequest.workload:type_name -> aegis.v1.Workload
+	10, // 20: aegis.v1.ListWorkloadsResponse.items:type_name -> aegis.v1.Workload
+	10, // 21: aegis.v1.LeaseWorkloadResponse.items:type_name -> aegis.v1.Workload
+	10, // 22: aegis.v1.AckWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	10, // 23: aegis.v1.StartWorkloadResponse.workload:type_name -> aegis.v1.Workload
+	3,  // 24: aegis.v1.GetBudgetResponse.budget:type_name -> aegis.v1.Budget
+	47, // 25: aegis.v1.GetBudgetResponse.usage:type_name -> aegis.v1.BudgetUsage
+	3,  // 26: aegis.v1.BudgetWithUsage.budget:type_name -> aegis.v1.Budget
+	47, // 27: aegis.v1.BudgetWithUsage.usage:type_name -> aegis.v1.BudgetUsage
+	50, // 28: aegis.v1.ListBudgetsResponse.items:type_name -> aegis.v1.BudgetWithUsage
+	6,  // 29: aegis.v1.CreateWorkspaceRequest.workspace:type_name -> aegis.v1.WorkspaceSpec
+	10, // 30: aegis.v1.CreateWorkspaceResponse.workload:type_name -> aegis.v1.Workload
+	79, // 31: aegis.v1.ClusterProfileReference.parameters:type_name -> aegis.v1.ClusterProfileReference.ParametersEntry
+	54, // 32: aegis.v1.CreateClusterRequest.profile:type_name -> aegis.v1.ClusterProfileReference
+	59, // 33: aegis.v1.CreateClusterResponse.job:type_name -> aegis.v1.Job
+	59, // 34: aegis.v1.GetClusterJobStatusResponse.job:type_name -> aegis.v1.Job
+	59, // 35: aegis.v1.DestroyClusterResponse.job:type_name -> aegis.v1.Job
+	0,  // 36: aegis.v1.ListProjectsResponse.items:type_name -> aegis.v1.Project
+	64, // 37: aegis.v1.ControlPlaneSignals.api_server_latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
+	64, // 38: aegis.v1.ControlPlaneSignals.api_server_5xx_rate:type_name -> aegis.v1.CloudWatchMetricSample
+	65, // 39: aegis.v1.ControlPlaneSignals.log_samples:type_name -> aegis.v1.ControlPlaneLogEntry
+	67, // 40: aegis.v1.NodegroupSignal.scaling_events:type_name -> aegis.v1.ScalingEvent
+	64, // 41: aegis.v1.LoadBalancerSignal.latency_p99:type_name -> aegis.v1.CloudWatchMetricSample
+	69, // 42: aegis.v1.LoadBalancerSignal.target_groups:type_name -> aegis.v1.TargetGroupHealth
+	70, // 43: aegis.v1.LoadBalancerSignal.access_logs:type_name -> aegis.v1.LoadBalancerAccessLog
+	66, // 44: aegis.v1.GetAwsSignalsResponse.control_plane:type_name -> aegis.v1.ControlPlaneSignals
+	68, // 45: aegis.v1.GetAwsSignalsResponse.nodegroups:type_name -> aegis.v1.NodegroupSignal
+	71, // 46: aegis.v1.GetAwsSignalsResponse.load_balancers:type_name -> aegis.v1.LoadBalancerSignal
+	28, // 47: aegis.v1.AegisPlatform.CreateProject:input_type -> aegis.v1.CreateProjectRequest
+	62, // 48: aegis.v1.AegisPlatform.ListProjects:input_type -> aegis.v1.ListProjectsRequest
+	29, // 49: aegis.v1.AegisPlatform.UpsertBudget:input_type -> aegis.v1.UpsertBudgetRequest
+	46, // 50: aegis.v1.AegisPlatform.GetBudget:input_type -> aegis.v1.GetBudgetRequest
+	49, // 51: aegis.v1.AegisPlatform.ListBudgets:input_type -> aegis.v1.ListBudgetsRequest
+	30, // 52: aegis.v1.AegisPlatform.UpsertFlavor:input_type -> aegis.v1.UpsertFlavorRequest
+	31, // 53: aegis.v1.AegisPlatform.UpsertQueue:input_type -> aegis.v1.UpsertQueueRequest
+	32, // 54: aegis.v1.AegisPlatform.SubmitWorkload:input_type -> aegis.v1.SubmitWorkloadRequest
+	33, // 55: aegis.v1.AegisPlatform.GetWorkload:input_type -> aegis.v1.GetWorkloadRequest
+	36, // 56: aegis.v1.AegisPlatform.ResumeWorkload:input_type -> aegis.v1.ResumeWorkloadRequest
+	37, // 57: aegis.v1.AegisPlatform.TerminateWorkload:input_type -> aegis.v1.TerminateWorkloadRequest
+	34, // 58: aegis.v1.AegisPlatform.ListWorkloads:input_type -> aegis.v1.ListWorkloadsRequest
+	52, // 59: aegis.v1.AegisPlatform.CreateWorkspace:input_type -> aegis.v1.CreateWorkspaceRequest
+	55, // 60: aegis.v1.AegisPlatform.CreateCluster:input_type -> aegis.v1.CreateClusterRequest
+	24, // 61: aegis.v1.AegisPlatform.ImportCluster:input_type -> aegis.v1.ImportClusterRequest
+	60, // 62: aegis.v1.AegisPlatform.DestroyCluster:input_type -> aegis.v1.DestroyClusterRequest
+	21, // 63: aegis.v1.AegisPlatform.ListClusters:input_type -> aegis.v1.ListClustersRequest
+	57, // 64: aegis.v1.AegisPlatform.GetClusterJobStatus:input_type -> aegis.v1.GetClusterJobStatusRequest
+	11, // 65: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:input_type -> aegis.v1.GetWorkspaceConnectionDetailsRequest
+	13, // 66: aegis.v1.AegisPlatform.CreateConnectionSession:input_type -> aegis.v1.CreateConnectionSessionRequest
+	15, // 67: aegis.v1.AegisPlatform.RenewConnectionSession:input_type -> aegis.v1.RenewConnectionSessionRequest
+	16, // 68: aegis.v1.AegisPlatform.RevokeConnectionSession:input_type -> aegis.v1.RevokeConnectionSessionRequest
+	38, // 69: aegis.v1.AegisPlatform.LeaseWorkload:input_type -> aegis.v1.LeaseWorkloadRequest
+	40, // 70: aegis.v1.AegisPlatform.ListClusterWorkloadIDs:input_type -> aegis.v1.ListClusterWorkloadIDsRequest
+	44, // 71: aegis.v1.AegisPlatform.StartWorkload:input_type -> aegis.v1.StartWorkloadRequest
+	42, // 72: aegis.v1.AegisPlatform.AckWorkload:input_type -> aegis.v1.AckWorkloadRequest
+	17, // 73: aegis.v1.AegisPlatform.RegisterCluster:input_type -> aegis.v1.ClusterRegisterRequest
+	19, // 74: aegis.v1.AegisPlatform.Heartbeat:input_type -> aegis.v1.ClusterHeartbeat
+	72, // 75: aegis.v1.AegisPlatform.GetAwsClusterSignals:input_type -> aegis.v1.GetAwsSignalsRequest
+	0,  // 76: aegis.v1.AegisPlatform.CreateProject:output_type -> aegis.v1.Project
+	63, // 77: aegis.v1.AegisPlatform.ListProjects:output_type -> aegis.v1.ListProjectsResponse
+	3,  // 78: aegis.v1.AegisPlatform.UpsertBudget:output_type -> aegis.v1.Budget
+	48, // 79: aegis.v1.AegisPlatform.GetBudget:output_type -> aegis.v1.GetBudgetResponse
+	51, // 80: aegis.v1.AegisPlatform.ListBudgets:output_type -> aegis.v1.ListBudgetsResponse
+	4,  // 81: aegis.v1.AegisPlatform.UpsertFlavor:output_type -> aegis.v1.Flavor
+	5,  // 82: aegis.v1.AegisPlatform.UpsertQueue:output_type -> aegis.v1.Queue
+	10, // 83: aegis.v1.AegisPlatform.SubmitWorkload:output_type -> aegis.v1.Workload
+	10, // 84: aegis.v1.AegisPlatform.GetWorkload:output_type -> aegis.v1.Workload
+	10, // 85: aegis.v1.AegisPlatform.ResumeWorkload:output_type -> aegis.v1.Workload
+	10, // 86: aegis.v1.AegisPlatform.TerminateWorkload:output_type -> aegis.v1.Workload
+	35, // 87: aegis.v1.AegisPlatform.ListWorkloads:output_type -> aegis.v1.ListWorkloadsResponse
+	53, // 88: aegis.v1.AegisPlatform.CreateWorkspace:output_type -> aegis.v1.CreateWorkspaceResponse
+	56, // 89: aegis.v1.AegisPlatform.CreateCluster:output_type -> aegis.v1.CreateClusterResponse
+	27, // 90: aegis.v1.AegisPlatform.ImportCluster:output_type -> aegis.v1.ImportClusterResponse
+	61, // 91: aegis.v1.AegisPlatform.DestroyCluster:output_type -> aegis.v1.DestroyClusterResponse
+	23, // 92: aegis.v1.AegisPlatform.ListClusters:output_type -> aegis.v1.ListClustersResponse
+	58, // 93: aegis.v1.AegisPlatform.GetClusterJobStatus:output_type -> aegis.v1.GetClusterJobStatusResponse
+	12, // 94: aegis.v1.AegisPlatform.GetWorkspaceConnectionDetails:output_type -> aegis.v1.GetWorkspaceConnectionDetailsResponse
+	14, // 95: aegis.v1.AegisPlatform.CreateConnectionSession:output_type -> aegis.v1.ConnectionSession
+	14, // 96: aegis.v1.AegisPlatform.RenewConnectionSession:output_type -> aegis.v1.ConnectionSession
+	80, // 97: aegis.v1.AegisPlatform.RevokeConnectionSession:output_type -> google.protobuf.Empty
+	39, // 98: aegis.v1.AegisPlatform.LeaseWorkload:output_type -> aegis.v1.LeaseWorkloadResponse
+	41, // 99: aegis.v1.AegisPlatform.ListClusterWorkloadIDs:output_type -> aegis.v1.ListClusterWorkloadIDsResponse
+	45, // 100: aegis.v1.AegisPlatform.StartWorkload:output_type -> aegis.v1.StartWorkloadResponse
+	43, // 101: aegis.v1.AegisPlatform.AckWorkload:output_type -> aegis.v1.AckWorkloadResponse
+	18, // 102: aegis.v1.AegisPlatform.RegisterCluster:output_type -> aegis.v1.ClusterRegisterResponse
+	20, // 103: aegis.v1.AegisPlatform.Heartbeat:output_type -> aegis.v1.ClusterHeartbeatAck
+	73, // 104: aegis.v1.AegisPlatform.GetAwsClusterSignals:output_type -> aegis.v1.GetAwsSignalsResponse
+	76, // [76:105] is the sub-list for method output_type
+	47, // [47:76] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_aegis_v1_platform_proto_init() }
@@ -5227,7 +5466,7 @@ func file_aegis_v1_platform_proto_init() {
 	if File_aegis_v1_platform_proto != nil {
 		return
 	}
-	file_aegis_v1_platform_proto_msgTypes[9].OneofWrappers = []any{
+	file_aegis_v1_platform_proto_msgTypes[10].OneofWrappers = []any{
 		(*Workload_Workspace)(nil),
 		(*Workload_Training)(nil),
 	}
@@ -5237,7 +5476,7 @@ func file_aegis_v1_platform_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aegis_v1_platform_proto_rawDesc), len(file_aegis_v1_platform_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   77,
+			NumMessages:   80,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

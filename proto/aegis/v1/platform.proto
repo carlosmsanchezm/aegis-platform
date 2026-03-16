@@ -59,6 +59,19 @@ message WorkspaceSpec {
   int64 max_duration_seconds = 5;
   bool interactive = 6;
   repeated int32 ports = 7;
+  WorkspaceStorage storage = 8;
+}
+
+// WorkspaceStorage configures persistent storage for a workspace pod.
+// When persistent=true, the k8s-agent creates a PVC and mounts it into the
+// workspace container. Data survives workspace restarts within the same project.
+// When omitted, the platform-api applies defaults (persistent=true, 50Gi, /home/coder).
+message WorkspaceStorage {
+  bool persistent = 1;            // true = create/attach PVC, false = ephemeral only
+  string storage_class = 2;       // Kubernetes StorageClass name (e.g. "gp3"). Empty = cluster default.
+  string size = 3;                // Storage size as K8s quantity (e.g. "50Gi", "100Gi")
+  string mount_path = 4;          // Mount path inside the container. Default: "/home/coder"
+  string existing_claim_name = 5; // Reuse an existing PVC by name (for session continuity)
 }
 message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; int64 max_duration_seconds = 7; }
 
@@ -114,6 +127,8 @@ message ConnectionSession {
   string proxy_url = 7; // https://proxy.cluster/proxy/<workload-id>
   string expires_at_utc = 8;
   bool one_time = 9;
+  string proxy_ca_pem = 10; // PEM-encoded CA cert for the spoke-proxy TLS certificate
+  string workspace_root = 11; // filesystem path for VS Code to open (e.g., "/home/aegis/work")
 }
 
 message RenewConnectionSessionRequest {
@@ -132,6 +147,7 @@ message ClusterRegisterRequest {
   string il_level = 4;
   map<string,string> labels = 5;
   string proxy_url = 6; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+  string proxy_ca_pem = 7; // PEM-encoded spoke-proxy CA certificate
 }
 message ClusterRegisterResponse { bool ok = 1; string message = 2; }
 message ClusterHeartbeat {
@@ -303,6 +319,15 @@ message Job {
   string status = 2;
   int32 progress = 3;
   string error = 4;
+}
+
+message DestroyClusterRequest {
+  string cluster_id = 1;
+  string project_id = 2;
+}
+
+message DestroyClusterResponse {
+  Job job = 1;
 }
 
 message ListProjectsRequest {}
@@ -492,6 +517,13 @@ service AegisPlatform {
   rpc ImportCluster(ImportClusterRequest) returns (ImportClusterResponse) {
     option (google.api.http) = {
       post: "/api/v1/clusters/import"
+      body: "*"
+    };
+  }
+
+  rpc DestroyCluster(DestroyClusterRequest) returns (DestroyClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/{cluster_id}/destroy"
       body: "*"
     };
   }

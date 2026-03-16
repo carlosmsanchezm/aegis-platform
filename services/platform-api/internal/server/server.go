@@ -119,14 +119,15 @@ type proxyClaims struct {
 }
 
 type sessionContext struct {
-	workload     *aegis.Workload
-	workspace    *aegis.WorkspaceSpec
-	port         int32
-	alias        string
-	internalHost string
-	dest         string
-	proxyURL     string
-	proxyCAPem   string
+	workload      *aegis.Workload
+	workspace     *aegis.WorkspaceSpec
+	port          int32
+	alias         string
+	internalHost  string
+	dest          string
+	proxyURL      string
+	proxyCAPem    string
+	workspaceRoot string
 }
 
 const (
@@ -1880,8 +1881,9 @@ func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, 
 		Port:         ctxData.port,
 		SSHConfig:    sshConfig,
 		ProxyURL:     ctxData.proxyURL,
-		ProxyCAPem:   ctxData.proxyCAPem,
-		VSCodeURI:    buildVSCodeURI(ctxData.alias),
+		ProxyCAPem:    ctxData.proxyCAPem,
+		WorkspaceRoot: ctxData.workspaceRoot,
+		VSCodeURI:     buildVSCodeURI(ctxData.alias),
 		ExpiresAt:    expiresAt,
 		OneTime:      true,
 		Used:         false,
@@ -1949,15 +1951,24 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	}
 	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())
 
+	// Resolve workspace root from env vars or use default
+	wsRoot := "/home/aegis/work"
+	if env := wk.Workspace.GetEnv(); env != nil {
+		if v, ok := env["WORKSPACE_ROOT"]; ok && v != "" {
+			wsRoot = v
+		}
+	}
+
 	return &sessionContext{
-		workload:     w,
-		workspace:    wk.Workspace,
-		port:         port,
-		alias:        alias,
-		internalHost: internalHost,
-		dest:         dest,
-		proxyURL:     proxyURL,
-		proxyCAPem:   proxyCAPem,
+		workload:      w,
+		workspace:     wk.Workspace,
+		port:          port,
+		alias:         alias,
+		internalHost:  internalHost,
+		dest:          dest,
+		proxyURL:      proxyURL,
+		proxyCAPem:    proxyCAPem,
+		workspaceRoot: wsRoot,
 	}, nil
 }
 
@@ -1986,7 +1997,8 @@ func sessionToProto(session *store.ConnectionSession) *aegis.ConnectionSession {
 		ProxyUrl:     session.ProxyURL,
 		ExpiresAtUtc: session.ExpiresAt.UTC().Format(time.RFC3339),
 		OneTime:      session.OneTime,
-		ProxyCaPem:   session.ProxyCAPem,
+		ProxyCaPem:    session.ProxyCAPem,
+		WorkspaceRoot: session.WorkspaceRoot,
 	}
 }
 
@@ -2689,7 +2701,7 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 	case *aegis.Workload_Workspace:
 		ws := wk.Workspace
 		if ws != nil {
-			spec.Workspace = &aegisv1alpha1.WorkspaceSpec{
+			wsSpec := &aegisv1alpha1.WorkspaceSpec{
 				Flavor:      ws.GetFlavor(),
 				Image:       ws.GetImage(),
 				Env:         cloneStringMap(ws.GetEnv()),
@@ -2697,6 +2709,16 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 				Interactive: ws.GetInteractive(),
 				Ports:       cloneInt32Slice(ws.GetPorts()),
 			}
+			if st := ws.GetStorage(); st != nil {
+				wsSpec.Storage = &aegisv1alpha1.WorkspaceStorageSpec{
+					Persistent:        st.GetPersistent(),
+					StorageClass:      st.GetStorageClass(),
+					Size:              st.GetSize(),
+					MountPath:         st.GetMountPath(),
+					ExistingClaimName: st.GetExistingClaimName(),
+				}
+			}
+			spec.Workspace = wsSpec
 		}
 	case *aegis.Workload_Training:
 		tr := wk.Training
@@ -3380,6 +3402,15 @@ func (s *Server) applyWorkspaceDefaults(ws *aegis.WorkspaceSpec) {
 		ws.Env = nil
 	} else {
 		ws.Env = mergedEnv
+	}
+
+	// Apply default persistent storage if not specified by the user.
+	if ws.GetStorage() == nil {
+		ws.Storage = &aegis.WorkspaceStorage{
+			Persistent: true,
+			Size:       "50Gi",
+			MountPath:  "/home/coder",
+		}
 	}
 
 	// Override DockerHub workspace images with the configured production image.

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -2098,6 +2099,43 @@ func deriveSSHUser(workspace *aegis.WorkspaceSpec, subject string) string {
 	return buildSSHUser(subject)
 }
 
+// handleDiscovery serves the platform discovery document — public metadata
+// for client auto-configuration. No authentication required.
+// Security: returns only DNS-resolvable endpoint URLs and version info.
+// No secrets, credentials, or internal state is exposed.
+func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
+	grpcEndpoint := os.Getenv("AEGIS_DISCOVERY_GRPC_ENDPOINT")
+	if grpcEndpoint == "" {
+		// Fallback: derive from request host
+		grpcEndpoint = r.Host
+		if !strings.Contains(grpcEndpoint, ":") {
+			grpcEndpoint += ":8081"
+		}
+	}
+
+	authAuthority := os.Getenv("OIDC_ISSUER_URL")
+	authClientID := os.Getenv("AEGIS_DISCOVERY_AUTH_CLIENT_ID")
+	if authClientID == "" {
+		authClientID = "vscode-extension"
+	}
+
+	discovery := map[string]interface{}{
+		"platform_version": "1.0.0",
+		"grpc_endpoint":    grpcEndpoint,
+		"auth": map[string]string{
+			"authority": authAuthority,
+			"client_id": authClientID,
+		},
+		"pki": map[string]string{
+			"root_ca_url": fmt.Sprintf("https://%s/api/v1/pki/root-ca", r.Host),
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300") // Cache for 5 minutes
+	json.NewEncoder(w).Encode(discovery)
+}
+
 func sanitizeSSHUser(raw string) string {
 	cleaned := strings.TrimSpace(strings.ToLower(raw))
 	if cleaned == "" {
@@ -2600,12 +2638,14 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	registerObservabilityRoutes(mux, svc)
 	registerProvisioningRoutes(mux, svc)
 	registerPKIRoutes(mux, svc)
+	registerExtensionRoutes(mux, svc)
 	root := http.NewServeMux()
 	root.Handle("/healthz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
 	}))
 	root.Handle("/api/v1/platform/config", http.HandlerFunc(handleGetPlatformConfig))
+	root.Handle("/api/v1/discovery", http.HandlerFunc(svc.handleDiscovery))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}

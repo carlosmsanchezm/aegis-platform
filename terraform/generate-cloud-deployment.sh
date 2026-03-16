@@ -931,6 +931,11 @@ HELM_ARGS+=(
   --timeout 10m
 )
 
+# Set discovery endpoint for VS Code extension auto-configuration
+if [[ -n "${DNS_PLATFORM_API}" ]]; then
+  HELM_ARGS+=( --set "platformApi.env.AEGIS_DISCOVERY_GRPC_ENDPOINT=${DNS_PLATFORM_API}:8081" )
+fi
+
 helm "${HELM_ARGS[@]}"
 
 

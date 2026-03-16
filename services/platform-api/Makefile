@@ -33,10 +33,18 @@ run:
 pulumi-preview:
 	GO111MODULE=on go run $(GO_FLAGS) ./cmd/pulumi-preview -- $(PULUMI_PREVIEW_ARGS)
 
+SOVRAN_DIR ?= $(HOME)/code/sovran
+VSIX_SRC   ?= $(SOVRAN_DIR)/aegis-vscode-remote/extension/aegis-remote.vsix
+
 .PHONY: docker-build docker-buildx
 # Build the image (defaults to host arch + local load; override PLATFORMS/BUILDX_OUTPUT for multi-arch + push).
+# Automatically bundles the VS Code extension VSIX if found in the sovran repo or build context.
 docker-build docker-buildx:
 	@echo "Building $(IMG) for $(PLATFORMS) with output $(BUILDX_OUTPUT)"
+	@if [ ! -f "$(ROOT)/aegis-remote.vsix" ] && [ -f "$(VSIX_SRC)" ]; then \
+		echo "Staging VS Code extension VSIX from $(VSIX_SRC)"; \
+		cp "$(VSIX_SRC)" "$(ROOT)/aegis-remote.vsix"; \
+	fi
 	docker buildx build --no-cache \
 		--platform $(PLATFORMS) \
 		--tag $(IMG) \
@@ -44,10 +52,15 @@ docker-build docker-buildx:
 		$(BUILD_ARGS) \
 		-f $(CURDIR)/Dockerfile \
 		$(ROOT)
+	@rm -f "$(ROOT)/aegis-remote.vsix"
 
 .PHONY: docker-load
-# Multi-arch build but keep the image locally (no push).
+# Build for host arch and load locally (no push).
 docker-load:
+	@if [ ! -f "$(ROOT)/aegis-remote.vsix" ] && [ -f "$(VSIX_SRC)" ]; then \
+		echo "Staging VS Code extension VSIX from $(VSIX_SRC)"; \
+		cp "$(VSIX_SRC)" "$(ROOT)/aegis-remote.vsix"; \
+	fi
 	@PLATFORM="$$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || echo linux/amd64)"; \
 	echo "Building $(IMG) for $$PLATFORM (local load)"; \
 	docker buildx build --no-cache \
@@ -56,3 +69,4 @@ docker-load:
 		--load \
 		-f $(CURDIR)/Dockerfile \
 		$(ROOT)
+	@rm -f "$(ROOT)/aegis-remote.vsix"

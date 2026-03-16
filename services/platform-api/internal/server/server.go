@@ -2653,9 +2653,9 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 	root.Handle("/api/v1/platform/config", http.HandlerFunc(handleGetPlatformConfig))
 	root.Handle("/api/v1/discovery", http.HandlerFunc(svc.handleDiscovery))
 	// Extension endpoints are unauthenticated — users download VSIX and setup script without a token.
-	root.Handle("/api/v1/extension/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mux.ServeHTTP(w, r)
-	}))
+	root.Handle("/api/v1/extension/metadata", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionMetadata(w, r) }))
+	root.Handle("/api/v1/extension/vsix", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionVSIX(w, r) }))
+	root.Handle("/api/v1/extension/setup-script", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionSetupScript(w, r) }))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}

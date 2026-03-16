@@ -176,10 +176,34 @@ build-proxy-local:
 	@echo "Building proxy image $(PROXY_IMAGE) for local platform"
 	@docker build -f services/proxy/Dockerfile -t $(PROXY_IMAGE) .
 
+PULUMI_VERSION ?= 3.226.0
+
+.PHONY: stage-build-deps
+stage-build-deps:
+	@echo "Staging Iron Bank build dependencies for linux/amd64..."
+	@if [ ! -f awscli.zip ]; then \
+		echo "  Downloading AWS CLI v2..."; \
+		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscli.zip; \
+	fi
+	@if [ ! -f kubectl ]; then \
+		echo "  Downloading kubectl..."; \
+		KUBE_VER=$$(curl -fsSL https://dl.k8s.io/release/stable.txt); \
+		curl -fsSL "https://dl.k8s.io/release/$${KUBE_VER}/bin/linux/amd64/kubectl" -o kubectl; \
+	fi
+	@if [ ! -f jq ]; then \
+		echo "  Downloading jq..."; \
+		curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o jq; \
+	fi
+	@if [ ! -f pulumi-linux-x64.tar.gz ]; then \
+		echo "  Downloading Pulumi v$(PULUMI_VERSION)..."; \
+		curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v$(PULUMI_VERSION)-linux-x64.tar.gz" -o pulumi-linux-x64.tar.gz; \
+	fi
+	@echo "All build dependencies staged."
+
 .PHONY: build-platform-local
-build-platform-local:
+build-platform-local: stage-build-deps
 	@echo "Building platform-api image $(PLATFORM_API_IMAGE) for local platform (native arch)"
-	@docker build -f services/platform-api/Dockerfile -t $(PLATFORM_API_IMAGE) .
+	@$(MAKE) -C services/platform-api docker-load IMG=$(PLATFORM_API_IMAGE)
 
 .PHONY: build-agent-local
 build-agent-local:
@@ -242,6 +266,7 @@ push-cloud-images:
 	@$(MAKE) PROXY_IMAGE=$(CLOUD_PROXY_IMAGE) build-proxy
 	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-agent
 	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) build-workspace
+	@$(MAKE) CLOUD_UI_IMAGE=$(CLOUD_UI_IMAGE) AEGIS_UI_DIR=$(AEGIS_UI_DIR) push-ui-cloud
 ifeq ($(PUSH_LATEST),1)
 	@echo "Promoting images to :latest"
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/platform-api:latest $(CLOUD_PLATFORM_API_IMAGE)
@@ -390,12 +415,12 @@ dev-backstage:
 
 dev-backstage-cloud:
 	@echo "Starting Backstage development server (cloud mode)..."
-	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@echo "   Backend: http://platform-api.aegis-platform.tech:8080"
 	@cd aegis-platform && yarn dev:cloud
 
 dev-backstage-cloud-tls:
 	@echo "Starting Backstage development server (cloud TLS mode)..."
-	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@echo "   Backend: http://platform-api.aegis-platform.tech:8080"
 	@cd aegis-platform && yarn dev:cloud-tls
 
 clean-local:
@@ -403,7 +428,7 @@ clean-local:
 
 AWS_PROFILE ?= aegis-new
 AWS_REGION ?= us-east-1
-SKIP_ROUTE53_UPDATE ?= 0
+SKIP_DNS_UPDATE ?= 0
 
 .PHONY: ecr-login
 ecr-login:
@@ -413,20 +438,12 @@ ecr-login:
 
 .PHONY: deploy-cloud
 deploy-cloud:
-	@echo "Deploying Aegis hub to cloud EKS..."
-	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_ROUTE53_UPDATE=$(SKIP_ROUTE53_UPDATE) \
-		PLATFORM_API_IMAGE_TAG=$(CLOUD_PLATFORM_API_IMAGE) \
-		PROXY_IMAGE_TAG=$(CLOUD_PROXY_IMAGE) \
-		K8S_AGENT_IMAGE_TAG=$(CLOUD_K8S_AGENT_IMAGE) \
-		./terraform/generate-cloud-deployment.sh --non-interactive
-
-.PHONY: deploy-cloud-full
-deploy-cloud-full: ecr-login push-cloud-images
-	@echo "Running Terraform apply..."
+	@echo "Applying Terraform (idempotent)..."
 	cd terraform && AWS_PROFILE=$(AWS_PROFILE) terraform apply -auto-approve
-	@echo "Deploying to EKS..."
-	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_ROUTE53_UPDATE=$(SKIP_ROUTE53_UPDATE) \
+	@echo "Deploying Aegis hub to cloud EKS..."
+	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_DNS_UPDATE=$(SKIP_DNS_UPDATE) \
 		PLATFORM_API_IMAGE_TAG=$(CLOUD_PLATFORM_API_IMAGE) \
 		PROXY_IMAGE_TAG=$(CLOUD_PROXY_IMAGE) \
 		K8S_AGENT_IMAGE_TAG=$(CLOUD_K8S_AGENT_IMAGE) \
+		UI_IMAGE_TAG=$(CLOUD_UI_IMAGE) \
 		./terraform/generate-cloud-deployment.sh --non-interactive

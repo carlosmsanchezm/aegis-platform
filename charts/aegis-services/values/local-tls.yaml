@@ -85,6 +85,8 @@ platformApi:
     AEGIS_DEV_MODE: "true"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
+    # VS Code extension version (paths use built-in defaults)
+    AEGIS_EXTENSION_VERSION: "0.1.0"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key

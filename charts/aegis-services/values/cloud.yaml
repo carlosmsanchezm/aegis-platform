@@ -19,6 +19,13 @@ platformApi:
   # Example: arn:aws:iam::123456789012:role/aegis-platform-api
   irsaRoleArn: "arn:aws:iam::195714074609:role/aegis-platform-api"
 
+  # Trust the platform's internal CA so platform-api can verify Keycloak's TLS
+  # when fetching JWKS for JWT validation. Without this, all auth fails.
+  auth:
+    oidc:
+      caBundle:
+        secretName: aegis-trust-bundle
+
   image:
     repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
     tag: "8afb9e0-vscode-dynamic"  # VS Code port fix build with dynamic VS Code commit support

@@ -302,6 +302,11 @@ func (m *Manager) HasKubeconfig(clusterID string) bool {
 			return true
 		}
 	}
+	// In-cluster fallback: if running inside Kubernetes, in-cluster config
+	// is always available and can reach any namespace on the same cluster.
+	if _, err := rest.InClusterConfig(); err == nil {
+		return true
+	}
 	return false
 }
 

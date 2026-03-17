@@ -303,6 +303,9 @@ global:
 #################################################################
 backstage:
   replicaCount: 1
+  # Trust the platform's internal CA so Backstage can verify Keycloak TLS
+  caBundle:
+    secretName: aegis-trust-bundle
 
 keycloak:
   enabled: true

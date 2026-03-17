@@ -1,5 +1,47 @@
 {{- $backstage := .Values.backstage | default dict -}}
 {{- if $backstage.enabled }}
+{{- $ca := $backstage.caBundle | default dict -}}
+{{- $caSecretName := include "aegis-services.backstage.caBundleSecretName" . | trim -}}
+{{- $mountTrust := and $caSecretName (ne $caSecretName "") -}}
+{{- $secretCfg := $backstage.secrets | default dict -}}
+{{- $backstageSecretName := include "aegis-services.backstage.secretName" . | trim -}}
+{{- $runtimeConfigName := include "aegis-services.backstage.runtimeConfigName" . | trim -}}
+{{- $mountRuntimeConfig := and $runtimeConfigName (ne $runtimeConfigName "") -}}
+{{- $startupPatchConfigName := include "aegis-services.backstage.startupPatchConfigName" . | trim -}}
+{{- $mountStartupPatch := and $startupPatchConfigName (ne $startupPatchConfigName "") -}}
+{{- $rawEnv := $backstage.env | default dict -}}
+{{- $appConfig := $backstage.appConfig | default dict -}}
+{{- $keycloak := $backstage.keycloak | default dict -}}
+{{- $postgres := $backstage.postgres | default dict -}}
+{{- $platformService := include "aegis-services.platformApi.fullname" . -}}
+{{- $platformHttpPort := (.Values.platformApi.service.httpPort | default 8080) -}}
+{{- $appBaseUrl := required "backstage.appConfig.appBaseUrl is required when backstage.enabled=true" ($appConfig.appBaseUrl | default "") -}}
+{{- $backendBaseUrl := $appConfig.backendBaseUrl | default $appBaseUrl -}}
+{{- $aegisApiUrl := $appConfig.aegisApiUrl | default (printf "http://%s.%s.svc.cluster.local:%v" $platformService .Release.Namespace $platformHttpPort) -}}
+{{- $postgresHost := $postgres.host | default (printf "platform-postgres.%s.svc.cluster.local" .Release.Namespace) -}}
+{{- $postgresPort := $postgres.port | default "5432" -}}
+{{- $postgresUser := $postgres.user | default "aegis_platform" -}}
+{{- $postgresDatabase := $postgres.database | default $postgresUser -}}
+{{- $postgresSecretName := $postgres.existingSecret | default (include "aegis-services.platformApi.secretName" .) -}}
+{{- $postgresSecretKey := $postgres.existingSecretPasswordKey | default "db-password" -}}
+{{- $kcBaseUrl := trimSuffix "/" (required "backstage.keycloak.baseUrl is required when backstage.enabled=true" ($keycloak.baseUrl | default "")) -}}
+{{- $kcRealm := $keycloak.realm | default "aegis" -}}
+{{- $kcIssuer := $keycloak.issuer | default (printf "%s/realms/%s" $kcBaseUrl $kcRealm) -}}
+{{- $kcMetadataUrl := $keycloak.metadataUrl | default (printf "%s/.well-known/openid-configuration" $kcIssuer) -}}
+{{- $kcJwksUrl := $keycloak.jwksUrl | default (printf "%s/protocol/openid-connect/certs" $kcIssuer) -}}
+{{- $kcClientId := $keycloak.clientId | default "backstage" -}}
+{{- $kcClientSecret := $keycloak.clientSecret | default dict -}}
+{{- $kcClientSecretName := $kcClientSecret.secretName | default "" -}}
+{{- $kcClientSecretKey := $kcClientSecret.key | default "clientSecret" -}}
+{{- if and (not (hasKey $rawEnv "BACKEND_SECRET")) (eq $backstageSecretName "") }}
+{{- fail "backstage requires backstage.secrets.create/name or backstage.env.BACKEND_SECRET" }}
+{{- end }}
+{{- if and (not (hasKey $rawEnv "POSTGRES_PASSWORD")) (eq $postgresSecretName "") }}
+{{- fail "backstage requires backstage.postgres.existingSecret or backstage.env.POSTGRES_PASSWORD" }}
+{{- end }}
+{{- if and (not (hasKey $rawEnv "KEYCLOAK_CLIENT_SECRET")) (eq $kcClientSecretName "") }}
+{{- fail "backstage requires backstage.keycloak.clientSecret.secretName or backstage.env.KEYCLOAK_CLIENT_SECRET" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,9 +57,13 @@ spec:
   template:
     metadata:
       annotations:
-        {{- $ca := $backstage.caBundle | default dict -}}
+        checksum/runtime-config: {{ include (print $.Template.BasePath "/backstage/configmap-runtime.yaml") . | sha256sum }}
+        checksum/startup-patch: {{ include (print $.Template.BasePath "/backstage/configmap-startup-patch.yaml") . | sha256sum }}
         {{- if $ca.create }}
         checksum/ca-bundle: {{ include (print $.Template.BasePath "/backstage/secret-ca.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if $secretCfg.create }}
+        checksum/secret: {{ include (print $.Template.BasePath "/backstage/secret.yaml") . | sha256sum }}
         {{- end }}
         {{- with $backstage.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -39,29 +85,141 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: clear-migration-locks
+          image: docker.io/postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              # Dynamically discover ALL backstage plugin databases and unlock
+              # stale knex migration locks. Uses UPDATE (not DELETE) so the
+              # required is_locked=0 row is preserved — an empty table causes
+              # knex to treat the lock as held, creating infinite CrashLoopBackOff.
+              DBS=$(PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+                -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" \
+                -d postgres -tAc \
+                "SELECT datname FROM pg_database WHERE datname LIKE 'backstage_plugin_%';" 2>/dev/null)
+
+              if [ -z "$DBS" ]; then
+                echo "No backstage databases found (first boot). Skipping."
+                exit 0
+              fi
+
+              for db in $DBS; do
+                echo "Unlocking migrations in ${db}..."
+                PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+                  -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" \
+                  -d "${db}" \
+                  -c "UPDATE knex_migrations_lock SET is_locked = 0 WHERE is_locked = 1;" 2>/dev/null \
+                  || echo "  (no lock table in ${db} — first boot, skipping)"
+              done
+              echo "Migration lock cleanup complete."
+          env:
+            - name: POSTGRES_HOST
+              value: {{ $postgresHost | quote }}
+            - name: POSTGRES_PORT
+              value: {{ $postgresPort | quote }}
+            - name: POSTGRES_USER
+              value: {{ $postgresUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresSecretName }}
+                  key: {{ $postgresSecretKey }}
       containers:
         - name: backstage
           image: "{{ $backstage.image.repository }}:{{ $backstage.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ $backstage.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - node
+          args:
+            - packages/backend
+            - --config
+            - app-config.yaml
+            - --config
+            - app-config.production.yaml
+            - --config
+            - /app/app-config.runtime.yaml
           ports:
             - name: http
               containerPort: {{ $backstage.service.port | default 7007 }}
               protocol: TCP
-          {{- $secretName := include "aegis-services.backstage.caBundleSecretName" . | trim -}}
-          {{- $mountTrust := and $secretName (ne $secretName "") -}}
-          {{- $envMeta := dict "count" 0 -}}
-          {{- if $mountTrust }}
-          {{- $_ := set $envMeta "count" (add (index $envMeta "count") 1) -}}
-          {{- end }}
-          {{- $_ := set $envMeta "count" (add (index $envMeta "count") (len ($backstage.env | default dict))) -}}
-          {{- $_ := set $envMeta "count" (add (index $envMeta "count") (len ($backstage.envFromSecrets | default list))) -}}
-          {{- if gt (index $envMeta "count") 0 }}
           env:
             {{- if $mountTrust }}
             - name: NODE_EXTRA_CA_CERTS
               value: "/etc/aegis/trust/aegis-local-trust.pem"
             {{- end }}
-            {{- range $key, $value := ($backstage.env | default dict) }}
+            {{- if not (hasKey $rawEnv "NODE_ENV") }}
+            - name: NODE_ENV
+              value: "production"
+            {{- end }}
+            {{- if not (hasKey $rawEnv "NODE_OPTIONS") }}
+            - name: NODE_OPTIONS
+              value: "--require /app/backstage-patches/auth-session-persistence.cjs"
+            {{- end }}
+            {{- if not (hasKey $rawEnv "APP_BASE_URL") }}
+            - name: APP_BASE_URL
+              value: {{ $appBaseUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "BACKEND_BASE_URL") }}
+            - name: BACKEND_BASE_URL
+              value: {{ $backendBaseUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "AEGIS_API_URL") }}
+            - name: AEGIS_API_URL
+              value: {{ $aegisApiUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "POSTGRES_HOST") }}
+            - name: POSTGRES_HOST
+              value: {{ $postgresHost | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "POSTGRES_PORT") }}
+            - name: POSTGRES_PORT
+              value: {{ $postgresPort | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "POSTGRES_USER") }}
+            - name: POSTGRES_USER
+              value: {{ $postgresUser | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "POSTGRES_PASSWORD") }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresSecretName }}
+                  key: {{ $postgresSecretKey }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "KEYCLOAK_CLIENT_ID") }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ $kcClientId | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "KEYCLOAK_ISSUER") }}
+            - name: KEYCLOAK_ISSUER
+              value: {{ $kcIssuer | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "KEYCLOAK_METADATA_URL") }}
+            - name: KEYCLOAK_METADATA_URL
+              value: {{ $kcMetadataUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "KEYCLOAK_JWKS_URL") }}
+            - name: KEYCLOAK_JWKS_URL
+              value: {{ $kcJwksUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "KEYCLOAK_CLIENT_SECRET") }}
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $kcClientSecretName }}
+                  key: {{ $kcClientSecretKey }}
+            {{- end }}
+            {{- if not (hasKey $rawEnv "BACKEND_SECRET") }}
+            - name: BACKEND_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $backstageSecretName }}
+                  key: backend-secret
+            {{- end }}
+            {{- range $key, $value := $rawEnv }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -72,12 +230,23 @@ spec:
                   name: {{ $secretNameRef.secret }}
                   key: {{ $secretNameRef.key }}
             {{- end }}
-          {{- end }}
-          {{- if or $mountTrust $backstage.volumeMounts $backstage.extraVolumeMounts }}
+          {{- if or $mountRuntimeConfig $mountStartupPatch $mountTrust $backstage.volumeMounts $backstage.extraVolumeMounts }}
           volumeMounts:
             {{- if $mountTrust }}
             - name: backstage-trust
               mountPath: /etc/aegis/trust
+              readOnly: true
+            {{- end }}
+            {{- if $mountRuntimeConfig }}
+            - name: backstage-runtime-config
+              mountPath: /app/app-config.runtime.yaml
+              subPath: app-config.runtime.yaml
+              readOnly: true
+            {{- end }}
+            {{- if $mountStartupPatch }}
+            - name: backstage-startup-patch
+              mountPath: /app/backstage-patches/auth-session-persistence.cjs
+              subPath: auth-session-persistence.cjs
               readOnly: true
             {{- end }}
             {{- with $backstage.volumeMounts }}
@@ -103,12 +272,22 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or $mountTrust $backstage.volumes $backstage.extraVolumes }}
+      {{- if or $mountRuntimeConfig $mountStartupPatch $mountTrust $backstage.volumes $backstage.extraVolumes }}
       volumes:
+        {{- if $mountRuntimeConfig }}
+        - name: backstage-runtime-config
+          configMap:
+            name: {{ $runtimeConfigName }}
+        {{- end }}
+        {{- if $mountStartupPatch }}
+        - name: backstage-startup-patch
+          configMap:
+            name: {{ $startupPatchConfigName }}
+        {{- end }}
         {{- if $mountTrust }}
         - name: backstage-trust
           secret:
-            secretName: {{ include "aegis-services.backstage.caBundleSecretName" . }}
+            secretName: {{ $caSecretName }}
         {{- end }}
         {{- with $backstage.volumes }}
         {{- toYaml . | nindent 8 }}

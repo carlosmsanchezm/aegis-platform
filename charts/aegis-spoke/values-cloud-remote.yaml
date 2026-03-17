@@ -61,3 +61,14 @@ proxy:
   tls:
     terminateAtIngress: false
     # Certs provided via --set-file during helm install
+
+workspaceClasses:
+  custom:
+    defaults:
+      execution:
+        image: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+        interactive: true
+        ports:
+          - 11111
+      storage:
+        mode: ephemeral

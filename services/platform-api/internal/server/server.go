@@ -3482,17 +3482,21 @@ func (s *Server) applyWorkspaceDefaults(ws *aegis.WorkspaceSpec) {
 		}
 	}
 
-	// Override DockerHub workspace images with the configured production image.
-	// Prevents accidental use of local-dev images on cloud/production clusters.
-	if s.defaultWorkspaceImage != "" && ws.GetImage() != "" {
+	// Set the default workspace image if none was provided, or override
+	// DockerHub images with the configured production image.
+	if s.defaultWorkspaceImage != "" {
 		image := ws.GetImage()
-		isDockerHub := !strings.Contains(image, ".") || strings.HasPrefix(image, "docker.io/")
-		if isDockerHub {
-			s.log.Warn("overriding DockerHub workspace image with production default",
-				zap.String("submitted_image", image),
-				zap.String("override_image", s.defaultWorkspaceImage),
-			)
+		if image == "" {
 			ws.Image = s.defaultWorkspaceImage
+		} else {
+			isDockerHub := !strings.Contains(image, ".") || strings.HasPrefix(image, "docker.io/")
+			if isDockerHub {
+				s.log.Warn("overriding DockerHub workspace image with production default",
+					zap.String("submitted_image", image),
+					zap.String("override_image", s.defaultWorkspaceImage),
+				)
+				ws.Image = s.defaultWorkspaceImage
+			}
 		}
 	}
 }

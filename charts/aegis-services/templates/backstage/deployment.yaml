@@ -132,15 +132,39 @@ spec:
           image: "{{ $backstage.image.repository }}:{{ $backstage.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ $backstage.image.pullPolicy | default "IfNotPresent" }}
           command:
-            - node
-          args:
-            - packages/backend
-            - --config
-            - app-config.yaml
-            - --config
-            - app-config.production.yaml
-            - --config
-            - /app/app-config.runtime.yaml
+            - sh
+            - -c
+            - |
+              # Clear stale knex migration locks on EVERY container restart
+              # (init containers only run once at pod creation, not on crash restarts).
+              # Uses the pg module already bundled in Backstage.
+              node -e "
+                const { Client } = require('pg');
+                (async () => {
+                  const base = { host: process.env.POSTGRES_HOST, port: process.env.POSTGRES_PORT,
+                                 user: process.env.POSTGRES_USER, password: process.env.POSTGRES_PASSWORD };
+                  // Query the postgres meta-database for all backstage plugin databases
+                  const meta = new Client({ ...base, database: 'postgres' });
+                  try {
+                    await meta.connect();
+                    const { rows } = await meta.query(\"SELECT datname FROM pg_database WHERE datname LIKE 'backstage_plugin_%'\");
+                    await meta.end();
+                    for (const { datname } of rows) {
+                      try {
+                        const c = new Client({ ...base, database: datname });
+                        await c.connect();
+                        const r = await c.query('UPDATE knex_migrations_lock SET is_locked = 0 WHERE is_locked = 1');
+                        if (r.rowCount > 0) console.log('[lock-cleanup] unlocked ' + datname);
+                        await c.end();
+                      } catch (e) { /* table does not exist yet — first boot */ }
+                    }
+                  } catch (e) { console.log('[lock-cleanup] skipped: ' + e.message); }
+                })();
+              " 2>/dev/null || true
+              exec node packages/backend \
+                --config app-config.yaml \
+                --config app-config.production.yaml \
+                --config /app/app-config.runtime.yaml
           ports:
             - name: http
               containerPort: {{ $backstage.service.port | default 7007 }}

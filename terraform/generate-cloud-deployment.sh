@@ -5,7 +5,6 @@
 
 set -e
 
-NON_INTERACTIVE=0
 K8S_NAMESPACE=${K8S_NAMESPACE:-aegis-system}
 HELM_RELEASE=${HELM_RELEASE:-aegis}
 SKIP_DNS_UPDATE=${SKIP_DNS_UPDATE:-${SKIP_ROUTE53_UPDATE:-0}}
@@ -146,6 +145,7 @@ PLATFORM_API_RELEASE_NAME="${RELEASE_BASENAME}-platform-api"
 PROXY_RELEASE_NAME="${RELEASE_BASENAME}-proxy"
 SPOKE_HELM_RELEASE=${SPOKE_HELM_RELEASE:-${HELM_RELEASE}-spoke}
 SPOKE_NAMESPACE=${SPOKE_NAMESPACE:-${K8S_NAMESPACE}}
+DEFAULT_PROJECT_ID=${DEFAULT_PROJECT_ID:-default}
 KEYCLOAK_SERVICE_NAME="${RELEASE_BASENAME}-keycloak-service"
 KEYCLOAK_INTERNAL_HOST="${KEYCLOAK_SERVICE_NAME}.${K8S_NAMESPACE}.svc.cluster.local"
 
@@ -154,7 +154,6 @@ cat <<'EOF'
 Usage: ./generate-cloud-deployment.sh [--non-interactive]
 
 Options:
-  --non-interactive  Run without interactive prompts for CI/CD
   -h, --help         Show this help message
 
 All cloud deployments terminate TLS inside the platform-api and proxy pods; no additional flags are required.
@@ -165,10 +164,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --tls)
       echo "⚠️  --tls is deprecated; TLS is always enforced for cloud deployments."
-      shift
-      ;;
-    --non-interactive)
-      NON_INTERACTIVE=1
       shift
       ;;
     -h|--help)
@@ -331,60 +326,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-if [[ $NON_INTERACTIVE -eq 0 ]]; then
-    echo ""
-    echo "🚀 Deploy to Kubernetes?"
-    echo ""
-    read -p "Do you want to deploy now? (y/n): " -n 1 -r
-    echo ""
-
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo ""
-        echo "⏭️  Skipping deployment. You can deploy later with:"
-        echo ""
-        echo "   # Configure kubectl"
-        echo "   $(terraform output -raw kubectl_config_command)"
-        echo ""
-        echo "   # Create secrets"
-        echo "   kubectl create secret generic aegis-platform-secrets \\"
-        echo "     --from-literal=db-password=\"\$(terraform output -raw db_password_secret_value)\" \\"
-        echo "     --from-literal=proxy-jwt-secret=\"\$(terraform output -raw jwt_secret_value)\" \\"
-        echo "     --namespace ${K8S_NAMESPACE} --create-namespace"
-        echo ""
-        echo "   # Deploy"
-        echo "   cd ${OUTPUT_DIR}"
-        echo "   helm upgrade --install ${HELM_RELEASE} ./aegis-services \\"
-        echo "     -f ./aegis-services/values/common.yaml \\"
-        echo "     -f ./aegis-services/values/cloud.yaml \\"
-        echo "     -f ./aegis-services/values-cloud-generated.yaml \\"
-        echo "     -f <your-overrides.yaml> \\"
-        echo "     --namespace ${K8S_NAMESPACE} --create-namespace"
-        echo ""
-        echo "   # Example overrides file (include secrets and image tags):"
-        echo "   cat > overrides.yaml <<'EOF'"
-        echo "   platformApi:"
-        echo "     image:"
-        echo "       tag: ${PLATFORM_API_IMAGE_TAG}"
-        echo "     env:"
-        echo "       DATABASE_URL: ${DB_URL}"
-        echo "     secrets:"
-        echo "       db-password: \$(terraform output -raw db_password_secret_value)"
-        echo "       proxy-jwt-secret: \$(terraform output -raw jwt_secret_value)"
-        echo "   proxy:"
-        echo "     image:"
-        echo "       tag: ${PROXY_IMAGE_TAG}"
-        echo "     jwtSecret: \$(terraform output -raw jwt_secret_value)"
-        echo "   EOF"
-        echo ""
-        echo "✨ Done!"
-        echo ""
-        echo "ℹ️  TLS is enforced automatically; rerun this script anytime you want to regenerate certificates"
-        exit 0
-    fi
-else
-    echo ""
-    echo "🤖 Non-interactive mode enabled; proceeding with automated deployment"
-fi
+echo "🚀 Proceeding with deployment..."
 
 echo ""
 echo "📋 Deployment Steps (namespace: ${K8S_NAMESPACE}, release: ${HELM_RELEASE}):"
@@ -1146,8 +1088,8 @@ echo "   ✅ k8s-agent deployed"
 # Step 8b: Register in-cluster kubeconfig for co-located spoke
 echo ""
 echo "8️⃣ b Registering in-cluster kubeconfig for spoke cluster..."
-SPOKE_CLUSTER_ID="$(kubectl get deploy -n "${SPOKE_NAMESPACE}" -l app.kubernetes.io/name=k8s-agent \
-  -o jsonpath='{.items[0].spec.template.spec.containers[0].env[?(@.name=="AEGIS_CLUSTER_ID")].value}' 2>/dev/null || true)"
+SPOKE_CLUSTER_ID="$(kubectl -n "${SPOKE_NAMESPACE}" get deploy "${SPOKE_HELM_RELEASE}-k8s-agent" \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AEGIS_CLUSTER_ID")].value}' 2>/dev/null || true)"
 
 if [[ -n "${SPOKE_CLUSTER_ID}" ]]; then
   IN_CLUSTER_KC=$(cat <<EOKC
@@ -1188,7 +1130,7 @@ EOKC
   if [[ -n "${POSTGRES_POD}" ]]; then
     kubectl -n "${K8S_NAMESPACE}" exec "${POSTGRES_POD}" -- \
       psql -U aegis_platform -d aegis_platform -c \
-      "UPDATE clusters SET kubeconfig_secret_ref = '${K8S_NAMESPACE}/aegis-kubeconfigs:${KC_KEY}', project_id = COALESCE(NULLIF(project_id, ''), 'default') WHERE id = '${SPOKE_CLUSTER_ID}' AND deleted_at IS NULL;" \
+      "UPDATE clusters SET kubeconfig_secret_ref = '${K8S_NAMESPACE}/aegis-kubeconfigs:${KC_KEY}', project_id = COALESCE(NULLIF(project_id, ''), '${DEFAULT_PROJECT_ID}') WHERE id = '${SPOKE_CLUSTER_ID}' AND deleted_at IS NULL;" \
       >/dev/null 2>&1 || echo "   ⚠️  DB update skipped (cluster may not be registered yet — will auto-resolve on next heartbeat)"
   fi
 else
@@ -1197,12 +1139,39 @@ fi
 
 # Step 8c: Bootstrap default project with policy regions
 echo ""
-echo "8️⃣ c Bootstrapping default project..."
-BOOTSTRAP_TOKEN=$(curl -sk -X POST "https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/token" \
-  -d "grant_type=client_credentials" \
-  -d "client_id=spoke-agent" \
-  -d "client_secret=${SPOKE_OIDC_CLIENT_SECRET}" 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+echo "8️⃣ c Bootstrapping '${DEFAULT_PROJECT_ID}' project..."
+
+# Wait for Keycloak realm import to complete (creates spoke-agent OIDC client)
+echo "   Waiting for Keycloak realm import to complete..."
+for i in $(seq 1 30); do
+  REALM_STATUS=$(kubectl -n "${K8S_NAMESPACE}" get keycloakrealmimport -o jsonpath='{.items[0].status.conditions[?(@.type=="Done")].status}' 2>/dev/null || true)
+  if [[ "${REALM_STATUS}" == "True" ]]; then
+    echo "   ✅ Realm import complete"
+    break
+  fi
+  if [[ $i -eq 30 ]]; then
+    echo "   ⚠️  Realm import not confirmed after 5 minutes — attempting token anyway"
+  else
+    echo "   Waiting for realm import... (${i}/30)"
+    sleep 10
+  fi
+done
+
+# Retry token acquisition (realm may take a moment to become functional after import)
+BOOTSTRAP_TOKEN=""
+for attempt in $(seq 1 5); do
+  BOOTSTRAP_TOKEN=$(curl -sk -X POST "https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/token" \
+    -d "grant_type=client_credentials" \
+    -d "client_id=spoke-agent" \
+    -d "client_secret=${SPOKE_OIDC_CLIENT_SECRET}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+  if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
+    echo "   ✅ Keycloak token obtained"
+    break
+  fi
+  echo "   Token attempt ${attempt}/5 — waiting for Keycloak..."
+  sleep 5
+done
 
 if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
   # Port-forward to platform-api for gRPC call
@@ -1212,15 +1181,15 @@ if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
 
   DEPLOY_REGION="$(cd "${SCRIPT_DIR}" && terraform output -raw aws_region 2>/dev/null || echo "us-east-1")"
   grpcurl -insecure -H "authorization: Bearer ${BOOTSTRAP_TOKEN}" \
-    -d "{\"project\":{\"id\":\"default\",\"display_name\":\"Default Project\",\"policy\":{\"regions\":[\"${DEPLOY_REGION}\"]}}}" \
+    -d "{\"project\":{\"id\":\"${DEFAULT_PROJECT_ID}\",\"display_name\":\"Default Project\",\"policy\":{\"regions\":[\"${DEPLOY_REGION}\"]}}}" \
     localhost:18081 aegis.v1.AegisPlatform/CreateProject >/dev/null 2>&1 && \
-    echo "   ✅ Default project created with region '${DEPLOY_REGION}'" || \
+    echo "   ✅ Project '${DEFAULT_PROJECT_ID}' created with region '${DEPLOY_REGION}'" || \
     echo "   ⚠️  Project bootstrap skipped (grpcurl may not be installed or platform-api not ready)"
 
   kill ${PF_PID} 2>/dev/null || true
   wait ${PF_PID} 2>/dev/null || true
 else
-  echo "   ⚠️  Could not obtain Keycloak token — project bootstrap skipped"
+  echo "   ❌ Could not obtain Keycloak token after 5 attempts — project bootstrap failed"
 fi
 
 # Step 9: Verify canonical public endpoints

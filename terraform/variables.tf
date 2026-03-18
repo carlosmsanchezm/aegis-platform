@@ -173,6 +173,12 @@ variable "spoke_oidc_client_secret" {
   sensitive   = true
 }
 
+variable "default_project_id" {
+  description = "Default project ID for the co-located spoke cluster. Used in the cluster ID ({project}-{region}-{env}) and project bootstrap."
+  type        = string
+  default     = "default"
+}
+
 variable "spoke_external_id" {
   description = "External ID for the spoke project role trust policy. Only used when create_spoke_project_role = true."
   type        = string

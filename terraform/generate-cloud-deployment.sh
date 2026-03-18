@@ -1216,10 +1216,11 @@ curl -fsS --max-time 20 "http://${DNS_PLATFORM_API}:8080/healthz" >/dev/null || 
   echo "❌ Platform API health check failed: http://${DNS_PLATFORM_API}:8080/healthz" >&2
   exit 1
 }
-curl -fsS --max-time 20 "http://${DNS_PROXY}:8080/healthz" >/dev/null || {
-  echo "❌ Proxy health check failed: http://${DNS_PROXY}:8080/healthz" >&2
+# Proxy serves WebSocket/TLS only — no HTTP health endpoint. Verify TCP connectivity.
+if ! nc -z -w 10 "${DNS_PROXY}" 8080 2>/dev/null && ! curl -fsS --max-time 10 -o /dev/null "http://${DNS_PROXY}:8080/" 2>/dev/null; then
+  echo "❌ Proxy not reachable on ${DNS_PROXY}:8080" >&2
   exit 1
-}
+fi
 curl -fsS --max-time 20 "https://${DNS_UI}/healthcheck" >/dev/null || {
   echo "❌ Backstage health check failed: https://${DNS_UI}/healthcheck" >&2
   exit 1

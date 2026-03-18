@@ -1157,12 +1157,19 @@ for i in $(seq 1 30); do
   fi
 done
 
+# Wait for Keycloak pod to be ready (realm import may trigger a restart)
+echo "   Waiting for Keycloak pod readiness..."
+kubectl -n "${K8S_NAMESPACE}" wait --for=condition=ready pod -l app=keycloak --timeout=180s 2>/dev/null || \
+  kubectl -n "${K8S_NAMESPACE}" wait --for=condition=ready pod -l app.kubernetes.io/name=keycloak --timeout=180s 2>/dev/null || \
+  echo "   ⚠️  Keycloak readiness wait timed out — attempting anyway"
+sleep 5
+
 # Port-forward to Keycloak and platform-api for local curl/grpcurl
 kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${KEYCLOAK_SERVICE_NAME}" 18443:8443 &
 KC_PF_PID=$!
 kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${HELM_RELEASE}-platform-api" 18081:8081 &
 PF_PID=$!
-sleep 3
+sleep 5
 
 # Retry token acquisition via port-forward (realm may take a moment after import)
 BOOTSTRAP_TOKEN=""

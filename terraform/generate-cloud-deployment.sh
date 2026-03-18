@@ -1157,10 +1157,17 @@ for i in $(seq 1 30); do
   fi
 done
 
-# Retry token acquisition (realm may take a moment to become functional after import)
+# Port-forward to Keycloak and platform-api for local curl/grpcurl
+kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${KEYCLOAK_SERVICE_NAME}" 18443:8443 &
+KC_PF_PID=$!
+kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${HELM_RELEASE}-platform-api" 18081:8081 &
+PF_PID=$!
+sleep 3
+
+# Retry token acquisition via port-forward (realm may take a moment after import)
 BOOTSTRAP_TOKEN=""
-for attempt in $(seq 1 5); do
-  BOOTSTRAP_TOKEN=$(curl -sk -X POST "https://${KEYCLOAK_INTERNAL_HOST}:${KEYCLOAK_INTERNAL_PORT}/realms/aegis/protocol/openid-connect/token" \
+for attempt in $(seq 1 10); do
+  BOOTSTRAP_TOKEN=$(curl -sk -X POST "https://localhost:18443/realms/aegis/protocol/openid-connect/token" \
     -d "grant_type=client_credentials" \
     -d "client_id=spoke-agent" \
     -d "client_secret=${SPOKE_OIDC_CLIENT_SECRET}" 2>/dev/null \
@@ -1169,15 +1176,11 @@ for attempt in $(seq 1 5); do
     echo "   ✅ Keycloak token obtained"
     break
   fi
-  echo "   Token attempt ${attempt}/5 — waiting for Keycloak..."
+  echo "   Token attempt ${attempt}/10 — waiting for Keycloak..."
   sleep 5
 done
 
 if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
-  # Port-forward to platform-api for gRPC call
-  kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${HELM_RELEASE}-platform-api" 18081:8081 &
-  PF_PID=$!
-  sleep 3
 
   DEPLOY_REGION="$(cd "${SCRIPT_DIR}" && terraform output -raw aws_region 2>/dev/null || echo "us-east-1")"
   grpcurl -insecure -H "authorization: Bearer ${BOOTSTRAP_TOKEN}" \
@@ -1186,10 +1189,12 @@ if [[ -n "${BOOTSTRAP_TOKEN}" ]]; then
     echo "   ✅ Project '${DEFAULT_PROJECT_ID}' created with region '${DEPLOY_REGION}'" || \
     echo "   ⚠️  Project bootstrap skipped (grpcurl may not be installed or platform-api not ready)"
 
-  kill ${PF_PID} 2>/dev/null || true
-  wait ${PF_PID} 2>/dev/null || true
+  kill ${PF_PID} ${KC_PF_PID} 2>/dev/null || true
+  wait ${PF_PID} ${KC_PF_PID} 2>/dev/null || true
 else
-  echo "   ❌ Could not obtain Keycloak token after 5 attempts — project bootstrap failed"
+  kill ${PF_PID} ${KC_PF_PID} 2>/dev/null || true
+  wait ${PF_PID} ${KC_PF_PID} 2>/dev/null || true
+  echo "   ❌ Could not obtain Keycloak token after 10 attempts — project bootstrap failed"
 fi
 
 # Step 9: Verify canonical public endpoints

@@ -1157,12 +1157,26 @@ for i in $(seq 1 30); do
   fi
 done
 
-# Wait for Keycloak pod to be ready (realm import may trigger a restart)
-echo "   Waiting for Keycloak pod readiness..."
-kubectl -n "${K8S_NAMESPACE}" wait --for=condition=ready pod -l app=keycloak --timeout=180s 2>/dev/null || \
-  kubectl -n "${K8S_NAMESPACE}" wait --for=condition=ready pod -l app.kubernetes.io/name=keycloak --timeout=180s 2>/dev/null || \
-  echo "   ⚠️  Keycloak readiness wait timed out — attempting anyway"
-sleep 5
+# Wait for Keycloak pod to be ready AND listening on 8443.
+# The realm import triggers a Keycloak restart; kubectl wait returns before
+# the new pod has bound to the HTTPS port. Poll until a connection succeeds.
+echo "   Waiting for Keycloak to accept connections on port 8443..."
+for i in $(seq 1 60); do
+  if kubectl -n "${K8S_NAMESPACE}" exec deploy/aegis-platform-api -- \
+    sh -c "cat < /dev/tcp/\${HOSTNAME_PLACEHOLDER}/8443" >/dev/null 2>&1; then
+    break
+  fi
+  # Use a lightweight in-cluster check: try to curl Keycloak from platform-api pod
+  if kubectl -n "${K8S_NAMESPACE}" exec deploy/aegis-platform-api -- \
+    curl -sk --max-time 2 -o /dev/null "https://${KEYCLOAK_SERVICE_NAME}.${K8S_NAMESPACE}.svc.cluster.local:8443/" 2>/dev/null; then
+    echo "   ✅ Keycloak accepting connections"
+    break
+  fi
+  if [[ $i -eq 60 ]]; then
+    echo "   ⚠️  Keycloak readiness timed out after 120s — attempting token anyway"
+  fi
+  sleep 2
+done
 
 # Port-forward to Keycloak and platform-api for local curl/grpcurl
 kubectl -n "${K8S_NAMESPACE}" port-forward svc/"${KEYCLOAK_SERVICE_NAME}" 18443:8443 &

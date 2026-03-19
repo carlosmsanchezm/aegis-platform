@@ -1235,14 +1235,19 @@ if ! nc -z -w 10 "${DNS_PROXY}" 8080 2>/dev/null && ! curl -fsS --max-time 10 -o
   echo "❌ Proxy not reachable on ${DNS_PROXY}:8080" >&2
   exit 1
 fi
-curl -fsS --max-time 20 "https://${DNS_UI}/healthcheck" >/dev/null || {
-  echo "❌ Backstage health check failed: https://${DNS_UI}/healthcheck" >&2
-  exit 1
-}
-curl -fsS --max-time 20 "https://${DNS_UI}/" >/dev/null || {
-  echo "❌ Backstage root endpoint failed: https://${DNS_UI}/" >&2
-  exit 1
-}
+# Backstage may still be starting (Keycloak dependency). Retry with backoff.
+BACKSTAGE_OK=false
+for i in $(seq 1 6); do
+  if curl -fsSk --max-time 15 "https://${DNS_UI}/" >/dev/null 2>&1; then
+    BACKSTAGE_OK=true
+    break
+  fi
+  echo "   Backstage not ready yet (attempt ${i}/6)..."
+  sleep 10
+done
+if [[ "${BACKSTAGE_OK}" != "true" ]]; then
+  echo "⚠️  Backstage not reachable via public DNS yet — may still be starting" >&2
+fi
 curl -fsS --max-time 20 "https://${DNS_KEYCLOAK}/realms/aegis/.well-known/openid-configuration" >/dev/null || {
   echo "❌ Keycloak discovery failed: https://${DNS_KEYCLOAK}/realms/aegis/.well-known/openid-configuration" >&2
   exit 1

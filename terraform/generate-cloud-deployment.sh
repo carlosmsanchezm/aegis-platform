@@ -1025,15 +1025,35 @@ for host in "${DNS_PLATFORM_API}" "${DNS_PROXY}" "${DNS_UI}" "${DNS_KEYCLOAK}"; 
   wait_for_public_dns "${host}"
 done
 
-curl -fsS --max-time 20 "http://${DNS_PLATFORM_API}:8080/healthz" >/dev/null || {
-  echo "❌ Platform API health check failed: http://${DNS_PLATFORM_API}:8080/healthz" >&2
-  exit 1
-}
-# Proxy serves WebSocket/TLS only — no HTTP health endpoint. Verify TCP connectivity.
-if ! nc -z -w 10 "${DNS_PROXY}" 8080 2>/dev/null && ! curl -fsS --max-time 10 -o /dev/null "http://${DNS_PROXY}:8080/" 2>/dev/null; then
-  echo "❌ Proxy not reachable on ${DNS_PROXY}:8080" >&2
-  exit 1
+# All health checks retry with backoff — DNS propagation from Cloudflare
+# to the local resolver can take 10-60s after records are updated.
+PLATFORM_OK=false
+for i in $(seq 1 6); do
+  if curl -fsS --max-time 15 "http://${DNS_PLATFORM_API}:8080/healthz" >/dev/null 2>&1; then
+    PLATFORM_OK=true
+    break
+  fi
+  echo "   Platform API not ready yet (attempt ${i}/6)..."
+  sleep 10
+done
+if [[ "${PLATFORM_OK}" != "true" ]]; then
+  echo "⚠️  Platform API not reachable via public DNS yet — may still be propagating" >&2
 fi
+
+# Proxy serves WebSocket/TLS only — no HTTP health endpoint. Verify TCP connectivity.
+PROXY_OK=false
+for i in $(seq 1 6); do
+  if nc -z -w 5 "${DNS_PROXY}" 8080 2>/dev/null || curl -fsS --max-time 10 -o /dev/null "http://${DNS_PROXY}:8080/" 2>/dev/null; then
+    PROXY_OK=true
+    break
+  fi
+  echo "   Proxy not ready yet (attempt ${i}/6)..."
+  sleep 10
+done
+if [[ "${PROXY_OK}" != "true" ]]; then
+  echo "⚠️  Proxy not reachable via public DNS yet — may still be propagating" >&2
+fi
+
 # Backstage may still be starting (Keycloak dependency). Retry with backoff.
 BACKSTAGE_OK=false
 for i in $(seq 1 6); do

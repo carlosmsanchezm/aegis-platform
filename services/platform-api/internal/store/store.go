@@ -134,7 +134,7 @@ type Store interface {
 	GetWorkload(id string) *aegis.Workload
 	ListWorkloads(projectID string) []*aegis.Workload
 	StartWorkload(id string) (*aegis.Workload, time.Duration, bool, error)
-	AckWorkload(id, nextStatus, url string) (*aegis.Workload, error)
+	AckWorkload(id, nextStatus, url, suspendReason, message string) (*aegis.Workload, error)
 	ResumeWorkload(id string) (*aegis.Workload, error)
 	TerminateWorkload(id, reason string) (*aegis.Workload, error)
 	RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error)

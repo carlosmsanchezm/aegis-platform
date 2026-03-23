@@ -1032,7 +1032,9 @@ func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aeg
 		url = fmt.Sprintf("k8s://%s/%s", aw.Namespace, aw.Name)
 	}
 	cpID := controlPlaneWorkloadID(aw.Name)
-	if err := r.cpClient.Ack(ctx, cpID, status, backend, url); err != nil {
+	// Include diagnostic message from the AegisWorkload status
+	ackMsg := strings.TrimSpace(aw.Status.Message)
+	if err := r.cpClient.AckWithReason(ctx, cpID, status, backend, url, "", ackMsg); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", status, "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
@@ -1108,7 +1110,13 @@ func (r *AegisWorkloadReconciler) ackWorkloadSuspended(ctx context.Context, aw *
 	}
 
 	cpID := controlPlaneWorkloadID(aw.Name)
-	if err := r.cpClient.Ack(ctx, cpID, "SUSPENDED", backend, url); err != nil {
+	suspendReason := strings.TrimSpace(job.GetAnnotations()[annotationSuspendReason])
+	suspendMsg := fmt.Sprintf("Suspended (%s)", suspendReason)
+	if suspendReason == "" {
+		suspendReason = "unknown"
+		suspendMsg = "Suspended by cluster policy"
+	}
+	if err := r.cpClient.AckWithReason(ctx, cpID, "SUSPENDED", backend, url, suspendReason, suspendMsg); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", "SUSPENDED", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}

@@ -2639,7 +2639,7 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		)
 		return nil, err
 	}
-	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus(), req.GetUrl())
+	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus(), req.GetUrl(), req.GetSuspendReason(), req.GetMessage())
 	if err != nil {
 		s.log.Error("ack workload store update failed",
 			zap.Error(err),

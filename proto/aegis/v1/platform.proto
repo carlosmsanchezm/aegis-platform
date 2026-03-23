@@ -307,6 +307,8 @@ message AckWorkloadRequest {
   string status = 2;
   string url = 3;
   string backend = 4;
+  string suspend_reason = 5; // "idle_timeout", "budget_exceeded", "admin_action", "pod_failure"
+  string message = 6;        // Human-readable diagnostic (e.g. "ImagePullBackOff: image not found")
 }
 
 message AckWorkloadResponse {

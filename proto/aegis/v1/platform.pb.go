@@ -3334,6 +3334,8 @@ type AckWorkloadRequest struct {
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
 	Backend       string                 `protobuf:"bytes,4,opt,name=backend,proto3" json:"backend,omitempty"`
+	SuspendReason string                 `protobuf:"bytes,5,opt,name=suspend_reason,json=suspendReason,proto3" json:"suspend_reason,omitempty"` // "idle_timeout", "budget_exceeded", "admin_action", "pod_failure"
+	Message       string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`                                  // Human-readable diagnostic (e.g. "ImagePullBackOff: image not found")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3392,6 +3394,20 @@ func (x *AckWorkloadRequest) GetUrl() string {
 func (x *AckWorkloadRequest) GetBackend() string {
 	if x != nil {
 		return x.Backend
+	}
+	return ""
+}
+
+func (x *AckWorkloadRequest) GetSuspendReason() string {
+	if x != nil {
+		return x.SuspendReason
+	}
+	return ""
+}
+
+func (x *AckWorkloadRequest) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -5638,12 +5654,14 @@ const file_aegis_v1_platform_proto_rawDesc = "" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\"C\n" +
 	"\x1eListClusterWorkloadIDsResponse\x12!\n" +
-	"\fworkload_ids\x18\x01 \x03(\tR\vworkloadIds\"h\n" +
+	"\fworkload_ids\x18\x01 \x03(\tR\vworkloadIds\"\xa9\x01\n" +
 	"\x12AckWorkloadRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x10\n" +
 	"\x03url\x18\x03 \x01(\tR\x03url\x12\x18\n" +
-	"\abackend\x18\x04 \x01(\tR\abackend\"E\n" +
+	"\abackend\x18\x04 \x01(\tR\abackend\x12%\n" +
+	"\x0esuspend_reason\x18\x05 \x01(\tR\rsuspendReason\x12\x18\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\"E\n" +
 	"\x13AckWorkloadResponse\x12.\n" +
 	"\bworkload\x18\x01 \x01(\v2\x12.aegis.v1.WorkloadR\bworkload\"E\n" +
 	"\x14StartWorkloadRequest\x12\x0e\n" +

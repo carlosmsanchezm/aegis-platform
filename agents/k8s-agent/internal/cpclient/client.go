@@ -88,7 +88,20 @@ func enableTLS() bool {
 }
 
 func buildTLSCredentials(endpoint string) (credentials.TransportCredentials, error) {
-	tlsConfig := &tls.Config{}
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	// FIPS 140-2 cipher suite enforcement (SC-13)
+	if os.Getenv("AEGIS_FIPS_ENABLED") == "true" {
+		tlsConfig.CipherSuites = []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		}
+		tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384}
+		log.Printf("cpclient: FIPS cipher suites enforced for gRPC TLS")
+	}
 
 	if skip := parseEnvBool("AEGIS_CP_GRPC_SKIP_VERIFY", false); skip {
 		tlsConfig.InsecureSkipVerify = true
@@ -236,7 +249,20 @@ func (c *Client) ListClusterWorkloadIDs(ctx context.Context, clusterID string) (
 }
 
 func (c *Client) Ack(ctx context.Context, id, status, backend, url string) error {
-	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{Id: id, Status: status, Backend: backend, Url: url})
+	return c.AckWithReason(ctx, id, status, backend, url, "", "")
+}
+
+// AckWithReason acknowledges a workload status change with an optional
+// suspend reason and diagnostic message for compliance audit trails.
+func (c *Client) AckWithReason(ctx context.Context, id, status, backend, url, suspendReason, message string) error {
+	_, err := c.api.AckWorkload(ctx, &aegis.AckWorkloadRequest{
+		Id:            id,
+		Status:        status,
+		Backend:       backend,
+		Url:           url,
+		SuspendReason: suspendReason,
+		Message:       message,
+	})
 	return err
 }
 

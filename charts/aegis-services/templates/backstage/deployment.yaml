@@ -320,6 +320,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
+      {{- with $backstage.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with $backstage.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -8,31 +8,35 @@ tags:
   - "latest"
 
 args:
-  BASE_IMAGE: "google/distroless/static"
-  BASE_TAG: "nonroot"
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/redhat/ubi/ubi9-minimal"
+  BASE_TAG: "9.7"
+  BUILDER_REGISTRY: "registry1.dso.mil"
+  BUILDER_IMAGE: "ironbank/google/golang/ubi9/golang-1.24"
+  BUILDER_TAG: "1.24.13"
 
 labels:
   org.opencontainers.image.title: "aegis-proxy"
-  org.opencontainers.image.description: "Aegis Platform reverse proxy for secure WebSocket workspace tunneling with JWT session validation"
-  org.opencontainers.image.licenses: "Proprietary"
-  org.opencontainers.image.url: "https://github.com/aegis-platform/aegis-platform"
+  org.opencontainers.image.description: "Aegis Platform reverse proxy for secure WebSocket workspace tunneling"
   org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
   org.opencontainers.image.version: "1.0.0"
   mil.dso.ironbank.image.keywords: "proxy,websocket,gpu,workspace,security"
-  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
   mil.dso.ironbank.product.name: "aegis-proxy"
 
 resources:
-  # Aegis proxy source (Go workspace — includes proto, pkg, and proxy service)
-  # Update URL and hash when tagging a new release
+  # Aegis proxy source
   - filename: aegis-proxy-src.tar.gz
-    url: https://github.com/aegis-platform/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
+    url: https://github.com/carlosmsanchezm/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
     validation:
       type: sha256
-      value: "PLACEHOLDER_UPDATE_WITH_ACTUAL_SHA256_ON_RELEASE"
+      value: "PLACEHOLDER_REPLACE_WITH_ACTUAL_HASH_AT_RELEASE"
 
 maintainers:
   - name: "Carlos Sanchez"
-    username: "REPLACE_WITH_REPO1_USERNAME"
-    email: "REPLACE_WITH_EMAIL"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
     cht_member: false

@@ -1,0 +1,36 @@
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $keycloak := $backstage.keycloak | default dict -}}
+{{- $signIn := $keycloak.signIn | default dict -}}
+{{- if $backstage.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegis-services.backstage.runtimeConfigName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+data:
+  app-config.runtime.yaml: |
+    backend:
+      trustProxy: true
+    auth:
+      session:
+        secret: ${BACKEND_SECRET}
+      {{- if ($signIn.enabled | default true) }}
+      providers:
+        keycloak:
+          development:
+            metadataUrl: ${KEYCLOAK_METADATA_URL}
+            issuer: ${KEYCLOAK_ISSUER}
+            callbackUrl: ${BACKEND_BASE_URL}/api/auth/keycloak/handler/frame
+            signIn:
+              resolvers:
+                - resolver: {{ ($signIn.resolver | default "emailLocalPartMatchingUserEntityName") | quote }}
+                  dangerouslyAllowSignInWithoutUserInCatalog: {{ ($signIn.dangerouslyAllowSignInWithoutUserInCatalog | default true) }}
+          production:
+            signIn:
+              resolvers:
+                - resolver: {{ ($signIn.resolver | default "emailLocalPartMatchingUserEntityName") | quote }}
+                  dangerouslyAllowSignInWithoutUserInCatalog: {{ ($signIn.dangerouslyAllowSignInWithoutUserInCatalog | default true) }}
+      {{- end }}
+{{- end }}

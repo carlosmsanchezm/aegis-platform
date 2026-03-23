@@ -720,6 +720,45 @@ func local_request_AegisPlatform_ListClusters_0(ctx context.Context, marshaler r
 	return msg, metadata, err
 }
 
+func request_AegisPlatform_GetCluster_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetClusterRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["cluster_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "cluster_id")
+	}
+	protoReq.ClusterId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "cluster_id", err)
+	}
+	msg, err := client.GetCluster(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_AegisPlatform_GetCluster_0(ctx context.Context, marshaler runtime.Marshaler, server AegisPlatformServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetClusterRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["cluster_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "cluster_id")
+	}
+	protoReq.ClusterId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "cluster_id", err)
+	}
+	msg, err := server.GetCluster(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 func request_AegisPlatform_GetClusterJobStatus_0(ctx context.Context, marshaler runtime.Marshaler, client AegisPlatformClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq GetClusterJobStatusRequest
@@ -1580,6 +1619,26 @@ func RegisterAegisPlatformHandlerServer(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListClusters_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetCluster_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetCluster", runtime.WithHTTPPathPattern("/api/v1/clusters/{cluster_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_AegisPlatform_GetCluster_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_GetCluster_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetClusterJobStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -2183,6 +2242,23 @@ func RegisterAegisPlatformHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_AegisPlatform_ListClusters_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetCluster_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/aegis.v1.AegisPlatform/GetCluster", runtime.WithHTTPPathPattern("/api/v1/clusters/{cluster_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_AegisPlatform_GetCluster_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_AegisPlatform_GetCluster_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	mux.Handle(http.MethodGet, pattern_AegisPlatform_GetClusterJobStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -2410,6 +2486,7 @@ var (
 	pattern_AegisPlatform_ImportCluster_0                 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"api", "v1", "clusters", "import"}, ""))
 	pattern_AegisPlatform_DestroyCluster_0                = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "clusters", "cluster_id", "destroy"}, ""))
 	pattern_AegisPlatform_ListClusters_0                  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "clusters"}, ""))
+	pattern_AegisPlatform_GetCluster_0                    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"api", "v1", "clusters", "cluster_id"}, ""))
 	pattern_AegisPlatform_GetClusterJobStatus_0           = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 1, 0, 4, 1, 5, 4, 2, 5}, []string{"api", "v1", "clusters", "jobs", "job_id", "status"}, ""))
 	pattern_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "workloads", "id", "connection_details"}, ""))
 	pattern_AegisPlatform_CreateConnectionSession_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "connection_sessions"}, ""))
@@ -2444,6 +2521,7 @@ var (
 	forward_AegisPlatform_ImportCluster_0                 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_DestroyCluster_0                = runtime.ForwardResponseMessage
 	forward_AegisPlatform_ListClusters_0                  = runtime.ForwardResponseMessage
+	forward_AegisPlatform_GetCluster_0                    = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetClusterJobStatus_0           = runtime.ForwardResponseMessage
 	forward_AegisPlatform_GetWorkspaceConnectionDetails_0 = runtime.ForwardResponseMessage
 	forward_AegisPlatform_CreateConnectionSession_0       = runtime.ForwardResponseMessage

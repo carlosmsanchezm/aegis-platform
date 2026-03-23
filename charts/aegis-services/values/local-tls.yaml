@@ -66,7 +66,7 @@ platformApi:
     AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-68895aac97778f40.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
-    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
+    AEGIS_SPOKE_VALUES_FILE: "/home/aegis/charts/aegis-spoke/values-aws-relay.yaml"
     # Authorization bindings - must include spoke-agent for k8s-agent to update workload status
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [

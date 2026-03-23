@@ -9,6 +9,17 @@ GO_CACHE_DIR := $(abspath ./.gocache)
 GO_MOD_CACHE := $(abspath ./.gomodcache)
 ALLOW_NET ?= 0
 ALLOW_SOCKETS ?= 0
+
+# FIPS 140-2 toggle: set FIPS=1 for production builds with BoringCrypto.
+# Default (FIPS=0) keeps dev builds fast with CGO_ENABLED=0.
+FIPS ?= 0
+ifeq ($(FIPS),1)
+  GO_CGO    := CGO_ENABLED=1
+  GO_EXPERIMENT := GOEXPERIMENT=boringcrypto
+else
+  GO_CGO    := CGO_ENABLED=0
+  GO_EXPERIMENT :=
+endif
 GRPC_ADDR ?= :8081
 HTTP_ADDR ?= :8080
 AEGIS_CP_GRPC ?= localhost:8081
@@ -50,8 +61,8 @@ endif
 build:
 ifeq ($(ALLOW_NET),1)
 	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_CACHE)
-	@cd $(API_MOD) && GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
-	@cd $(AGENT_MOD) && GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
+	@cd $(API_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
+	@cd $(AGENT_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
 else
 	@echo "ALLOW_NET=0: skipping build"
 endif
@@ -75,7 +86,7 @@ verify:
 
 run-api:
 ifeq ($(ALLOW_SOCKETS),1)
-	@cd $(API_MOD) && GRPC_ADDR=$(GRPC_ADDR) HTTP_ADDR=$(HTTP_ADDR) go run ./...
+	@cd $(API_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GRPC_ADDR=$(GRPC_ADDR) HTTP_ADDR=$(HTTP_ADDR) go run ./...
 else
 	@echo "ALLOW_SOCKETS=0: disabled here"
 endif
@@ -83,6 +94,7 @@ endif
 run-operator:
 ifeq ($(ALLOW_SOCKETS),1)
 	@cd $(AGENT_MOD) && \
+	$(GO_CGO) $(GO_EXPERIMENT) \
 	AEGIS_CP_GRPC=$(AEGIS_CP_GRPC) \
 	AEGIS_CLUSTER_ID=$(AEGIS_CLUSTER_ID) \
 	AEGIS_REGION=$(AEGIS_REGION) \
@@ -174,31 +186,40 @@ build-proxy:
 .PHONY: build-proxy-local
 build-proxy-local:
 	@echo "Building proxy image $(PROXY_IMAGE) for local platform"
-	@docker build -f services/proxy/Dockerfile -t $(PROXY_IMAGE) .
+	@docker build -f services/proxy/Dockerfile -t $(PROXY_IMAGE) \
+		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
+		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
+		.
 
 PULUMI_VERSION ?= 3.226.0
 
 .PHONY: stage-build-deps
 stage-build-deps:
-	@echo "Staging Iron Bank build dependencies for linux/amd64..."
-	@if [ ! -f awscli.zip ]; then \
-		echo "  Downloading AWS CLI v2..."; \
-		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscli.zip; \
-	fi
-	@if [ ! -f kubectl ]; then \
-		echo "  Downloading kubectl..."; \
+	@HOST_ARCH=$$(uname -m); \
+	if [ "$$HOST_ARCH" = "arm64" ] || [ "$$HOST_ARCH" = "aarch64" ]; then \
+		ARCH=aarch64; GOARCH=arm64; JQ_ARCH=arm64; PULUMI_ARCH=arm64; \
+	else \
+		ARCH=x86_64; GOARCH=amd64; JQ_ARCH=amd64; PULUMI_ARCH=x64; \
+	fi; \
+	echo "Staging Iron Bank build dependencies for linux/$$ARCH..."; \
+	if [ ! -f awscli.zip ]; then \
+		echo "  Downloading AWS CLI v2 ($$ARCH)..."; \
+		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$$ARCH.zip" -o awscli.zip; \
+	fi; \
+	if [ ! -f kubectl ]; then \
+		echo "  Downloading kubectl ($$GOARCH)..."; \
 		KUBE_VER=$$(curl -fsSL https://dl.k8s.io/release/stable.txt); \
-		curl -fsSL "https://dl.k8s.io/release/$${KUBE_VER}/bin/linux/amd64/kubectl" -o kubectl; \
-	fi
-	@if [ ! -f jq ]; then \
-		echo "  Downloading jq..."; \
-		curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o jq; \
-	fi
-	@if [ ! -f pulumi-linux-x64.tar.gz ]; then \
-		echo "  Downloading Pulumi v$(PULUMI_VERSION)..."; \
-		curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v$(PULUMI_VERSION)-linux-x64.tar.gz" -o pulumi-linux-x64.tar.gz; \
-	fi
-	@echo "All build dependencies staged."
+		curl -fsSL "https://dl.k8s.io/release/$${KUBE_VER}/bin/linux/$$GOARCH/kubectl" -o kubectl; \
+	fi; \
+	if [ ! -f jq ]; then \
+		echo "  Downloading jq ($$JQ_ARCH)..."; \
+		curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-$$JQ_ARCH" -o jq; \
+	fi; \
+	if [ ! -f pulumi-linux-x64.tar.gz ]; then \
+		echo "  Downloading Pulumi v$(PULUMI_VERSION) ($$PULUMI_ARCH)..."; \
+		curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v$(PULUMI_VERSION)-linux-$$PULUMI_ARCH.tar.gz" -o pulumi-linux-x64.tar.gz; \
+	fi; \
+	echo "All build dependencies staged."
 
 .PHONY: build-platform-local
 build-platform-local: stage-build-deps
@@ -208,7 +229,10 @@ build-platform-local: stage-build-deps
 .PHONY: build-agent-local
 build-agent-local:
 	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE) for local platform (native arch)"
-	@docker build -f agents/k8s-agent/Dockerfile -t $(K8S_AGENT_IMAGE) .
+	@docker build -f agents/k8s-agent/Dockerfile -t $(K8S_AGENT_IMAGE) \
+		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
+		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
+		.
 
 .PHONY: build-local-all
 build-local-all: build-platform-local build-proxy-local build-agent-local

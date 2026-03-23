@@ -8,31 +8,24 @@ tags:
   - "latest"
 
 args:
-  BASE_IMAGE: "redhat/ubi/ubi9-minimal"
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/redhat/ubi/ubi9-minimal"
   BASE_TAG: "9.7"
 
 labels:
   org.opencontainers.image.title: "aegis-vscode-reh-init"
-  org.opencontainers.image.description: "Init container providing pre-downloaded VS Code Remote Extension Host for Aegis workspace pods"
-  org.opencontainers.image.licenses: "Proprietary"
-  org.opencontainers.image.url: "https://github.com/aegis-platform/aegis-platform"
+  org.opencontainers.image.description: "Init container that injects VS Code Remote Extension Host into Aegis workspace pods"
   org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
   org.opencontainers.image.version: "1.0.0"
   mil.dso.ironbank.image.keywords: "vscode,init-container,workspace,remote-development"
-  mil.dso.ironbank.image.type: "opensource"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
   mil.dso.ironbank.product.name: "aegis-vscode-reh-init"
 
 resources:
   # VS Code Remote Extension Host (REH) server binary
-  # Pinned to a specific stable commit. Update commit hash and SHA256 when
-  # upgrading VS Code version.
-  #
-  # To find the current stable commit:
-  #   curl -sI https://update.code.visualstudio.com/latest/server-linux-x64/stable | grep location
-  #
-  # To compute SHA256:
-  #   curl -fsSL <url> -o vscode-server-linux-x64.tar.gz && sha256sum vscode-server-linux-x64.tar.gz
-  #
+  # Pinned commit: ce099c1ed25d9eb3076c11e4a280f3eb52b4fbeb
   - filename: vscode-server-linux-x64.tar.gz
     url: https://vscode.download.prss.microsoft.com/dbazure/download/stable/ce099c1ed25d9eb3076c11e4a280f3eb52b4fbeb/vscode-server-linux-x64.tar.gz
     validation:
@@ -41,6 +34,7 @@ resources:
 
 maintainers:
   - name: "Carlos Sanchez"
-    username: "REPLACE_WITH_REPO1_USERNAME"
-    email: "REPLACE_WITH_EMAIL"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
     cht_member: false

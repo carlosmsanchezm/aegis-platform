@@ -585,6 +585,190 @@ func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersReques
 	return &aegis.ListClustersResponse{Items: items}, nil
 }
 
+// GetCluster returns detailed cluster information including node pools,
+// conditions, addons, and observability configuration. Data is aggregated
+// from the cluster store and the ProjectInfra CRD.
+func (s *Server) GetCluster(ctx context.Context, req *aegis.GetClusterRequest) (*aegis.ClusterDetail, error) {
+	clusterID := strings.TrimSpace(req.GetClusterId())
+	if clusterID == "" {
+		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
+	}
+
+	// 1. Authorize: get caller's allowed projects
+	_, allowed, err := s.authorizedProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Fetch cluster (single PK lookup)
+	ci := s.store.GetClusterInfo(clusterID)
+	if ci == nil {
+		return nil, status.Error(codes.NotFound, "cluster not found")
+	}
+
+	// 3. Re-check project authorization
+	projectID := clusterProject(ci)
+	if len(allowed) > 0 {
+		if _, ok := allowed[strings.ToLower(projectID)]; !ok {
+			return nil, status.Error(codes.PermissionDenied, "project not accessible")
+		}
+	}
+
+	// 4. Build base detail from ClusterInfo
+	now := time.Now()
+	phase := "Ready"
+	if !clusterReady(ci, now) {
+		if ci.LastHeartbeat.IsZero() {
+			phase = "Pending"
+		} else {
+			phase = "Unhealthy"
+		}
+	}
+
+	flavors := make([]string, 0, len(ci.AvailableFlavorSet))
+	for f := range ci.AvailableFlavorSet {
+		flavors = append(flavors, f)
+	}
+
+	detail := &aegis.ClusterDetail{
+		Id:               ci.ID,
+		Name:             clusterDisplayName(ci),
+		ProjectId:        projectID,
+		Provider:         ci.Provider,
+		Region:           ci.Region,
+		IlLevel:          ci.ILLevel,
+		Phase:            phase,
+		TtfGpuSecondsP50: ci.TTFGSecondsP50,
+		AvailableFlavors: flavors,
+		Labels:           ci.Labels,
+		ClusterEndpoint:  ci.ClusterEndpoint,
+		ProxyUrl:         ci.ProxyURL,
+	}
+	if !ci.CreatedAt.IsZero() {
+		detail.CreatedAt = ci.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !ci.LastHeartbeat.IsZero() {
+		detail.LastHeartbeat = ci.LastHeartbeat.UTC().Format(time.RFC3339)
+	}
+
+	// 5. Build conditions from heartbeat
+	if !ci.LastHeartbeat.IsZero() {
+		condStatus := "True"
+		condMsg := fmt.Sprintf("Last heartbeat received at %s.", ci.LastHeartbeat.UTC().Format(time.RFC3339))
+		if !clusterReady(ci, now) {
+			condStatus = "False"
+			condMsg = fmt.Sprintf("Heartbeat stale since %s.", ci.LastHeartbeat.UTC().Format(time.RFC3339))
+		}
+		detail.Conditions = append(detail.Conditions, &aegis.ClusterCondition{
+			Type:           "AgentConnection",
+			Status:         condStatus,
+			Message:        condMsg,
+			LastTransition: ci.LastHeartbeat.UTC().Format(time.RFC3339),
+		})
+	}
+
+	// 6. Enrich from ProjectInfra CRD (if infra client available)
+	if s.infraClient != nil {
+		s.enrichClusterDetailFromInfra(ctx, detail, projectID, clusterID)
+	}
+
+	s.log.Debug("get cluster", zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+	return detail, nil
+}
+
+// enrichClusterDetailFromInfra populates node pools, addons, observability
+// config, and provisioning job ID from the ProjectInfra CRD.
+func (s *Server) enrichClusterDetailFromInfra(ctx context.Context, detail *aegis.ClusterDetail, projectID, clusterID string) {
+	var infraList infraapi.ProjectInfraList
+	if err := s.infraClient.List(ctx, &infraList, client.InNamespace(s.infraNamespace)); err != nil {
+		s.log.Warn("failed to list ProjectInfra for cluster detail", zap.Error(err))
+		return
+	}
+
+	for _, item := range infraList.Items {
+		if !strings.EqualFold(strings.TrimSpace(item.Spec.ProjectID), projectID) {
+			continue
+		}
+
+		// Match by cluster ID in the outputs or spec
+		matched := false
+		for _, out := range item.Status.Outputs {
+			if strings.EqualFold(strings.TrimSpace(out.ClusterID), clusterID) {
+				matched = true
+				// Populate observability endpoints
+				obs := out.Observability
+				detail.Observability = &aegis.ClusterObservabilityConfig{
+					LokiEndpoint:         fmt.Sprintf("%s:%d", obs.LokiService, obs.LokiPort),
+					PrometheusEndpoint:   fmt.Sprintf("%s:%d", obs.PrometheusService, obs.PrometheusPort),
+					TempoEndpoint:        fmt.Sprintf("%s:%d", obs.TempoService, obs.TempoPort),
+					AlertmanagerEndpoint: fmt.Sprintf("%s:%d", obs.AlertmanagerService, obs.AlertmanagerPort),
+				}
+				break
+			}
+		}
+
+		if !matched {
+			// Try matching by spec cluster name patterns
+			if item.Spec.Aws != nil && strings.Contains(clusterID, strings.TrimSpace(item.Spec.Aws.ClusterName)) {
+				matched = true
+			}
+		}
+
+		if !matched {
+			continue
+		}
+
+		// Set provisioning job ID
+		detail.ProvisioningJobId = item.Name
+
+		// Extract node pools from spec
+		if item.Spec.Aws != nil {
+			for _, np := range item.Spec.Aws.NodePools {
+				pool := &aegis.ClusterNodePool{
+					Name:         strings.TrimSpace(np.Name),
+					InstanceType: strings.TrimSpace(np.InstanceType),
+					MinSize:      np.MinSize,
+					MaxSize:      np.MaxSize,
+					Gpu:          strings.Contains(strings.ToLower(np.Name), "gpu"),
+				}
+				detail.NodePools = append(detail.NodePools, pool)
+			}
+		}
+
+		// Extract addons from deployed Helm releases
+		detail.Addons = buildAddonsFromInfra(&item)
+		break
+	}
+}
+
+// buildAddonsFromInfra extracts addon information from the ProjectInfra spec.
+func buildAddonsFromInfra(item *infraapi.ProjectInfra) []*aegis.ClusterAddon {
+	if item == nil {
+		return nil
+	}
+	phase := string(item.Status.Phase)
+	addonStatus := "Deployed"
+	if phase != "Ready" {
+		addonStatus = phase
+	}
+
+	// Standard addons deployed by Pulumi provisioner
+	addons := []*aegis.ClusterAddon{
+		{Name: "cert-manager", Namespace: "cert-manager", Status: addonStatus},
+		{Name: "step-issuer", Namespace: "cert-manager", Status: addonStatus},
+		{Name: "cluster-autoscaler", Namespace: "kube-system", Status: addonStatus},
+		{Name: "nvidia-device-plugin", Namespace: "kube-system", Status: addonStatus},
+		{Name: "prometheus", Namespace: "aegis-observability", Status: addonStatus},
+		{Name: "alertmanager", Namespace: "aegis-observability", Status: addonStatus},
+		{Name: "loki", Namespace: "aegis-logging", Status: addonStatus},
+		{Name: "fluentbit", Namespace: "aegis-logging", Status: addonStatus},
+		{Name: "tempo", Namespace: "aegis-tracing", Status: addonStatus},
+		{Name: "metrics-server", Namespace: "kube-system", Status: addonStatus},
+		{Name: "aegis-spoke", Namespace: "aegis-system", Status: addonStatus},
+	}
+	return addons
+}
+
 func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
 	_ = ctx // reserved for future use (tracing, cancellation)
 	if !s.autoBootstrap || w == nil {
@@ -2741,6 +2925,19 @@ func grpcServerOptionsFromEnv(log *zap.Logger) ([]grpc.ServerOption, error) {
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
+	}
+	// FIPS 140-2 cipher suite enforcement (SC-13): when AEGIS_FIPS_ENABLED is set,
+	// restrict to FIPS-approved AEAD cipher suites only.
+	if os.Getenv("AEGIS_FIPS_ENABLED") == "true" {
+		tlsConfig.CipherSuites = []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		}
+		tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384}
+		log.Info("gRPC TLS FIPS cipher suites enforced")
 	}
 	if caPath := os.Getenv("AEGIS_GRPC_TLS_CLIENT_CA"); caPath != "" {
 		caPEM, err := os.ReadFile(caPath)

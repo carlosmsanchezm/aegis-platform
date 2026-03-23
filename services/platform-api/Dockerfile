@@ -21,10 +21,21 @@ ARG BUILDER_TAG=1.24.13
 FROM ${BUILDER_REGISTRY}/${BUILDER_IMAGE}:${BUILDER_TAG} AS builder
 
 ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 ARG PULUMI_VERSION=3.226.0
+ARG FIPS_ENABLED=true
 
 USER 0
+
+# Install C compiler for CGO (FIPS/BoringCrypto requires CGO_ENABLED=1).
+# IB golang builder already has gcc; this handles public golang:slim images.
+RUN if ! command -v gcc >/dev/null 2>&1; then \
+      if command -v microdnf >/dev/null 2>&1; then microdnf install -y gcc && microdnf clean all; \
+      elif command -v dnf >/dev/null 2>&1; then dnf install -y gcc && dnf clean all; \
+      elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*; \
+      fi; \
+    fi
+
 WORKDIR /app
 
 COPY go.work* ./
@@ -57,7 +68,9 @@ COPY . .
 
 WORKDIR /app/services/platform-api
 RUN GOCACHE=/tmp/go-cache \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    CGO_ENABLED=$(if [ "${FIPS_ENABLED}" = "true" ]; then echo 1; else echo 0; fi) \
+    GOEXPERIMENT=$(if [ "${FIPS_ENABLED}" = "true" ]; then echo boringcrypto; fi) \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o platform-api .
 
 # --- Final Stage: Iron Bank UBI9-minimal ---

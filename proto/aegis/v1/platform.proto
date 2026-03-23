@@ -182,6 +182,63 @@ message ListClustersResponse {
   repeated ClusterSummary items = 1;
 }
 
+// Cluster detail
+message GetClusterRequest {
+  string cluster_id = 1;
+}
+
+message ClusterDetail {
+  string id = 1;
+  string name = 2;
+  string project_id = 3;
+  string provider = 4;
+  string region = 5;
+  string il_level = 6;
+  string phase = 7;
+  double ttf_gpu_seconds_p50 = 8;
+  repeated string available_flavors = 9;
+  map<string, string> labels = 10;
+  string created_at = 11;
+  string last_heartbeat = 12;
+  string cluster_endpoint = 13;
+  string proxy_url = 14;
+  repeated ClusterNodePool node_pools = 15;
+  repeated ClusterCondition conditions = 16;
+  repeated ClusterAddon addons = 17;
+  ClusterObservabilityConfig observability = 18;
+  string provisioning_job_id = 19;
+}
+
+message ClusterNodePool {
+  string name = 1;
+  string instance_type = 2;
+  int32 min_size = 3;
+  int32 max_size = 4;
+  int32 desired_size = 5;
+  bool gpu = 6;
+}
+
+message ClusterCondition {
+  string type = 1;
+  string status = 2;
+  string message = 3;
+  string last_transition = 4;
+}
+
+message ClusterAddon {
+  string name = 1;
+  string namespace = 2;
+  string version = 3;
+  string status = 4;
+}
+
+message ClusterObservabilityConfig {
+  string loki_endpoint = 1;
+  string prometheus_endpoint = 2;
+  string tempo_endpoint = 3;
+  string alertmanager_endpoint = 4;
+}
+
 // Cluster import
 message ImportClusterRequest {
   string cluster_id = 1;
@@ -534,6 +591,12 @@ service AegisPlatform {
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
     option (google.api.http) = {
       get: "/api/v1/clusters"
+    };
+  }
+
+  rpc GetCluster(GetClusterRequest) returns (ClusterDetail) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/{cluster_id}"
     };
   }
 

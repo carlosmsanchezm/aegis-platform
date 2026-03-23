@@ -110,8 +110,8 @@ IB_ARGS_CUDA=(
 echo "2️⃣  Building platform-api..."
 # Stage dependencies for Iron Bank Dockerfile (COPY instead of curl)
 echo "   Staging dependencies..."
-curl -fsSL "https://dl.k8s.io/release/v1.35.2/bin/linux/amd64/kubectl" -o kubectl
-curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7/jq-linux-amd64" -o jq
+curl -fsSL "https://dl.k8s.io/release/v1.33.0/bin/linux/amd64/kubectl" -o kubectl
+curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-amd64" -o jq
 curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.17.10.zip" -o awscli.zip
 curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v3.226.0-linux-x64.tar.gz" -o pulumi-linux-x64.tar.gz
 

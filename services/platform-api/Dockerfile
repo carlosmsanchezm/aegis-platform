@@ -132,7 +132,7 @@ RUN printf '#!/usr/bin/env bash\nset -euo pipefail\n: "${AEGIS_EKS_CLUSTER_NAME:
 # present in build context (staged by Makefile from the sovran repo).
 RUN mkdir -p /data/extension && chown 1000:1000 /data/extension
 COPY --chown=1000:1000 scripts/aegis-setup-vscode.sh /data/extension/aegis-setup-vscode.sh
-COPY --chown=1000:1000 aegis-remote.vsi[x] /data/extension/aegis-remote.vsix
+COPY --chown=1000:1000 aegis-remote.vsix /data/extension/aegis-remote.vsix
 
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 

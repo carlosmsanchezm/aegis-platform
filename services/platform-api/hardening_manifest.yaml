@@ -60,7 +60,14 @@ resources:
     url: https://github.com/carlosmsanchezm/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
     validation:
       type: sha256
-      value: 4d30bfeb14d0bb71914cc114ead89125dac318c569775c8051d9e985e59d17a5
+      value: 237b91b14fdc3a3f7d2f6504b31d8ffff9181f725e28170f369f2713b7f7e779
+
+  # Aegis Remote VS Code extension (Sovran) v1.0.0
+  - filename: aegis-remote.vsix
+    url: https://github.com/carlosmsanchezm/sovran/releases/download/v1.0.0/aegis-remote.vsix
+    validation:
+      type: sha256
+      value: 3d4e680cb3887d25d8be9a36d3c08afc629113b93736026b8f790095e6361d3c
 
 maintainers:
   - name: "Carlos Sanchez"

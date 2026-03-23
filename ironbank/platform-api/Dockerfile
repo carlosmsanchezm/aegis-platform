@@ -110,9 +110,10 @@ COPY --from=builder /tmp/pulumi-cli /usr/local/bin/pulumi
 RUN printf '#!/usr/bin/env bash\nset -euo pipefail\n: "${AEGIS_EKS_CLUSTER_NAME:?cluster name required}"\n: "${AEGIS_EKS_REGION:?region required}"\n: "${AEGIS_EKS_ROLE_ARN:?role arn required}"\n: "${AEGIS_EKS_EXTERNAL_ID:?external id required}"\nassumed=$(aws sts assume-role --role-arn "${AEGIS_EKS_ROLE_ARN}" --role-session-name "aegis-eks-token" --external-id "${AEGIS_EKS_EXTERNAL_ID}")\nexport AWS_ACCESS_KEY_ID=$(echo "${assumed}" | jq -r .Credentials.AccessKeyId)\nexport AWS_SECRET_ACCESS_KEY=$(echo "${assumed}" | jq -r .Credentials.SecretAccessKey)\nexport AWS_SESSION_TOKEN=$(echo "${assumed}" | jq -r .Credentials.SessionToken)\naws eks get-token --cluster-name "${AEGIS_EKS_CLUSTER_NAME}" --region "${AEGIS_EKS_REGION}" --output json\n' \
   > /usr/local/bin/aegis-eks-token && chmod +x /usr/local/bin/aegis-eks-token
 
-# VS Code extension setup script (from source tarball)
+# VS Code extension distribution: setup script from source, VSIX from pipeline resource
 RUN mkdir -p /data/extension && chown 1000:1000 /data/extension
 COPY --from=builder --chown=1000:1000 /app/scripts/aegis-setup-vscode.sh /data/extension/aegis-setup-vscode.sh
+COPY --chown=1000:1000 aegis-remote.vsix /data/extension/aegis-remote.vsix
 
 EXPOSE 8080 8081
 

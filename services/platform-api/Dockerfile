@@ -80,7 +80,7 @@ LABEL org.opencontainers.image.title="aegis-platform-api" \
       org.opencontainers.image.description="Aegis Platform API — gRPC+REST control plane for multi-cluster GPU workload orchestration" \
       org.opencontainers.image.vendor="Aegis Platform" \
       org.opencontainers.image.licenses="Proprietary" \
-      mil.dso.ironbank.image.type="opensource" \
+      mil.dso.ironbank.image.type="commercial" \
       mil.dso.ironbank.product.name="aegis-platform-api"
 
 ARG TARGETARCH=amd64
@@ -133,6 +133,8 @@ RUN printf '#!/usr/bin/env bash\nset -euo pipefail\n: "${AEGIS_EKS_CLUSTER_NAME:
 RUN mkdir -p /data/extension && chown 1000:1000 /data/extension
 COPY --chown=1000:1000 scripts/aegis-setup-vscode.sh /data/extension/aegis-setup-vscode.sh
 COPY --chown=1000:1000 aegis-remote.vsi[x] /data/extension/aegis-remote.vsix
+
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 EXPOSE 8080 8081
 

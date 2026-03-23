@@ -7,7 +7,7 @@ where they live, and how they are used across environments.
 
 | Purpose | Registry / Tag | Architecture | Consumers | Notes |
 |---------|----------------|--------------|-----------|-------|
-| **Production / shared clusters** | `567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:<version>` | `linux/amd64` (multi-arch planned) | Platform API when launching workspaces via Backstage or VS Code against AWS | Tagged and pushed via CI. Update Terraform/Helm values when the tag changes. |
+| **Production / shared clusters** | `195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:<version>` | `linux/amd64` (multi-arch planned) | Platform API when launching workspaces via Backstage or VS Code against AWS | Tagged and pushed via CI. Update Terraform/Helm values when the tag changes. |
 | **Local development default** | `aegis-workspace:latest` (local Docker daemon) | host arch | `SubmitWorkload` from a developer machine pointing at Docker Desktop’s Kubernetes | Rebuilt with `docker build … workspace-images/openssh-vscode`. Suitable for rapid iterations without pushing. |
 | **Ephemeral published build** | `ttl.sh/aegis-workspace-<timestamp>:24h` | `linux/amd64`, `linux/arm64` | Ad hoc local testing where nodes need to pull from a registry | Built with `docker buildx build --platform linux/amd64,linux/arm64 … --push`. Expires automatically after 24h. |
 
@@ -28,7 +28,7 @@ the repository first, then be promoted to remote registries.
    docker buildx create --name aegis-multi --driver docker-container --use
    docker buildx build \
      --platform linux/amd64,linux/arm64 \
-     -t 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:<newtag> \
+     -t 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:<newtag> \
      workspace-images/openssh-vscode \
      --push
    ```
@@ -120,6 +120,94 @@ Use this in CI or before demos to guarantee the stack produces connectable works
   - `kubectl get deploy -n aegis-system aigis-spoke-k8s-agent -o yaml | grep image:` to inspect runtime images.
 
 Keep this document current whenever workspace images or workflows change.
+
+## Persistent Storage
+
+Workspace pods support persistent storage via Kubernetes PersistentVolumeClaims. When enabled, user data (code, models, datasets, checkpoints) survives workspace restarts.
+
+### How it works
+
+1. User launches a workspace with persistent storage enabled (default: `true`)
+2. The k8s-agent creates a PVC named `aegis-ws-{workloadId}` in the workload namespace
+3. The PVC is mounted at `/home/coder` inside the workspace container
+4. When the workspace restarts, the same PVC is reattached — data is preserved
+
+### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `persistent` | `true` | Enable PVC-backed storage |
+| `size` | `50Gi` | Storage capacity |
+| `storageClass` | cluster default | Kubernetes StorageClass (e.g., `gp3` for EKS, `managed-premium` for AKS) |
+| `mountPath` | `/home/coder` | Mount point inside the container |
+| `existingClaimName` | auto-generated | Reuse a specific PVC by name |
+
+### Storage class per cloud provider
+
+| Provider | Recommended StorageClass | Notes |
+|----------|-------------------------|-------|
+| EKS (AWS) | `gp3` | Default EBS storage class. Set in spoke Helm values. |
+| AKS (Azure) | `managed-premium` | Premium SSD. |
+| GKE (GCP) | `standard-rwo` | Regional persistent disk. |
+| On-prem / RKE2 | `local-path` or NFS-backed class | Depends on cluster configuration. |
+| Docker Desktop (local dev) | `hostpath` (default) | Uses host filesystem. |
+
+### Helm values
+
+Configure defaults in `charts/aegis-spoke/values.yaml`:
+
+```yaml
+workspace:
+  storage:
+    defaultEnabled: true
+    defaultSize: "50Gi"
+    defaultStorageClass: ""    # Empty = cluster default
+    defaultMountPath: "/home/coder"
+```
+
+### PVC lifecycle
+
+- PVCs are created per-workload and labeled with `aegis.yourorg.dev/project`
+- PVCs are NOT automatically deleted when a workspace is terminated — this allows data recovery
+- To clean up unused PVCs: `kubectl delete pvc -l aegis.yourorg.dev/project=<projectId> -n <namespace>`
+
+## Custom Workspace Images
+
+Engineers can use custom container images for their workspaces. Images must include SSH server support and optionally VS Code REH for Sovran connectivity.
+
+### How to use a custom image
+
+1. Build a Docker image based on the default workspace image or from scratch
+2. Push to your container registry (ECR, Harbor, registry1.dso.mil, etc.)
+3. When launching a workspace in the Backstage UI, select "Custom Image" and enter the image URI
+4. Or submit via gRPC with the `image` field set in `WorkspaceSpec`
+
+### Requirements for custom images
+
+- **SSH server** on port 2222 (for VS Code Remote SSH connectivity)
+- **Non-root user** recommended for security
+- **CUDA runtime** if GPU workloads are needed
+- Base image: `aegis/workspace-vscode:latest` provides all of these out of the box
+
+### Example custom Dockerfile
+
+```dockerfile
+FROM 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest
+
+# Add your team's ML tools
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio \
+    mlflow tensorboard jupyter
+
+# Pre-install VS Code extensions
+RUN code-server --install-extension ms-python.python || true
+```
+
+Build and push:
+```bash
+docker build -t your-registry/workspace-pytorch:latest .
+docker push your-registry/workspace-pytorch:latest
+```
 
 ### VS Code extension settings
 

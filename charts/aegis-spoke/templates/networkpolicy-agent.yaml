@@ -1,0 +1,34 @@
+{{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+# NetworkPolicy for k8s-agent: egress-only to hub platform API, Keycloak, and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis-spoke.fullname" . }}-k8s-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-spoke.labels" . | nindent 4 }}
+    app.kubernetes.io/component: k8s-agent
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: k8s-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Hub platform API (gRPC-TLS), platform API (gRPC), Keycloak OIDC
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+{{- end }}

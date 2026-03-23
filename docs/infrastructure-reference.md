@@ -3,6 +3,15 @@
 **Last Updated:** January 7, 2026
 **Purpose:** Quick reference for understanding the complete local development infrastructure setup
 
+**Authoritative for:** local/hybrid infrastructure relationships, endpoints, and troubleshooting context.
+
+**Not authoritative for:** current deployment workflow, cloud rollout sequencing, or production runbooks.
+
+**See also:**
+- `AGENT_DEPLOYMENT_GUIDE.md` -- current deployment workflow
+- `docs/PRODUCTION_DEPLOYMENT.md` -- production-only overlays
+- `docs/networking-architecture.md` -- canonical network topology
+
 ---
 
 ## Table of Contents
@@ -14,7 +23,7 @@
 5. [Spoke Architecture: Multi-Tenancy and Scalability](#spoke-architecture-multi-tenancy-and-scalability) *(Event-driven status sync)*
 6. [DNS and Hostname Configuration](#dns-and-hostname-configuration)
 7. [TLS/Certificate Configuration](#tlscertificate-configuration)
-8. [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup)
+8. [Remote Spoke Connectivity (AWS NLB Relay)](#remote-spoke-connectivity-aws-nlb-relay)
 9. [Authentication (Keycloak)](#authentication-keycloak)
 10. [Database Configuration](#database-configuration)
 11. [AWS Credentials Architecture](#aws-credentials-architecture)
@@ -31,25 +40,16 @@
 ```
                                     INTERNET
                                         |
-                        +---------------+---------------+
-                        |                               |
-                  Cloudflare CDN                  AWS NLB (gRPC)
-                        |                               |
-            +-----------+-----------+                   |
-            |                       |                   |
-    keycloak.aegis-platform.tech   remote.aegis-platform.tech
-            |                       |                   |
-            +-------+-------+-------+                   |
-                    |                                   |
-            +-------v-------+                           |
-            |  cloudflared  |                           |
-            |  (aegis-system)|                          |
-            +-------+-------+                           |
-                    |                                   |
-    +---------------+---------------+                   |
-    |               |               |                   |
-+---v---+     +-----v-----+   +-----v-----+             |
-|Keycloak|    |Platform-API|   |   Proxy   |<-----------+
+                                  AWS NLB (TCP passthrough)
+                                  :8081 (gRPC) + :8443 (OIDC)
+                                        |
+                                  SSH Reverse Tunnel
+                                        |
+                                        |
+    +---------------+---------------+   |
+    |               |               |   |
++---v---+     +-----v-----+   +----v------+
+|Keycloak|    |Platform-API|   |   Proxy   |
 |(keycloak)|  |(aegis-system)| |(aegis-system)|
 +---+---+     +-----+-----+   +-----+-----+
     |               |               |
@@ -77,7 +77,6 @@
 | Platform API | aegis-system | gRPC/HTTP API for infrastructure management |
 | Proxy | aegis-system | WebSocket/HTTP proxy for workspaces |
 | Keycloak | keycloak | OIDC authentication server |
-| cloudflared | aegis-system | Cloudflare tunnel for external access |
 | PostgreSQL (platform-api) | aegis-system | Platform API database |
 | PostgreSQL (keycloak) | keycloak | Keycloak database |
 | ingress-nginx | ingress-nginx | Kubernetes ingress controller |
@@ -90,7 +89,7 @@
 
 ```bash
 # Core namespaces
-aegis-system     # Platform API, Proxy, cloudflared, platform-api PostgreSQL
+aegis-system     # Platform API, Proxy, platform-api PostgreSQL
 keycloak         # Keycloak and its PostgreSQL
 ingress-nginx    # Ingress controller
 aegis-workloads  # User workloads (created by platform-api)
@@ -124,18 +123,14 @@ aegis-workloads  # User workloads (created by platform-api)
 | Keycloak | https://keycloak.localtest.me | HTTPS | Via ingress |
 | Proxy | https://proxy.localtest.me | HTTPS | Via ingress |
 
-### External Endpoints (via Cloudflare Tunnel)
+### AWS NLB Relay (Hybrid Dev)
 
-| Hostname | Backend Service | Protocol | Purpose |
-|----------|-----------------|----------|---------|
-| keycloak.aegis-platform.tech | keycloak:8443 | HTTPS | Public Keycloak access |
-| remote.aegis-platform.tech | platform-api:8081 | h2c/gRPC | Remote platform API access |
-
-### AWS Resources (Production/Remote)
+All remote spoke traffic routes through the AWS NLB relay via SSH reverse tunnel:
 
 | Resource | Endpoint | Purpose |
 |----------|----------|---------|
-| NLB (gRPC) | aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081 | gRPC streaming for remote workspaces |
+| NLB :8081 | aegis-dev-relay-nlb-*.elb.us-east-1.amazonaws.com:8081 | gRPC (platform-api) |
+| NLB :8443 | aegis-dev-relay-nlb-*.elb.us-east-1.amazonaws.com:8443 | OIDC (Keycloak) |
 
 ---
 
@@ -252,7 +247,7 @@ This section documents the complete connectivity architecture for AWS EKS spoke 
 |------|------------|------------------------|
 | 1. Deploy local platform | SSH tunnel needs platform-api running | Tunnel starts but connections fail |
 | 2. Deploy relay infra | Tunnel script reads terraform outputs | Script fails with "relay IP not found" |
-| 3. Start AWS tunnel | Generates values-aws-relay.yaml with NLB | Spoke configured with wrong endpoint (Cloudflare) |
+| 3. Start AWS tunnel | Generates values-aws-relay.yaml with NLB | Spoke configured with wrong endpoint |
 | 4. Provision cluster | Needs all above running | Spoke can't connect, cluster stuck in "Pending" |
 
 #### Common Failure Modes
@@ -260,7 +255,7 @@ This section documents the complete connectivity architecture for AWS EKS spoke 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Spoke agent logs: "dial tcp: i/o timeout" | SSH tunnel not running | Run `./scripts/start-aws-tunnel.sh` |
-| Spoke agent logs: "server closed stream without trailers" | Spoke using Cloudflare endpoint (can't do gRPC streaming) | Re-run tunnel script to regenerate values, redeploy spoke |
+| Spoke agent logs: "server closed stream without trailers" | Spoke using stale endpoint | Re-run tunnel script to regenerate values, redeploy spoke with `--reset-values` |
 | NLB target "unused" state | NLB listeners not created | Check terraform completed; may need `terraform apply` |
 | "cluster registration failed" | Tunnel or port-forward died | Check `ps aux | grep ssh.*aegis-relay` and restart |
 
@@ -546,7 +541,7 @@ postgres action failed: set_cluster_project: violates foreign key constraint "cl
 ```bash
 # Check target health
 aws elbv2 describe-target-health \
-  --target-group-arn "arn:aws:elasticloadbalancing:us-east-1:567751785679:targetgroup/aegis-dev-relay-grpc/a0dad6f9b7dc5670" \
+  --target-group-arn "arn:aws:elasticloadbalancing:us-east-1:195714074609:targetgroup/aegis-dev-relay-grpc/a0dad6f9b7dc5670" \
   --region us-east-1
 
 # Expected: "State": "healthy"
@@ -650,7 +645,7 @@ kubectl port-forward -n aegis-system svc/aegis-services-platform-api 8081:8081 &
 
 # Check NLB health manually
 aws elbv2 describe-target-health \
-  --target-group-arn "arn:aws:elasticloadbalancing:us-east-1:567751785679:targetgroup/aegis-dev-relay-grpc/a0dad6f9b7dc5670" \
+  --target-group-arn "arn:aws:elasticloadbalancing:us-east-1:195714074609:targetgroup/aegis-dev-relay-grpc/a0dad6f9b7dc5670" \
   --region us-east-1
 
 # Check clusters in database
@@ -916,12 +911,12 @@ kubectl logs -n aegis-spoke -l app.kubernetes.io/component=k8s-agent --tail=100 
 - Certificates can have valid SANs for these hostnames
 - No need for custom DNS server or dnsmasq
 
-### External Domains (Cloudflare DNS)
+### External Domains
 
 | Domain | Points To |
 |--------|-----------|
-| *.aegis-platform.tech | Cloudflare Tunnel |
-| *.aegist.dev | AWS resources (EKS, NLB) |
+| *.aegis-platform.tech | Canonical public full-cloud endpoints (`ui`, `platform-api`, `proxy`, `keycloak`) |
+| *.localtest.me | Local TLS ingress endpoints for development |
 
 ---
 
@@ -1114,7 +1109,7 @@ kubectl -n keycloak get secret keycloak-tls -o jsonpath='{.data.tls\.crt}' | \
 |-------------|-----------------|
 | localhost:3000 (Backstage) | None (HTTP dev server) |
 | *.localtest.me (local) | ingress-nginx terminates, re-encrypts to backends |
-| *.aegis-platform.tech (external) | Cloudflare terminates, cloudflared connects with noTLSVerify |
+| NLB relay (hybrid dev) | TCP passthrough (no TLS termination), spoke uses AEGIS_CP_OIDC_SKIP_TLS_VERIFY |
 
 ### Local CA Trust
 
@@ -1136,11 +1131,11 @@ NODE_EXTRA_CA_CERTS=~/aegis-local-trust.pem yarn dev
 
 If you only pass your custom CA to these libraries:
 - Connections to services using your custom CA will work (e.g., `platform-api-grpc.localtest.me`)
-- Connections to services using public CAs (Cloudflare, Let's Encrypt, etc.) will **FAIL** with `unable to get local issuer certificate`
+- Connections to services using public CAs (Let's Encrypt, etc.) will **FAIL** with `unable to get local issuer certificate`
 
 Example failure scenario:
-1. Extension authenticates via Keycloak at `keycloak.aegis-platform.tech` (Cloudflare certificate)
-2. Only custom CA is loaded → Cloudflare's certificate chain cannot be verified
+1. Extension authenticates via Keycloak at `keycloak.localtest.me` (self-signed certificate)
+2. Only custom CA is loaded → certificate chain cannot be verified
 3. Token exchange fails: `fetch failed (unable to get local issuer certificate)`
 
 #### The Solution: Shared TLS Utility
@@ -1251,59 +1246,26 @@ new Agent({ connect: { ca: getCombinedCAsArray(customCa) } })
 
 ---
 
-## Cloudflare Tunnel Setup
+## Remote Spoke Connectivity (AWS NLB Relay)
 
-### Tunnel Information
+> **Note:** Cloudflare tunnels were previously used for OIDC/Keycloak connectivity but have been
+> replaced by the unified AWS NLB relay. All traffic (gRPC and OIDC) now routes through the NLB
+> via SSH reverse tunnel. See `docs/aws-tunnel-dev-setup.md` for setup instructions.
 
-| Property | Value |
-|----------|-------|
-| Tunnel ID | a21f6af6-e7b8-49d5-90be-08f0a8d9a829 |
-| Account Tag | aff4ed64e72c1e215be1a4ba105e4ab1 |
-| Config File | `/cloudflared-config.yaml` (repo root) |
+### Architecture
 
-### Tunnel Ingress Rules
-
-```yaml
-ingress:
-  # Platform API (gRPC via h2c)
-  - hostname: remote.aegis-platform.tech
-    service: https://aegis-services-platform-api.aegis-system.svc.cluster.local:8081
-    originRequest:
-      noTLSVerify: true
-      http2Origin: true
-      disableChunkedEncoding: true
-
-  # Keycloak (HTTPS)
-  - hostname: keycloak.aegis-platform.tech
-    service: https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443
-    originRequest:
-      noTLSVerify: true
-      httpHostHeader: keycloak.aegis-platform.tech
-      originServerName: keycloak.aegis-platform.tech
-
-  # Catch-all 404
-  - service: http_status:404
+```
+EKS spoke → NLB :8081 → SSH tunnel → local platform-api :8081
+EKS spoke → NLB :8443 → SSH tunnel → local keycloak :8443
 ```
 
-### Deploying cloudflared
+### Quick Start
 
 ```bash
-# Manual deployment (if setup script fails)
-kubectl apply -f cloudflared-config.yaml
-
-# Verify tunnel is running
-kubectl -n aegis-system get pods -l app=cloudflared
-kubectl -n aegis-system logs -l app=cloudflared --tail=20
-
-# Expected log output: "Connection ... registered" (4 connections)
+./scripts/start-aws-tunnel.sh
 ```
 
-### Why cloudflared Instead of Public Ingress?
-
-- Local Docker Desktop cluster has no public IP
-- Cloudflare tunnel creates outbound connection to Cloudflare edge
-- Cloudflare handles TLS termination and DDoS protection
-- No need to expose ports or configure port forwarding
+This starts port-forwards, establishes the SSH tunnel, and generates the Helm values file.
 
 ---
 
@@ -1447,7 +1409,7 @@ Project annotations **must use camelCase** after the domain prefix. The system a
 ```json
 {
   "aegis.yourorg.dev/awsRoleArn": "arn:aws:iam::...",
-  "aegis.yourorg.dev/awsAccountId": "567751785679",
+  "aegis.yourorg.dev/awsAccountId": "195714074609",
   "aegis.yourorg.dev/awsExternalId": "..."
 }
 ```
@@ -1480,6 +1442,9 @@ WHERE c.deleted_at IS NULL;
 
 ## AWS Credentials Architecture
 
+> For the full dev-mode vs production-mode comparison and switching checklist,
+> see [Dev Mode vs Production](dev-mode-vs-production.md).
+
 **CRITICAL:** The platform uses a specific credential flow. Using incorrect credentials will cause Pulumi failures, EKS provisioning errors, or "InvalidAccessKeyId" errors.
 
 ### Credential Flow Diagram
@@ -1500,7 +1465,7 @@ WHERE c.deleted_at IS NULL;
                              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  aegis-platform (IAM Role)                                              │
-│  ARN: arn:aws:iam::567751785679:role/aegis-platform                     │
+│  ARN: arn:aws:iam::195714074609:role/aegis-platform                     │
 │  Policy: AdministratorAccess                                            │
 │                                                                          │
 │  Used for:                                                               │
@@ -1535,9 +1500,9 @@ terraform output pulumi_secret_access_key
 | Item | Value |
 |------|-------|
 | IAM User | `aegis-pulumi-provisioner` |
-| User ARN | `arn:aws:iam::567751785679:user/service/aegis-pulumi-provisioner` |
+| User ARN | `arn:aws:iam::195714074609:user/service/aegis-pulumi-provisioner` |
 | Access Key ID | `REPLACE_WITH_AWS_ACCESS_KEY_ID` |
-| Target Role ARN | `arn:aws:iam::567751785679:role/aegis-platform` |
+| Target Role ARN | `arn:aws:iam::195714074609:role/aegis-platform` |
 | S3 Bucket | `aegis-pulumi-state-dev` |
 | S3 Prefix | `aegis/pulumi` |
 
@@ -1578,7 +1543,7 @@ kubectl -n aegis-system rollout restart deployment/aegis-services-platform-api
 # 5. Verify
 kubectl -n aegis-system exec deployment/aegis-services-platform-api -- \
   aws sts get-caller-identity
-# Should show: arn:aws:iam::567751785679:user/service/aegis-pulumi-provisioner
+# Should show: arn:aws:iam::195714074609:user/service/aegis-pulumi-provisioner
 ```
 
 ### Verification Commands
@@ -1595,10 +1560,10 @@ kubectl -n aegis-system exec deployment/aegis-services-platform-api -- \
 # Test AssumeRole capability
 kubectl -n aegis-system exec deployment/aegis-services-platform-api -- \
   aws sts assume-role \
-    --role-arn "arn:aws:iam::567751785679:role/aegis-platform" \
+    --role-arn "arn:aws:iam::195714074609:role/aegis-platform" \
     --role-session-name test \
     --query 'AssumedRoleUser.Arn' --output text
-# Should show: arn:aws:sts::567751785679:assumed-role/aegis-platform/test
+# Should show: arn:aws:sts::195714074609:assumed-role/aegis-platform/test
 ```
 
 ### Common Credential Issues
@@ -1653,7 +1618,7 @@ data "aws_iam_policy_document" "pulumi" {
   statement {
     effect    = "Allow"
     actions   = ["sts:AssumeRole"]
-    resources = ["arn:aws:iam::567751785679:role/aegis-platform"]
+    resources = ["arn:aws:iam::195714074609:role/aegis-platform"]
   }
 
   # S3 state bucket access
@@ -1686,17 +1651,22 @@ data "aws_iam_policy_document" "pulumi" {
 
 ### Backstage (aegis-ui)
 
-See `aegis-ui/app-config.local-dev.yaml` and `.env.development`:
-```yaml
-auth:
-  providers:
-    keycloak:
-      development:
-        clientId: backstage
-        clientSecret: local-backstage-client-secret
-        issuer: https://keycloak.aegis-platform.tech/realms/aegis
-        metadataUrl: https://keycloak.aegis-platform.tech/realms/aegis/.well-known/openid-configuration
-```
+The external `aegis-ui` repo is relevant when you are running the UI source locally.
+It is **not** the source of truth for the production cloud UI.
+
+For the current cloud auth/runtime contract, use:
+
+- `charts/aegis-services/templates/backstage/configmap-runtime.yaml`
+- `docs/security/auth.md`
+- `AGENT_DEPLOYMENT_GUIDE.md`
+
+Current cloud auth expectations:
+
+- public UI: `https://ui.aegis-platform.tech`
+- public issuer: `https://keycloak.aegis-platform.tech/realms/aegis`
+- `backend.trustProxy: true`
+- `auth.providers.keycloak.<env>.signIn.resolvers` must stay configured
+- pre-login `GET /api/auth/keycloak/refresh?... -> 401 Missing session cookie` is expected
 
 ---
 
@@ -1715,7 +1685,7 @@ auth:
 
 | File | Purpose |
 |------|---------|
-| `cloudflared-config.yaml` | Cloudflare tunnel deployment (manual) |
+| `terraform/dev-relay/relay.tf` | AWS NLB relay infrastructure |
 | `charts/aegis-services/templates/keycloak/` | Keycloak CRDs and resources |
 | `charts/aegis-services/templates/platform-api-*.yaml` | Platform API resources |
 | `charts/aegis-services/crds/` | Custom Resource Definitions |
@@ -1731,7 +1701,7 @@ auth:
 
 | File | Purpose |
 |------|---------|
-| `scripts/setup-cloudflare-tunnels.sh` | Cloudflare tunnel setup (may have bugs) |
+| `scripts/start-aws-tunnel.sh` | AWS NLB relay tunnel setup |
 | `scripts/generate-certs.sh` | Generate local TLS certificates |
 | `scripts/verify-ca-consistency.sh` | **Pre-deploy check** - Validates CA and Keycloak certs match |
 | `scripts/regenerate-matching-certs.sh` | **Recovery** - Regenerates matching CA + Keycloak certs |
@@ -1802,9 +1772,6 @@ curl -k -s https://keycloak.localtest.me/realms/aegis/ | jq '.realm'
 # Check Platform-API health
 curl -k https://platform-api.localtest.me/healthz
 
-# Check cloudflared tunnel status
-kubectl -n aegis-system logs -l app=cloudflared --tail=10
-
 # Check all pods status
 kubectl get pods -A | grep -E "aegis-system|keycloak|ingress-nginx"
 ```
@@ -1824,7 +1791,7 @@ Authentication Error?
 │       └── "invalid issuer" → Check OIDC_ISSUER_URL matches Keycloak
 │
 ├── Keycloak 530/Connection Refused
-│   └── kubectl apply -f cloudflared-config.yaml
+│   └── Check Keycloak pod is running and port-forward is active
 │
 └── "invalid bearer token"
     └── Clear browser cookies and re-login
@@ -1833,6 +1800,8 @@ Authentication Error?
 ---
 
 ## Deployment Commands
+
+This section is a local convenience reference only. Use `AGENT_DEPLOYMENT_GUIDE.md` for the current authoritative deployment workflow.
 
 ### Full Local Deployment
 
@@ -1862,8 +1831,8 @@ make clean-local-all && make deploy-local-tls
 # Rebuild and push platform-api image
 make build-platform-api push-platform-api
 
-# Apply cloudflared manually
-kubectl apply -f cloudflared-config.yaml
+# Start AWS relay tunnel (for hybrid dev)
+./scripts/start-aws-tunnel.sh
 
 # Restart a deployment
 kubectl -n aegis-system rollout restart deploy/aegis-services-platform-api
@@ -1894,16 +1863,7 @@ curl -k -s https://keycloak.localtest.me/realms/aegis/ | jq '.realm'
 curl -k https://platform-api.localtest.me/healthz
 # Expected: OK or similar
 
-# 4. Verify cloudflared is running
-kubectl -n aegis-system get pods -l app=cloudflared
-kubectl -n aegis-system logs -l app=cloudflared --tail=10
-# Expected: "Connection ... registered"
-
-# 5. Verify external access via Cloudflare
-curl -s https://keycloak.aegis-platform.tech/realms/aegis/ | jq '.realm'
-# Expected: "aegis"
-
-# 6. Verify ingress controller
+# 4. Verify ingress controller
 kubectl -n ingress-nginx get pods
 
 # 7. Check PostgreSQL (platform-api)
@@ -1924,19 +1884,18 @@ kubectl -n keycloak get pods -l app=keycloak-postgres
 **Solution:**
 1. Wait 2-3 minutes for all pods to stabilize
 2. Check `kubectl get pods -A`
-3. If cloudflared is missing: `kubectl apply -f cloudflared-config.yaml`
-4. If persistent issues: `make clean-local && make deploy-local-tls`
+3. If persistent issues: `make clean-local && make deploy-local-tls`
 
-### Keycloak 530/Connection Refused
+### Keycloak Connection Refused
 
-**Symptom:** Browser shows 530 error or ERR_CONNECTION_REFUSED for keycloak.aegis-platform.tech
+**Symptom:** ERR_CONNECTION_REFUSED for Keycloak
 
-**Cause:** cloudflared tunnel not deployed or not running
+**Cause:** Keycloak pod not running or port-forward not active
 
 **Solution:**
 ```bash
-kubectl apply -f cloudflared-config.yaml
-kubectl -n aegis-system logs -l app=cloudflared --tail=20
+kubectl -n keycloak get pods
+kubectl -n keycloak logs -l app=keycloak --tail=20
 ```
 
 ### Invalid Issuer / Token Errors
@@ -1950,7 +1909,7 @@ kubectl -n aegis-system logs -l app=cloudflared --tail=20
    ```bash
    curl -s https://keycloak.aegis-platform.tech/realms/aegis/.well-known/openid-configuration | jq -r '.issuer'
    ```
-2. Ensure Backstage config (`aegis-ui/.env.development` and `app-config.local-dev.yaml`) uses the same issuer
+2. If you are running the UI source repo locally, ensure the local `aegis-ui` config uses the same issuer. For cloud, inspect the generated Backstage runtime config in `aegis-platform`.
 3. Clear browser cookies
 4. Restart Backstage
 
@@ -2037,7 +1996,7 @@ make deploy-local-tls
 
 **Symptom:** ERR_CERT_AUTHORITY_INVALID in browser
 
-**Note:** For external access via *.aegis-platform.tech, Cloudflare handles TLS. You should NOT see certificate errors for these domains.
+**Note:** For remote spoke access, the NLB relay uses TCP passthrough (no TLS termination). The spoke agent uses `AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"` to accept self-signed certs.
 
 For local *.localtest.me access:
 1. Ensure `NODE_EXTRA_CA_CERTS=~/aegis-local-trust.pem` when running Backstage
@@ -2103,7 +2062,7 @@ If you need to manually recover:
 ```bash
 # Assume the aegis-platform role
 AWS_PROFILE=aegis
-CREDS=$(aws sts assume-role --role-arn arn:aws:iam::567751785679:role/aegis-platform --role-session-name recovery --output json)
+CREDS=$(aws sts assume-role --role-arn arn:aws:iam::195714074609:role/aegis-platform --role-session-name recovery --output json)
 export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')
 export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')
 export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')
@@ -2142,20 +2101,19 @@ LOCAL URLS:
   Platform API:     https://platform-api.localtest.me
   Platform gRPC:    https://platform-api-grpc.localtest.me
 
-EXTERNAL URLS (via Cloudflare):
-  Keycloak:         https://keycloak.aegis-platform.tech
-  Platform API:     https://remote.aegis-platform.tech
+REMOTE SPOKE (via AWS NLB relay):
+  gRPC:     NLB:8081 → SSH tunnel → local platform-api
+  OIDC:     NLB:8443 → SSH tunnel → local keycloak
 
 NAMESPACES:
-  aegis-system      Platform API, Proxy, cloudflared
+  aegis-system      Platform API, Proxy
   keycloak          Keycloak
   ingress-nginx     Ingress controller
 
 KEY COMMANDS:
   make deploy-local-tls              Deploy everything
   make clean-local                   Clean all resources
-  kubectl apply -f cloudflared-config.yaml   Deploy tunnel
-  kubectl -n aegis-system logs -l app=cloudflared   Check tunnel
+  ./scripts/start-aws-tunnel.sh      Start NLB relay tunnel
 
 SPOKE CLUSTER CONNECTIVITY (must be running for EKS clusters):
   make spoke-start      Start tunnel (foreground, Ctrl+C to stop)
@@ -2174,30 +2132,18 @@ AWS CREDENTIALS (terraform-managed):
   IAM User:         aegis-pulumi-provisioner
   Access Key:       REPLACE_WITH_AWS_ACCESS_KEY_ID
   Get secret:       cd terraform/pulumi-stack && terraform output pulumi_secret_access_key
-  Target Role:      arn:aws:iam::567751785679:role/aegis-platform
+  Target Role:      arn:aws:iam::195714074609:role/aegis-platform
 ```
 
 ---
 
-## Appendix: Cloudflare Tunnel Recovery
+## Appendix: AWS NLB Relay Tunnel
 
-If the Cloudflare tunnel needs to be recreated from scratch:
+The NLB relay infrastructure is defined in `terraform/dev-relay/relay.tf`. To set up or recover:
 
-1. **Tunnel ID:** a21f6af6-e7b8-49d5-90be-08f0a8d9a829
-2. **Account Tag:** aff4ed64e72c1e215be1a4ba105e4ab1
-3. **Credentials location:** `cloudflared-config.yaml` (stringData.credentials.json)
-
-The tunnel configuration is fully captured in `/cloudflared-config.yaml`. Simply apply it:
-```bash
-kubectl apply -f cloudflared-config.yaml
-```
-
-If the tunnel itself needs to be recreated in Cloudflare dashboard:
-1. Go to Cloudflare Zero Trust dashboard
-2. Access > Tunnels
-3. Create new tunnel or manage existing
-4. Update credentials in `cloudflared-config.yaml`
-5. Update DNS records for *.aegis-platform.tech to point to new tunnel
+1. Deploy the relay: `cd terraform/dev-relay && terraform apply`
+2. Start the tunnel: `./scripts/start-aws-tunnel.sh`
+3. See `docs/aws-tunnel-dev-setup.md` for full details
 
 ---
 

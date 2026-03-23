@@ -462,6 +462,11 @@ func clusterProject(ci *store.ClusterInfo) string {
 	if ci == nil {
 		return ""
 	}
+	// 1. Direct ProjectID field (populated by auto-derivation at register/heartbeat)
+	if ci.ProjectID != "" {
+		return ci.ProjectID
+	}
+	// 2. Label lookup (backward compat)
 	for k, v := range ci.Labels {
 		key := strings.ToLower(strings.TrimSpace(k))
 		switch key {
@@ -471,17 +476,12 @@ func clusterProject(ci *store.ClusterInfo) string {
 			}
 		}
 	}
-	// Extract project ID from cluster ID format: {projectId}-{region}-{clusterId}
-	// e.g., "db-1-us-east-1-atlas-train-govcloud" -> "db-1"
-	// Look for common AWS region patterns to find the boundary
-	id := strings.TrimSpace(ci.ID)
-	regionPatterns := []string{"-us-east-", "-us-west-", "-eu-west-", "-eu-central-", "-ap-", "-sa-east-", "-ca-central-", "-me-south-", "-af-south-"}
-	for _, pattern := range regionPatterns {
-		if idx := strings.Index(id, pattern); idx > 0 {
-			return id[:idx]
-		}
+	// 3. Shared region-pattern derivation (read-only fallback for display)
+	if derived := store.DeriveProjectIDFromClusterID(ci.ID); derived != "" {
+		return derived
 	}
-	// Fallback: take first part before hyphen
+	// 4. First segment fallback (kept for non-AWS cluster IDs)
+	id := strings.TrimSpace(ci.ID)
 	if parts := strings.Split(id, "-"); len(parts) > 1 && parts[0] != "" {
 		return parts[0]
 	}

@@ -20,6 +20,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// WorkspaceStorageSpec configures persistent storage for workspace pods.
+// Data persists across workspace restarts within the same project.
+type WorkspaceStorageSpec struct {
+	// Persistent enables PVC-backed storage. When false, workspace data is ephemeral.
+	// +kubebuilder:validation:Optional
+	Persistent bool `json:"persistent,omitempty"`
+
+	// StorageClass is the Kubernetes StorageClass name (e.g. "gp3"). Empty uses the cluster default.
+	// +kubebuilder:validation:Optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// Size is the storage capacity as a Kubernetes quantity (e.g. "50Gi").
+	// +kubebuilder:validation:Optional
+	Size string `json:"size,omitempty"`
+
+	// MountPath is the path inside the container where storage is mounted. Default: "/home/coder".
+	// +kubebuilder:validation:Optional
+	MountPath string `json:"mountPath,omitempty"`
+
+	// ExistingClaimName reuses an existing PVC by name for session continuity.
+	// +kubebuilder:validation:Optional
+	ExistingClaimName string `json:"existingClaimName,omitempty"`
+}
+
 // WorkspaceSpec defines properties for interactive workloads.
 type WorkspaceSpec struct {
 	// Flavor is the GPU flavor requested for the workspace pods.
@@ -45,6 +69,10 @@ type WorkspaceSpec struct {
 	// Ports exposes additional container ports for interactive scenarios (defaults to 11111 when empty).
 	// +kubebuilder:validation:Optional
 	Ports []int32 `json:"ports,omitempty"`
+
+	// Storage configures persistent storage for the workspace. When nil, platform defaults apply.
+	// +kubebuilder:validation:Optional
+	Storage *WorkspaceStorageSpec `json:"storage,omitempty"`
 }
 
 // TrainingSpec captures distributed training configuration details.

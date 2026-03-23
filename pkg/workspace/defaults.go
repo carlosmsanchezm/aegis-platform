@@ -20,7 +20,7 @@ const (
 	DefaultPasswordAccess = "true"
 	DefaultUserName       = "aegis"
 	DefaultUserPassword   = "aegis123"
-	DefaultWorkspaceImage = "567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+	DefaultWorkspaceImage = "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
 )
 
 // DefaultEnv returns a writable map containing the baseline VS Code server

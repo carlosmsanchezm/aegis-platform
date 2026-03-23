@@ -720,11 +720,15 @@
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:7008/*",
-        "https://backstage.localtest.me/*"
+        "https://backstage.localtest.me/*",
+        "http://ui.aegis-platform.tech:7007/*",
+        "https://ui.aegis-platform.tech/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "https://backstage.localtest.me"
+        "https://backstage.localtest.me",
+        "http://ui.aegis-platform.tech:7007",
+        "https://ui.aegis-platform.tech"
       ],
       "notBefore": 0,
       "bearerOnly": false,
@@ -1023,7 +1027,7 @@
       "consentRequired": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": true,
       "frontchannelLogout": true,

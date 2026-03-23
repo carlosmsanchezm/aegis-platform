@@ -38,6 +38,7 @@ type AWSProvisionMode string
 const (
 	AWSProvisionModeProvision AWSProvisionMode = "Provision"
 	AWSProvisionModeImport    AWSProvisionMode = "Import"
+	AWSProvisionModeDestroy   AWSProvisionMode = "Destroy"
 )
 
 // SecretKeyReference describes a namespaced secret key selector.
@@ -100,6 +101,8 @@ type ClusterOutput struct {
 	Name                string              `json:"name"`
 	Region              string              `json:"region"`
 	KubeconfigSecretKey string              `json:"kubeconfigSecretKey"`
+	ClusterEndpoint     string              `json:"clusterEndpoint,omitempty"`
+	ClusterCA           string              `json:"clusterCA,omitempty"`
 	Observability       ObservabilityOutput `json:"observability,omitempty"`
 }
 

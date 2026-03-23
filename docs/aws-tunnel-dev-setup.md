@@ -1,5 +1,12 @@
 # AWS Tunnel Development Setup
 
+> **Use this guide when:**
+> - k8s-agent can't reach platform-api (heartbeat failures, connection refused, deadline exceeded)
+> - gRPC errors: "server closed the stream without sending trailers"
+> - Running hybrid setup: local hub (Docker Desktop) + remote spoke (AWS EKS)
+>
+> **Quick start:** `./scripts/start-aws-tunnel.sh`
+
 This guide covers connecting remote AWS EKS spoke clusters to your local Docker Desktop platform during development.
 
 ## Architecture
@@ -12,21 +19,22 @@ This guide covers connecting remote AWS EKS spoke clusters to your local Docker 
 │  │ (gRPC:8081)  │     │ (8081)      │     │ to AWS Relay EC2       │   │
 │  └──────────────┘     └─────────────┘     └───────────┬─────────────┘   │
 │                                                        │                 │
-│  ┌──────────────┐     ┌─────────────────────────────────────────────┐   │
-│  │ Keycloak     │◄────┤ Cloudflare Tunnel (keycloak.aegis-...)      │   │
-│  │ (HTTPS:8443) │     │ (HTTPS works fine through Cloudflare)       │   │
-│  └──────────────┘     └─────────────────────────────────────────────┘   │
+│  ┌──────────────┐     ┌─────────────┐                  │                 │
+│  │ Keycloak     │◄────┤ Port-Forward│                  │                 │
+│  │ (HTTPS:8443) │     │ (8443)      │                  │                 │
+│  └──────────────┘     └─────────────┘                  │                 │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     │ AWS NLB (TCP passthrough)
-                                    │ Port 8081 → SSH Tunnel → Local
+                                    │ Port 8081 → SSH Tunnel → Local platform-api
+                                    │ Port 8443 → SSH Tunnel → Local keycloak
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  AWS EKS Cluster                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │ aegis-spoke (k8s-agent)                                           │   │
 │  │  - gRPC → NLB:8081 → SSH tunnel → local platform-api             │   │
-│  │  - OIDC → Cloudflare → local Keycloak                            │   │
+│  │  - OIDC → NLB:8443 → SSH tunnel → local Keycloak                 │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -35,8 +43,8 @@ This guide covers connecting remote AWS EKS spoke clusters to your local Docker 
 
 | Traffic | Route | Reason |
 |---------|-------|--------|
-| gRPC (platform-api) | AWS NLB → SSH tunnel | Cloudflare doesn't handle gRPC streaming properly |
-| OIDC (Keycloak) | Cloudflare tunnel | HTTPS works fine; NLB port 8443 often conflicts |
+| gRPC (platform-api) | AWS NLB :8081 → SSH tunnel → local :8081 | TCP passthrough preserves HTTP/2 |
+| OIDC (Keycloak) | AWS NLB :8443 → SSH tunnel → local :8443 | TCP passthrough, no extra dependencies |
 
 ## Prerequisites
 
@@ -51,12 +59,7 @@ This guide covers connecting remote AWS EKS spoke clusters to your local Docker 
    # Add public key to terraform.tfvars: relay_ssh_public_key = "..."
    ```
 
-3. **Cloudflare Tunnel** running (for Keycloak):
-   ```bash
-   kubectl get pods -n aegis-system -l app=cloudflared
-   ```
-
-4. **Remote cluster kubeconfig**:
+3. **Remote cluster kubeconfig**:
    ```bash
    # Create kubeconfig using AWS CLI (not aegis-eks-token)
    # See: /tmp/remote-kubeconfig-aegis.yaml
@@ -71,9 +74,9 @@ This guide covers connecting remote AWS EKS spoke clusters to your local Docker 
 ```
 
 This script:
-1. Starts `kubectl port-forward` to local platform-api (8081)
-2. Establishes SSH reverse tunnel to AWS relay EC2
-3. **Generates `charts/aegis-spoke/values-aws-relay.yaml`** with correct endpoints
+1. Starts `kubectl port-forward` to local platform-api (8081) and keycloak (8443)
+2. Establishes SSH reverse tunnel to AWS relay EC2 (forwarding both ports)
+3. **Generates `charts/aegis-spoke/values-aws-relay.yaml`** with correct NLB endpoints
 
 Keep this running in a terminal.
 
@@ -89,7 +92,7 @@ KUBECONFIG=/tmp/remote-kubeconfig-aegis.yaml helm upgrade aegis-spoke \
   --set k8sAgent.env.AEGIS_PROVIDER=aws
 ```
 
-**Important:** Always use `--reset-values` to clear any stale Cloudflare endpoints from previous deployments.
+**Important:** Always use `--reset-values` to clear any stale endpoints from previous deployments.
 
 ### Step 3: Verify Connection
 
@@ -114,7 +117,7 @@ kubectl --context docker-desktop logs \
 
 ### "server closed the stream without sending trailers"
 
-**Cause:** k8s-agent is using Cloudflare endpoint for gRPC instead of NLB.
+**Cause:** k8s-agent is using a stale endpoint for gRPC instead of NLB.
 
 **Fix:** Re-run helm upgrade with `--reset-values`:
 ```bash
@@ -127,9 +130,9 @@ KUBECONFIG=/tmp/remote-kubeconfig-aegis.yaml helm upgrade aegis-spoke \
   --set k8sAgent.env.AEGIS_PROVIDER=aws
 ```
 
-### Pulumi keeps overwriting helm values with Cloudflare
+### Pulumi keeps overwriting helm values with wrong endpoint
 
-**Cause:** Platform-api has `AEGIS_PLATFORM_API_ENDPOINT` set to Cloudflare. The Pulumi runner (runner.go line 997) **overrides** `AEGIS_CP_GRPC` in the values file with this env var.
+**Cause:** Platform-api has `AEGIS_PLATFORM_API_ENDPOINT` set to a stale endpoint. The Pulumi runner (runner.go line 997) **overrides** `AEGIS_CP_GRPC` in the values file with this env var.
 
 **Fix:** Update platform-api's env var to use NLB:
 ```bash
@@ -154,16 +157,51 @@ KUBECONFIG=/tmp/remote-kubeconfig-aegis.yaml helm rollback aegis-spoke -n aegis-
 
 ### OIDC token fetch timeout
 
-**Cause:** Keycloak Cloudflare tunnel not running or slow.
+**Cause:** Keycloak port-forward or SSH tunnel not running.
 
-**Fix:** Check cloudflared pod:
+**Fix:** Restart the tunnel:
 ```bash
-kubectl --context docker-desktop logs -n aegis-system deployment/cloudflared
+./scripts/stop-aws-tunnel.sh
+./scripts/start-aws-tunnel.sh
 ```
 
 ### Port 8443 already in use
 
-**Note:** This is expected. The script tries to forward Keycloak via NLB but we use Cloudflare instead. The error can be ignored.
+**Cause:** Another process (e.g. `make port-forward`) already bound port 8443 before the tunnel script.
+
+**Fix:** The script now kills all processes on ports 8081/8443 before starting. If it still fails, manually kill the conflicting process:
+```bash
+lsof -ti:8443 | xargs kill -9
+```
+
+### Cluster shows "unhealthy" after rebuilding/restarting platform-api
+
+**Cause:** Restarting the platform-api pod (e.g., after `make build-platform-local` + `kubectl rollout restart`) kills the `kubectl port-forward` on port 8081. The SSH tunnel is still running but its target (`localhost:8081`) is gone, so the EKS spoke can't reach platform-api and heartbeats stop. After 45 seconds without a heartbeat, the cluster is marked stale/unhealthy.
+
+**The port-forward chain:**
+```
+EKS spoke → NLB relay → SSH tunnel → localhost:8081 → port-forward → platform-api pod
+                                      ^^^^^^^^^^^
+                                      Dies when pod restarts
+```
+
+**Fix:** Re-establish the port-forward on 8081 (and 8443 for Keycloak if needed):
+```bash
+# Check if port-forwards are alive
+lsof -i :8081  # gRPC to platform-api
+lsof -i :8443  # OIDC to Keycloak
+
+# Restart whichever is missing
+kubectl -n aegis-system port-forward svc/aegis-services-platform-api 8081:8081 &
+kubectl -n keycloak port-forward svc/aegis-services-keycloak 8443:8443 &
+
+# Also restart the dev port-forward if needed (for local UI/grpcurl access)
+kubectl -n aegis-system port-forward svc/aegis-services-platform-api 10080:8080 10081:8081 &
+```
+
+The spoke agent reconnects automatically within ~10 seconds once the port-forward is back.
+
+**Rule of thumb:** Any time you restart a pod that the SSH tunnel targets, re-check port-forwards with `lsof -i :8081 :8443`.
 
 ### Connection reset by peer on NLB
 
@@ -248,7 +286,7 @@ VS Code Extension → Spoke Proxy (AWS) → Workspace Pod (AWS)
 ### Testing with VS Code Extension
 
 1. Open VS Code with the Aegis extension
-2. Sign in (uses Cloudflare → Keycloak)
+2. Sign in (uses local Keycloak via ingress)
 3. Select a workspace in the remote cluster
 4. Connect - the extension will receive the spoke proxy URL from platform-api
 
@@ -275,7 +313,7 @@ The platform-api's `buildSessionContext()` checks the cluster's proxy URL and re
 Use this checklist when spinning up the EKS cluster after it's been stopped.
 
 ### Prerequisites
-- AWS profile `aegis` configured with role `arn:aws:iam::567751785679:role/aegis-platform`
+- AWS profile `aegis` configured with role `arn:aws:iam::195714074609:role/aegis-platform`
 - Docker Desktop running with Kubernetes enabled
 - Local aegis-services deployed
 
@@ -297,7 +335,7 @@ aws eks update-kubeconfig \
   --name db-1-us-east-1-atlas-train-govcloud \
   --region us-east-1 \
   --profile aegis \
-  --role-arn arn:aws:iam::567751785679:role/aegis-platform \
+  --role-arn arn:aws:iam::195714074609:role/aegis-platform \
   --kubeconfig /tmp/remote-kubeconfig-aegis.yaml
 
 # Test access
@@ -340,7 +378,7 @@ users:
       - --cluster-name
       - db-1-us-east-1-atlas-train-govcloud
       - --role-arn
-      - arn:aws:iam::567751785679:role/aegis-platform
+      - arn:aws:iam::195714074609:role/aegis-platform
       - --output
       - json
       command: aws
@@ -431,7 +469,7 @@ kubectl get secret aegis-kubeconfigs -n aegis-system -o json | jq '.data | keys'
 |-----------|-------|
 | Cluster ID | `db-1-us-east-1-atlas-train-govcloud` |
 | AWS Profile | `aegis` |
-| IAM Role | `arn:aws:iam::567751785679:role/aegis-platform` |
+| IAM Role | `arn:aws:iam::195714074609:role/aegis-platform` |
 | EKS Region | `us-east-1` |
 | Spoke Proxy Port | `31484` |
 | Local Trust Cert | `~/aegis-local-trust.pem` |

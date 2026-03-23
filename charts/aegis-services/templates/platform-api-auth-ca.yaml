@@ -2,7 +2,10 @@
 {{- $auth := $platform.auth | default dict -}}
 {{- $oidc := $auth.oidc | default dict -}}
 {{- $ca := $oidc.caBundle | default dict -}}
-{{- if and $platform.enabled $ca.create -}}
+{{- $pki := .Values.pki | default dict -}}
+{{- $oidcCaSource := ($pki.oidcCa | default dict).source | default "" -}}
+{{- /* Skip when pki-secrets-init hook creates the OIDC CA from trust bundle */ -}}
+{{- if and $platform.enabled $ca.create (ne $oidcCaSource "trustBundle") -}}
 {{- $secretName := include "aegis-services.platformApi.oidcCASecretName" . -}}
 {{- $bundle := trim $ca.data -}}
 {{- if and $secretName $bundle -}}

@@ -4,7 +4,7 @@
 # Creates everything needed for cloud GPU testing
 #
 # Environment Variables:
-#   AWS_PROFILE - AWS profile to use (default: myclaude)
+#   AWS_PROFILE - AWS profile to use (default: aegis-new)
 #   PLATFORM_API_ENDPOINT - Platform API gRPC endpoint (default: placeholder)
 #
 # Usage:
@@ -21,8 +21,8 @@ set -e
 
 CLUSTER_NAME="aegis-spoke-prod"
 REGION="us-east-1"
-AWS_PROFILE="${AWS_PROFILE:-myclaude}"
-ACCOUNT_ID="567751785679"
+AWS_PROFILE="${AWS_PROFILE:-aegis-new}"
+ACCOUNT_ID="195714074609"
 PLATFORM_API_ENDPOINT="${PLATFORM_API_ENDPOINT:-YOUR_PLATFORM_API_ENDPOINT:8081}"
 
 echo "🚀 Deploying Aegis to AWS"

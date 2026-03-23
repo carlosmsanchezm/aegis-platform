@@ -2,6 +2,14 @@
 
 A unified Helm chart for deploying Aegis spoke components (k8s-agent and proxy) in workload clusters.
 
+**Authoritative for:** spoke chart values, install examples, and spoke-specific configuration.
+
+**Not authoritative for:** hub deployment workflow, full-cloud rollout sequencing, or production runbook decisions.
+
+**See also:**
+- `AGENT_DEPLOYMENT_GUIDE.md` -- deployment workflow and hybrid/full-cloud behavior
+- `docs/networking-architecture.md` -- hub/spoke connection flows
+
 ## Overview
 
 This chart deploys the "spoke" side of the Aegis hub-and-spoke architecture:
@@ -33,7 +41,7 @@ For production deployment on cloud platforms:
 helm install aegis-spoke ./charts/aegis-spoke \
   -f ./charts/aegis-spoke/values.yaml \
   --set-string k8sAgent.env.AEGIS_CLUSTER_ID="prod-cluster-1" \
-  --set-string k8sAgent.env.AEGIS_CP_GRPC="platform-api-grpc.aegist.dev:8081" \
+  --set-string k8sAgent.env.AEGIS_CP_GRPC="platform-api.aegis-platform.tech:8081" \
   --set-string k8sAgent.env.AEGIS_REGION="us-east-1" \
   --set-string k8sAgent.env.AEGIS_PROVIDER="aws" \
   --set-string k8sAgent.env.AEGIS_FLAVORS="cpu-small,cpu-large,gpu-a100" \
@@ -96,7 +104,7 @@ Configure how the agent connects to the central platform-api:
 k8sAgent:
   env:
     # Hub gRPC endpoint
-    AEGIS_CP_GRPC: "platform-api-grpc.aegist.dev:8081"
+    AEGIS_CP_GRPC: "platform-api.aegis-platform.tech:8081"
 
     # Cluster identifier (must be unique across all clusters)
     AEGIS_CLUSTER_ID: "prod-cluster-1"
@@ -164,6 +172,39 @@ k8sAgent:
     # Can point to centralized proxy (aegis-services) or per-cluster proxy
     AEGIS_PROXY_INGRESS_HOST: "proxy.customer-a.aegis.dev"
 ```
+
+## Workspace Storage Configuration
+
+Workspaces support persistent storage via Kubernetes PVCs. Configure defaults in the spoke chart values:
+
+```yaml
+k8sAgent:
+  workspace:
+    storage:
+      defaultEnabled: true       # Workspaces get persistent storage by default
+      defaultSize: "50Gi"        # Default PVC size
+      defaultStorageClass: ""    # Empty = cluster default. Examples below.
+      defaultMountPath: "/home/coder"
+```
+
+### Storage class examples by provider
+
+| Provider | StorageClass | Values snippet |
+|---|---|---|
+| EKS (AWS) | `gp3` | `defaultStorageClass: "gp3"` |
+| AKS (Azure) | `managed-premium` | `defaultStorageClass: "managed-premium"` |
+| GKE (GCP) | `standard-rwo` | `defaultStorageClass: "standard-rwo"` |
+| On-prem / RKE2 | `local-path` | `defaultStorageClass: "local-path"` |
+| Docker Desktop | (leave empty) | `defaultStorageClass: ""` (uses hostpath) |
+| Air-gapped | site-specific | Set to whatever StorageClass is available in the air-gapped cluster |
+
+### How it works
+
+When a workspace is created with `storage.persistent=true` (the default):
+1. The k8s-agent creates a PVC named `aegis-ws-{workloadId}` in the workload namespace
+2. The PVC is mounted at the configured `mountPath` (default `/home/coder`)
+3. If the workspace restarts, the same PVC is reattached — data persists
+4. PVCs are labeled with `aegis.yourorg.dev/project` for cleanup
 
 ## Proxy Configuration
 
@@ -363,13 +404,13 @@ helm install aegis-spoke ./charts/aegis-spoke \
   -f ./charts/aegis-spoke/values.yaml \
   --set proxy.enabled=true \
   --set-string k8sAgent.env.AEGIS_CLUSTER_ID="prod-us-east-1-cluster-1" \
-  --set-string k8sAgent.env.AEGIS_CP_GRPC="platform-api-grpc.aegist.dev:8081" \
+  --set-string k8sAgent.env.AEGIS_CP_GRPC="platform-api.aegis-platform.tech:8081" \
   --set-string k8sAgent.env.AEGIS_CP_GRPC_INSECURE="false" \
   --set-string k8sAgent.env.AEGIS_REGION="us-east-1" \
   --set-string k8sAgent.env.AEGIS_PROVIDER="aws" \
   --set-string k8sAgent.env.AEGIS_FLAVORS="cpu-small,cpu-large,gpu-a100" \
   --set-string proxy.jwtSecret="$(openssl rand -base64 32)" \
-  --set proxy.ingress.hostname="proxy-us-east-1.aegist.dev" \
+  --set proxy.ingress.hostname="proxy-us-east-1.aegis-platform.tech" \
   --set-file proxy.tls.cert=/path/to/production-cert.pem \
   --set-file proxy.tls.key=/path/to/production-key.pem \
   --namespace aegis-system --create-namespace
@@ -578,7 +619,7 @@ proxy:
   enabled: false
 k8sAgent:
   env:
-    AEGIS_PROXY_INGRESS_HOST: "proxy.central.aegist.dev"
+    AEGIS_PROXY_INGRESS_HOST: "proxy.central.aegis-platform.tech"
 ```
 
 **Option 2: Per-Cluster Proxy**
@@ -591,7 +632,7 @@ k8sAgent:
 proxy:
   enabled: true
   ingress:
-    hostname: "proxy.cluster-1.aegist.dev"
+    hostname: "proxy.cluster-1.aegis-platform.tech"
 ```
 
 ## Contributing

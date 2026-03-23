@@ -65,6 +65,12 @@ docker-load:
 	echo "Building $(IMG) for $$PLATFORM (local load)"; \
 	docker buildx build --no-cache \
 		--platform "$$PLATFORM" \
+		--build-arg BUILDER_REGISTRY=docker.io \
+		--build-arg BUILDER_IMAGE=library/golang \
+		--build-arg BUILDER_TAG=1.24 \
+		--build-arg BASE_REGISTRY=registry.access.redhat.com \
+		--build-arg BASE_IMAGE=ubi9/ubi-minimal \
+		--build-arg BASE_TAG=9.7 \
 		--tag $(IMG) \
 		--load \
 		-f $(CURDIR)/Dockerfile \

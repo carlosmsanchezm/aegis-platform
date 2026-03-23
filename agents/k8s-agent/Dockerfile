@@ -54,7 +54,7 @@ LABEL org.opencontainers.image.title="aegis-k8s-agent" \
       org.opencontainers.image.description="Aegis Platform Kubernetes operator agent for spoke cluster workload reconciliation" \
       org.opencontainers.image.vendor="Aegis Platform" \
       org.opencontainers.image.licenses="Proprietary" \
-      mil.dso.ironbank.image.type="opensource" \
+      mil.dso.ironbank.image.type="commercial" \
       mil.dso.ironbank.product.name="aegis-k8s-agent"
 
 RUN microdnf update -y && \
@@ -69,6 +69,8 @@ RUN groupadd -g 65532 nonroot && \
 
 WORKDIR /
 COPY --from=builder --chown=root:root /workspace/agents/k8s-agent/manager .
+
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 USER 65532:65532
 

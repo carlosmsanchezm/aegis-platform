@@ -74,7 +74,7 @@ cd /path/to/aegis-platform
 ./scripts/compliance/export_github_security_baseline.sh /path/to/aegis-compliance-evidence/soc2/2025/2025-01/ci-cd-security
 
 # Export AWS security baseline
-AWS_PROFILE=myclaude ./scripts/compliance/export_aws_security_baseline.sh /path/to/aegis-compliance-evidence/soc2/2025/2025-01/access-reviews
+AWS_PROFILE=aegis-new ./scripts/compliance/export_aws_security_baseline.sh /path/to/aegis-compliance-evidence/soc2/2025/2025-01/access-reviews
 
 # Export CI reports (SBOM, vuln scans)
 ./scripts/compliance/export_ci_reports.sh /path/to/aegis-compliance-evidence/soc2/2025/2025-01/vuln-management

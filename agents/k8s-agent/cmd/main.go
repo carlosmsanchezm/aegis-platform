@@ -21,6 +21,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -94,6 +96,9 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// FIPS 140-2 startup verification (SC-13)
+	checkFIPSMode()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -255,6 +260,20 @@ func main() {
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
+		os.Exit(1)
+	}
+}
+
+// checkFIPSMode verifies BoringCrypto is active at startup (SC-13 FIPS 140-2).
+func checkFIPSMode() {
+	boringActive := strings.Contains(goruntime.Version(), "boringcrypto")
+	if boringActive {
+		setupLog.Info("FIPS mode: enabled (BoringCrypto)", "go_version", goruntime.Version())
+	} else {
+		setupLog.Info("FIPS mode: disabled (standard Go crypto)", "go_version", goruntime.Version())
+	}
+	if os.Getenv("AEGIS_FIPS_ENABLED") == "true" && !boringActive {
+		setupLog.Error(nil, "AEGIS_FIPS_ENABLED=true but BoringCrypto is not active; binary must be built with GOEXPERIMENT=boringcrypto")
 		os.Exit(1)
 	}
 }

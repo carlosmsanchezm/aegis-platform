@@ -144,7 +144,7 @@ GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS=aegis-platform \
     ../aegis-compliance-evidence/soc2/$(date +%Y)/${MONTH}/ci-cd-security/
 
 # AWS export
-AWS_PROFILE=myclaude \
+AWS_PROFILE=aegis-new \
     ./scripts/compliance/export_aws_security_baseline.sh \
     ../aegis-compliance-evidence/soc2/$(date +%Y)/${MONTH}/access-reviews/
 

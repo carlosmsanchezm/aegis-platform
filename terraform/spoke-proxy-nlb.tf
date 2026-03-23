@@ -25,22 +25,6 @@
 #   - TCP passthrough preserves WebSocket/TLS
 
 ################################################################################
-# Variables for spoke-proxy NLB
-################################################################################
-
-variable "enable_spoke_proxy_nlb" {
-  description = "Enable the spoke-proxy NLB for VS Code remote connections"
-  type        = bool
-  default     = true
-}
-
-variable "spoke_proxy_port" {
-  description = "Port for spoke-proxy service (NodePort in EKS)"
-  type        = number
-  default     = 31484
-}
-
-################################################################################
 # Data sources for default VPC (where Pulumi creates clusters)
 ################################################################################
 

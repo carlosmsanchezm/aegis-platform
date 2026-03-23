@@ -33,7 +33,7 @@ Deletes:
 
 ## Prerequisites
 
-- AWS CLI configured with profile `myclaude`
+- AWS CLI configured with profile `aegis-new`
 - Docker running
 - kubectl, helm, eksctl installed
 

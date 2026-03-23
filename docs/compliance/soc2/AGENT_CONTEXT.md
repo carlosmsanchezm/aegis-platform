@@ -210,7 +210,7 @@ GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS="aegis-platform aegis-ui sovran" \
     ${VAULT_PATH}/soc2/${YEAR}/${MONTH}/ci-cd-security/
 
 # 2. AWS security baseline
-AWS_PROFILE=myclaude \
+AWS_PROFILE=aegis-new \
     ./scripts/compliance/export_aws_security_baseline.sh \
     ${VAULT_PATH}/soc2/${YEAR}/${MONTH}/access-reviews/
 

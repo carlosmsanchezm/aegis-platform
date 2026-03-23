@@ -345,7 +345,7 @@ jobs:
     env:
       RUN_SUBSET: ${{ needs.resolve-settings.outputs.run_subset }}
       MANUAL_IMAGE_TAG: ${{ needs.resolve-settings.outputs.manual_image_tag }}
-      ECR_REGISTRY: 567751785679.dkr.ecr.us-east-1.amazonaws.com
+      ECR_REGISTRY: 195714074609.dkr.ecr.us-east-1.amazonaws.com
     steps:
       - name: Download image artifacts
         if: ${{ contains('all,deploy,deploy-no-teardown', env.RUN_SUBSET) }}
@@ -492,7 +492,7 @@ jobs:
             echo "workspace=${{ needs.collect-built-images.outputs.workspace_image }}" >> "$GITHUB_OUTPUT"
           else
             IMAGE_TAG="${MANUAL_IMAGE_TAG:-${DEFAULT_E2E_IMAGE_TAG}}"
-            ECR_REGISTRY="567751785679.dkr.ecr.us-east-1.amazonaws.com"
+            ECR_REGISTRY="195714074609.dkr.ecr.us-east-1.amazonaws.com"
             echo "platform=${ECR_REGISTRY}/aegis/platform-api:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
             echo "proxy=${ECR_REGISTRY}/aegis/proxy:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
             echo "agent=${ECR_REGISTRY}/aegis/k8s-agent:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -957,9 +957,9 @@ jobs:
               IMAGE="${WORKSPACE_IMAGE_OUTPUT}"
               if [[ -z "${IMAGE}" ]]; then
                 if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
-                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${MANUAL_IMAGE_TAG}"
+                  IMAGE="195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${MANUAL_IMAGE_TAG}"
                 else
-                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${DEFAULT_E2E_IMAGE_TAG}"
+                  IMAGE="195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:${DEFAULT_E2E_IMAGE_TAG}"
                 fi
               fi
               scripts/test-workspace-connection.sh "${IMAGE}"
@@ -974,9 +974,9 @@ jobs:
               IMAGE="${K8S_AGENT_IMAGE_OUTPUT}"
               if [[ -z "${IMAGE}" ]]; then
                 if [[ -n "${MANUAL_IMAGE_TAG}" ]]; then
-                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${MANUAL_IMAGE_TAG}"
+                  IMAGE="195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${MANUAL_IMAGE_TAG}"
                 else
-                  IMAGE="567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${DEFAULT_E2E_IMAGE_TAG}"
+                  IMAGE="195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:${DEFAULT_E2E_IMAGE_TAG}"
                 fi
               fi
               export K8S_AGENT_E2E_IMAGE="${IMAGE}"

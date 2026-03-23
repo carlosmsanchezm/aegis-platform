@@ -1606,6 +1606,18 @@ But the honest answer is: **we use the proxy because Backstage requires it for a
 
 ---
 
+### "How do engineers get their data in and out? Does data persist across sessions?"
+
+**Answer:** Workspace pods support persistent storage via Kubernetes PVCs. By default, every workspace gets a 50Gi persistent volume mounted at `/home/coder`. Data — code, models, datasets, checkpoints — survives workspace restarts.
+
+- **Persistent storage is on by default** — togglable in the launch form
+- **Storage size is configurable** — 50Gi default, adjustable per workspace
+- **Data survives restarts** — the PVC is reattached when the workspace relaunches
+- **Custom images** — engineers can use their own Docker images with their ML tools pre-installed
+- **External storage** — workspaces can connect to S3, databases, MLflow servers, or any service reachable from the spoke cluster's network
+
+**Key line:** "Your engineers' work persists across sessions. Code, models, checkpoints — all mounted on persistent storage. They can also connect to your existing data stores, model registries, and ML tracking servers from inside the workspace."
+
 ### "Can we run this on bare metal / RKE2 / non-EKS?"
 
 **Answer:** The platform runs on any Kubernetes distribution. We've tested on:

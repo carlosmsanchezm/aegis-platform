@@ -3,8 +3,14 @@
 package certmanager
 
 import (
+	"crypto/sha1"
+	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -148,7 +154,15 @@ func ResolveFromEnv() Config {
 	if stepCaTLSCA == "" {
 		stepCaTLSCA = strings.TrimSpace(os.Getenv(envStepCaTLSCAB64))
 	}
-	// Fall back to internal root CA if TLS CA not specified
+	// If no explicit TLS CA is set and the step-ca URL is external (not cluster-local),
+	// auto-fetch the TLS CA chain from the remote server. This handles Cloudflare tunnel
+	// scenarios where the TLS cert is from a public CA, not from step-ca's internal CA.
+	if stepCaTLSCA == "" && stepCaURL != "" && !isClusterLocalURL(stepCaURL) {
+		if chain, err := fetchTLSCAChain(stepCaURL); err == nil && chain != "" {
+			stepCaTLSCA = chain
+		}
+	}
+	// Fall back to internal root CA if TLS CA still not available
 	if stepCaTLSCA == "" {
 		stepCaTLSCA = stepCaRootCA
 	}
@@ -338,6 +352,14 @@ func installStepIssuer(ctx *pulumi.Context, clusterID string, kubeProvider *kube
 			"limits": pulumi.Map{
 				"cpu":    pulumi.String("100m"),
 				"memory": pulumi.String("128Mi"),
+			},
+		},
+		// Override the deprecated gcr.io/kubebuilder/kube-rbac-proxy image
+		// which was removed from GCR. Use the new registry.k8s.io location.
+		"kubeRBACproxy": pulumi.Map{
+			"image": pulumi.Map{
+				"repository": pulumi.String("registry.k8s.io/kubebuilder/kube-rbac-proxy"),
+				"tag":        pulumi.String("v0.16.0"),
 			},
 		},
 	}
@@ -548,7 +570,11 @@ func createStepIssuerApproverRBAC(ctx *pulumi.Context, clusterID string, kubePro
 		return nil, fmt.Errorf("failed to create step-issuer approver ClusterRole: %w", err)
 	}
 
-	// Create ClusterRoleBinding to bind the approver role to cert-manager's service account
+	// Create ClusterRoleBinding to bind the approver role to cert-manager's service account.
+	// The SA name must match the cert-manager Helm release name, which uses pulumiResourceName
+	// truncation (same as installCertManager). Without this, the SA name won't match and
+	// cert-manager won't be able to approve CertificateRequests for StepClusterIssuers.
+	certManagerSAName := pulumiResourceName(cfg.CertManager.ReleaseName+"-"+clusterID, 53)
 	clusterRoleBinding, err := rbacv1.NewClusterRoleBinding(ctx, pulumiResourceName(clusterID+"-step-issuer-approver-binding", 53), &rbacv1.ClusterRoleBindingArgs{
 		Metadata: &metav1.ObjectMetaArgs{
 			Name: pulumi.String(fmt.Sprintf("cert-manager-approval:certmanager-step-sm:%s", issuerName)),
@@ -565,7 +591,7 @@ func createStepIssuerApproverRBAC(ctx *pulumi.Context, clusterID string, kubePro
 		Subjects: rbacv1.SubjectArray{
 			&rbacv1.SubjectArgs{
 				Kind:      pulumi.String("ServiceAccount"),
-				Name:      pulumi.String(fmt.Sprintf("cert-manager-%s", clusterID)),
+				Name:      pulumi.String(certManagerSAName),
 				Namespace: pulumi.String(namespace),
 			},
 		},
@@ -577,10 +603,81 @@ func createStepIssuerApproverRBAC(ctx *pulumi.Context, clusterID string, kubePro
 	return clusterRoleBinding, nil
 }
 
-// pulumiResourceName truncates a name to fit within Pulumi's resource name limits.
+// isClusterLocalURL returns true if the URL points to a Kubernetes cluster-internal service.
+func isClusterLocalURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return strings.HasSuffix(host, ".svc.cluster.local") ||
+		strings.HasSuffix(host, ".svc") ||
+		host == "localhost" ||
+		net.ParseIP(host) != nil
+}
+
+// fetchTLSCAChain connects to a TLS server and returns the base64-encoded PEM
+// of the non-leaf certificates (intermediate + root) in the chain. This is used
+// to auto-detect the CA bundle when connecting to step-ca through an external
+// proxy like Cloudflare, where the TLS cert is from a public CA.
+func fetchTLSCAChain(rawURL string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse URL: %w", err)
+	}
+
+	host := parsed.Hostname()
+	port := parsed.Port()
+	if port == "" {
+		port = "443"
+	}
+	addr := net.JoinHostPort(host, port)
+
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 10 * time.Second},
+		"tcp", addr,
+		&tls.Config{ServerName: host},
+	)
+	if err != nil {
+		return "", fmt.Errorf("TLS dial %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) < 2 {
+		return "", fmt.Errorf("server returned %d certificates, need at least 2 (leaf + CA)", len(certs))
+	}
+
+	// Collect non-leaf certificates (intermediate and root CAs)
+	var pemBytes []byte
+	for _, cert := range certs[1:] {
+		pemBytes = append(pemBytes, pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: cert.Raw,
+		})...)
+	}
+
+	return base64.StdEncoding.EncodeToString(pemBytes), nil
+}
+
+// pulumiResourceName truncates a name to fit within maxLen using a hash suffix
+// to avoid collisions when multiple long names share the same prefix.
 func pulumiResourceName(name string, maxLen int) string {
 	if len(name) <= maxLen {
 		return name
 	}
-	return name[:maxLen]
+	hash := sha1.Sum([]byte(name))
+	suffix := hex.EncodeToString(hash[:])[:8]
+	trim := maxLen - len(suffix) - 1
+	if trim <= 0 {
+		return suffix
+	}
+	if trim > len(name) {
+		trim = len(name)
+	}
+	trimmed := strings.TrimRight(name[:trim], "-")
+	if trimmed == "" {
+		return suffix
+	}
+	return trimmed + "-" + suffix
 }

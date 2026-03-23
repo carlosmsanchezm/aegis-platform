@@ -21,16 +21,3 @@ dependencies:
     version: "4.11.3"
     repository: https://kubernetes.github.io/ingress-nginx
     condition: ingressController.enabled
-  - name: cert-manager
-    version: "v1.16.2"
-    repository: https://charts.jetstack.io
-    condition: pki.certManager.enabled
-  - name: step-certificates
-    version: "1.28.4"
-    repository: https://smallstep.github.io/helm-charts
-    condition: pki.stepCa.enabled
-    alias: step-ca
-  - name: step-issuer
-    version: "1.9.11"
-    repository: https://smallstep.github.io/helm-charts
-    condition: pki.stepIssuer.enabled

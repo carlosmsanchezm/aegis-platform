@@ -52,7 +52,7 @@ LABEL org.opencontainers.image.title="aegis-proxy" \
       org.opencontainers.image.description="Aegis Platform reverse proxy for secure WebSocket workspace tunneling" \
       org.opencontainers.image.vendor="Aegis Platform" \
       org.opencontainers.image.licenses="Proprietary" \
-      mil.dso.ironbank.image.type="opensource" \
+      mil.dso.ironbank.image.type="commercial" \
       mil.dso.ironbank.product.name="aegis-proxy"
 
 RUN microdnf update -y && \
@@ -66,6 +66,8 @@ RUN groupadd -g 65532 nonroot && \
     useradd -u 65532 -g 65532 -s /sbin/nologin nonroot
 
 COPY --from=builder --chown=root:root /aegis-auth-proxy /aegis-auth-proxy
+
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 EXPOSE 8080
 

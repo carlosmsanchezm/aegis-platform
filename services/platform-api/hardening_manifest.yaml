@@ -60,7 +60,7 @@ resources:
     url: https://github.com/carlosmsanchezm/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
     validation:
       type: sha256
-      value: "PLACEHOLDER_REPLACE_WITH_ACTUAL_HASH_AT_RELEASE"
+      value: 4d30bfeb14d0bb71914cc114ead89125dac318c569775c8051d9e985e59d17a5
 
 maintainers:
   - name: "Carlos Sanchez"

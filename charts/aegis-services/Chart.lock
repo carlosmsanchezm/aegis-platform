@@ -2,14 +2,5 @@ dependencies:
 - name: ingress-nginx
   repository: https://kubernetes.github.io/ingress-nginx
   version: 4.11.3
-- name: cert-manager
-  repository: https://charts.jetstack.io
-  version: v1.16.2
-- name: step-certificates
-  repository: https://smallstep.github.io/helm-charts
-  version: 1.28.4
-- name: step-issuer
-  repository: https://smallstep.github.io/helm-charts
-  version: 1.9.11
-digest: sha256:d5e654a64ca7507cecf0614c59a4bd1cc1e35d0566298ca209803124af154233
-generated: "2026-01-15T17:36:20.602279-05:00"
+digest: sha256:e53bf1347ed06cbab50fb26d8813d04376fe761fd959dd9aa241f7b185288b9d
+generated: "2026-03-02T01:34:57.18159-05:00"

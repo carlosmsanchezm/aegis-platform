@@ -267,7 +267,7 @@ Key packages updated:
    - Authenticated and first export completed
 
 ~~3. **AWS CLI Configuration** - ✅ RESOLVED~~
-   - Using profile `myclaude`, first export completed
+   - Using profile `aegis-new`, first export completed
 
 **Current Blockers:** None
 

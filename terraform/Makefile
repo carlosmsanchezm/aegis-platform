@@ -10,7 +10,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Variables
-AWS_PROFILE ?= myclaude
+AWS_PROFILE ?= aegis-new
 AWS_REGION ?= us-east-1
 ENVIRONMENT ?= prod
 

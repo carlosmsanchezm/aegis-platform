@@ -48,7 +48,7 @@ Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
 export EVIDENCE_VAULT="$HOME/code/aegis-compliance-evidence"
 
 # Optional: AWS profile for compliance exports
-export AWS_PROFILE="myclaude"
+export AWS_PROFILE="aegis-new"
 
 # Optional: GitHub owner/repos (defaults provided in scripts)
 export GITHUB_OWNER="carlosmsanchezm"

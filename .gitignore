@@ -94,3 +94,8 @@ pulumi-linux-x64.tar.gz
 
 # Compliance evidence (stored in separate vault)
 compliance-evidence/
+terraform/tfplan
+terraform/dev-relay/tfplan
+terraform/pulumi-stack/tfplan
+pulumi-preview
+pilot-test-deploy.yaml

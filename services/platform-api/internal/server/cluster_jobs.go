@@ -219,6 +219,12 @@ func jobFromInfra(infra *infraapi.ProjectInfra, defaultID string) *aegis.Job {
 	case "provisioning":
 		status = "RUNNING"
 		progress = 55
+	case "destroying":
+		status = "RUNNING"
+		progress = 55
+	case "destroyed":
+		status = "SUCCEEDED"
+		progress = 100
 	default:
 		status = "PENDING"
 		progress = 10

@@ -170,12 +170,12 @@ ps aux | grep "port-forward" | grep -v grep
 # - 10081:8081  (for local gRPC access)
 ```
 
-### 7. Cloudflared Tunnel (for Keycloak)
+### 7. Keycloak Port-Forward (for OIDC)
 ```bash
-# Check cloudflared is running
-kubectl --context docker-desktop get pods -n aegis-system | grep cloudflared
+# Check keycloak port-forward is running (via start-aws-tunnel.sh)
+lsof -i :8443
 
-# Expected: 1/1 Running
+# Expected: kubectl process listening on port 8443
 ```
 
 ---
@@ -233,11 +233,19 @@ k8s-agent (EKS)
     │
     │ HTTPS to AEGIS_CP_OIDC_TOKEN_URL
     ▼
-Cloudflare Tunnel: keycloak.aegis-platform.tech
+NLB (internal): aegis-dev-relay-nlb-*.elb.us-east-1.amazonaws.com:8443
     │
-    │ Tunnel to local cluster
+    │ TCP passthrough
     ▼
-keycloak service (Docker Desktop)
+Relay EC2 (8443)
+    │
+    │ SSH reverse tunnel
+    ▼
+localhost:8443 (your machine)
+    │
+    │ kubectl port-forward
+    ▼
+keycloak:8443 (Docker Desktop)
 ```
 
 ---
@@ -346,8 +354,8 @@ k8sAgent:
     # Default workspace image
     AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
 
-    # OIDC configuration (via Cloudflare)
-    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
+    # OIDC configuration (via NLB relay)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://<nlb-dns>:8443/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
     AEGIS_CP_OIDC_CLIENT_SECRET: "<secret>"
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
@@ -390,8 +398,8 @@ aws elbv2 describe-target-health \
     --region us-east-1 --query 'TargetGroups[0].TargetGroupArn' --output text) \
   --region us-east-1 --query 'TargetHealthDescriptions[0].TargetHealth.State' --output text 2>/dev/null
 
-echo -n "Cloudflared: "
-kubectl --context docker-desktop get pods -n aegis-system -l app=cloudflared -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NOT FOUND"
+echo -n "Keycloak Port 8443: "
+lsof -i :8443 >/dev/null 2>&1 && echo "OK" || echo "NOT RUNNING"
 ```
 
 ### Check Spoke Agent Logs (After Provisioning)
@@ -492,9 +500,10 @@ aws eks delete-cluster --name <cluster-name> --region us-east-1
 
 ### Symptom: OIDC Authentication Failures
 
-**Check Keycloak accessibility:**
+**Check Keycloak accessibility (via NLB relay):**
 ```bash
-curl -sk https://keycloak.aegis-platform.tech/realms/aegis/.well-known/openid-configuration | head -5
+# From within the VPC (or via SSH to relay):
+curl -sk https://<nlb-dns>:8443/realms/aegis/.well-known/openid-configuration | head -5
 ```
 
 **Check spoke-agent client exists in Keycloak:**
@@ -544,7 +553,7 @@ pkill -f "ssh.*aegis-relay"
 
 3. **Values file vs runtime overrides** - The `values-aws-relay.yaml` may have stale NLB endpoints. Pulumi runtime values (from `AEGIS_PLATFORM_API_ENDPOINT`) always take precedence.
 
-4. **Keycloak via Cloudflare, gRPC via NLB** - Cloudflare tunnels don't support gRPC streaming properly. That's why we use the NLB+SSH tunnel for gRPC and Cloudflare only for Keycloak OIDC.
+4. **All traffic via NLB relay** - Both gRPC and OIDC route through the AWS NLB relay via SSH reverse tunnel. No Cloudflare dependency.
 
 ---
 

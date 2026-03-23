@@ -1,6 +1,18 @@
 # Aegis Platform - Production Deployment Guide
 
-This document provides step-by-step instructions for deploying the Aegis platform to a production environment on AWS EKS. It covers infrastructure provisioning, image building, secret management, Helm-based service deployment, Keycloak SSO configuration, post-deployment verification, rollback procedures, and troubleshooting.
+This document describes the **production-specific overlay** for deploying the Aegis platform on AWS EKS. It covers RDS/HA-oriented infrastructure choices, production secret handling, production Helm overrides, rollback procedures, and operational troubleshooting.
+
+## Doc Ownership
+
+**Authoritative for:** production deltas on top of the standard deployment flow, especially RDS, HA, secret management posture, rollback, and production operations.
+
+**Not authoritative for:** the baseline local/hybrid/full-cloud workflow, deploy script step list, or make target sequencing.
+
+**See also:**
+- `AGENT_DEPLOYMENT_GUIDE.md` -- standard deployment workflow for local, hybrid, and full cloud
+- `terraform/README.md` -- infrastructure scope and outputs
+- `docs/make-commands.md` -- target contracts
+- `docs/security/auth.md` -- current Backstage/Keycloak cloud auth contract
 
 ---
 
@@ -23,13 +35,29 @@ This document provides step-by-step instructions for deploying the Aegis platfor
 
 - **AWS Account** with appropriate IAM permissions (or GovCloud for IL4/IL5 environments)
 - **EKS Cluster** (Kubernetes 1.27+; Terraform defaults to 1.33)
-- **RDS PostgreSQL 15+** instance (Terraform provisions `db.t3.micro` by default; size up for production)
+- **RDS PostgreSQL 15+** instance *(optional -- use in-cluster Postgres for minimal deployments)*
 - **ECR Repositories** for container images (`aegis/platform-api`, `aegis/proxy`, `aegis/k8s-agent`, `aegis/workspace-vscode`)
 - **VPC** with public, private, and database subnets across 3 AZs
-- **Route53 Hosted Zone** for DNS (e.g., `aegist.dev`)
+- **Cloudflare-managed DNS zone** for the public control plane (for example, `aegis-platform.tech`)
 - **S3 Bucket + DynamoDB Table** for Terraform remote state
 - **Keycloak Instance** for OIDC authentication (deployed as part of the aegis-services chart, or bring your own)
-- **Domain Name** with DNS control for platform-api, proxy, and Keycloak endpoints
+- **Domain Name** with DNS control for UI, platform-api, proxy, and Keycloak endpoints
+
+> **Baseline workflow:** Start with `AGENT_DEPLOYMENT_GUIDE.md` for the standard cloud deployment path.
+> This document only adds the production-specific requirements and overrides.
+
+> **Minimal Cloud Hub (no RDS):** For a quick proof deployment, run `terraform apply` then
+> `make deploy-cloud`. This uses in-cluster Postgres with no RDS provisioning required.
+> See `terraform/README.md` and `AGENT_DEPLOYMENT_GUIDE.md` § Cloud Hub Deployment.
+> This guide covers the **full production setup** with RDS, HA, and comprehensive secrets management.
+
+> **Current deployment contract:** Hybrid local-hub + cloud-spoke testing remains a separate workflow and should keep using the local/tunnel docs. The full-cloud public surface uses Cloudflare-managed `ui.aegis-platform.tech`, `platform-api.aegis-platform.tech`, `proxy.aegis-platform.tech`, and `keycloak.aegis-platform.tech`. `generate-cloud-deployment.sh` is deploy-only and requires explicit prebuilt image refs for platform-api, proxy, k8s-agent, and UI.
+
+> **Current Backstage constraint:** In the full-cloud path, Backstage is intentionally kept at a single replica until a dedicated migration job exists. Scaling it before first-boot migrations are serialized can trip the catalog `knex_migrations_lock` and leave the UI crash-looping.
+
+> **Public DNS ordering:** The production cloud flow assumes Cloudflare is patched to the live ingress and service load balancers before Backstage is treated as ready. UI and Keycloak verification are meaningful only after those canonical public DNS records point at the current release.
+
+> **Current verified scope:** The production cloud path is currently verified for public UI load, Keycloak discovery, and successful SSO landing in Backstage. Treat project CRUD, workload submission, proxy-based workspace access, and logout/session lifecycle as separate acceptance checks until they are exercised end to end.
 
 ### Network Requirements
 
@@ -44,33 +72,37 @@ This document provides step-by-step instructions for deploying the Aegis platfor
 
 Aegis uses a **hub-and-spoke** model:
 
-```
-                    ┌────────────────────────────────────────────┐
-                    │          Hub Cluster (aegis-services)       │
-                    │                                            │
-  Users/Backstage ──┤  ┌──────────────┐   ┌──────────────┐      │
-                    │  │ platform-api │   │    proxy     │      │
-                    │  │  (gRPC+HTTP) │   │  (WebSocket) │      │
-                    │  └──────┬───────┘   └──────┬───────┘      │
-                    │         │                  │              │
-                    │  ┌──────┴──────┐   ┌──────┴──────┐      │
-                    │  │  PostgreSQL  │   │  Keycloak   │      │
-                    │  │   (RDS)      │   │   (OIDC)    │      │
-                    │  └─────────────┘   └─────────────┘      │
-                    └──────────┬─────────────────┬─────────────┘
-                               │                 │
-              ┌────────────────┘                 └────────────────┐
-              │                                                  │
-    ┌─────────┴──────────┐                          ┌─────────────┴──────────┐
-    │  Spoke Cluster A   │                          │  Spoke Cluster B       │
-    │  ┌──────────────┐  │                          │  ┌──────────────┐      │
-    │  │  k8s-agent   │  │                          │  │  k8s-agent   │      │
-    │  └──────────────┘  │                          │  └──────────────┘      │
-    │  Workload pods     │                          │  Workload pods         │
-    └────────────────────┘                          └────────────────────────┘
+```mermaid
+graph TD
+    Users["Users / Backstage"] --> PlatformAPI
+    Users --> Proxy
+
+    subgraph Hub["Hub Cluster (aegis-services)"]
+        PlatformAPI["platform-api<br/>(gRPC + HTTP)"]
+        Proxy["proxy<br/>(WebSocket)"]
+        PG["PostgreSQL<br/>(RDS or in-cluster)"]
+        KC["Keycloak<br/>(OIDC)"]
+        PlatformAPI --> PG
+        PlatformAPI --> KC
+    end
+
+    PlatformAPI -- "gRPC" --> AgentA
+    PlatformAPI -- "gRPC" --> AgentB
+
+    subgraph SpokeA["Spoke Cluster A"]
+        AgentA["k8s-agent"]
+        WorkloadsA["Workload pods"]
+        AgentA --> WorkloadsA
+    end
+
+    subgraph SpokeB["Spoke Cluster B"]
+        AgentB["k8s-agent"]
+        WorkloadsB["Workload pods"]
+        AgentB --> WorkloadsB
+    end
 ```
 
-- **Hub (aegis-services chart)**: Central control plane. Runs `platform-api` (gRPC + REST gateway) for workload management, placement decisions, audit logging, and compliance enforcement. Runs `proxy` for WebSocket-based access to workloads. Optionally runs Keycloak for OIDC.
+- **Hub (aegis-services chart)**: Central control plane. Runs `platform-api` (gRPC + REST gateway) for workload management, placement decisions, audit logging, and compliance enforcement. Runs `proxy` for WebSocket-based access to workloads. In the current full-cloud path it also hosts the Backstage UI and Keycloak, with UI/Keycloak exposed through the shared public ingress.
 - **Spoke (aegis-spoke chart)**: Deployed once per workload cluster. Runs `k8s-agent` which registers the cluster with the hub, reports capacity/flavors, reconciles `AegisWorkload` CRDs, creates and manages Kubernetes Jobs, and streams status updates back to the hub.
 
 ---
@@ -163,7 +195,7 @@ terraform output rds_database_name               # "aegis"
 terraform output rds_username                    # "aegis_api"
 
 # ECR registry
-terraform output -raw ecr_registry_url           # e.g., 567751785679.dkr.ecr.us-east-1.amazonaws.com
+terraform output -raw ecr_registry_url           # e.g., 195714074609.dkr.ecr.us-east-1.amazonaws.com
 
 # Cluster info
 terraform output -raw cluster_name
@@ -234,7 +266,7 @@ eval "$(terraform -chdir=terraform output -raw kubectl_config_command)"
 # Or manually:
 aws eks update-kubeconfig \
   --region us-east-1 \
-  --name aegis-spoke-prod
+  --name aegis-hub-prod
 ```
 
 ### 3.2 Create Namespace
@@ -297,7 +329,7 @@ kubectl create secret generic keycloak-backstage-client-secret \
 
 ## Step 4: Deploy Hub (aegis-services)
 
-The `aegis-services` chart deploys the hub control plane: `platform-api`, `proxy`, and optionally `Keycloak`.
+The `aegis-services` chart deploys the hub control plane: `platform-api`, `proxy`, `Keycloak`, and `Backstage`.
 
 ### 4.1 Generate Terraform-Derived Values
 
@@ -321,10 +353,10 @@ platformApi:
     tag: "0.1.0"
   env:
     DATABASE_URL: "postgres://aegis_api:<URL_ENCODED_PASSWORD>@<RDS_HOST>:5432/aegis?sslmode=require"
-    OIDC_ISSUER_URL: "https://aegis-keycloak-service.aegis-system.svc.cluster.local:8443/realms/aegis"
-    OIDC_AUDIENCE: "backstage"
+    OIDC_ISSUER_URL: "https://keycloak.aegis-platform.tech/realms/aegis"
+    OIDC_AUDIENCE: "backstage,aegis-platform"
     OIDC_JWKS_URL: "https://aegis-keycloak-service.aegis-system.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs"
-    AEGIS_PROXY_BASE_URL: "wss://proxy.aegist.dev:8080"
+    AEGIS_PROXY_BASE_URL: "wss://proxy.aegis-platform.tech:8080"
     LOG_LEVEL: "info"
     ENVIRONMENT: "production"
     AEGIS_STORE_BACKEND: "postgres"
@@ -339,29 +371,69 @@ platformApi:
     certManager:
       enabled: true
       dnsNames:
-        - "platform-api-grpc.aegist.dev"
-        - "platform-api.aegist.dev"
+        - "platform-api.aegis-platform.tech"
 
 proxy:
   image:
     repository: <ECR_REGISTRY>/aegis/proxy
     tag: "0.1.0"
   jwtSecret: "<JWT_SECRET>"
-  publicHost: "proxy.aegist.dev"
+  publicHost: "proxy.aegis-platform.tech"
   tls:
     enabled: true
     certManager:
       enabled: true
       dnsNames:
-        - "proxy.aegist.dev"
+        - "proxy.aegis-platform.tech"
+
+backstage:
+  enabled: true
+  image:
+    repository: <ECR_REGISTRY>/aegis/ui
+    tag: "0.1.0"
+  service:
+    type: ClusterIP
+    port: 7007
+  ingress:
+    enabled: true
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - host: "ui.aegis-platform.tech"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: aegis-backstage-tls
+        hosts:
+          - "ui.aegis-platform.tech"
+  tls:
+    certManager:
+      enabled: true
+      dnsNames:
+        - "ui.aegis-platform.tech"
+  appConfig:
+    appBaseUrl: "https://ui.aegis-platform.tech"
+    backendBaseUrl: "https://ui.aegis-platform.tech"
+  keycloak:
+    baseUrl: "https://keycloak.aegis-platform.tech"
+    realm: "aegis"
+    clientId: "backstage"
+    clientSecret:
+      secretName: keycloak-backstage-client-secret
+      key: clientSecret
+  secrets:
+    create: true
+    backendSecret: "<BACKSTAGE_BACKEND_SECRET>"
 
 keycloak:
   enabled: true
   forceRender: true
   namespace: aegis-system
   hostname:
-    hostname: "https://aegis-keycloak-service.aegis-system.svc.cluster.local:8443"
-    admin: "https://aegis-keycloak-service.aegis-system.svc.cluster.local:8443"
+    hostname: "https://keycloak.aegis-platform.tech"
+    admin: "https://keycloak.aegis-platform.tech"
     strict: false
   tls:
     secret:
@@ -479,17 +551,17 @@ PLATFORM_API_LB=$(kubectl get svc aegis-platform-api -n aegis-system \
 PROXY_LB=$(kubectl get svc aegis-proxy -n aegis-system \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
+PUBLIC_INGRESS_LB=$(kubectl get svc ingress-nginx-controller -n aegis-system \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+echo "Update the canonical Cloudflare CNAMEs with these values:"
 echo "Platform API LB: ${PLATFORM_API_LB}"
 echo "Proxy LB: ${PROXY_LB}"
-
-# Update Route53 DNS records
-cd terraform
-terraform apply -auto-approve \
-  -var="platform_api_lb_hostname=${PLATFORM_API_LB}" \
-  -var="proxy_lb_hostname=${PROXY_LB}" \
-  -target=aws_route53_record.platform_api_grpc \
-  -target=aws_route53_record.platform_api_http \
-  -target=aws_route53_record.proxy
+echo "Public ingress LB: ${PUBLIC_INGRESS_LB}"
+echo "platform-api.aegis-platform.tech -> ${PLATFORM_API_LB}"
+echo "proxy.aegis-platform.tech -> ${PROXY_LB}"
+echo "ui.aegis-platform.tech -> ${PUBLIC_INGRESS_LB}"
+echo "keycloak.aegis-platform.tech -> ${PUBLIC_INGRESS_LB}"
 ```
 
 ---
@@ -525,13 +597,13 @@ These are typically set in `values-cloud-generated.yaml` but can be overridden:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AEGIS_CLUSTER_ID` | Unique identifier for this spoke cluster | `aws-us-east-1-prod` |
-| `AEGIS_CP_GRPC` | Hub platform-api gRPC endpoint | `platform-api-grpc.aegist.dev:8081` |
+| `AEGIS_CP_GRPC` | Hub platform-api gRPC endpoint | `platform-api.aegis-platform.tech:8081` |
 | `AEGIS_CP_GRPC_INSECURE` | Set to `"false"` for TLS connections | `"false"` |
 | `AEGIS_REGION` | AWS region where this cluster is deployed | `us-east-1` |
 | `AEGIS_PROVIDER` | Cloud provider | `aws` |
 | `AEGIS_FLAVORS` | Comma-separated compute flavors this cluster offers | `cpu-small,cpu-large,gpu-a100` |
 | `AEGIS_DEFAULT_IMAGE` | Default workspace image | `<ECR>/aegis/workspace-vscode:latest` |
-| `AEGIS_PROXY_INGRESS_HOST` | Public hostname for spoke proxy (if enabled) | `proxy.spoke-a.aegist.dev` |
+| `AEGIS_PROXY_INGRESS_HOST` | Public hostname for spoke proxy (if enabled) | `proxy.spoke-a.aegis-platform.tech` |
 | `AEGIS_WORKLOAD_GC_ENABLED` | Enable orphaned workload garbage collection | `"true"` |
 
 ### 5.3 Verify Spoke Registration
@@ -669,23 +741,23 @@ export AEGIS_BEARER_TOKEN="<your-bearer-token>"
 grpcurl -cacert "${CA_BUNDLE}" \
   -H "authorization: Bearer ${AEGIS_BEARER_TOKEN}" \
   -d '{"project":{"id":"p-test","displayName":"Test Project","ownerGroup":"eng"}}' \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/CreateProject
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/CreateProject
 
 # List projects
 grpcurl -cacert "${CA_BUNDLE}" \
   -H "authorization: Bearer ${AEGIS_BEARER_TOKEN}" \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/ListProjects
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/ListProjects
 
 # List clusters (should show registered spoke)
 grpcurl -cacert "${CA_BUNDLE}" \
   -H "authorization: Bearer ${AEGIS_BEARER_TOKEN}" \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/ListClusters
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/ListClusters
 ```
 
 ### 7.3 Run the E2E Test Script
 
 ```bash
-export AEGIS_GRPC_ADDR="platform-api-grpc.aegist.dev:8081"
+export AEGIS_GRPC_ADDR="platform-api.aegis-platform.tech:8081"
 export GRPC_TLS=1
 export GRPC_CA="${HOME}/aegis-platform-api-ca.crt"
 export AEGIS_BEARER_TOKEN="<your-token>"
@@ -708,7 +780,7 @@ grpcurl -cacert "${CA_BUNDLE}" \
       "command": ["echo", "hello aegis"]
     }
   }' \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/SubmitWorkload
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/SubmitWorkload
 ```
 
 ### 7.5 Verify Audit Events
@@ -718,49 +790,21 @@ grpcurl -cacert "${CA_BUNDLE}" \
 grpcurl -cacert "${CA_BUNDLE}" \
   -H "authorization: Bearer ${AEGIS_BEARER_TOKEN}" \
   -d '{"pageSize": 10}' \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/ListAuditEvents
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/ListAuditEvents
 ```
 
 ---
 
-## Automated Deployment (Recommended)
+## Automated Deployment (Production Overlay)
 
-The `generate-cloud-deployment.sh` script automates Steps 3-5 above:
+Use the cloud workflow in `AGENT_DEPLOYMENT_GUIDE.md` as the baseline. For production, add these requirements on top of that standard path:
 
-```bash
-cd terraform
+1. Apply Terraform with the production infrastructure choices in this document, especially RDS sizing, backup policy, and deletion protection.
+2. Use production-grade secret handling for database credentials, JWT secrets, and Keycloak client material.
+3. Apply the production Helm overrides in this document rather than the minimal in-cluster-Postgres defaults.
+4. Verify the canonical public hosts from the deployment guide, then perform the production rollback/readiness checks below.
 
-# Interactive mode (prompts before deploying)
-./generate-cloud-deployment.sh
-
-# Non-interactive mode (for CI/CD)
-./generate-cloud-deployment.sh --non-interactive
-```
-
-The script will:
-1. Generate Helm values from Terraform outputs
-2. Configure kubectl for the EKS cluster
-3. Create namespace and Kubernetes secrets
-4. Run database migrations via a Kubernetes Job
-5. Install internal PKI (cert-manager + step-ca)
-6. Deploy aegis-services with Helm
-7. Wait for LoadBalancers and update Route53 DNS
-8. Deploy aegis-spoke with Helm
-9. Update Backstage configuration files
-
-Environment variables to customize the script:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PLATFORM_API_IMAGE_TAG` | `v1.0.6-tls2` | Platform API image tag (can include repo:tag) |
-| `PROXY_IMAGE_TAG` | `no-client-cert` | Proxy image tag |
-| `K8S_AGENT_IMAGE_TAG` | `v1.0.2-tls-20251005-amd64` | K8s agent image tag |
-| `K8S_NAMESPACE` | `aegis-system` | Target Kubernetes namespace |
-| `HELM_RELEASE` | `aegis` | Helm release name |
-| `KEYCLOAK_ADMIN_PASSWORD` | - | Keycloak admin password |
-| `KEYCLOAK_DB_PASSWORD` | - | Keycloak DB password |
-| `KEYCLOAK_BACKSTAGE_CLIENT_SECRET` | - | OIDC client secret |
-| `SKIP_ROUTE53_UPDATE` | `0` | Set to `1` to skip DNS updates |
+The deploy-script contract, step list, and environment-variable interface are intentionally owned by `AGENT_DEPLOYMENT_GUIDE.md` and are not repeated here.
 
 ---
 
@@ -883,7 +927,7 @@ kubectl logs -n aegis-system -l app.kubernetes.io/component=k8s-agent --tail=100
 
 # 2. Verify the agent can reach the hub
 kubectl exec -it deployment/aegis-spoke-aegis-spoke-k8s-agent -n aegis-system -- \
-  wget -q -O- --no-check-certificate https://platform-api-grpc.aegist.dev:8081 || echo "Connection test complete"
+  wget -q -O- --no-check-certificate https://platform-api.aegis-platform.tech:8081 || echo "Connection test complete"
 
 # 3. Check AEGIS_CP_GRPC is set correctly
 kubectl get deployment aegis-spoke-aegis-spoke-k8s-agent -n aegis-system \
@@ -901,7 +945,7 @@ kubectl get secret aegis-trust-bundle -n aegis-system
 grpcurl -cacert "${CA_BUNDLE}" \
   -H "authorization: Bearer ${TOKEN}" \
   -d '{"projectId":"<PROJECT_ID>"}' \
-  platform-api-grpc.aegist.dev:8081 aegis.v1.AegisPlatform/ListWorkloads
+  platform-api.aegis-platform.tech:8081 aegis.v1.AegisPlatform/ListWorkloads
 
 # 2. Check if the target cluster has the required flavor
 # (AEGIS_FLAVORS on the spoke must include the requested flavor)
@@ -950,8 +994,8 @@ kubectl get secret aegis-trust-bundle -n aegis-system \
   -o "jsonpath={.data.ca\.crt}" | base64 --decode > ~/aegis-platform-api-ca.crt
 
 # 5. Test TLS connectivity
-openssl s_client -connect platform-api-grpc.aegist.dev:8081 \
-  -CAfile ~/aegis-platform-api-ca.crt -servername platform-api-grpc.aegist.dev
+openssl s_client -connect platform-api.aegis-platform.tech:8081 \
+  -CAfile ~/aegis-platform-api-ca.crt -servername platform-api.aegis-platform.tech
 ```
 
 ### Keycloak Issues
@@ -975,16 +1019,9 @@ kubectl port-forward svc/aegis-keycloak-service -n aegis-system 8443:8443
 
 ---
 
-## Quick Reference
+## Production Operations Quick Reference
 
-### Service Endpoints
-
-| Service | Protocol | Default Endpoint |
-|---------|----------|------------------|
-| Platform API (gRPC) | gRPC/TLS | `platform-api-grpc.aegist.dev:8081` |
-| Platform API (HTTP) | HTTPS | `platform-api.aegist.dev:8080` |
-| Proxy (WebSocket) | WSS | `proxy.aegist.dev:8080` |
-| Keycloak (OIDC) | HTTPS | `aegis-keycloak-service.aegis-system.svc.cluster.local:8443` |
+For the canonical public endpoint contract, use `AGENT_DEPLOYMENT_GUIDE.md` § Cloud Hub Deployment.
 
 ### Useful Commands
 

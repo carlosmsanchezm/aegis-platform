@@ -18,11 +18,12 @@ LABEL org.opencontainers.image.title="aegis-vscode-reh-init" \
       org.opencontainers.image.description="Init container that injects VS Code Remote Extension Host into Aegis workspace pods" \
       org.opencontainers.image.vendor="Aegis Platform" \
       org.opencontainers.image.licenses="Proprietary" \
-      mil.dso.ironbank.image.type="opensource" \
+      mil.dso.ironbank.image.type="commercial" \
       mil.dso.ironbank.product.name="aegis-vscode-reh-init"
 
 # Install tar for extraction (available in UBI9 base repos)
-RUN microdnf install -y --nodocs tar gzip && \
+RUN microdnf update -y && \
+    microdnf install -y --nodocs tar gzip && \
     microdnf clean all
 
 # VS Code REH tarball — pre-fetched by Iron Bank pipeline from hardening_manifest
@@ -33,6 +34,8 @@ RUN mkdir -p /reh/bin/current && \
     tar -xzf /tmp/vscode-server-linux-x64.tar.gz -C /reh/bin/current --strip-components=1 && \
     rm -f /tmp/vscode-server-linux-x64.tar.gz && \
     chmod -R 755 /reh
+
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 USER 65534
 

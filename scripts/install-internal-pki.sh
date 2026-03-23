@@ -25,6 +25,7 @@
 #   STEP_CA_MIN_TLS_CERT_DURATION     (default: 5m)
 #   STEP_CA_DB_PERSISTENT             (default: true)
 #   STEP_CA_REINSTALL_ON_MISMATCH     (default: false)
+#   STEP_CA_EXTERNAL_DNS_NAMES        (comma-separated; e.g., step-ca.aegis-platform.tech)
 #   STEP_CLUSTER_ISSUER_NAME (default: aegis-internal)
 #   TRUST_BUNDLE_SECRET_NAME (default: aegis-trust-bundle)
 #   TRUST_BUNDLE_NAMESPACES  (default: aegis-system,keycloak)
@@ -67,6 +68,8 @@ STEP_CA_DEFAULT_TLS_CERT_DURATION="${STEP_CA_DEFAULT_TLS_CERT_DURATION:-2160h}"
 STEP_CA_MIN_TLS_CERT_DURATION="${STEP_CA_MIN_TLS_CERT_DURATION:-5m}"
 STEP_CA_DB_PERSISTENT="${STEP_CA_DB_PERSISTENT:-true}"
 STEP_CA_REINSTALL_ON_MISMATCH="${STEP_CA_REINSTALL_ON_MISMATCH:-false}"
+
+STEP_CA_EXTERNAL_DNS_NAMES="${STEP_CA_EXTERNAL_DNS_NAMES:-}"
 
 TRUST_BUNDLE_SECRET_NAME="${TRUST_BUNDLE_SECRET_NAME:-aegis-trust-bundle}"
 TRUST_BUNDLE_NAMESPACES="${TRUST_BUNDLE_NAMESPACES:-aegis-system,keycloak}"
@@ -183,12 +186,54 @@ ensure_step_ca_tls_claims() {
   kubectl rollout status "statefulset/${STEP_CA_RELEASE}" -n "$PKI_NAMESPACE" --timeout=5m >/dev/null
 }
 
+ensure_step_ca_dns_names() {
+  [[ -z "$STEP_CA_EXTERNAL_DNS_NAMES" ]] && return 0
+
+  wait_for_step_ca_config
+
+  local cm_config="${STEP_CA_RELEASE}-config"
+  local ca_json_raw
+  ca_json_raw="$(kubectl get configmap "$cm_config" -n "$PKI_NAMESPACE" -o jsonpath='{.data.ca\.json}')"
+
+  IFS=',' read -r -a dns_names <<<"$STEP_CA_EXTERNAL_DNS_NAMES"
+
+  # Remove all existing NLB entries (*.elb.*.amazonaws.com), then add the requested ones fresh.
+  # This ensures stale NLB DNS names are cleaned up when the relay is recreated.
+  local jq_filter='. | .dnsNames = [.dnsNames[] | select(test("elb\\..*\\.amazonaws\\.com") | not)]'
+  for name in "${dns_names[@]}"; do
+    name="$(echo "$name" | xargs)"
+    [[ -z "$name" ]] && continue
+    jq_filter="${jq_filter} | .dnsNames += [\"${name}\"]"
+  done
+
+  local desired_json desired_json_canon ca_json_canon
+  desired_json="$(printf '%s' "$ca_json_raw" | jq "$jq_filter")"
+  desired_json_canon="$(printf '%s' "$desired_json" | jq -c .)"
+  ca_json_canon="$(printf '%s' "$ca_json_raw" | jq -c .)"
+
+  if [[ "$desired_json_canon" == "$ca_json_canon" ]]; then
+    log "step-ca dnsNames already up to date"
+    return 0
+  fi
+
+  log "Updating step-ca external DNS names: ${STEP_CA_EXTERNAL_DNS_NAMES}"
+  local escaped_json
+  escaped_json="$(printf '%s' "$desired_json" | jq -Rs .)"
+  kubectl patch configmap "$cm_config" -n "$PKI_NAMESPACE" --type merge \
+    -p "{\"data\":{\"ca.json\":${escaped_json}}}" >/dev/null
+
+  log "Restarting step-ca to apply dnsNames changes"
+  kubectl rollout restart "statefulset/${STEP_CA_RELEASE}" -n "$PKI_NAMESPACE" >/dev/null
+  kubectl rollout status "statefulset/${STEP_CA_RELEASE}" -n "$PKI_NAMESPACE" --timeout=5m >/dev/null
+}
+
 install_step_issuer() {
   log "Installing/upgrading step-issuer in namespace ${CERT_MANAGER_NAMESPACE}"
   ensure_namespace "$CERT_MANAGER_NAMESPACE"
   helm upgrade --install "$STEP_ISSUER_RELEASE" smallstep/step-issuer \
     --namespace "$CERT_MANAGER_NAMESPACE" \
     --set image.repository=smallstep/step-issuer \
+    --set kubeRBACproxy.image.repository=registry.k8s.io/kubebuilder/kube-rbac-proxy \
     --wait \
     --timeout 10m >/dev/null
 }
@@ -295,6 +340,7 @@ main() {
   install_cert_manager
   install_step_ca
   ensure_step_ca_tls_claims
+  ensure_step_ca_dns_names
   install_step_issuer
   create_step_cluster_issuer
   create_trust_bundle_secrets

@@ -11,7 +11,7 @@ platformApi:
   serviceAccountName: aegis-platform-api
 
   image:
-    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
     tag: "latest"
     pullPolicy: IfNotPresent  # Use local images if available
 

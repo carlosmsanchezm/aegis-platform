@@ -50,7 +50,7 @@ Aegis is a multi-cluster Kubernetes control plane that orchestrates GPU workload
 | **Platform API** | this repo | Go, gRPC + REST gateway | Central orchestration: workload placement, budget enforcement, cluster management, proxy ticket minting |
 | **K8s Agent** | this repo | Go, controller-runtime | Per-cluster operator that reconciles `AegisWorkload` CRDs into Kubernetes Jobs with Kueue integration |
 | **Proxy** | this repo | Go, WebSocket | Authenticated reverse proxy for VS Code workspace connections (JWT + mTLS) |
-| **Aegis UI** | [aegis-ui](https://github.com/carlosmsanchezm/aegis-ui) | TypeScript, Backstage | Web frontend for workload submission, monitoring, FinOps dashboards, and administration |
+| **Aegis UI** | [aegis-ui](https://github.com/carlosmsanchezm/aegis-ui) | TypeScript, Backstage | Web frontend source for workload submission, monitoring, FinOps dashboards, and administration. The cloud runtime/deployment path is owned by this repo’s `aegis-services` chart. |
 | **Sovran** | [sovran](https://github.com/carlosmsanchezm/sovran) | TypeScript, VS Code API | VS Code extension for connecting to remote GPU workspaces via the Aegis proxy |
 
 ## Key Features
@@ -60,10 +60,15 @@ Aegis is a multi-cluster Kubernetes control plane that orchestrates GPU workload
 - **Kueue integration** -- Jobs are created suspended with queue annotations; Kueue handles admission and resource fairness
 - **Interactive workspaces** -- Submit workspace workloads with port mappings, connect via VS Code through authenticated WebSocket tunnels
 - **NIST 800-171 R3 compliance** -- Session management (AC-11/AC-12), audit logging, OSCAL evidence export, policy domain enforcement with region and IL-level constraints
-- **Automated infrastructure** -- Pulumi-based AWS EKS spoke cluster provisioning with cert-manager PKI, Cloudflare tunnel connectivity
+- **Automated infrastructure** -- Pulumi-based AWS EKS spoke cluster provisioning with cert-manager PKI, AWS NLB relay connectivity
 - **Multi-tenant projects** -- Project isolation with per-project AWS credentials, policy domains, and data classification levels
 
 ## Deployment
+
+For the current deployment workflows and the verified production-cloud auth/UI surface, use:
+
+- `AGENT_DEPLOYMENT_GUIDE.md` for local, hybrid, and full-cloud rollout steps
+- `docs/security/auth.md` for the current cloud Backstage/Keycloak auth contract
 
 ### Prerequisites
 
@@ -124,7 +129,7 @@ helm upgrade --install aegis-spoke charts/aegis-spoke \
 | **Orchestration** | Kubernetes (client-go, controller-runtime), Kueue |
 | **Infrastructure** | Pulumi (AWS EKS), Terraform, Helm |
 | **Identity** | Keycloak (OIDC), JWT, mTLS via cert-manager + step-ca |
-| **Networking** | Cloudflare Tunnels, AWS NLB, ingress-nginx |
+| **Networking** | AWS NLB, ingress-nginx |
 | **Observability** | Prometheus metrics, OpenTelemetry, Zap structured logging |
 | **Clients** | Backstage (React/TypeScript), VS Code Extension (TypeScript) |
 

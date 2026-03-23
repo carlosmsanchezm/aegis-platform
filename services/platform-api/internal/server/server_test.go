@@ -103,6 +103,8 @@ func (s staticKubeClient) HasKubeconfig(clusterID string) bool {
 	return true // Test mock always has kubeconfig
 }
 
+func (s staticKubeClient) EvictClient(clusterID string) {}
+
 func (s staticKubeClient) Dir() string {
 	return "/tmp/test-kubeconfigs"
 }
@@ -750,7 +752,7 @@ func TestMaybeBootstrapWorkspaceDeps_CreatesCatalogWhenEnabled(t *testing.T) {
 	if flavor == nil {
 		t.Fatalf("expected flavor cpu-small to be bootstrapped")
 	}
-	if flavor.GetCpuCoresRequest() != "2" || flavor.GetMemoryRequest() != "4Gi" {
+	if flavor.GetCpuCoresRequest() != "500m" || flavor.GetMemoryRequest() != "512Mi" {
 		t.Fatalf("unexpected flavor defaults: cpu=%s mem=%s", flavor.GetCpuCoresRequest(), flavor.GetMemoryRequest())
 	}
 	// Ensure idempotency
@@ -1477,5 +1479,146 @@ func TestAuditEventsOnSubmit(t *testing.T) {
 	}
 	if ev.Details["project_id"] != "proj-1" {
 		t.Fatalf("expected details.project_id proj-1, got %s", ev.Details["project_id"])
+	}
+}
+
+// --- Auto-derivation tests ---
+
+func TestRegisterClusterAutoDerivesProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Create the project first so derivation succeeds
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Register cluster without project label
+	resp, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("expected ok=true, got false")
+	}
+
+	// Verify project ID was persisted
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "db-1" {
+		t.Fatalf("expected project_id=db-1, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestRegisterClusterExplicitLabelTakesPriority(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+	srv.store.PutProject(&aegis.Project{Id: "explicit-proj", OwnerGroup: "admin"})
+
+	// Register cluster WITH explicit project label (should override derivation)
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "explicit-proj"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "explicit-proj" {
+		t.Fatalf("expected project_id=explicit-proj, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestRegisterClusterProjectNotFoundSkipsDerivation(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Do NOT create the project — derivation should be skipped
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, _ := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if pid != "" {
+		t.Fatalf("expected empty project_id (project not found), got %q", pid)
+	}
+}
+
+func TestHeartbeatBackfillsProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Register cluster without project (project doesn't exist yet)
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, _ := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if pid != "" {
+		t.Fatalf("expected empty project_id before project creation, got %q", pid)
+	}
+
+	// Now create the project
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Heartbeat should backfill
+	_, err = srv.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "db-1" {
+		t.Fatalf("expected project_id=db-1 after heartbeat, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestHeartbeatDoesNotOverwriteExistingProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	srv.store.PutProject(&aegis.Project{Id: "original-proj", OwnerGroup: "admin"})
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Register cluster with explicit project
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "original-proj"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	// Heartbeat should NOT overwrite the existing project ID
+	_, err = srv.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "original-proj" {
+		t.Fatalf("expected project_id=original-proj (unchanged), got %q (ok=%v)", pid, ok)
 	}
 }

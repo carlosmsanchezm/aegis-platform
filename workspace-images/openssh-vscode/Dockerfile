@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.title="aegis-workspace" \
       org.opencontainers.image.description="Aegis GPU development workspace with CUDA runtime. VS Code server injected via init container." \
       org.opencontainers.image.vendor="Aegis Platform" \
       org.opencontainers.image.licenses="Proprietary" \
-      mil.dso.ironbank.image.type="opensource" \
+      mil.dso.ironbank.image.type="commercial" \
       mil.dso.ironbank.product.name="aegis-workspace"
 
 ENV LANG=en_US.UTF-8 \

@@ -13,7 +13,7 @@ aws --version
 gh auth login
 
 # Verify aws profile
-aws sts get-caller-identity --profile myclaude
+aws sts get-caller-identity --profile aegis-new
 ```
 
 ---
@@ -138,7 +138,7 @@ GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS=aegis-platform \
     ${VAULT_PATH}/soc2/2025/${CURRENT_MONTH}/ci-cd-security
 
 # Export AWS security baseline
-AWS_PROFILE=myclaude \
+AWS_PROFILE=aegis-new \
     ./scripts/compliance/export_aws_security_baseline.sh \
     ${VAULT_PATH}/soc2/2025/${CURRENT_MONTH}/access-reviews
 

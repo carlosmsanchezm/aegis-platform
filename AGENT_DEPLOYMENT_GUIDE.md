@@ -3,6 +3,19 @@
 Machine-readable deployment reference for AI agents operating the Aegis V1 platform.
 This is the **authoritative guide** for all deployment modes (local, local-tls, cloud).
 
+## Doc Ownership
+
+**Authoritative for:** deployment workflow, command sequencing, hybrid vs full-cloud behavior, canonical public endpoints, verification steps.
+
+**Not authoritative for:** RDS/HA production overlays, deep network topology reference, chart-internal configuration details.
+
+**See also:**
+- `docs/PRODUCTION_DEPLOYMENT.md` -- production-only deltas and RDS/HA guidance
+- `terraform/README.md` -- infrastructure scope, variables, and outputs
+- `docs/make-commands.md` -- command reference only
+- `docs/networking-architecture.md` -- ports, DNS model, and connection flows
+- `docs/security/auth.md` -- current Backstage/Keycloak cloud auth contract and failure modes
+
 ## Quick Reference
 
 | Command | Effect |
@@ -10,10 +23,9 @@ This is the **authoritative guide** for all deployment modes (local, local-tls, 
 | `make deploy-local` | Deploy hub locally without TLS |
 | `make deploy-local-tls` | Deploy hub locally with TLS (default dev workflow) |
 | `make deploy-local-tls DEPLOY_SPOKE=true` | Deploy hub + spoke locally with TLS |
-| `make deploy-cloud` | Deploy hub to cloud EKS (runs `generate-cloud-deployment.sh --non-interactive`) |
-| `make deploy-cloud-full` | One-shot: ECR login + push images + terraform apply + deploy to EKS |
+| `make deploy-cloud` | Terraform apply (idempotent) + deploy full-cloud hub to EKS. Images must already be in ECR. |
 | `make ecr-login` | Authenticate Docker to ECR |
-| `make push-cloud-images` | Build + push all images to ECR with git SHA tag |
+| `make push-cloud-images` | Build + push the cloud image set to ECR with git SHA tag, including UI |
 | `make build-local-all` | Build all 3 service images for local Docker Desktop |
 | `make clean-local` | Remove Helm releases |
 | `make port-forward` | Port-forward platform-api, proxy, keycloak |
@@ -32,7 +44,14 @@ Full make targets reference: see `docs/make-commands.md`.
 |---|---|---|---|
 | **Local (no TLS)** | `docker-desktop` | `make deploy-local` | ClusterIP services, use port-forward |
 | **Local (TLS)** | `docker-desktop` | `make deploy-local-tls` | Internal PKI (step-ca + cert-manager) |
-| **Cloud (TLS)** | `arn:aws:eks:...aegis-hub-prod` | `make deploy-cloud` | In-cluster Postgres, Cloudflare DNS |
+| **Cloud (TLS)** | `arn:aws:eks:...aegis-hub-prod` | `make deploy-cloud` | In-cluster Postgres, Cloudflare public DNS, deploy-only script |
+
+## Deployment Modes
+
+Aegis has two distinct workflows. Do not collapse them into one mental model.
+
+- **Hybrid dev/testing**: run the hub locally with `make deploy-local-tls` and optionally connect cloud spokes to that local hub through the existing relay/tunnel workflow. This path keeps local development behavior and does **not** depend on `*.aegis-platform.tech`.
+- **Full cloud hub**: deploy the hub to EKS and expose the public control plane only through Cloudflare-managed `*.aegis-platform.tech` hosts. The canonical public endpoints are `ui.aegis-platform.tech`, `platform-api.aegis-platform.tech`, `proxy.aegis-platform.tech`, and `keycloak.aegis-platform.tech`.
 
 ## Local Development (No TLS)
 
@@ -108,31 +127,37 @@ Full make targets reference: see `docs/make-commands.md`.
 
 ## Cloud Hub Deployment
 
-Deploys the hub control plane to EKS with in-cluster Postgres. For full production with RDS and HA, see `docs/PRODUCTION_DEPLOYMENT.md`.
+Deploys the hub control plane to EKS with in-cluster Postgres. This doc owns the standard workflow. For production-only deltas such as RDS, HA, and rollback posture, see `docs/PRODUCTION_DEPLOYMENT.md`.
 
 ### Prerequisites
 
 - Terraform infrastructure applied (`cd terraform && terraform apply`)
 - AWS CLI configured with `aegis-new` profile
-- Docker Desktop running (for buildx cross-compilation)
 - kubectl context set to the EKS cluster
+- Cloudflare API token available unless `SKIP_DNS_UPDATE=1`
+- Prebuilt ECR images available for platform-api, proxy, k8s-agent, and UI
+- Docker running only if you plan to build/push images with `make push-cloud-images`
 
-### One-Shot Deploy (recommended)
+### Cloud Deploy: `make deploy-cloud`
 
-Single command that does everything — ECR login, image push, terraform apply, full deploy:
+`make deploy-cloud` runs `terraform apply` (idempotent — no-op if infra already exists) and then the deploy script. It does **not** build or push images. Build/push stays in the separate `make push-cloud-images` phase.
 
 ```bash
 export AWS_PROFILE=aegis-new
 export CLOUDFLARE_API_TOKEN="<your-token>"
-make deploy-cloud-full
+make push-cloud-images
+make deploy-cloud
 ```
 
 Override the image tag (defaults to `git rev-parse --short HEAD`):
 ```bash
-CLOUD_IMAGE_TAG=v1.0.0 make deploy-cloud-full
+CLOUD_IMAGE_TAG=v1.0.0 make push-cloud-images
+CLOUD_IMAGE_TAG=v1.0.0 make deploy-cloud
 ```
 
-### Step-by-Step Deploy
+### Deploy Path (authoritative)
+
+This is the contract the full-cloud deployment is built around: build and push first, then deploy explicit image references.
 
 1. **Login to ECR**
    ```bash
@@ -143,49 +168,81 @@ CLOUD_IMAGE_TAG=v1.0.0 make deploy-cloud-full
    ```bash
    make push-cloud-images
    ```
+   This builds platform-api, proxy, k8s-agent, and UI and prints the exact `PLATFORM_API_IMAGE_TAG=... PROXY_IMAGE_TAG=... K8S_AGENT_IMAGE_TAG=... UI_IMAGE_TAG=...` values to reuse with `make deploy-cloud`.
 
 3. **Deploy to cloud EKS**
    ```bash
    make deploy-cloud
    ```
 
-4. **Verify**
+4. **Verify the canonical public surface**
    ```bash
-   kubectl get pods -n aegis-system
+   curl http://platform-api.aegis-platform.tech:8080/healthz
+   curl http://proxy.aegis-platform.tech:8080/healthz
+   curl https://ui.aegis-platform.tech/healthcheck
+   curl https://keycloak.aegis-platform.tech/realms/aegis/.well-known/openid-configuration
    ```
 
 ### What `generate-cloud-deployment.sh` Does (9 Steps)
 
-Both `deploy-cloud` and `deploy-cloud-full` run `terraform/generate-cloud-deployment.sh --non-interactive`, which executes:
+`make deploy-cloud` runs `terraform apply` followed by `terraform/generate-cloud-deployment.sh --non-interactive`.
+
+Before Step 1, the script:
+
+- requires explicit `PLATFORM_API_IMAGE_TAG`, `PROXY_IMAGE_TAG`, `K8S_AGENT_IMAGE_TAG`, and `UI_IMAGE_TAG` values
+- verifies those image references already exist in ECR
+- verifies the required Cloudflare records exist when DNS updates are enabled
+- generates cloud Helm values from Terraform outputs
+
+The deployment phase then executes:
 
 | Step | Action | Fatal? |
 |------|--------|--------|
 | 1 | Configure kubectl for EKS cluster | Yes |
 | 2 | Create namespace `aegis-system` + Kubernetes secrets | Yes |
 | 3 | Defer migrations to Step 6b (in-cluster Postgres mode) | Yes |
-| 4 | Install internal PKI (cert-manager + step-ca + step-issuer) | Yes |
+| 4 | Ensure internal PKI (cert-manager + step-ca + step-issuer) and refresh CA bundle | Yes |
 | 5 | Apply CRDs (AegisWorkload) | Yes |
-| 6 | Deploy aegis-services Helm chart (platform-api, proxy, keycloak) | Yes |
+| 6 | Deploy aegis-services Helm chart (platform-api, proxy, keycloak, backstage) and remove any legacy `aegis-ui` release | Yes |
 | 6b | Run in-cluster Postgres migrations | Yes |
-| 7 | Wait for LoadBalancers, update Cloudflare + Route53 DNS, update /etc/hosts | Non-fatal (/etc/hosts) |
-| 7b | Write Backstage config to `aegis-ui/app-config.cloud.yaml` | Non-fatal |
+| 7 | Wait for platform-api, proxy, and public ingress LoadBalancers; patch Cloudflare CNAMEs (`ui` and `keycloak` share ingress); then restart/verify Backstage against the canonical public hosts | Yes |
 | 8 | Deploy aegis-spoke (k8s-agent) Helm chart with OIDC credentials | Yes |
-| 9 | Build + push + deploy aegis-ui (Backstage) | Non-fatal (subshell) |
+| 9 | Verify canonical public endpoints on `platform-api`, `proxy`, `ui`, and `keycloak` | Yes |
 
 ### Key Environment Variables for Cloud Deploy
 
 | Variable | Default | Description |
 |---|---|---|
 | `AWS_PROFILE` | `aegis-new` | AWS CLI profile |
-| `CLOUD_IMAGE_TAG` | `git rev-parse --short HEAD` | Image tag for all ECR images |
-| `CLOUDFLARE_API_TOKEN` | (empty) | Required for Cloudflare DNS updates in Step 7 |
-| `SKIP_ROUTE53_UPDATE` | `0` | Set to `1` to skip DNS updates |
+| `PLATFORM_API_IMAGE_TAG` | (required) | Full ECR image reference for platform-api (`repo:tag`) |
+| `PROXY_IMAGE_TAG` | (required) | Full ECR image reference for proxy (`repo:tag`) |
+| `K8S_AGENT_IMAGE_TAG` | (required) | Full ECR image reference for k8s-agent (`repo:tag`) |
+| `UI_IMAGE_TAG` | (required) | Full ECR image reference for UI (`repo:tag`) |
+| `PLATFORM_API_PUBLIC_HOST` | `platform-api.aegis-platform.tech` | Canonical public hostname for platform-api HTTP/gRPC |
+| `KEYCLOAK_PUBLIC_HOST` | `keycloak.aegis-platform.tech` | Canonical public hostname for Keycloak |
+| `PROXY_PUBLIC_HOST` | `proxy.aegis-platform.tech` | Canonical public hostname for proxy |
+| `UI_PUBLIC_HOST` | `ui.aegis-platform.tech` | Canonical public hostname for UI |
+| `CLOUDFLARE_API_TOKEN` | (empty) | Required for Cloudflare DNS updates in Step 7 unless `SKIP_DNS_UPDATE=1` |
+| `SKIP_DNS_UPDATE` | `0` | Set to `1` to skip Cloudflare DNS updates |
+| `SKIP_ROUTE53_UPDATE` | (deprecated alias) | Backward-compatible alias for `SKIP_DNS_UPDATE` |
+| `CLOUD_IMAGE_TAG` | `git rev-parse --short HEAD` | Convenience tag used by `make push-cloud-images` and `make deploy-cloud` |
 | `SKIP_MIGRATION_PLACEHOLDER` | `1` (set by Make) | Defers migrations to Step 6b |
 
 ### Key notes
 
 - Uses **in-cluster Postgres** (no RDS). Migrations run in Step 6b.
-- DNS zones: `aegist.dev` (Route53), `aegis-platform.tech` (Cloudflare — `terraform/cloudflare.tf`)
+- Full-cloud public DNS is **Cloudflare-only** on `*.aegis-platform.tech`.
+- The canonical public endpoints are `platform-api.aegis-platform.tech`, `proxy.aegis-platform.tech`, `ui.aegis-platform.tech`, and `keycloak.aegis-platform.tech`.
+- The canonical cloud UI path is the in-repo `aegis-services` Backstage deployment. The legacy standalone `aegis-ui` Helm release is not part of the supported cloud workflow.
+- In full cloud, UI and Keycloak are exposed through ingress on standard HTTPS while platform-api and proxy remain direct service LoadBalancers.
+- In full cloud, Backstage stays at `replicaCount=1` until a dedicated migration job exists. Multiple replicas can race on the catalog migration lock during first boot.
+- Backstage OIDC startup depends on the canonical public Keycloak hostname, so Cloudflare DNS must be patched before Backstage is treated as ready. The deploy script now applies DNS updates before the final Backstage readiness gate.
+- Backstage auth sessions live in the plugin-scoped Postgres database `backstage_plugin_auth`, not in `aegis_platform`. If OIDC state appears to disappear between `/start` and `/handler/frame`, inspect `backstage_plugin_auth.sessions`.
+- A pre-login `GET /api/auth/keycloak/refresh?... -> 401 Missing session cookie` is expected until the user has completed SSO. Treat it as informational unless it continues after a successful callback.
+- Backstage cloud auth must keep `auth.providers.keycloak.<env>.signIn.resolvers` configured. If that resolver block disappears, Keycloak login can succeed but the popup callback will not return a `backstageIdentity`, and the UI will fall back to `Authentication failed. Please try again.`
+- The currently verified full-cloud slice is limited to public UI load, Keycloak discovery, and successful SSO landing in Backstage. Treat project/workload/proxy actions as separate cloud acceptance work until those flows are exercised explicitly.
+- `make deploy-cloud` runs `terraform apply` (idempotent) then deploys. Expects prebuilt ECR images. Build/push stays separate in `make push-cloud-images`.
+- Hybrid local-hub + cloud-spoke testing remains a separate workflow and should continue to use the existing local/tunnel documentation.
 - Hub cluster name: `aegis-hub-prod` (configurable via `cluster_name_prefix` terraform variable)
 - `CLOUD_IMAGE_TAG` uses simple expansion (`:=`) — tag is locked at Make parse time to prevent mismatch between push and deploy
 - For infrastructure details, see `terraform/README.md`
@@ -296,10 +353,19 @@ script copies it to `aegis-system` as `step-ca-credentials` with the key renamed
 ### Cloud
 
 1. **Infra**: `cd terraform && terraform apply`
-2. **One-shot deploy**: `AWS_PROFILE=aegis-new CLOUDFLARE_API_TOKEN=<token> make deploy-cloud-full`
-   (This handles: ECR login, image push, terraform apply, deploy steps 1-9 including DNS)
-3. **Verify**: `kubectl get pods -n aegis-system`
-4. **Import cluster**: Via platform-api gRPC or Backstage UI
+2. **Build + push images**: `AWS_PROFILE=aegis-new make push-cloud-images`
+3. **Deploy**: `AWS_PROFILE=aegis-new CLOUDFLARE_API_TOKEN=<token> make deploy-cloud`
+4. **Verify public endpoints**: `platform-api.aegis-platform.tech`, `proxy.aegis-platform.tech`, `ui.aegis-platform.tech`, `keycloak.aegis-platform.tech`
+5. **Import cluster**: Via platform-api gRPC or Backstage UI
+
+### Hybrid (Local Hub + Cloud Spoke)
+
+1. **Deploy hub locally with TLS**: `make deploy-local-tls`
+2. **Use the relay/tunnel workflow**: see `docs/aws-tunnel-dev-setup.md`
+3. **Deploy or upgrade the remote spoke**
+4. **Test against the local hub**
+
+This path is intentionally separate from the full-cloud public DNS surface.
 
 ## Environment Variables
 
@@ -315,10 +381,14 @@ script copies it to `aegis-system` as `step-ca-credentials` with the key renamed
 | `RHBK_USERNAME` | (empty) | Red Hat registry username |
 | `RHBK_PASSWORD` | (empty) | Red Hat registry password |
 | `SKIP_MIGRATION_PLACEHOLDER` | `0` | Set to `1` to skip DB migration job (cloud with in-cluster Postgres) |
-| `SKIP_ROUTE53_UPDATE` | `0` | Set to `1` to skip Route53 DNS updates |
+| `SKIP_DNS_UPDATE` | `0` | Set to `1` to skip Cloudflare DNS updates |
 | `CLOUDFLARE_API_TOKEN` | (empty) | Cloudflare API token for DNS management (Step 7) |
 | `CLOUD_IMAGE_TAG` | `git rev-parse --short HEAD` | Image tag for all ECR images; locked at Make parse time |
-| `AWS_PROFILE` | `aegis-new` | AWS CLI profile for ECR, EKS, Route53 |
+| `PLATFORM_API_IMAGE_TAG` | (required for `make deploy-cloud`) | Full image ref for platform-api |
+| `PROXY_IMAGE_TAG` | (required for `make deploy-cloud`) | Full image ref for proxy |
+| `K8S_AGENT_IMAGE_TAG` | (required for `make deploy-cloud`) | Full image ref for k8s-agent |
+| `UI_IMAGE_TAG` | (required for `make deploy-cloud`) | Full image ref for UI |
+| `AWS_PROFILE` | `aegis-new` | AWS CLI profile for ECR and EKS |
 
 ## Helm Values Layering
 
@@ -365,7 +435,10 @@ TAG=$(git rev-parse --short HEAD)
 docker buildx build --platform linux/amd64 -f services/platform-api/Dockerfile -t 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api:$TAG --push .
 docker buildx build --platform linux/amd64 -f services/proxy/Dockerfile -t 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy:$TAG --push .
 docker buildx build --platform linux/amd64 -f agents/k8s-agent/Dockerfile -t 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent:$TAG --push .
+docker buildx build --platform linux/amd64 -f "$HOME/code/aegis-ui/packages/backend/Dockerfile.cloud" -t 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/ui:$TAG --push "$HOME/code/aegis-ui"
 ```
+
+`make push-cloud-images` uses `AEGIS_UI_DIR` (default: `~/code/aegis-ui`) for the UI image build and prints the explicit image refs required by the deploy-only cloud path.
 
 ### ECR Login
 
@@ -424,10 +497,10 @@ GRPC_TLS_SERVER_NAME=platform-api-grpc.localtest.me \
 **Cloud:**
 ```bash
 WORKSPACE_IMAGE=195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:stable \
-GRPC_ADDR=platform-api-grpc.aegist.dev:8081 \
+GRPC_ADDR=platform-api.aegis-platform.tech:8081 \
 GRPC_TLS=1 \
 GRPC_CA="$HOME/aegis-platform-api-ca.crt" \
-GRPC_TLS_SERVER_NAME=platform-api-grpc.aegist.dev \
+GRPC_TLS_SERVER_NAME=platform-api.aegis-platform.tech \
 WORKSPACE_NAMESPACE=aegis-workloads \
 ./scripts/test-workspace-connection.sh
 ```
@@ -450,7 +523,7 @@ WORKSPACE_NAMESPACE=aegis-workloads \
 | Proxy `ImagePullBackOff` on Apple Silicon | Proxy image built for amd64 only | Rebuild with multi-arch: `docker buildx build --platform linux/arm64,linux/amd64 -f services/proxy/Dockerfile -t carlosmsanchez/aegis-proxy:dev --push .` |
 | `Client refused: version mismatch` in VS Code | VS Code commit/channel mismatch | Ensure the workspace pod uses the stable VS Code server hash and you launch **stable** VS Code |
 | Workspace never reaches `Running` | Namespace or image misconfigured | Confirm `WORKSPACE_NAMESPACE` matches the deployment and that the image tag is valid |
-| TLS handshake errors in proxy logs | Incorrect CA bundle or server name | Check `GRPC_CA` and `GRPC_TLS_SERVER_NAME`. Local TLS: `platform-api-grpc.localtest.me`; cloud: `platform-api-grpc.aegist.dev` |
+| TLS handshake errors in proxy logs | Incorrect CA bundle or server name | Check `GRPC_CA` and `GRPC_TLS_SERVER_NAME`. Local TLS: `platform-api-grpc.localtest.me`; full cloud: `platform-api.aegis-platform.tech` |
 | `make clean-local` removes cloud resources | Running from the wrong context | Always switch back to `docker-desktop` before running local cleanup targets |
 
 ## Context Switching

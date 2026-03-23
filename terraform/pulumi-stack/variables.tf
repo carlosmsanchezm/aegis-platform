@@ -6,8 +6,8 @@ variable "aws_region" {
 
 variable "target_role_arn" {
   type        = string
-  description = "ARN of the IAM role that Pulumi should assume (e.g., arn:aws:iam::567751785679:role/aegis-platform)."
-  default     = "arn:aws:iam::567751785679:role/aegis-platform"
+  description = "ARN of the IAM role that Pulumi should assume (e.g., arn:aws:iam::195714074609:role/aegis-platform)."
+  default     = "arn:aws:iam::195714074609:role/aegis-platform"
 }
 
 variable "pulumi_state_bucket" {

@@ -42,6 +42,10 @@ spec:
               readOnly: true
 {{- end }}
           env:
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
             - name: AEGIS_PROXY_JWT_SECRET
               valueFrom:
                 secretKeyRef:

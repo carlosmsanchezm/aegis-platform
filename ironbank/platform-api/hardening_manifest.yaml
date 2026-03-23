@@ -1,0 +1,69 @@
+---
+apiVersion: v1
+
+name: "aegis/platform-api"
+
+tags:
+  - "1.0.0"
+
+args:
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/redhat/ubi/ubi9-minimal"
+  BASE_TAG: "9.7"
+  BUILDER_REGISTRY: "registry1.dso.mil"
+  BUILDER_IMAGE: "ironbank/google/golang/ubi9/golang-1.24"
+  BUILDER_TAG: "1.24.13"
+
+labels:
+  org.opencontainers.image.title: "aegis-platform-api"
+  org.opencontainers.image.description: "Aegis Platform API — gRPC+REST control plane for multi-cluster GPU workload orchestration"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "grpc,kubernetes,gpu,workload,scheduling,security,rbac"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
+  mil.dso.ironbank.product.name: "aegis-platform-api"
+
+resources:
+  # Aegis Platform monorepo source (v1.0.0 release tarball)
+  - filename: aegis-platform-src.tar.gz
+    url: https://github.com/carlosmsanchezm/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
+    validation:
+      type: sha256
+      value: 4d30bfeb14d0bb71914cc114ead89125dac318c569775c8051d9e985e59d17a5
+
+  # Pulumi CLI v3.226.0 (linux x64)
+  - filename: pulumi-linux-x64.tar.gz
+    url: https://get.pulumi.com/releases/sdk/pulumi-v3.226.0-linux-x64.tar.gz
+    validation:
+      type: sha256
+      value: 6bf8e5d09f9c3ebb3ca003a86e2ed4c218b0ddb82dad60a1ed1c451abfd6c0ec
+
+  # AWS CLI v2 (x86_64) — unversioned URL; hash computed 2026-03-20
+  - filename: awscli.zip
+    url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+    validation:
+      type: sha256
+      value: 05f820e8df6bdc2b1c296afd1b63d3fecd39ac0725fd823004f110191c8180dd
+
+  # kubectl v1.33.0 (linux amd64)
+  - filename: kubectl
+    url: https://dl.k8s.io/release/v1.33.0/bin/linux/amd64/kubectl
+    validation:
+      type: sha256
+      value: 9efe8d3facb23e1618cba36fb1c4e15ac9dc3ed5a2c2e18109e4a66b2bac12dc
+
+  # jq v1.8.0 (linux amd64) — upgraded from 1.7.1 to fix CVE-2025-48060, CVE-2024-53427
+  - filename: jq
+    url: https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-amd64
+    validation:
+      type: sha256
+      value: 8926c33326111bcd67a47a970b5a5db933ef9194ad925994934c639c76a0605c
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
+    cht_member: false

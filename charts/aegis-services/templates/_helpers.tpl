@@ -115,8 +115,46 @@ app.kubernetes.io/component: backstage
 {{- end -}}
 
 {{- define "aegis-services.backstage.caBundleSecretName" -}}
-{{- $name := .Values.backstage.caBundle.secretName | default (printf "%s-backstage-ca" (include "aegis-services.fullname" .)) -}}
-{{- $name | trunc 63 | trimSuffix "-" -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $ca := $backstage.caBundle | default dict -}}
+{{- if $ca.secretName -}}
+{{- $ca.secretName | trunc 63 | trimSuffix "-" -}}
+{{- else if $ca.create -}}
+{{- printf "%s-backstage-ca" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.secretName" -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $secrets := $backstage.secrets | default dict -}}
+{{- if $secrets.name -}}
+{{- $secrets.name | trunc 63 | trimSuffix "-" -}}
+{{- else if $secrets.create -}}
+{{- printf "%s-backstage-secret" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.runtimeConfigName" -}}
+{{- printf "%s-backstage-runtime-config" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.startupPatchConfigName" -}}
+{{- printf "%s-backstage-startup-patch" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "aegis-services.backstage.tlsSecretName" -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $ingress := $backstage.ingress | default dict -}}
+{{- $tls := $ingress.tls | default list -}}
+{{- if and $tls (gt (len $tls) 0) ((index $tls 0).secretName) -}}
+{{- (index $tls 0).secretName | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-backstage-tls" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Component selector labels */}}
@@ -176,46 +214,26 @@ app.kubernetes.io/component: keycloak-postgres
 app.kubernetes.io/component: keycloak-postgres
 {{- end -}}
 
-{{/* PKI / Step-CA helpers */}}
+{{/* PKI helpers for external PKI consumption */}}
 {{- define "aegis-services.pki.namespace" -}}
 {{- $pki := .Values.pki | default dict }}
-{{- $stepCa := $pki.stepCa | default dict }}
-{{- if $stepCa.namespace -}}
-{{- $stepCa.namespace -}}
-{{- else -}}
-{{- .Release.Namespace -}}
-{{- end -}}
+{{- $ext := $pki.external | default dict }}
+{{- default "aegis-pki" $ext.namespace -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.fullname" -}}
-{{- printf "%s-step-ca" (include "aegis-services.fullname" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
-{{- define "aegis-services.pki.stepCa.releaseName" -}}
 {{- $pki := .Values.pki | default dict }}
-{{- $stepCa := $pki.stepCa | default dict }}
-{{- default "step-certificates" $stepCa.releaseName -}}
-{{- end -}}
-
-{{- define "aegis-services.pki.stepCa.configMapName" -}}
-{{- printf "%s-config" (include "aegis-services.pki.stepCa.fullname" .) -}}
-{{- end -}}
-
-{{- define "aegis-services.pki.stepCa.certsConfigMapName" -}}
-{{- printf "%s-certs" (include "aegis-services.pki.stepCa.fullname" .) -}}
-{{- end -}}
-
-{{- define "aegis-services.pki.stepCa.provisionerSecretName" -}}
-{{- printf "%s-provisioner-password" (include "aegis-services.pki.stepCa.fullname" .) -}}
+{{- $ext := $pki.external | default dict }}
+{{- default "step-certificates" $ext.releaseName -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.stepCa.serviceURL" -}}
 {{- $pki := .Values.pki | default dict }}
-{{- $stepCa := $pki.stepCa | default dict }}
+{{- $ext := $pki.external | default dict }}
 {{- $ns := include "aegis-services.pki.namespace" . -}}
-{{- $fullname := include "aegis-services.pki.stepCa.fullname" . -}}
-{{- $port := $stepCa.service.port | default 443 -}}
-{{- printf "https://%s.%s.svc.cluster.local:%d" $fullname $ns (int $port) -}}
+{{- $name := include "aegis-services.pki.stepCa.fullname" . -}}
+{{- $port := $ext.servicePort | default 443 -}}
+{{- printf "https://%s.%s.svc.cluster.local:%d" $name $ns (int $port) -}}
 {{- end -}}
 
 {{- define "aegis-services.pki.clusterIssuerName" -}}

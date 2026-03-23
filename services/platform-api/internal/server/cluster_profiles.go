@@ -32,7 +32,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "system",
-						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for spoke, autoscaler, observability
+						InstanceType: "t3.large", // 2 vCPU, 8GB, 35 pod limit - fits all system + observability pods on one node
 						MinSize:      1,
 						MaxSize:      3,
 						Labels: map[string]string{
@@ -71,7 +71,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "general",
-						InstanceType: "t3.small", // 2 vCPU, 2GB - cost-effective for general workloads
+						InstanceType: "t3.large", // 2 vCPU, 8GB, 35 pod limit - fits observability stack on one node
 						MinSize:      2,
 						MaxSize:      10,
 						Labels: map[string]string{
@@ -94,7 +94,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "system",
-						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for system workloads
+						InstanceType: "t3.large", // 2 vCPU, 8GB, 35 pod limit - fits all system + observability pods on one node
 						MinSize:      1,
 						MaxSize:      5,
 						Labels: map[string]string{
@@ -115,7 +115,7 @@ func defaultClusterProfiles() map[string]*clusterProfileTemplate {
 				NodePools: []infraapi.NodePool{
 					{
 						Name:         "control",
-						InstanceType: "t3.small", // 2 vCPU, 2GB - sufficient for control plane components
+						InstanceType: "t3.large", // 2 vCPU, 8GB, 35 pod limit - fits all system + observability pods on one node
 						MinSize:      3,
 						MaxSize:      6,
 						Labels: map[string]string{

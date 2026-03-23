@@ -103,6 +103,9 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
+        {{- if $postgresStorage.className }}
+        storageClassName: {{ $postgresStorage.className }}
+        {{- end }}
         resources:
           requests:
             storage: {{ default "5Gi" $postgresStorage.size | quote }}

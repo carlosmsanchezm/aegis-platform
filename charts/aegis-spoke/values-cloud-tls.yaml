@@ -5,3 +5,6 @@ k8sAgent:
   env:
     # Enable TLS for gRPC connection to platform-api
     AEGIS_CP_GRPC_INSECURE: "false"
+    # Skip certificate verification for internal CA (co-located spokes)
+    AEGIS_CP_GRPC_SKIP_VERIFY: "true"
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"

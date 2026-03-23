@@ -23,6 +23,15 @@ type GPUHints struct {
 	MemoryRequest   *string
 }
 
+// StorageOptions configures persistent storage for a workspace pod.
+type StorageOptions struct {
+	Persistent        bool
+	StorageClass      string // Kubernetes StorageClass name. Empty = cluster default.
+	Size              string // e.g. "50Gi"
+	MountPath         string // default: "/home/coder"
+	ExistingClaimName string // reuse an existing PVC by name
+}
+
 // WorkspaceOptions describes the inputs required to render a Kubernetes Job for workspaces.
 type WorkspaceOptions struct {
 	Namespace               string
@@ -35,6 +44,7 @@ type WorkspaceOptions struct {
 	Flavor                  string
 	Queue                   string
 	Hints                   *GPUHints
+	Storage                 *StorageOptions
 	DryRun                  bool
 	KueueEnabled            bool
 	KueueQueue              string
@@ -304,6 +314,31 @@ fi
 		corev1.VolumeMount{Name: sshConfigVolume, MountPath: "/config/sshd", SubPath: "config"},
 	)
 	main.Env = append(main.Env, corev1.EnvVar{Name: "AEGIS_SSH_CONFIG_DIR", Value: "/aegis-ssh"})
+
+	// Persistent storage: mount a PVC for user data that survives workspace restarts.
+	if opts.Storage != nil && opts.Storage.Persistent {
+		pvcName := opts.Storage.ExistingClaimName
+		if pvcName == "" {
+			pvcName = fmt.Sprintf("aegis-ws-%s", opts.WorkloadID)
+		}
+		mountPath := opts.Storage.MountPath
+		if mountPath == "" {
+			mountPath = "/home/coder"
+		}
+
+		const dataVolumeName = "workspace-data"
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: dataVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvcName,
+				},
+			},
+		})
+		main.VolumeMounts = append(main.VolumeMounts,
+			corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath},
+		)
+	}
 
 	// VS Code REH init container: injects pre-built VS Code server binary from
 	// a separate Iron Bank image into a shared emptyDir volume at /reh.

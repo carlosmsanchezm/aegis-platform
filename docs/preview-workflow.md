@@ -91,7 +91,7 @@ gh workflow run preview-deployment.yml \
   -f preview_number=26
 ```
 
-> When supplying `image_tag`, confirm the tag already exists in `567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/<service>:<tag>`. The workflow never builds images in deploy/tests-only modes.
+> When supplying `image_tag`, confirm the tag already exists in `195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/<service>:<tag>`. The workflow never builds images in deploy/tests-only modes.
 
 ---
 

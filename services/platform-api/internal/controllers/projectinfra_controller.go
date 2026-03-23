@@ -24,6 +24,7 @@ import (
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
+	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 )
@@ -198,6 +199,17 @@ func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	// Ensure the project exists in the store for the workspace wizard to list.
 	r.syncProjectToStore(infra)
+
+	// Terminal state: infrastructure already destroyed.
+	if strings.EqualFold(infra.Status.Phase, "Destroyed") {
+		log.Info("skipping reconcile; infrastructure already destroyed")
+		return ctrl.Result{}, nil
+	}
+
+	// Route destroy mode before Ready/Error checks — a Ready cluster can be destroyed.
+	if infra.Spec.Aws != nil && strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeDestroy)) {
+		return r.handleAWSDestroy(ctx, log, infra)
+	}
 
 	// If already in Ready state, skip reconciliation. The infrastructure is provisioned.
 	if strings.EqualFold(infra.Status.Phase, "Ready") {
@@ -377,20 +389,74 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	condProvisioning := newCondition(metav1.ConditionFalse, "Provisioning", "provisioning in progress")
 	_ = r.setStatus(ctx, infra, "Provisioning", &condProvisioning, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
 
+	// Pre-register cluster in store so it appears in the UI during provisioning.
+	// The full cluster ID (with hash suffix) will be updated by ensureAegisCluster
+	// after Provision succeeds. PreRegisterCluster is idempotent (ON CONFLICT DO UPDATE).
+	clusterName := strings.TrimSpace(infra.Spec.Aws.ClusterName)
+	if clusterName != "" && r.Store != nil {
+		r.Store.PreRegisterCluster(
+			clusterName,
+			strings.TrimSpace(infra.Spec.ProjectID),
+			"aws",
+			strings.TrimSpace(infra.Spec.Region),
+			"", "", "",
+		)
+		log.Info("pre-registered cluster in store", zap.String("cluster_name", clusterName))
+	}
+
 	result, err := r.Provisioner.Provision(ctx, infra, infra.Spec.Aws)
 	if err != nil {
-		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
-		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
 		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+
+		// Auto-cleanup: destroy any AWS resources Pulumi created before the failure.
+		// This prevents orphaned EKS clusters, IAM roles, etc. that the user cannot
+		// see in the UI. Safe because Destroy is a no-op if no stack/resources exist.
+		log.Warn("provisioning failed; attempting automatic cleanup of partial resources",
+			zap.Error(err))
+		r.recordProvisioningLog(infra, "Cleanup", store.LogTypeEvent,
+			"cleaning up partial AWS resources after provisioning failure")
+
+		var cleanupMsg string
+		if destroyErr := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); destroyErr != nil {
+			log.Error("auto-cleanup failed after provisioning error",
+				zap.Error(destroyErr), zap.NamedError("provision_error", err))
+			r.recordProvisioningLog(infra, "Cleanup", store.LogTypeError,
+				fmt.Sprintf("automatic cleanup failed: %s", destroyErr.Error()))
+			cleanupMsg = fmt.Sprintf("%s\n\nWARNING: automatic cleanup also failed: %s. Manual intervention may be required.", err.Error(), destroyErr.Error())
+		} else {
+			log.Info("auto-cleanup completed after provisioning failure")
+			r.recordProvisioningLog(infra, "Cleanup", store.LogTypeEvent,
+				"partial resources cleaned up successfully")
+			cleanupMsg = fmt.Sprintf("%s\n\nPartial resources have been automatically cleaned up.", err.Error())
+		}
+
+		// Soft-delete the pre-registered cluster so it doesn't linger in the UI.
+		if clusterName != "" && r.Store != nil {
+			r.Store.DeleteCluster(clusterName)
+			// Also clean up any partial outputs (e.g. full cluster ID with hash)
+			if result != nil {
+				for _, out := range result.Outputs {
+					if cid := strings.TrimSpace(out.ClusterID); cid != "" && cid != clusterName {
+						r.Store.DeleteCluster(cid)
+					}
+				}
+			}
+		}
+
+		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", cleanupMsg)
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
 		r.recordProvisioningStatus(infra, "Error", true)
-		// Do not requeue automatically on failure; require an explicit relaunch.
 		return ctrl.Result{}, nil
 	}
 
 	kubeconfigData := map[string][]byte{}
 	for clusterID, kubeconfig := range result.Kubeconfigs {
+		sanitized, warnings := kubeclients.SanitizeKubeconfig(kubeconfig)
+		for _, w := range warnings {
+			r.logger().Warn("kubeconfig sanitized", zap.String("cluster_id", clusterID), zap.String("warning", w))
+		}
 		key := fmt.Sprintf("%s.kubeconfig", clusterID)
-		kubeconfigData[key] = kubeconfig
+		kubeconfigData[key] = sanitized
 	}
 	if len(kubeconfigData) == 0 {
 		err := fmt.Errorf("provisioner returned no kubeconfigs")
@@ -422,6 +488,22 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 			})
 		}
 	}
+	// Clean up the short-name placeholder now that we have the full cluster IDs
+	// from Pulumi. The placeholder was created with spec.aws.clusterName (e.g. "training-1")
+	// but the actual cluster ID includes the project prefix (e.g. "e2e-pilot-test-training-1").
+	if clusterName != "" && r.Store != nil {
+		for _, out := range outputs {
+			fullID := strings.TrimSpace(out.ClusterID)
+			if fullID != "" && fullID != clusterName {
+				r.Store.DeleteCluster(clusterName)
+				log.Info("removed pre-registration placeholder",
+					zap.String("placeholder", clusterName),
+					zap.String("full_id", fullID))
+				break
+			}
+		}
+	}
+
 	for i := range outputs {
 		if outputs[i].KubeconfigSecretKey == "" {
 			outputs[i].KubeconfigSecretKey = fmt.Sprintf("%s.kubeconfig", outputs[i].ClusterID)
@@ -452,6 +534,83 @@ func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *za
 	return ctrl.Result{}, nil
 }
 
+func (r *ProjectInfraReconciler) handleAWSDestroy(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// Already destroyed — nothing to do.
+	if strings.EqualFold(infra.Status.Phase, "Destroyed") {
+		return ctrl.Result{}, nil
+	}
+	// Already in progress — don't double-run (the lock should prevent this, but be safe).
+	if strings.EqualFold(infra.Status.Phase, "Destroying") {
+		log.Info("skipping reconcile; destroy already in progress")
+		return ctrl.Result{}, nil
+	}
+
+	clusterIDs := collectClusterIDs(infra)
+	log.Info("handling destroy mode",
+		zap.String("name", infra.Name),
+		zap.String("project", infra.Spec.ProjectID),
+		zap.Strings("cluster_ids", clusterIDs))
+
+	// Clear old provisioning logs so the UI starts fresh.
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID != "" && r.Store != nil {
+		r.Store.ClearProvisioningLogs(jobID)
+	}
+
+	// Set phase to Destroying.
+	condDestroying := newCondition(metav1.ConditionFalse, "Destroying", "infrastructure destroy in progress")
+	if err := r.setStatus(ctx, infra, "Destroying", &condDestroying, infra.Status.Outputs, 0); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "cluster destroy initiated")
+	r.recordProvisioningStatus(infra, "Destroying", false)
+
+	// Run Pulumi destroy. Logs are streamed via the existing ProvisioningLogSink.
+	if infra.Spec.Aws != nil && r.Provisioner != nil {
+		r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "running pulumi destroy")
+		if err := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); err != nil {
+			log.Error("aws destroy failed", zap.Error(err))
+			cond := newCondition(metav1.ConditionFalse, "DestroyFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, 0)
+			r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+			r.recordProvisioningStatus(infra, "Error", true)
+			return ctrl.Result{}, nil // Don't auto-retry; user can retry via API.
+		}
+		r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "pulumi destroy completed")
+	} else if infra.Spec.Aws != nil && r.Provisioner == nil {
+		log.Warn("aws destroy skipped; provisioner not configured")
+	}
+
+	// Remove kubeconfigs from the shared secret.
+	if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+		log.Error("failed to remove kubeconfigs during destroy", zap.Error(err))
+	}
+	// Delete AegisCluster CRDs.
+	if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+		log.Error("failed to delete aegis clusters during destroy", zap.Error(err))
+	}
+	// Soft-delete clusters and terminate workloads in store.
+	if r.Store != nil {
+		for _, id := range clusterIDs {
+			r.Store.DeleteCluster(id)
+			if n := r.Store.TerminateWorkloadsByCluster(id); n > 0 {
+				log.Info("terminated workloads on destroyed cluster",
+					zap.String("cluster_id", id), zap.Int64("count", n))
+			}
+		}
+	}
+
+	// Set final status to Destroyed — CRD stays as an audit record.
+	condDestroyed := newCondition(metav1.ConditionTrue, "Destroyed", "infrastructure destroyed successfully")
+	if err := r.setStatus(ctx, infra, "Destroyed", &condDestroyed, nil, 0); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.recordProvisioningLog(infra, "Destroyed", store.LogTypeEvent, "cluster infrastructure destroyed")
+	r.recordProvisioningStatus(infra, "Destroyed", true)
+	log.Info("cluster infrastructure destroyed", zap.Strings("cluster_ids", clusterIDs))
+	return ctrl.Result{}, nil
+}
+
 func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
 	clusterIDs := collectClusterIDs(infra)
 	log.Info("reconciling project infrastructure deletion",
@@ -461,22 +620,32 @@ func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.L
 		zap.String("region", infra.Spec.Region),
 		zap.Strings("cluster_ids", clusterIDs),
 	)
-	if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
-		log.Error("failed to remove kubeconfigs", zap.Error(err))
-		return ctrl.Result{}, err
-	}
-	if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
-		log.Error("failed to delete aegis clusters", zap.Error(err))
-		return ctrl.Result{}, err
-	}
-	// Remove clusters from the store so they no longer appear in the UI
-	if r.Store != nil {
-		for _, id := range clusterIDs {
-			r.Store.DeleteCluster(id)
+
+	// If handleAWSDestroy already ran, skip kubeconfig/store/pulumi cleanup.
+	alreadyDestroyed := strings.EqualFold(infra.Status.Phase, "Destroyed")
+
+	if !alreadyDestroyed {
+		if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+			log.Error("failed to remove kubeconfigs", zap.Error(err))
+			return ctrl.Result{}, err
 		}
-		log.Info("removed clusters from store", zap.Strings("cluster_ids", clusterIDs))
+		if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+			log.Error("failed to delete aegis clusters", zap.Error(err))
+			return ctrl.Result{}, err
+		}
+		if r.Store != nil {
+			for _, id := range clusterIDs {
+				r.Store.DeleteCluster(id)
+				if n := r.Store.TerminateWorkloadsByCluster(id); n > 0 {
+					log.Info("terminated workloads on deleted cluster", zap.String("cluster_id", id), zap.Int64("count", n))
+				}
+			}
+			log.Info("removed clusters from store", zap.Strings("cluster_ids", clusterIDs))
+		}
+	} else {
+		log.Info("skipping cleanup; infrastructure already destroyed via mode=Destroy")
 	}
-	if infra.Spec.Aws != nil && r.Provisioner != nil {
+	if !alreadyDestroyed && infra.Spec.Aws != nil && r.Provisioner != nil {
 		log.Info("triggering aws destroy via pulumi",
 			zap.String("project", infra.Spec.ProjectID),
 			zap.String("region", infra.Spec.Region),
@@ -659,7 +828,7 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 				proxyURL = host
 			}
 		}
-		if err := r.Store.PreRegisterCluster(clusterID, projectID, provider, region, proxyURL); err != nil {
+		if err := r.Store.PreRegisterCluster(clusterID, projectID, provider, region, proxyURL, output.ClusterEndpoint, output.ClusterCA); err != nil {
 			r.Log.Warn("failed to pre-register cluster in store",
 				zap.String("cluster_id", clusterID),
 				zap.String("project_id", projectID),
@@ -670,6 +839,14 @@ func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *
 				zap.String("cluster_id", clusterID),
 				zap.String("project_id", projectID),
 				zap.String("proxy_url", proxyURL))
+		}
+
+		// Propagate the project's data classification level (e.g. IL4) to the cluster
+		// so workspace creation policy checks pass without waiting for k8s-agent registration.
+		if proj := r.Store.GetProject(projectID); proj != nil {
+			if dl := strings.TrimSpace(strings.ToUpper(proj.GetPolicy().GetDataLevel())); dl != "" {
+				r.Store.SetClusterLabel(clusterID, "aegis.yourorg.dev/ilLevel", dl)
+			}
 		}
 	}
 

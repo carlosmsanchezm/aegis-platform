@@ -121,6 +121,62 @@ spec:
 {{ end }}
 
 {{- /* --------------------------------------------------------------------- */ -}}
+{{- /* Backstage certificate */ -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $backstageIngress := $backstage.ingress | default dict -}}
+{{- $backstageTLS := $backstage.tls | default dict -}}
+{{- $backstageCM := $backstageTLS.certManager | default dict -}}
+{{- if and ($backstage.enabled | default false) ($backstageIngress.enabled | default false) ($backstageCM.enabled | default false) -}}
+{{- $issuer := $backstageCM.issuerRef | default dict -}}
+{{- $issuerName := $issuer.name | default "aegis-internal" -}}
+{{- $issuerKind := $issuer.kind | default "StepClusterIssuer" -}}
+{{- $issuerGroup := $issuer.group | default "certmanager.step.sm" -}}
+{{- $dnsNames := list -}}
+{{- range ($backstageIngress.hosts | default list) -}}
+  {{- if .host -}}
+    {{- $dnsNames = append $dnsNames (.host | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $appBaseUrl := ($backstage.appConfig | default dict).appBaseUrl | default "" -}}
+{{- if $appBaseUrl -}}
+  {{- $clean := $appBaseUrl | trim | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" -}}
+  {{- $hostOnly := (splitList ":" $clean | first) -}}
+  {{- if $hostOnly -}}
+    {{- $dnsNames = append $dnsNames $hostOnly -}}
+  {{- end -}}
+{{- end -}}
+{{- range ($backstageCM.dnsNames | default list) -}}
+  {{- if . -}}
+    {{- $dnsNames = append $dnsNames (. | trim) -}}
+  {{- end -}}
+{{- end -}}
+{{- $dnsNames = $dnsNames | uniq }}
+{{- if gt (len $dnsNames) 0 }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "aegis-services.backstage.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "aegis-services.backstage.tlsSecretName" . }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: {{ $issuerKind }}
+    group: {{ $issuerGroup }}
+  duration: {{ $backstageCM.duration | default "2160h" | quote }}
+  renewBefore: {{ $backstageCM.renewBefore | default "168h" | quote }}
+  privateKey:
+    algorithm: {{ (($backstageCM.privateKey | default dict).algorithm) | default "RSA" }}
+    size: {{ (($backstageCM.privateKey | default dict).size) | default 2048 }}
+  dnsNames:
+{{ toYaml $dnsNames | nindent 4 }}
+{{- end }}
+{{ end }}
+
+{{- /* --------------------------------------------------------------------- */ -}}
 {{- /* Keycloak certificate */ -}}
 {{- $kc := .Values.keycloak | default dict -}}
 {{- $crdReady := or (.Capabilities.APIVersions.Has "k8s.keycloak.org/v2alpha1") ($kc.forceRender | default false) -}}

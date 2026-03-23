@@ -3,12 +3,17 @@ k8sAgent:
   image:
     repository: carlosmsanchez/aegis-k8s-agent
     tag: "dev"
-    pullPolicy: Always
+    pullPolicy: IfNotPresent  # Docker Desktop shares daemon; no remote pull needed
   env:
     AEGIS_CLUSTER_ID: "dev-local"
     AEGIS_CP_GRPC: "aegis-services-platform-api.aegis-system.svc.cluster.local:8081"
     AEGIS_PROXY_INGRESS_HOST: "proxy.localtest.me"
     AEGIS_DEFAULT_IMAGE: "carlosmsanchez/aegis-workspace-vscode:latest"
+    # OIDC client credentials for spoke-agent → Keycloak → Platform-API auth
+    AEGIS_CP_OIDC_TOKEN_URL: "https://aegis-services-keycloak-service.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/token"
+    AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+    AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
 
 proxy:
   enabled: false  # Use aegis-services proxy for local testing

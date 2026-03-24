@@ -1,7 +1,7 @@
 # Aegis Compliance Program Status
 
-**Last Updated:** 2026-03-09 (CMMC + FedRAMP buildout)
-**Evidence Vault Commit:** `bc0b73d`
+**Last Updated:** 2026-03-23 (weekly security check)
+**Evidence Vault Commit:** `17b169e`
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
 ---
@@ -86,10 +86,10 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | Metric | Value |
 |--------|-------|
 | **Location** | `$EVIDENCE_VAULT` → `../aegis-compliance-evidence` |
-| **Total Files** | 452 (excluding .gitkeep placeholders) |
-| **Observation Period** | Sept 2025 - Mar 2026 (6 months) |
+| **Total Files** | 178 (excluding .gitkeep placeholders) |
+| **Observation Period** | Sept 2025 - Mar 2026 (7 months) |
 | **Monthly Collection** | Automated scripts |
-| **Latest Commit** | `bc0b73d` (weekly check, 2026-03-09) |
+| **Latest Commit** | `17b169e` (weekly check, 2026-03-23) |
 
 ### First Corrective Action Cycle (CA-001)
 
@@ -148,12 +148,13 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 ## Next Actions Checklist
 
-### This Week
+### This Week (Mar 23–29)
 
 - [x] ~~Complete ISO 27001 internal audit~~ ✅ Done Mar 10
-- [ ] Conduct management review (CA-003) — target Mar 15
-- [ ] Remediate 2 critical Dependabot alerts in aegis-ui
-- [ ] Run weekly check Monday Mar 16
+- [x] Run weekly check Monday Mar 23 ✅ Done (55 Dependabot, 4 critical, 0 secrets, 0 code scan)
+- [ ] Conduct management review (CA-003) — **due Mar 31 (8 days)**
+- [ ] Update overdue risk treatments (CA-005) — **due Mar 31 (8 days)**
+- [ ] Remediate 4 critical Dependabot alerts (3 aegis-platform, 1 aegis-ui)
 
 ### This Month
 
@@ -194,7 +195,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | `sovran` | IaC, VS Code extension | 161 | ✅ `Tests on ubuntu-latest` | ✅ Full |
 
 **Total Commits:** 725+
-**Total Vulnerabilities:** 88 open Dependabot alerts (2 critical in aegis-ui, 36 high in sovran). 55 were fixed on 2026-01-17; new alerts accumulated during development.
+**Total Vulnerabilities:** 55 open Dependabot alerts (4 critical: 3 in aegis-platform + 1 in aegis-ui; 31 high: 1 in aegis-platform + 10 in aegis-ui + 20 in sovran). As of 2026-03-23 weekly check.
 
 ---
 
@@ -230,6 +231,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Commit | Date | Description |
 |--------|------|-------------|
+| `17b169e` | 2026-03-23 | Weekly security check: Week 13 |
 | `bc0b73d` | 2026-03-09 | Weekly security check: Week 11 |
 | `70205a7` | 2026-03-09 | Monthly evidence collection: 2026-03 |
 | `353e5f6` | 2026-03-09 | Retroactive catch-up: 2026-03 |
@@ -286,6 +288,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.6 | 2026-03-23 | Claude Opus 4.6 | Weekly security check (Week 13): 55 Dependabot alerts (4 critical, 31 high), 0 secrets/code scan; vault at 178 files; updated alert totals and next actions |
 | 1.5 | 2026-03-10 | Claude Opus 4.6 | ISO 27001 internal audit completed (self-assessment); ISO status → Pending Management Review; CA-003/004/005 opened; updated 30/60/90 plan |
 | 1.4 | 2026-03-09 | Claude Opus 4.6 | Added CMMC program structure (STATUS, control mapping, gap analysis, SPRS); FedRAMP SSP sections 1-3 + appendices E/F/L; expanded customer docs to 40 controls |
 | 1.3 | 2026-03-09 | Claude Opus 4.6 | Evidence catch-up (Feb-Mar); vault at 137 files; updated 30/60/90 plan; 88 Dependabot alerts tracked |

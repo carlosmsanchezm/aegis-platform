@@ -159,17 +159,34 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 ### This Month
 
-- [ ] Close CA-003 (management review, due Mar 31)
-- [ ] Close CA-005 (update overdue risk treatments, due Mar 31)
+- [x] Draft management review output (CA-003) ✅ Done Mar 23 — awaiting Carlos approval by Mar 31
+- [x] Propose revised risk treatment dates (CA-005) ✅ Done Mar 23 — awaiting Carlos approval by Mar 31
+- [ ] Carlos: Review and sign management review output (CA-003, due Mar 31)
+- [ ] Carlos: Approve revised risk treatment dates (CA-005, due Mar 31)
+- [ ] Carlos: Verify AWS root MFA status (due Mar 31)
 - [ ] Run monthly evidence Apr 1
-- [ ] Triage all high Dependabot alerts (create plan)
+- [ ] Remediate remaining ~20 medium/low Dependabot alerts (in progress)
+- [ ] Merge security remediation PRs to main (aegis-ui, sovran)
 
 ### This Quarter
 
 - [ ] Execute Q1 Access Review (CA-004, due Apr 15)
 - [ ] Close CA-002 (aegis-ui tests, due Apr 15)
+- [ ] Add container scanning (Trivy/Grype) to CI — RISK-014 (due Apr 30)
+- [ ] Remediate DISA STIG V-242415: secrets as env vars — CAT I (due next sprint)
 - [ ] Schedule ISO 27001 Stage 1 audit
 - [ ] Begin SOC 2 auditor selection
+
+### DISA Kubernetes STIG Remediation Tracking
+
+| Finding | Severity | Issue | Aegis Owner? | Status | Target |
+|---------|----------|-------|-------------|--------|--------|
+| V-242415 | CAT I | Secrets as env vars (18 secretKeyRef in Helm charts) | Yes | Open | Next sprint |
+| V-242437 | CAT I | PSS namespace labels missing from Helm charts | Yes | Open | Next sprint |
+| V-242442 | CAT II | No revisionHistoryLimit on Deployments | Yes | Open | Next sprint |
+| V-242443 | CAT II | No formal patch cadence documentation | Yes | Open | Next sprint |
+
+**Note:** V-242415 is the priority — only CAT I finding Aegis owns. Could block ATO.
 
 ---
 

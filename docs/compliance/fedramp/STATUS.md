@@ -181,6 +181,23 @@ Based on Aegis's current profile (Model B - self-hosted software, minimal PII), 
 | FED-009 | Limited personnel security | Onboard/offboard | Background checks | Medium |
 | FED-010 | No boundary diagram | Architecture docs | FedRAMP-specific diagram | Medium |
 
+### DISA Kubernetes STIG Findings (V2R2, assessed 2026-03-23)
+
+Full matrix: `docs/compliance/disa-k8s-stig-matrix.md`
+
+Of 93 STIG findings, 86 (92.5%) are Customer Responsibility. Aegis owns 7 findings:
+
+| Finding | Severity | Status | Issue | Target |
+|---------|----------|--------|-------|--------|
+| V-242415 | **CAT I** | **Open** | 18 secretKeyRef usages in Helm charts need migration to volume mounts | Next sprint |
+| V-242437 | **CAT I** | **Open** | PSS namespace labels missing from Helm charts | Next sprint |
+| V-242442 | CAT II | Open | No revisionHistoryLimit on Deployments | Next sprint |
+| V-242443 | CAT II | Open | No formal patch cadence documentation | Next sprint |
+| V-242376+ | CAT II | Satisfied (3) | TLS 1.2+ enforced in app layer | Done |
+| V-242395 | CAT II | Satisfied (1) | Network policies in Helm charts | Done |
+
+**V-242415 is the priority** — only CAT I finding Aegis owns. Maps to IA-5 (already updated to "Partial" in control mapping). Could block ATO if not addressed.
+
 ### Inheritable Controls (from AWS GovCloud)
 
 If Aegis or customers deploy on AWS GovCloud, many controls are inherited:

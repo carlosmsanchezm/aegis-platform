@@ -162,8 +162,8 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 - [ ] **Carlos: Approve management review output** (CA-003, due Mar 31)
 - [ ] **Carlos: Approve revised risk treatment dates** (CA-005, due Mar 31)
 - [ ] **Carlos: Verify AWS root MFA** (critical finding from access review)
-- [ ] Merge security PRs to main (aegis-ui, sovran) — in progress
-- [ ] Remediate remaining ~20 medium/low alerts — in progress
+- [ ] Merge security PRs to main (aegis-ui [#61](https://github.com/carlosmsanchezm/aegis-ui/pull/61), sovran [#17](https://github.com/carlosmsanchezm/sovran/pull/17)) — CI failures are pre-existing
+- [x] Remediate remaining medium/low alerts ✅ Done Mar 23 (48 fixed, 1 unfixable — elliptic has no upstream patch)
 
 ### This Month
 
@@ -221,7 +221,7 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 | `sovran` | IaC, VS Code extension | 161 | ✅ `Tests on ubuntu-latest` | ✅ Full |
 
 **Total Commits:** 725+
-**Total Vulnerabilities:** 55 open Dependabot alerts found 2026-03-23 → **all 35 critical+high remediated** (4 critical, 31 high). 20 medium/low remain. Remediation commits: aegis-platform `a2708aa`, aegis-ui `96b163d`, sovran `de15aa1`.
+**Total Vulnerabilities:** 55 open Dependabot alerts found 2026-03-23 → **all 54 remediated** (4 critical, 31 high, 19 medium/low). 1 remaining (elliptic in aegis-ui — no upstream fix). Commits: aegis-platform `a2708aa`+`f84137d`, aegis-ui `96b163d`+`c32f8ea`, sovran `de15aa1`+`e135dde`.
 
 ---
 

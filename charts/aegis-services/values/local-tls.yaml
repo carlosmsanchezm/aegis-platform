@@ -62,11 +62,11 @@ platformApi:
         mountPath: /etc/aegis-platform-api/oidc
         data: ""
   env:
-    # Use NLB for gRPC (Cloudflare doesn't handle streaming properly)
-    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-12123e67db2b2af4.elb.us-east-1.amazonaws.com:8081"
+    # NLB relay endpoint for remote spoke clusters (gRPC + OIDC)
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-68895aac97778f40.elb.us-east-1.amazonaws.com:8081"
     AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
     AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
-    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-aws-relay.yaml"
+    AEGIS_SPOKE_VALUES_FILE: "/home/aegis/charts/aegis-spoke/values-aws-relay.yaml"
     # Authorization bindings - must include spoke-agent for k8s-agent to update workload status
     AUTHZ_ROLE_BINDINGS_JSON: |-
       [
@@ -77,20 +77,22 @@ platformApi:
           "queues": ["*"]
         }
       ]
-    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-dev/aegis/pulumi"
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-195714074609/aegis/pulumi"
     PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
-    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "567751785679"
-    AEGIS_DEFAULT_AWS_ROLE_ARN: "arn:aws:iam::567751785679:role/aegis-platform"
+    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "195714074609"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: ""
     AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
     AEGIS_DEV_MODE: "true"
     AWS_REGION: "us-east-1"
     AWS_DEFAULT_REGION: "us-east-1"
+    # VS Code extension version (paths use built-in defaults)
+    AEGIS_EXTENSION_VERSION: "0.1.0"
   envFromSecret:
     AWS_ACCESS_KEY_ID: aws-access-key-id
     AWS_SECRET_ACCESS_KEY: aws-secret-access-key
   secrets:
-    aws-access-key-id: "REPLACE_WITH_YOUR_AWS_ACCESS_KEY_ID"
-    aws-secret-access-key: "REPLACE_WITH_YOUR_AWS_SECRET_ACCESS_KEY"
+    aws-access-key-id: "REPLACE_WITH_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REPLACE_WITH_AWS_SECRET_ACCESS_KEY"
   httpIngress:
     enabled: true
     className: "ingress-nginx"

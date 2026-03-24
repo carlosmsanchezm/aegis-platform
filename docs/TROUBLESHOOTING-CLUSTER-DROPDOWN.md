@@ -43,6 +43,20 @@ kubectl exec -n aegis-system platform-postgres-0 -- \
   "INSERT INTO cluster_labels (cluster_id, k, v) VALUES ('db-1-us-east-1-atlas-train-govcloud', 'aegis.yourorg.dev/projectId', 'db-1') ON CONFLICT DO NOTHING;"
 ```
 
+### Auto-Derivation from Cluster ID
+
+As of the project-ID auto-derivation feature, the server automatically extracts and persists the project association from the cluster ID format (`{projectId}-{region}-{clusterName}-{suffix}`) at registration and heartbeat time. This means:
+
+- **Manual label insertion is no longer needed** for clusters with standard AWS-format IDs (e.g., `db-1-us-east-1-atlas-train-govcloud` → project `db-1`)
+- The server validates that the derived project exists in the `projects` table before persisting
+- Heartbeat acts as self-healing: if a cluster registered before its project was created, the next heartbeat will backfill the association
+- Explicit `AEGIS_PROJECT_ID` env var or `aegis.yourorg.dev/projectId` label still takes priority over auto-derivation
+
+If a cluster still doesn't appear in the dropdown after auto-derivation was deployed, check:
+1. The cluster ID follows the `{projectId}-{region}-...` format
+2. The project exists in the `projects` table
+3. The cluster has sent at least one heartbeat since the feature was deployed
+
 ### 2. Query Parameter Case Mismatch
 
 The frontend must send `project_id` (snake_case), not `projectId` (camelCase).

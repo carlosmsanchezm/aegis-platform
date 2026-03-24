@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ type ClusterInfo struct {
 	ProjectID           string // Direct FK to projects table for multi-tenancy
 	Provider            string
 	Region              string
+	ILLevel             string // Impact level classification (e.g., "IL4", "IL5")
 	Labels              map[string]string
 	AvailableFlavorSet  map[string]bool
 	TTFGSecondsP50      float64
@@ -24,6 +26,9 @@ type ClusterInfo struct {
 	ImportedAt          time.Time
 	KubeconfigSecretRef string
 	AssumeRoleARN       string
+	ClusterEndpoint     string // EKS API server endpoint (e.g., https://ABC123.eks.us-east-1.amazonaws.com)
+	ClusterCA           string // base64-encoded cluster CA certificate
+	ProxyCAPem          string // PEM-encoded CA certificate for the spoke-proxy
 }
 
 // ClusterImport captures the metadata required to register an existing cluster
@@ -38,6 +43,8 @@ type ClusterImport struct {
 	ImportedAt          time.Time
 	KubeconfigSecretRef string
 	AssumeRoleARN       string
+	ClusterEndpoint     string
+	ClusterCA           string
 }
 
 type clusterState struct {
@@ -63,6 +70,9 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 	}
 	ci.Provider = req.GetProvider()
 	ci.Region = req.GetRegion()
+	if ilLevel := strings.TrimSpace(req.GetIlLevel()); ilLevel != "" {
+		ci.ILLevel = strings.ToUpper(ilLevel)
+	}
 	if ci.Labels == nil {
 		ci.Labels = map[string]string{}
 	}
@@ -72,9 +82,19 @@ func (cs *clusterState) upsertFromRegister(req *aegis.ClusterRegisterRequest) {
 		}
 		ci.Labels[k] = v
 	}
+	// Sync ProjectID from the project label if present and not already set
+	if ci.ProjectID == "" {
+		if pid, ok := ci.Labels["aegis.yourorg.dev/projectId"]; ok && pid != "" {
+			ci.ProjectID = pid
+		}
+	}
 	// Set proxy URL if provided during registration (useful for spoke clusters)
 	if proxyURL := req.GetProxyUrl(); proxyURL != "" {
 		ci.ProxyURL = proxyURL
+	}
+	// Set proxy CA if provided during registration (for client TLS trust)
+	if proxyCAPem := strings.TrimSpace(req.GetProxyCaPem()); proxyCAPem != "" {
+		ci.ProxyCAPem = proxyCAPem
 	}
 	// Do not touch flavors/TTFG here; those arrive in heartbeat.
 }
@@ -193,9 +213,38 @@ func (cs *clusterState) delete(clusterID string) {
 	delete(cs.clusters, clusterID)
 }
 
+// DeriveProjectIDFromClusterID attempts to extract the project ID from a cluster ID
+// that follows the format {projectId}-{region}-{clusterName}-{suffix}. It looks for
+// known AWS region patterns to find the boundary between project ID and region.
+// Returns empty string for non-parseable IDs (e.g., "docker-desktop").
+// This is more conservative than clusterProject() — no "first part before hyphen"
+// fallback, since the result gets persisted to the database.
+func DeriveProjectIDFromClusterID(clusterID string) string {
+	id := strings.TrimSpace(clusterID)
+	if id == "" {
+		return ""
+	}
+	regionPatterns := []string{
+		"-us-east-", "-us-west-",
+		"-eu-west-", "-eu-central-",
+		"-ap-southeast-", "-ap-northeast-", "-ap-south-",
+		"-sa-east-",
+		"-ca-central-",
+		"-me-south-",
+		"-af-south-",
+		"-il-central-",
+	}
+	for _, pattern := range regionPatterns {
+		if idx := strings.Index(id, pattern); idx > 0 {
+			return id[:idx]
+		}
+	}
+	return ""
+}
+
 // preRegister creates or updates a cluster entry with provisioning-time information.
 // This is called before the k8s-agent connects to ensure project_id and proxy_url are set.
-func (cs *clusterState) preRegister(clusterID, projectID, provider, region, proxyURL string) {
+func (cs *clusterState) preRegister(clusterID, projectID, provider, region, proxyURL, endpoint, ca string) {
 	if clusterID == "" {
 		return
 	}
@@ -223,5 +272,11 @@ func (cs *clusterState) preRegister(clusterID, projectID, provider, region, prox
 	}
 	if proxyURL != "" {
 		ci.ProxyURL = proxyURL
+	}
+	if endpoint != "" {
+		ci.ClusterEndpoint = endpoint
+	}
+	if ca != "" {
+		ci.ClusterCA = ca
 	}
 }

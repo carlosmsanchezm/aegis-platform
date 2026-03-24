@@ -148,7 +148,14 @@ func (s *Server) handleProvisioningLogs(w http.ResponseWriter, r *http.Request, 
 	}
 
 	limit := parseLimit(r.URL.Query().Get("limit"), 200, 1000)
-	cursorTS, cursorSeq := parseCursor(r.URL.Query().Get("since"))
+	rawSince := r.URL.Query().Get("since")
+	cursorTS, cursorSeq := parseCursor(rawSince)
+	// When no cursor is provided and the job is already completed,
+	// return logs from the beginning instead of the last 30 minutes.
+	if rawSince == "" && run.CompletedAt != nil {
+		cursorTS = time.Time{} // zero time → no time filter
+		cursorSeq = 0
+	}
 	stream := forceStream || parseBool(r.URL.Query().Get("stream"))
 
 	logs := s.store.ListProvisioningLogs(jobID, cursorTS, cursorSeq, limit)

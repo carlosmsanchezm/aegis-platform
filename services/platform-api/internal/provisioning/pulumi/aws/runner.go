@@ -40,6 +40,9 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	metav1List "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sclient "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
@@ -76,7 +79,11 @@ const (
 	envAegisSpokeImageRepo     = "AEGIS_SPOKE_IMAGE_REPO"
 	envAegisSpokeImageTag      = "AEGIS_SPOKE_IMAGE_TAG"
 	envAegisSpokeProxyNodePort = "AEGIS_SPOKE_PROXY_NODEPORT"
-	envAegisSpokeProxyHost        = "AEGIS_SPOKE_PROXY_HOST"           // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
+	envAegisSpokeOIDCTokenURL      = "AEGIS_SPOKE_OIDC_TOKEN_URL"       // OIDC token URL for spoke agent
+	envAegisSpokeOIDCClientID      = "AEGIS_SPOKE_OIDC_CLIENT_ID"       // OIDC client ID for spoke agent (default: spoke-agent)
+	envAegisSpokeOIDCClientSecret  = "AEGIS_SPOKE_OIDC_CLIENT_SECRET"   // OIDC client secret for spoke agent
+	envAegisSpokeOIDCAudience      = "AEGIS_SPOKE_OIDC_AUDIENCE"        // OIDC audience for spoke agent (default: aegis-platform)
+	envAegisSpokeProxyHost         = "AEGIS_SPOKE_PROXY_HOST"           // Stable proxy hostname (e.g., spoke-proxy.52.1.2.3.nip.io:443)
 	envAegisSpokeProxyCACert      = "AEGIS_SPOKE_PROXY_CA_CERT"        // Path to spoke-proxy CA certificate for signing
 	envAegisSpokeProxyCAKey       = "AEGIS_SPOKE_PROXY_CA_KEY"         // Path to spoke-proxy CA private key for signing
 	envAegisSpokeProxyTargetGroup = "AEGIS_SPOKE_PROXY_TARGET_GROUP"   // ARN of NLB target group for spoke-proxy
@@ -164,6 +171,21 @@ func (r *Runner) Provision(ctx context.Context, infra *infraapi.ProjectInfra, sp
 	} else {
 		// Use runUpWithRetry which handles pending operations and "already exists" errors
 		if err := r.runUpWithRetry(ctx, stack, progressWriter); err != nil {
+			// Best-effort: capture spoke cluster diagnostics (pod status, events)
+			// to help operators debug Helm failures like ImagePullBackOff.
+			r.captureSpokeClusterDiagnostics(ctx, stack, programCfg.SpokeHelm.Namespace)
+
+			// Best-effort: capture partial outputs so the caller knows what AWS
+			// resources were created before the failure. This enables automatic
+			// cleanup of orphaned resources (e.g. EKS cluster created but Helm failed).
+			if partialOutputs, outErr := stack.Outputs(ctx); outErr == nil {
+				if partialResult, trErr := r.translateOutputs(partialOutputs, programCfg.Region); trErr == nil && len(partialResult.Outputs) > 0 {
+					r.log.Warn("pulumi up failed with partial resources created",
+						zap.Int("partial_clusters", len(partialResult.Outputs)),
+						zap.Error(err))
+					return partialResult, fmt.Errorf("pulumi up (partial): %w", err)
+				}
+			}
 			return nil, fmt.Errorf("pulumi up: %w", err)
 		}
 	}
@@ -319,6 +341,12 @@ func (r *Runner) NewStack(ctx context.Context, infra *infraapi.ProjectInfra, spe
 		EnableCostEstimates: true,
 	}
 
+	// Pre-flight validation: fail fast before expensive EKS/Pulumi operations
+	// if spoke configuration is missing or inconsistent.
+	if err := r.validateProgramInput(programCfg); err != nil {
+		return auto.Stack{}, nil, err
+	}
+
 	projectName := r.projectName(projectID)
 	program := r.buildPulumiProgram(programCfg)
 
@@ -416,6 +444,97 @@ type helmConfig struct {
 }
 
 // ----------------------------------------------------------------------------- //
+// Pre-flight validation
+
+// validateProgramInput checks that the programInput has sufficient configuration
+// for a successful spoke provisioning. It returns an error listing all missing
+// or invalid fields so the operator can fix everything in one pass instead of
+// discovering problems one at a time across a 30+ minute provisioning cycle.
+func (r *Runner) validateProgramInput(input *programInput) error {
+	if input.SkipHelm {
+		r.log.Info("spoke Helm install skipped; bypassing spoke config validation")
+		return nil
+	}
+
+	var errs []string
+
+	// Platform API endpoint — required so spokes know where to connect.
+	if input.Platform.Endpoint == "" {
+		errs = append(errs, "AEGIS_PLATFORM_API_ENDPOINT is required for spoke provisioning but was empty")
+	} else if hp := grpcEndpointHostPort(input.Platform.Endpoint); hp == "" {
+		errs = append(errs, fmt.Sprintf("AEGIS_PLATFORM_API_ENDPOINT %q does not contain a valid host:port", input.Platform.Endpoint))
+	}
+
+	// Spoke image repo — required so EKS nodes pull the correct (ECR) image.
+	if input.Platform.ImageRepo == "" {
+		errs = append(errs, "AEGIS_SPOKE_IMAGE_REPO is required but was empty; spokes will deploy with wrong images")
+	} else if !strings.Contains(input.Platform.ImageRepo, "/") {
+		errs = append(errs, fmt.Sprintf("AEGIS_SPOKE_IMAGE_REPO %q does not look like a valid image reference (missing '/')", input.Platform.ImageRepo))
+	}
+
+	// Spoke Helm values file — if specified, must exist on disk.
+	if input.SpokeHelm.ValuesFile != "" {
+		if _, err := os.Stat(input.SpokeHelm.ValuesFile); err != nil {
+			errs = append(errs, fmt.Sprintf("AEGIS_SPOKE_VALUES_FILE %q does not exist: %v", input.SpokeHelm.ValuesFile, err))
+		}
+	}
+
+	// Spoke chart path — if specified and not a URL, must exist as a directory.
+	if input.SpokeHelm.ChartPath != "" && !strings.Contains(input.SpokeHelm.ChartPath, "://") {
+		if info, err := os.Stat(input.SpokeHelm.ChartPath); err != nil {
+			errs = append(errs, fmt.Sprintf("spoke chart path %q does not exist: %v", input.SpokeHelm.ChartPath, err))
+		} else if !info.IsDir() {
+			errs = append(errs, fmt.Sprintf("spoke chart path %q is not a directory", input.SpokeHelm.ChartPath))
+		}
+	}
+
+	// OIDC configuration — all-or-nothing. Partial OIDC is always a bug.
+	oidcTokenURL := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCTokenURL))
+	oidcClientID := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCClientID))
+	oidcClientSecret := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCClientSecret))
+	oidcAudience := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCAudience))
+	oidcSet := []string{}
+	oidcMissing := []string{}
+	for _, kv := range []struct{ name, val string }{
+		{"AEGIS_SPOKE_OIDC_TOKEN_URL", oidcTokenURL},
+		{"AEGIS_SPOKE_OIDC_CLIENT_ID", oidcClientID},
+		{"AEGIS_SPOKE_OIDC_CLIENT_SECRET", oidcClientSecret},
+		{"AEGIS_SPOKE_OIDC_AUDIENCE", oidcAudience},
+	} {
+		if kv.val != "" {
+			oidcSet = append(oidcSet, kv.name)
+		} else {
+			oidcMissing = append(oidcMissing, kv.name)
+		}
+	}
+	if len(oidcSet) > 0 && len(oidcMissing) > 0 {
+		errs = append(errs, fmt.Sprintf("partial OIDC configuration: %s set but %s missing — set all or none",
+			strings.Join(oidcSet, ", "), strings.Join(oidcMissing, ", ")))
+	}
+
+	// Warnings (non-fatal).
+	if input.Platform.ImageTag == "" {
+		r.log.Warn("AEGIS_SPOKE_IMAGE_TAG is empty; spoke will use chart default tag")
+	}
+	if len(oidcSet) == 0 && !isDevMode() {
+		r.log.Warn("no OIDC configuration found for spoke provisioning; spoke agents will not authenticate to the hub")
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("spoke config pre-flight check failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	r.log.Info("spoke config pre-flight check passed",
+		zap.String("endpoint", input.Platform.Endpoint),
+		zap.String("image_repo", input.Platform.ImageRepo),
+		zap.String("image_tag", input.Platform.ImageTag),
+		zap.String("values_file", input.SpokeHelm.ValuesFile),
+		zap.Bool("oidc_configured", len(oidcSet) == 4),
+	)
+	return nil
+}
+
+// ----------------------------------------------------------------------------- //
 // Workspace helpers
 
 func (r *Runner) buildWorkspaceOptions() []auto.LocalWorkspaceOption {
@@ -426,6 +545,12 @@ func (r *Runner) buildWorkspaceOptions() []auto.LocalWorkspaceOption {
 	env := map[string]string{}
 	if backend := strings.TrimSpace(os.Getenv(envPulumiBackendURL)); backend != "" {
 		env["PULUMI_BACKEND_URL"] = backend
+	}
+	// Forward AWS credentials so the Pulumi subprocess can access the S3 state backend.
+	for _, k := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION", "PULUMI_CONFIG_PASSPHRASE"} {
+		if v := os.Getenv(k); v != "" {
+			env[k] = v
+		}
 	}
 	if len(env) > 0 {
 		opts = append(opts, auto.EnvVars(env))
@@ -600,13 +725,23 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				}
 			}
 
-			// Extract AWS account ID from the RoleARN (format: arn:aws:iam::ACCOUNT_ID:role/...)
-			accountID := extractAccountIDFromARN(input.RoleARN)
-			if accountID == "" {
+			// Extract AWS account ID for IRSA trust policies.
+			var accountID string
+			if isDevMode() {
+				// Dev mode: use ambient credentials' account (RoleARN may reference a different account)
 				if ident, err := aws.GetCallerIdentity(ctx, nil, providerOpt); err == nil && ident != nil {
 					accountID = strings.TrimSpace(ident.AccountId)
 				} else {
-					return fmt.Errorf("resolve AWS account id for IRSA: %w", err)
+					return fmt.Errorf("resolve AWS account id for IRSA in dev mode: %w", err)
+				}
+			} else {
+				accountID = extractAccountIDFromARN(input.RoleARN)
+				if accountID == "" {
+					if ident, err := aws.GetCallerIdentity(ctx, nil, providerOpt); err == nil && ident != nil {
+						accountID = strings.TrimSpace(ident.AccountId)
+					} else {
+						return fmt.Errorf("resolve AWS account id for IRSA: %w", err)
+					}
 				}
 			}
 
@@ -662,10 +797,12 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 			}
 
 			if !input.SkipHelm {
-				// Include cert-manager resources as dependencies so the spoke helm chart
-				// waits for the webhook to be ready before creating Certificate resources
 				spokeDeps := append(nodeGroups, cluster)
-				spokeDeps = append(spokeDeps, certMgrResources...)
+				// Only add cert-manager deps when the spoke chart uses cert-manager for TLS.
+				// When using self-signed certs (generateSpokeProxyCert), cert-manager is not needed.
+				if input.EnableCertManager && input.CertManager.Enable {
+					spokeDeps = append(spokeDeps, certMgrResources...)
+				}
 				if err := r.installSpokeHelmChart(ctx, clusterDef.ClusterID, kubeProvider, kubeconfig, input, spokeDeps); err != nil {
 					return err
 				}
@@ -689,6 +826,8 @@ func (r *Runner) buildPulumiProgram(input *programInput) pulumi.RunFunc {
 				"name":                pulumi.String(clusterDef.Name),
 				"region":              pulumi.String(input.Region),
 				"kubeconfigSecretKey": pulumi.String(kubeconfigKey),
+				"clusterEndpoint":     cluster.Endpoint,
+				"clusterCA":           cluster.CertificateAuthority.Data().Elem(),
 			}
 			if observabilityOutputs != nil {
 				entry["observability"] = observabilityOutputs
@@ -1053,7 +1192,7 @@ func (r *Runner) configureManagedNodeGroups(ctx *pulumi.Context, clusterDef clus
 		name = pulumiResourceName(sanitize(name), 30)
 		instanceType := normalizeInstanceType(pool.InstanceType)
 		if instanceType == "" {
-			instanceType = "t3.small" // Default: 2 vCPU, 2GB - sufficient for most system workloads
+			instanceType = "t3.large" // Default: 2 vCPU, 8GB, 35 pod limit - fits system + observability on one node
 		}
 		gpuPool := isGpuNodePool(pool)
 		// AWS EKS requires MaxSize >= 1 for node groups.
@@ -1165,6 +1304,18 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 			}
 		}
 	}
+	if oidcTokenURL := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCTokenURL)); oidcTokenURL != "" {
+		envValues["AEGIS_CP_OIDC_TOKEN_URL"] = pulumi.String(oidcTokenURL)
+	}
+	if oidcClientID := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCClientID)); oidcClientID != "" {
+		envValues["AEGIS_CP_OIDC_CLIENT_ID"] = pulumi.String(oidcClientID)
+	}
+	if oidcClientSecret := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCClientSecret)); oidcClientSecret != "" {
+		envValues["AEGIS_CP_OIDC_CLIENT_SECRET"] = pulumi.String(oidcClientSecret)
+	}
+	if oidcAudience := strings.TrimSpace(os.Getenv(envAegisSpokeOIDCAudience)); oidcAudience != "" {
+		envValues["AEGIS_CP_OIDC_AUDIENCE"] = pulumi.String(oidcAudience)
+	}
 	if input.Platform.CABundleBase64 != "" {
 		envValues["AEGIS_PLATFORM_CA_B64"] = pulumi.String(input.Platform.CABundleBase64)
 	}
@@ -1204,7 +1355,7 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	}
 	if input.Platform.ImageRepo != "" {
 		proxyValues["image"] = pulumi.Map{
-			"repository": pulumi.String(strings.Replace(input.Platform.ImageRepo, "aegis-k8s-agent", "aegis-proxy", 1)),
+			"repository": pulumi.String(spokeProxyImageRepo(input.Platform.ImageRepo)),
 			"tag":        pulumi.String(input.Platform.ImageTag),
 		}
 	}
@@ -1213,25 +1364,39 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 	// If cert-manager is enabled, use it for automated certificate management.
 	// Otherwise, generate a self-signed certificate (or CA-signed if CA is configured).
 	if input.EnableCertManager && input.CertManager.Enable {
-		// Use cert-manager to get certificates from step-ca
+		// Determine issuerRef kind/group based on whether step-ca is configured.
+		// With step-ca: use StepClusterIssuer (certmanager.step.sm)
+		// Without step-ca: use standard ClusterIssuer (cert-manager.io)
+		useStepCA := input.CertManager.StepCA.URL != "" && input.CertManager.StepCA.RootCABase64 != "" &&
+			input.CertManager.StepCA.ProvisionerKID != "" && input.CertManager.StepCA.ProvisionerPassword != ""
+		issuerKind := "ClusterIssuer"
+		issuerGroup := "cert-manager.io"
+		if useStepCA {
+			issuerKind = "StepClusterIssuer"
+			issuerGroup = "certmanager.step.sm"
+		}
+
 		proxyValues["tls"] = pulumi.Map{
 			"terminateAtIngress": pulumi.Bool(false),
 			"certManager": pulumi.Map{
 				"enabled": pulumi.Bool(true),
 				"issuerRef": pulumi.Map{
 					"name":  pulumi.String(input.CertManager.ClusterIssuerName),
-					"kind":  pulumi.String("StepClusterIssuer"),
-					"group": pulumi.String("certmanager.step.sm"),
+					"kind":  pulumi.String(issuerKind),
+					"group": pulumi.String(issuerGroup),
 				},
 				"dnsNames": pulumi.StringArray{
 					pulumi.String("*.nip.io"),
 					pulumi.String(fmt.Sprintf("spoke-proxy-%s.nip.io", clusterID)),
+					// *.nip.io matches single-level subdomains like spoke-proxy-98-83-164-24.nip.io
+					// (the k8s-agent uses dash notation for node IP nip.io hostnames)
 				},
 			},
 		}
 		r.log.Info("spoke-proxy will use cert-manager for TLS certificates",
 			zap.String("cluster_id", clusterID),
-			zap.String("issuer", input.CertManager.ClusterIssuerName))
+			zap.String("issuer", input.CertManager.ClusterIssuerName),
+			zap.String("issuer_kind", issuerKind))
 	} else {
 		// Fallback: Generate self-signed TLS certificate for spoke-proxy with *.nip.io wildcard
 		certPEM, keyPEM, err := generateSpokeProxyCert()
@@ -1242,6 +1407,14 @@ func (r *Runner) installSpokeHelmChart(ctx *pulumi.Context, clusterID string, ku
 			"cert": pulumi.String(certPEM),
 			"key":  pulumi.String(keyPEM),
 		}
+	}
+
+	// Propagate JWT signing secret so spoke-proxy can validate tokens signed by the hub.
+	// Must match AEGIS_PROXY_JWT_SECRET on the hub's platform-api.
+	if proxyJWTSecret := strings.TrimSpace(os.Getenv("AEGIS_PROXY_JWT_SECRET")); proxyJWTSecret != "" {
+		proxyValues["jwtSecret"] = pulumi.String(proxyJWTSecret)
+	} else {
+		return fmt.Errorf("AEGIS_PROXY_JWT_SECRET not set; cannot deploy spoke without shared JWT secret")
 	}
 
 	values := pulumi.Map{
@@ -1677,6 +1850,8 @@ func (r *Runner) translateOutputs(outputs map[string]auto.OutputValue, region st
 		name := stringFromEntry(entry, "name", clusterID)
 		secretKey := stringFromEntry(entry, "kubeconfigSecretKey", fmt.Sprintf("%s.kubeconfig", clusterID))
 		regionOut := stringFromEntry(entry, "region", region)
+		endpoint := stringFromEntry(entry, "clusterEndpoint", "")
+		ca := stringFromEntry(entry, "clusterCA", "")
 		observability := observabilityFromEntry(entry["observability"])
 
 		result.Outputs = append(result.Outputs, infraapi.ClusterOutput{
@@ -1684,6 +1859,8 @@ func (r *Runner) translateOutputs(outputs map[string]auto.OutputValue, region st
 			Name:                name,
 			Region:              regionOut,
 			KubeconfigSecretKey: secretKey,
+			ClusterEndpoint:     endpoint,
+			ClusterCA:           ca,
 			Observability:       observability,
 		})
 	}
@@ -1829,7 +2006,7 @@ func (r *Runner) buildClusterDefinitions(projectID, region, infraName string, sp
 func defaultNodePools() []infraapi.NodePool {
 	return []infraapi.NodePool{{
 		Name:         "default",
-		InstanceType: "t3.small", // 2 vCPU, 2GB - cost-effective default
+		InstanceType: "t3.large", // 2 vCPU, 8GB, 35 pod limit - fits system + observability on one node
 		MinSize:      1,
 		MaxSize:      3,
 	}}
@@ -2571,33 +2748,39 @@ func grpcEndpointHostPort(endpoint string) string {
 	return strings.TrimSuffix(trimmed, "/")
 }
 
+// spokeProxyImageRepo derives the proxy image repository from the k8s-agent
+// image repository. It handles both ECR (aegis/k8s-agent) and DockerHub
+// (carlosmsanchez/aegis-k8s-agent) naming conventions.
+func spokeProxyImageRepo(agentRepo string) string {
+	// ECR format: .../aegis/k8s-agent → .../aegis/proxy
+	if strings.HasSuffix(agentRepo, "/k8s-agent") {
+		return agentRepo[:len(agentRepo)-len("/k8s-agent")] + "/proxy"
+	}
+	// DockerHub format: carlosmsanchez/aegis-k8s-agent → carlosmsanchez/aegis-proxy
+	if strings.HasSuffix(agentRepo, "/aegis-k8s-agent") {
+		return agentRepo[:len(agentRepo)-len("/aegis-k8s-agent")] + "/aegis-proxy"
+	}
+	// Fallback: generic replace
+	return strings.Replace(agentRepo, "k8s-agent", "proxy", 1)
+}
+
+// buildClusterID produces a cluster identifier in the format {projectID}-{name}.
+// Region is stored as metadata, not embedded in the ID.
 func buildClusterID(projectID, region, name string) string {
 	parts := []string{}
 	if projectID != "" {
 		parts = append(parts, sanitize(projectID))
 	}
-	if region != "" {
-		parts = append(parts, sanitize(region))
-	}
 	parts = append(parts, sanitize(name))
 	return strings.Join(parts, "-")
 }
 
-// buildClusterIDWithSuffix creates a unique cluster ID by appending a short hash suffix.
-// This ensures each ProjectInfra gets its own unique EKS cluster, preventing conflicts
-// when multiple ProjectInfras use the same base cluster name.
+// buildClusterIDWithSuffix is kept for backward compatibility with existing clusters
+// that were provisioned with the old {project}-{region}-{name}-{hash} format.
+// For new clusters, the suffix is no longer appended — sequential cluster names
+// provide sufficient uniqueness.
 func buildClusterIDWithSuffix(projectID, region, name, suffix string) string {
-	base := buildClusterID(projectID, region, name)
-	if suffix == "" {
-		return base
-	}
-	// EKS cluster name limit is 100 chars. Ensure we stay within that.
-	// Format: {base}-{suffix} where suffix is 8 chars
-	maxBase := 100 - len(suffix) - 1
-	if len(base) > maxBase {
-		base = base[:maxBase]
-	}
-	return fmt.Sprintf("%s-%s", base, suffix)
+	return buildClusterID(projectID, region, name)
 }
 
 // shortHash generates an 8-character hash from the input string.
@@ -2762,6 +2945,109 @@ func (r *Runner) attachNodeGroupsToTargetGroup(ctx *pulumi.Context, clusterID st
 		}
 	}
 	return nil
+}
+
+// captureSpokeClusterDiagnostics is a best-effort helper that logs pod status and
+// events from the spoke cluster when a Helm install fails. This gives operators
+// immediate visibility into pod-level issues (ImagePullBackOff, CrashLoop, etc.)
+// instead of just "context deadline exceeded". It never returns an error.
+func (r *Runner) captureSpokeClusterDiagnostics(ctx context.Context, stack auto.Stack, namespace string) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			r.log.Error("panic in spoke diagnostics (recovered)", zap.Any("panic", rv))
+		}
+	}()
+
+	if namespace == "" {
+		namespace = "aegis-system"
+	}
+
+	outputs, err := stack.Outputs(ctx)
+	if err != nil {
+		r.log.Warn("could not retrieve stack outputs for spoke diagnostics", zap.Error(err))
+		return
+	}
+	rawKubeconfigs, ok := outputs["kubeconfigs"]
+	if !ok {
+		r.log.Warn("no kubeconfigs output available for spoke diagnostics")
+		return
+	}
+	kubeconfigEntries, ok := rawKubeconfigs.Value.(map[string]interface{})
+	if !ok || len(kubeconfigEntries) == 0 {
+		r.log.Warn("kubeconfigs output is empty or malformed")
+		return
+	}
+
+	// Use the first kubeconfig (most spokes provision a single cluster).
+	var kubeconfigYAML string
+	for _, v := range kubeconfigEntries {
+		if s, ok := v.(string); ok && s != "" {
+			kubeconfigYAML = s
+			break
+		}
+	}
+	if kubeconfigYAML == "" {
+		r.log.Warn("no usable kubeconfig found in stack outputs")
+		return
+	}
+
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfigYAML))
+	if err != nil {
+		r.log.Warn("could not parse kubeconfig for spoke diagnostics", zap.Error(err))
+		return
+	}
+	restCfg.Timeout = 15 * time.Second
+
+	clientset, err := k8sclient.NewForConfig(restCfg)
+	if err != nil {
+		r.log.Warn("could not create k8s client for spoke diagnostics", zap.Error(err))
+		return
+	}
+
+	// List pods in the spoke namespace.
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1List.ListOptions{})
+	if err != nil {
+		r.log.Warn("could not list pods for spoke diagnostics", zap.String("namespace", namespace), zap.Error(err))
+		return
+	}
+	r.log.Error("spoke cluster diagnostics — pod status", zap.String("namespace", namespace), zap.Int("pod_count", len(pods.Items)))
+	for _, pod := range pods.Items {
+		fields := []zap.Field{
+			zap.String("pod", pod.Name),
+			zap.String("phase", string(pod.Status.Phase)),
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil {
+				fields = append(fields,
+					zap.String("container", cs.Name),
+					zap.String("waiting_reason", cs.State.Waiting.Reason),
+					zap.String("waiting_message", cs.State.Waiting.Message),
+				)
+			}
+		}
+		r.log.Error("  spoke pod", fields...)
+	}
+
+	// List Warning events.
+	events, err := clientset.CoreV1().Events(namespace).List(ctx, metav1List.ListOptions{
+		FieldSelector: "type=Warning",
+	})
+	if err != nil {
+		r.log.Warn("could not list events for spoke diagnostics", zap.Error(err))
+		return
+	}
+	// Show last 10 warning events.
+	items := events.Items
+	if len(items) > 10 {
+		items = items[len(items)-10:]
+	}
+	for _, ev := range items {
+		r.log.Error("  spoke event",
+			zap.String("reason", ev.Reason),
+			zap.String("object", ev.InvolvedObject.Name),
+			zap.String("message", ev.Message),
+		)
+	}
 }
 
 // generateSpokeProxyCert generates a self-signed TLS certificate for the spoke-proxy.

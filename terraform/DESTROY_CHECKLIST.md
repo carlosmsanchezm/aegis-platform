@@ -19,7 +19,7 @@ Kubernetes creates AWS LoadBalancers that Terraform doesn't manage. These block 
 ### 1. Delete Kubernetes Resources (if EKS cluster exists)
 ```bash
 # Configure kubectl (if cluster is still running)
-aws eks update-kubeconfig --region us-east-1 --name aegis-spoke-prod --profile myclaude
+aws eks update-kubeconfig --region us-east-1 --name aegis-spoke-prod --profile aegis-new
 
 # Delete Helm releases (removes LoadBalancers)
 helm delete aegis -n aegis-system 2>/dev/null || true
@@ -33,14 +33,14 @@ sleep 60
 ### 2. Force Delete LoadBalancers (if Kubernetes is unreachable)
 ```bash
 # Delete Network Load Balancers
-aws --profile myclaude elbv2 describe-load-balancers --region us-east-1 \
+aws --profile aegis-new elbv2 describe-load-balancers --region us-east-1 \
   --query 'LoadBalancers[?VpcId==`vpc-0a4b821294f120863`].[LoadBalancerArn]' \
-  --output text | xargs -I {} aws --profile myclaude elbv2 delete-load-balancer --load-balancer-arn {} --region us-east-1
+  --output text | xargs -I {} aws --profile aegis-new elbv2 delete-load-balancer --load-balancer-arn {} --region us-east-1
 
 # Delete Classic Load Balancers
-aws --profile myclaude elb describe-load-balancers --region us-east-1 \
+aws --profile aegis-new elb describe-load-balancers --region us-east-1 \
   --query 'LoadBalancerDescriptions[?VPCId==`vpc-0a4b821294f120863`].[LoadBalancerName]' \
-  --output text | xargs -I {} aws --profile myclaude elb delete-load-balancer --load-balancer-name {} --region us-east-1
+  --output text | xargs -I {} aws --profile aegis-new elb delete-load-balancer --load-balancer-name {} --region us-east-1
 
 # Wait for deletion
 sleep 30
@@ -69,7 +69,7 @@ terraform destroy -auto-approve
 
 **Solution:** Manually delete node groups:
 ```bash
-aws eks delete-nodegroup --cluster-name aegis-spoke-prod --nodegroup-name <NAME> --profile myclaude --region us-east-1
+aws eks delete-nodegroup --cluster-name aegis-spoke-prod --nodegroup-name <NAME> --profile aegis-new --region us-east-1
 ```
 
 ## Prevention

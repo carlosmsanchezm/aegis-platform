@@ -7,7 +7,7 @@ set -e
 
 CLUSTER_NAME="aegis-spoke-prod"
 REGION="us-east-1"
-AWS_PROFILE="${AWS_PROFILE:-myclaude}"
+AWS_PROFILE="${AWS_PROFILE:-aegis-new}"
 
 echo "🚨 COMPLETE TEARDOWN - This will delete ALL AWS resources"
 echo "   - EKS Cluster: $CLUSTER_NAME"

@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -78,7 +79,7 @@ const (
 
 	// Event-driven state tracking annotations
 	// These track the last-pushed state to platform-api, enabling proper re-sync when jobs are recreated
-	annotationLastPushedState  = "aegis.yourorg.dev/last-pushed-state"  // PENDING, RUNNING, SUCCEEDED, FAILED
+	annotationLastPushedState  = "aegis.yourorg.dev/last-pushed-state"   // PENDING, RUNNING, SUCCEEDED, FAILED
 	annotationLastPushedJobUID = "aegis.yourorg.dev/last-pushed-job-uid" // UID of the job when state was pushed
 
 	annotationSSHAuthorizedKeys = "aegis.yourorg.dev/ssh-authorized-keys"
@@ -111,7 +112,10 @@ type AegisWorkloadReconciler struct {
 	proxyServicePort      int32
 	proxyIngressHost      string
 	proxyURL              string // Full URL for heartbeat reporting (e.g., wss://host:port)
+	proxyURLCache         string
+	proxyURLCacheAt       time.Time
 	sshBootstrapImage     string
+	vscodeREHInitImage    string
 
 	workspaceEnvDefaults map[string]string
 
@@ -215,6 +219,24 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 	err := r.Get(ctx, jobKey, &job)
 	if apierrors.IsNotFound(err) {
 		mergedEnv := workspacecfg.MergeEnv(spec.Env, r.workspaceEnvDefaults)
+
+		// Convert CRD storage spec to builder storage options.
+		var storageOpts *builders.StorageOptions
+		if spec.Storage != nil && spec.Storage.Persistent {
+			storageOpts = &builders.StorageOptions{
+				Persistent:        spec.Storage.Persistent,
+				StorageClass:      spec.Storage.StorageClass,
+				Size:              spec.Storage.Size,
+				MountPath:         spec.Storage.MountPath,
+				ExistingClaimName: spec.Storage.ExistingClaimName,
+			}
+			// Ensure PVC exists before creating the Job.
+			if err := r.ensureWorkspacePVC(ctx, aw, storageOpts); err != nil {
+				log.Error(err, "failed to ensure workspace PVC")
+				return ctrl.Result{}, err
+			}
+		}
+
 		opts := builders.WorkspaceOptions{
 			Namespace:               aw.Namespace,
 			JobName:                 jobName,
@@ -226,6 +248,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			Flavor:                  flavor,
 			Queue:                   aw.Spec.Queue,
 			Hints:                   convertSpecHints(aw.Spec.Hints),
+			Storage:                 storageOpts,
 			DryRun:                  r.dryRun,
 			KueueEnabled:            r.kueueEnabled,
 			KueueQueue:              r.kueueQueue,
@@ -233,6 +256,7 @@ func (r *AegisWorkloadReconciler) reconcileWorkspace(ctx context.Context, aw *ae
 			Interactive:             workspaceInteractive,
 			InteractivePorts:        ports,
 			SSHBootstrapImage:       r.sshBootstrapImage,
+			VSCodeREHInitImage:      r.vscodeREHInitImage,
 			ActiveDeadlineSeconds:   nil,
 			TTLSecondsAfterFinished: ttlAfterFinished,
 		}
@@ -595,14 +619,16 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 
 	// Build proxy URL before registration so it's included in the initial request
 	proxyURL := r.buildProxyURL()
+	proxyCAPem := r.readProxyCAPem(ctx)
 
 	registerReq := &aegisproto.ClusterRegisterRequest{
-		ClusterId: r.clusterID,
-		Provider:  os.Getenv("AEGIS_PROVIDER"),
-		Region:    os.Getenv("AEGIS_REGION"),
-		IlLevel:   os.Getenv("AEGIS_IL_LEVEL"),
-		Labels:    labels,
-		ProxyUrl:  proxyURL, // Include proxy URL in registration for immediate availability
+		ClusterId:  r.clusterID,
+		Provider:   os.Getenv("AEGIS_PROVIDER"),
+		Region:     os.Getenv("AEGIS_REGION"),
+		IlLevel:    os.Getenv("AEGIS_IL_LEVEL"),
+		Labels:     labels,
+		ProxyUrl:   proxyURL,   // Include proxy URL in registration for immediate availability
+		ProxyCaPem: proxyCAPem, // Include proxy CA cert for client TLS trust
 	}
 
 	for {
@@ -620,14 +646,43 @@ func (r *AegisWorkloadReconciler) startClusterPresence(ctx context.Context) {
 	}
 
 	flavors := r.discoverFlavors()
-	r.cpClient.HeartbeatLoop(ctx, zapLogger, r.clusterID, flavors, proxyURL)
+	r.cpClient.HeartbeatLoop(ctx, zapLogger, r.clusterID, flavors, r.buildProxyURL)
 }
 
-// buildProxyURL returns the spoke proxy URL for heartbeat reporting.
+// readProxyCAPem reads the spoke-proxy TLS certificate from the aegis-spoke-proxy-tls K8s Secret.
+// This is sent during cluster registration so the hub can distribute it to VS Code clients
+// for TLS trust without manual CA export.
+func (r *AegisWorkloadReconciler) readProxyCAPem(ctx context.Context) string {
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: "aegis-spoke-proxy-tls", Namespace: "aegis-system"}
+	if err := r.Client.Get(ctx, key, secret); err != nil {
+		return ""
+	}
+	if cert, ok := secret.Data["tls.crt"]; ok && len(cert) > 0 {
+		return string(cert)
+	}
+	return ""
+}
+
+// buildProxyURL returns the spoke proxy URL, refreshing the cached value every 60 seconds.
+// This allows the agent to pick up a newly provisioned LoadBalancer endpoint without restarting.
+func (r *AegisWorkloadReconciler) buildProxyURL() string {
+	if r.proxyURLCache != "" && time.Since(r.proxyURLCacheAt) < 60*time.Second {
+		return r.proxyURLCache
+	}
+	url := r.buildProxyURLUncached()
+	if url != "" {
+		r.proxyURLCache = url
+		r.proxyURLCacheAt = time.Now()
+	}
+	return url
+}
+
+// buildProxyURLUncached returns the spoke proxy URL for heartbeat reporting.
 // If AEGIS_PROXY_URL is set, it's used directly. Otherwise, constructs from AEGIS_PROXY_INGRESS_HOST.
 // If neither is set, tries to auto-discover the LoadBalancer hostname from the proxy Service.
 // Falls back to node public IP with nip.io for NodePort access.
-func (r *AegisWorkloadReconciler) buildProxyURL() string {
+func (r *AegisWorkloadReconciler) buildProxyURLUncached() string {
 	// Prefer explicit proxy URL if set (supports custom port for NodePort access)
 	if r.proxyURL != "" {
 		url := r.proxyURL
@@ -645,11 +700,23 @@ func (r *AegisWorkloadReconciler) buildProxyURL() string {
 			host = lbHost
 		} else if ip := discoverNodePublicIP(); ip != "" {
 			// Fallback: Auto-discover node public IP for AWS/cloud deployments
-			// Construct nip.io URL with default NodePort
-			host = fmt.Sprintf("spoke-proxy.%s.nip.io:31484", ip)
+			// Discover NodePort from the proxy Service, default to 443
+			nodePort := r.discoverProxyNodePort()
+			// Use dash notation (e.g. spoke-proxy-98-83-164-24.nip.io) so the hostname
+			// is a single-level subdomain matching the *.nip.io wildcard in the TLS cert.
+			// nip.io resolves both dot and dash notation to the same IP.
+			dashIP := strings.ReplaceAll(ip, ".", "-")
+			host = fmt.Sprintf("spoke-proxy-%s.nip.io:%d", dashIP, nodePort)
 		}
 	}
 	if host == "" {
+		// Last fallback: use hub proxy URL suggested via heartbeat ack.
+		// This handles co-located spokes (spoke on same cluster as hub, no LB).
+		if r.cpClient != nil {
+			if suggested := r.cpClient.SuggestedProxyURL(); suggested != "" {
+				return suggested
+			}
+		}
 		return ""
 	}
 	// If no scheme specified, default to wss://
@@ -682,9 +749,9 @@ func (r *AegisWorkloadReconciler) discoverLoadBalancerHost() string {
 			for _, ingress := range svc.Status.LoadBalancer.Ingress {
 				if ingress.Hostname != "" {
 					// AWS NLB uses hostname
-					port := int32(31484) // default proxy port
+					port := int32(443) // default proxy port (NLB service port)
 					for _, p := range svc.Spec.Ports {
-						if p.Name == "proxy" || p.Name == "https" || p.Port == 8443 || p.Port == 31484 {
+						if p.Name == "https-proxy" || p.Name == "proxy" || p.Name == "https" {
 							port = p.Port
 							break
 						}
@@ -693,9 +760,9 @@ func (r *AegisWorkloadReconciler) discoverLoadBalancerHost() string {
 				}
 				if ingress.IP != "" {
 					// GCP/Azure use IP
-					port := int32(31484)
+					port := int32(443)
 					for _, p := range svc.Spec.Ports {
-						if p.Name == "proxy" || p.Name == "https" || p.Port == 8443 || p.Port == 31484 {
+						if p.Name == "https-proxy" || p.Name == "proxy" || p.Name == "https" {
 							port = p.Port
 							break
 						}
@@ -706,6 +773,36 @@ func (r *AegisWorkloadReconciler) discoverLoadBalancerHost() string {
 		}
 	}
 	return ""
+}
+
+// discoverProxyNodePort queries the aegis-spoke-proxy Service for its NodePort.
+// Returns the NodePort if found, or 443 as default.
+func (r *AegisWorkloadReconciler) discoverProxyNodePort() int32 {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	serviceNames := []string{"aegis-spoke-proxy", "spoke-proxy"}
+	namespaces := []string{"aegis-system", "default"}
+
+	for _, ns := range namespaces {
+		for _, name := range serviceNames {
+			var svc corev1.Service
+			if err := r.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &svc); err != nil {
+				continue
+			}
+			for _, p := range svc.Spec.Ports {
+				if p.NodePort != 0 && (p.Name == "https-proxy" || p.Name == "proxy" || p.Name == "https") {
+					return p.NodePort
+				}
+			}
+			for _, p := range svc.Spec.Ports {
+				if p.NodePort != 0 {
+					return p.NodePort
+				}
+			}
+		}
+	}
+	return 443
 }
 
 // discoverNodePublicIP attempts to discover the node's public IP address.
@@ -935,7 +1032,9 @@ func (r *AegisWorkloadReconciler) ackWorkloadBridge(ctx context.Context, aw *aeg
 		url = fmt.Sprintf("k8s://%s/%s", aw.Namespace, aw.Name)
 	}
 	cpID := controlPlaneWorkloadID(aw.Name)
-	if err := r.cpClient.Ack(ctx, cpID, status, backend, url); err != nil {
+	// Include diagnostic message from the AegisWorkload status
+	ackMsg := strings.TrimSpace(aw.Status.Message)
+	if err := r.cpClient.AckWithReason(ctx, cpID, status, backend, url, "", ackMsg); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", status, "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
@@ -1011,7 +1110,13 @@ func (r *AegisWorkloadReconciler) ackWorkloadSuspended(ctx context.Context, aw *
 	}
 
 	cpID := controlPlaneWorkloadID(aw.Name)
-	if err := r.cpClient.Ack(ctx, cpID, "SUSPENDED", backend, url); err != nil {
+	suspendReason := strings.TrimSpace(job.GetAnnotations()[annotationSuspendReason])
+	suspendMsg := fmt.Sprintf("Suspended (%s)", suspendReason)
+	if suspendReason == "" {
+		suspendReason = "unknown"
+		suspendMsg = "Suspended by cluster policy"
+	}
+	if err := r.cpClient.AckWithReason(ctx, cpID, "SUSPENDED", backend, url, suspendReason, suspendMsg); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "AckWorkload bridge failed", "status", "SUSPENDED", "workload", aw.Name, "cpWorkloadID", cpID, "clusterID", r.clusterID)
 		return
 	}
@@ -1019,7 +1124,6 @@ func (r *AegisWorkloadReconciler) ackWorkloadSuspended(ctx context.Context, aw *
 		ctrl.LoggerFrom(ctx).Error(err, "failed to persist suspension acknowledgement", "workload", aw.Name)
 	}
 }
-
 
 func (r *AegisWorkloadReconciler) ensureInteractiveResources(ctx context.Context, aw *aegisv1alpha1.AegisWorkload) (bool, error) {
 	ports := effectiveWorkspacePorts(aw.Spec.Workspace)
@@ -1397,6 +1501,7 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.proxyIngressHost = envOrDefault("AEGIS_PROXY_INGRESS_HOST", "")
 	r.proxyURL = envOrDefault("AEGIS_PROXY_URL", "")
 	r.sshBootstrapImage = envOrDefault("AEGIS_SSH_BOOTSTRAP_IMAGE", "")
+	r.vscodeREHInitImage = envOrDefault("AEGIS_VSCODE_REH_INIT_IMAGE", "")
 	if r.kueueEnabled {
 		if ok, err := workdiscovery.DetectKueue(r.Config); err != nil {
 			ctrl.Log.WithName("operator").Error(err, "kueue detection failed")
@@ -1424,4 +1529,58 @@ func (r *AegisWorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Named("aegisworkload").
 		Complete(r)
+}
+
+// ensureWorkspacePVC creates a PVC for workspace persistent storage if one does not already exist.
+// PVCs are named based on the workload ID so they can be reused across workspace restarts.
+func (r *AegisWorkloadReconciler) ensureWorkspacePVC(ctx context.Context, aw *aegisv1alpha1.AegisWorkload, storage *builders.StorageOptions) error {
+	pvcName := storage.ExistingClaimName
+	if pvcName == "" {
+		pvcName = fmt.Sprintf("aegis-ws-%s", aw.Name)
+	}
+
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: aw.Namespace}, existing)
+	if err == nil {
+		return nil // PVC already exists — reuse for session continuity
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check existing PVC %s: %w", pvcName, err)
+	}
+
+	size := storage.Size
+	if size == "" {
+		size = "50Gi"
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: aw.Namespace,
+			Labels: map[string]string{
+				"aegis.yourorg.dev/workload": aw.Name,
+				"aegis.yourorg.dev/project":  aw.Spec.ProjectID,
+				"app.kubernetes.io/managed-by": "aegis",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(size),
+				},
+			},
+		},
+	}
+
+	if storage.StorageClass != "" {
+		pvc.Spec.StorageClassName = &storage.StorageClass
+	}
+
+	if err := r.Create(ctx, pvc); err != nil {
+		return fmt.Errorf("create workspace PVC %s: %w", pvcName, err)
+	}
+
+	ctrl.LoggerFrom(ctx).Info("workspace PVC created", "pvc", pvcName, "size", size)
+	return nil
 }

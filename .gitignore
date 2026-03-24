@@ -76,9 +76,26 @@ CREDENTIALS-CHEATSHEET.md
 agents/__init__.py
 agents/__pycache__
 
-# Helm auto-generated values files
+# Terraform-generated step-ca external DNS (NLB hostname)
+.step-ca-external-dns
+
+# Helm auto-generated values files (terraform/dev-relay generates these)
 charts/aegis-services/values-cloud-generated.yaml
+charts/aegis-services/values/local-relay.yaml
 charts/aegis-spoke/values-cloud-generated.yaml
+charts/aegis-spoke/values-aws-relay.yaml
+
+# Transient build artifacts (staged by Makefile for Docker builds)
+aegis-remote.vsix
+awscli.zip
+kubectl
+jq
+pulumi-linux-x64.tar.gz
 
 # Compliance evidence (stored in separate vault)
 compliance-evidence/
+terraform/tfplan
+terraform/dev-relay/tfplan
+terraform/pulumi-stack/tfplan
+pulumi-preview
+pilot-test-deploy.yaml

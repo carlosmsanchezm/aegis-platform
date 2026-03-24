@@ -45,7 +45,7 @@ log_info "AWS Profile: $AWS_PROFILE"
 log_info "Cluster ID: $CLUSTER_ID"
 
 # Role to assume for EKS access
-ROLE_ARN="arn:aws:iam::567751785679:role/aegis-platform"
+ROLE_ARN="arn:aws:iam::195714074609:role/aegis-platform"
 
 # Assume the role and export credentials
 log_info "Assuming role: $ROLE_ARN"

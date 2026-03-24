@@ -12,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -136,6 +139,15 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		}
 		kubeconfig = decoded
 
+		// Sanitize kubeconfig: strip environment-specific exec env vars
+		sanitized, warnings := kubeclients.SanitizeKubeconfig(kubeconfig)
+		for _, w := range warnings {
+			s.log.Warn("kubeconfig sanitized during import",
+				zap.String("cluster_id", clusterID),
+				zap.String("warning", w))
+		}
+		kubeconfig = sanitized
+
 		if existingProjectID, ok := s.store.GetClusterProjectID(clusterID); ok && existingProjectID != "" && !strings.EqualFold(existingProjectID, projectID) {
 			return nil, status.Error(codes.PermissionDenied, "cluster_id is already associated with a different project")
 		}
@@ -148,6 +160,12 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		rollbackKubeconfig = rollback
 	}
 
+	// Extract endpoint+CA from kubeconfig if available (for programmatic token auth fallback)
+	var clusterEndpoint, clusterCA string
+	if len(kubeconfig) > 0 {
+		clusterEndpoint, clusterCA = kubeclients.ExtractClusterEndpointCA(kubeconfig)
+	}
+
 	if err := s.store.UpsertClusterImport(store.ClusterImport{
 		ClusterID:           clusterID,
 		ProjectID:           projectID,
@@ -158,6 +176,8 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		ImportedAt:          time.Now(),
 		KubeconfigSecretRef: kubeconfigSecretRef,
 		AssumeRoleARN:       assumeRoleARN,
+		ClusterEndpoint:     clusterEndpoint,
+		ClusterCA:           clusterCA,
 	}); err != nil {
 		if rollbackKubeconfig != nil {
 			_ = rollbackKubeconfig(ctx)

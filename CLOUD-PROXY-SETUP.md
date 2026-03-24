@@ -514,17 +514,6 @@ For production, use proper certificates:
 - cert-manager for in-cluster TLS
 - Update aegis-connect to trust CA
 
-### Issue: Platform-API Using In-Memory Store
-
-**Cause:** `AEGIS_STORE_BACKEND` not set to "postgres"
-
-**Solution:** Set environment variable:
-```bash
-kubectl set env deployment/aegis-services-aegis-services-platform-api \
-  -n aegis-services \
-  AEGIS_STORE_BACKEND=postgres
-```
-
 ## Testing GPU Workspaces
 
 To test with GPU-enabled workspaces:

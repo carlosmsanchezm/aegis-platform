@@ -1,7 +1,7 @@
 # FedRAMP Readiness Status
 
-**Last Updated:** 2026-01-17
-**Status:** 🔴 NOT STARTED - ASSESSMENT PHASE
+**Last Updated:** 2026-03-23
+**Status:** 🔴 PRE-ASSESSMENT - RESEARCH & PLANNING
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
 ---
@@ -181,6 +181,23 @@ Based on Aegis's current profile (Model B - self-hosted software, minimal PII), 
 | FED-009 | Limited personnel security | Onboard/offboard | Background checks | Medium |
 | FED-010 | No boundary diagram | Architecture docs | FedRAMP-specific diagram | Medium |
 
+### DISA Kubernetes STIG Findings (V2R2, assessed 2026-03-23)
+
+Full matrix: `docs/compliance/disa-k8s-stig-matrix.md`
+
+Of 93 STIG findings, 86 (92.5%) are Customer Responsibility. Aegis owns 7 findings:
+
+| Finding | Severity | Status | Issue | Target |
+|---------|----------|--------|-------|--------|
+| V-242415 | **CAT I** | **Open** | 18 secretKeyRef usages in Helm charts need migration to volume mounts | Next sprint |
+| V-242437 | **CAT I** | **Open** | PSS namespace labels missing from Helm charts | Next sprint |
+| V-242442 | CAT II | Open | No revisionHistoryLimit on Deployments | Next sprint |
+| V-242443 | CAT II | Open | No formal patch cadence documentation | Next sprint |
+| V-242376+ | CAT II | Satisfied (3) | TLS 1.2+ enforced in app layer | Done |
+| V-242395 | CAT II | Satisfied (1) | Network policies in Helm charts | Done |
+
+**V-242415 is the priority** — only CAT I finding Aegis owns. Maps to IA-5 (already updated to "Partial" in control mapping). Could block ATO if not addressed.
+
 ### Inheritable Controls (from AWS GovCloud)
 
 If Aegis or customers deploy on AWS GovCloud, many controls are inherited:
@@ -191,6 +208,28 @@ If Aegis or customers deploy on AWS GovCloud, many controls are inherited:
 | Media (MP) | 90% | Media destruction |
 | Environmental (PE) | 100% | Fire, HVAC, power |
 | Maintenance (MA) | 80% | Hardware maintenance |
+
+---
+
+## Active Control Evidence (Pre-Assessment)
+
+Even though FedRAMP assessment has not begun, existing compliance operations provide evidence for several FedRAMP control families. This evidence will be referenced in the SSP when written.
+
+### SI-2: Flaw Remediation — Active
+
+**2026-03-23:** Automated vulnerability scanning identified 55 Dependabot alerts. All 35 critical and high severity vulnerabilities were remediated same-day.
+
+| Control | Requirement | Evidence |
+|---------|-------------|----------|
+| **SI-2** | Identify, report, and correct information system flaws | 35 critical+high vulns patched within 24 hours (commits: `a2708aa`, `96b163d`, `de15aa1`) |
+| **SI-2(2)** | Employ automated mechanisms to determine flaw remediation status | Dependabot + weekly `run_weekly_checks.sh` automation |
+| **RA-5** | Scan for vulnerabilities and remediate | Weekly automated scanning, same-day critical remediation demonstrated |
+| **RA-5(2)** | Update vulnerabilities to be scanned | Dependabot auto-updates vulnerability database |
+| **CM-3** | Configuration change control | All fixes via version-controlled commits with CI build verification |
+| **SA-11** | Developer security testing | Build verification (`go build`, `yarn tsc`, `yarn build:backend`, `npm run build`, `uv sync`) after all patches |
+
+**SSP sections this will support:** SI-2, RA-5, CM-3, SA-11
+**Evidence location:** `$EVIDENCE_VAULT/soc2/2026/2026-03/vuln-management/2026-03-23_vulnerability_remediation_report.md`
 
 ---
 
@@ -362,4 +401,5 @@ If Aegis or customers deploy on AWS GovCloud, many controls are inherited:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.1 | 2026-03-23 | Claude Opus 4.6 | Added active control evidence: SI-2/RA-5 flaw remediation (35 critical+high vulns fixed same-day). Updated SSP sections this supports. |
 | 1.0 | 2026-01-17 | Carlos Sanchez | Initial FedRAMP assessment |

@@ -7,10 +7,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"sort"
@@ -27,6 +29,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -34,6 +37,7 @@ import (
 	aegisv1alpha1 "github.com/yourorg/aegis/agents/k8s-agent/api/v1alpha1"
 	workspacecfg "github.com/yourorg/aegis/pkg/workspace"
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
 	"github.com/yourorg/aegis/services/platform-api/internal/authz"
 	"github.com/yourorg/aegis/services/platform-api/internal/aws/observability"
 	"github.com/yourorg/aegis/services/platform-api/internal/config"
@@ -43,6 +47,7 @@ import (
 	mw "github.com/yourorg/aegis/services/platform-api/internal/server/mw"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	unstructuredapi "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -54,6 +59,7 @@ type kubeClientProvider interface {
 	ClientFor(clusterID string) (client.Client, error)
 	RestConfigFor(clusterID string) (*rest.Config, error)
 	HasKubeconfig(clusterID string) bool
+	EvictClient(clusterID string)
 	Dir() string
 }
 
@@ -88,8 +94,9 @@ type Server struct {
 	proxyAudience        string
 	proxySecret          []byte
 	proxyTokenTTL        time.Duration
-	workspaceEnvDefaults map[string]string
-	autoBootstrap        bool
+	workspaceEnvDefaults    map[string]string
+	defaultWorkspaceImage   string
+	autoBootstrap           bool
 	authzPolicy          *authz.Policy
 	infraClient          client.Client
 	infraNamespace       string
@@ -114,13 +121,15 @@ type proxyClaims struct {
 }
 
 type sessionContext struct {
-	workload     *aegis.Workload
-	workspace    *aegis.WorkspaceSpec
-	port         int32
-	alias        string
-	internalHost string
-	dest         string
-	proxyURL     string
+	workload      *aegis.Workload
+	workspace     *aegis.WorkspaceSpec
+	port          int32
+	alias         string
+	internalHost  string
+	dest          string
+	proxyURL      string
+	proxyCAPem    string
+	workspaceRoot string
 }
 
 const (
@@ -186,6 +195,9 @@ var (
 )
 
 func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespace string, overlay *placement.PolicyOverlay, infraClient client.Client, infraNamespace string) *Server {
+	if log == nil {
+		log = zap.Must(zap.NewProduction())
+	}
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -226,10 +238,7 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 	}
 	policy, err := authz.LoadPolicyFromEnv(config.DefaultRoleBindingsJSON())
 	if err != nil {
-		if log != nil {
-			log.Fatal("failed to load authorization policy", zap.Error(err))
-		}
-		panic(fmt.Errorf("failed to load authorization policy: %w", err))
+		log.Fatal("failed to load authorization policy", zap.Error(err))
 	}
 	if strings.TrimSpace(infraNamespace) == "" {
 		infraNamespace = defaultInfraNamespace
@@ -255,8 +264,9 @@ func New(log *zap.Logger, st store.Store, clients *kubeclients.Manager, namespac
 		proxyAudience:        audience,
 		proxySecret:          []byte(secret),
 		proxyTokenTTL:        time.Duration(ttlSeconds) * time.Second,
-		workspaceEnvDefaults: defaults,
-		autoBootstrap:        getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
+		workspaceEnvDefaults:  defaults,
+		defaultWorkspaceImage: os.Getenv("AEGIS_DEFAULT_WORKSPACE_IMAGE"),
+		autoBootstrap:         getEnvBool("AEGIS_AUTO_BOOTSTRAP_WORKSPACES", false),
 		authzPolicy:          policy,
 		infraClient:          infraClient,
 		infraNamespace:       infraNamespace,
@@ -317,6 +327,9 @@ func (s *Server) CreateProject(ctx context.Context, req *aegis.CreateProjectRequ
 	p.Annotations = mergeProjectAnnotations(p.GetAnnotations(), awsCreds)
 	s.store.PutProject(p)
 	s.log.Info("project upserted", zap.String("project_id", p.GetId()), zap.String("owner_group", p.GetOwnerGroup()))
+	s.audit(ctx, "project.created", "project", p.GetId(), "create", "success", map[string]string{
+		"owner_group": p.GetOwnerGroup(),
+	})
 	populateProjectAwsFromAnnotations(p)
 	return p, nil
 }
@@ -354,6 +367,11 @@ func (s *Server) UpsertBudget(ctx context.Context, req *aegis.UpsertBudgetReques
 		zap.Float64("limit_usd", b.GetLimitUsd()),
 		zap.String("policy_mode", b.GetPolicyMode()),
 	)
+	s.audit(ctx, "budget.updated", "budget", b.GetProjectId(), "update", "success", map[string]string{
+		"queue":       b.GetQueue(),
+		"limit_usd":   fmt.Sprintf("%.2f", b.GetLimitUsd()),
+		"policy_mode": b.GetPolicyMode(),
+	})
 	return b, nil
 }
 
@@ -405,8 +423,52 @@ func (s *Server) RegisterCluster(ctx context.Context, r *aegis.ClusterRegisterRe
 		}
 	}
 
+	// Auto-derive project ID from cluster ID if not explicitly provided
+	if labels := r.GetLabels(); labels == nil || labels["aegis.yourorg.dev/projectId"] == "" {
+		if derived := store.DeriveProjectIDFromClusterID(r.GetClusterId()); derived != "" {
+			if proj := s.store.GetProject(derived); proj != nil {
+				if r.Labels == nil {
+					r.Labels = map[string]string{}
+				}
+				r.Labels["aegis.yourorg.dev/projectId"] = derived
+				s.log.Info("auto-derived project ID from cluster ID",
+					zap.String("cluster_id", r.GetClusterId()),
+					zap.String("derived_project_id", derived))
+			} else {
+				s.log.Warn("derived project ID not found in projects table, skipping auto-association",
+					zap.String("cluster_id", r.GetClusterId()),
+					zap.String("derived_project_id", derived))
+			}
+		}
+	}
+
+	// Auto-derive IL level from project policy if not explicitly provided.
+	// This ensures clusters provisioned for a project automatically inherit the
+	// project's data classification without requiring AEGIS_IL_LEVEL in Helm values.
+	if strings.TrimSpace(r.GetIlLevel()) == "" {
+		projectID := ""
+		if labels := r.GetLabels(); labels != nil {
+			projectID = labels["aegis.yourorg.dev/projectId"]
+		}
+		if projectID != "" {
+			if proj := s.store.GetProject(projectID); proj != nil {
+				if dl := strings.TrimSpace(proj.GetPolicy().GetDataLevel()); dl != "" {
+					r.IlLevel = strings.ToUpper(dl)
+					s.log.Info("auto-derived IL level from project policy",
+						zap.String("cluster_id", r.GetClusterId()),
+						zap.String("project_id", projectID),
+						zap.String("il_level", r.IlLevel))
+				}
+			}
+		}
+	}
+
 	s.store.UpsertClusterFromRegister(r)
 	s.log.Info("cluster registered", zap.String("cluster_id", r.GetClusterId()), zap.String("provider", r.GetProvider()), zap.String("region", r.GetRegion()), zap.Int("label_count", len(r.GetLabels())))
+	s.audit(ctx, "cluster.registered", "cluster", r.GetClusterId(), "create", "success", map[string]string{
+		"provider": r.GetProvider(),
+		"region":   r.GetRegion(),
+	})
 
 	resp := &aegis.ClusterRegisterResponse{Ok: true, Message: "registered"}
 	if warning != "" {
@@ -425,6 +487,18 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 	for _, f := range hb.GetAvailableFlavors() {
 		flavorNames = append(flavorNames, f.GetName())
 	}
+	// Self-healing: backfill project ID if not yet set
+	if pid, ok := s.store.GetClusterProjectID(hb.GetClusterId()); !ok || pid == "" {
+		if derived := store.DeriveProjectIDFromClusterID(hb.GetClusterId()); derived != "" {
+			if proj := s.store.GetProject(derived); proj != nil {
+				s.store.SetClusterProjectID(hb.GetClusterId(), derived)
+				s.log.Info("heartbeat backfilled project ID from cluster ID",
+					zap.String("cluster_id", hb.GetClusterId()),
+					zap.String("derived_project_id", derived))
+			}
+		}
+	}
+
 	s.store.UpdateClusterFromHeartbeat(hb)
 	s.log.Debug("cluster heartbeat",
 		zap.String("cluster_id", hb.GetClusterId()),
@@ -432,7 +506,10 @@ func (s *Server) Heartbeat(ctx context.Context, hb *aegis.ClusterHeartbeat) (*ae
 		zap.Strings("available_flavors", flavorNames),
 		zap.String("proxy_url", hb.GetProxyUrl()),
 	)
-	return &aegis.ClusterHeartbeatAck{Ok: true}, nil
+	return &aegis.ClusterHeartbeatAck{
+		Ok:                true,
+		SuggestedProxyUrl: s.proxyBaseURL, // Hub proxy URL for spokes that can't discover their own
+	}, nil
 }
 
 func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersRequest) (*aegis.ListClustersResponse, error) {
@@ -506,6 +583,190 @@ func (s *Server) ListClusters(ctx context.Context, req *aegis.ListClustersReques
 		zap.Int("count", len(items)),
 	)
 	return &aegis.ListClustersResponse{Items: items}, nil
+}
+
+// GetCluster returns detailed cluster information including node pools,
+// conditions, addons, and observability configuration. Data is aggregated
+// from the cluster store and the ProjectInfra CRD.
+func (s *Server) GetCluster(ctx context.Context, req *aegis.GetClusterRequest) (*aegis.ClusterDetail, error) {
+	clusterID := strings.TrimSpace(req.GetClusterId())
+	if clusterID == "" {
+		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
+	}
+
+	// 1. Authorize: get caller's allowed projects
+	_, allowed, err := s.authorizedProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Fetch cluster (single PK lookup)
+	ci := s.store.GetClusterInfo(clusterID)
+	if ci == nil {
+		return nil, status.Error(codes.NotFound, "cluster not found")
+	}
+
+	// 3. Re-check project authorization
+	projectID := clusterProject(ci)
+	if len(allowed) > 0 {
+		if _, ok := allowed[strings.ToLower(projectID)]; !ok {
+			return nil, status.Error(codes.PermissionDenied, "project not accessible")
+		}
+	}
+
+	// 4. Build base detail from ClusterInfo
+	now := time.Now()
+	phase := "Ready"
+	if !clusterReady(ci, now) {
+		if ci.LastHeartbeat.IsZero() {
+			phase = "Pending"
+		} else {
+			phase = "Unhealthy"
+		}
+	}
+
+	flavors := make([]string, 0, len(ci.AvailableFlavorSet))
+	for f := range ci.AvailableFlavorSet {
+		flavors = append(flavors, f)
+	}
+
+	detail := &aegis.ClusterDetail{
+		Id:               ci.ID,
+		Name:             clusterDisplayName(ci),
+		ProjectId:        projectID,
+		Provider:         ci.Provider,
+		Region:           ci.Region,
+		IlLevel:          ci.ILLevel,
+		Phase:            phase,
+		TtfGpuSecondsP50: ci.TTFGSecondsP50,
+		AvailableFlavors: flavors,
+		Labels:           ci.Labels,
+		ClusterEndpoint:  ci.ClusterEndpoint,
+		ProxyUrl:         ci.ProxyURL,
+	}
+	if !ci.CreatedAt.IsZero() {
+		detail.CreatedAt = ci.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !ci.LastHeartbeat.IsZero() {
+		detail.LastHeartbeat = ci.LastHeartbeat.UTC().Format(time.RFC3339)
+	}
+
+	// 5. Build conditions from heartbeat
+	if !ci.LastHeartbeat.IsZero() {
+		condStatus := "True"
+		condMsg := fmt.Sprintf("Last heartbeat received at %s.", ci.LastHeartbeat.UTC().Format(time.RFC3339))
+		if !clusterReady(ci, now) {
+			condStatus = "False"
+			condMsg = fmt.Sprintf("Heartbeat stale since %s.", ci.LastHeartbeat.UTC().Format(time.RFC3339))
+		}
+		detail.Conditions = append(detail.Conditions, &aegis.ClusterCondition{
+			Type:           "AgentConnection",
+			Status:         condStatus,
+			Message:        condMsg,
+			LastTransition: ci.LastHeartbeat.UTC().Format(time.RFC3339),
+		})
+	}
+
+	// 6. Enrich from ProjectInfra CRD (if infra client available)
+	if s.infraClient != nil {
+		s.enrichClusterDetailFromInfra(ctx, detail, projectID, clusterID)
+	}
+
+	s.log.Debug("get cluster", zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
+	return detail, nil
+}
+
+// enrichClusterDetailFromInfra populates node pools, addons, observability
+// config, and provisioning job ID from the ProjectInfra CRD.
+func (s *Server) enrichClusterDetailFromInfra(ctx context.Context, detail *aegis.ClusterDetail, projectID, clusterID string) {
+	var infraList infraapi.ProjectInfraList
+	if err := s.infraClient.List(ctx, &infraList, client.InNamespace(s.infraNamespace)); err != nil {
+		s.log.Warn("failed to list ProjectInfra for cluster detail", zap.Error(err))
+		return
+	}
+
+	for _, item := range infraList.Items {
+		if !strings.EqualFold(strings.TrimSpace(item.Spec.ProjectID), projectID) {
+			continue
+		}
+
+		// Match by cluster ID in the outputs or spec
+		matched := false
+		for _, out := range item.Status.Outputs {
+			if strings.EqualFold(strings.TrimSpace(out.ClusterID), clusterID) {
+				matched = true
+				// Populate observability endpoints
+				obs := out.Observability
+				detail.Observability = &aegis.ClusterObservabilityConfig{
+					LokiEndpoint:         fmt.Sprintf("%s:%d", obs.LokiService, obs.LokiPort),
+					PrometheusEndpoint:   fmt.Sprintf("%s:%d", obs.PrometheusService, obs.PrometheusPort),
+					TempoEndpoint:        fmt.Sprintf("%s:%d", obs.TempoService, obs.TempoPort),
+					AlertmanagerEndpoint: fmt.Sprintf("%s:%d", obs.AlertmanagerService, obs.AlertmanagerPort),
+				}
+				break
+			}
+		}
+
+		if !matched {
+			// Try matching by spec cluster name patterns
+			if item.Spec.Aws != nil && strings.Contains(clusterID, strings.TrimSpace(item.Spec.Aws.ClusterName)) {
+				matched = true
+			}
+		}
+
+		if !matched {
+			continue
+		}
+
+		// Set provisioning job ID
+		detail.ProvisioningJobId = item.Name
+
+		// Extract node pools from spec
+		if item.Spec.Aws != nil {
+			for _, np := range item.Spec.Aws.NodePools {
+				pool := &aegis.ClusterNodePool{
+					Name:         strings.TrimSpace(np.Name),
+					InstanceType: strings.TrimSpace(np.InstanceType),
+					MinSize:      np.MinSize,
+					MaxSize:      np.MaxSize,
+					Gpu:          strings.Contains(strings.ToLower(np.Name), "gpu"),
+				}
+				detail.NodePools = append(detail.NodePools, pool)
+			}
+		}
+
+		// Extract addons from deployed Helm releases
+		detail.Addons = buildAddonsFromInfra(&item)
+		break
+	}
+}
+
+// buildAddonsFromInfra extracts addon information from the ProjectInfra spec.
+func buildAddonsFromInfra(item *infraapi.ProjectInfra) []*aegis.ClusterAddon {
+	if item == nil {
+		return nil
+	}
+	phase := string(item.Status.Phase)
+	addonStatus := "Deployed"
+	if phase != "Ready" {
+		addonStatus = phase
+	}
+
+	// Standard addons deployed by Pulumi provisioner
+	addons := []*aegis.ClusterAddon{
+		{Name: "cert-manager", Namespace: "cert-manager", Status: addonStatus},
+		{Name: "step-issuer", Namespace: "cert-manager", Status: addonStatus},
+		{Name: "cluster-autoscaler", Namespace: "kube-system", Status: addonStatus},
+		{Name: "nvidia-device-plugin", Namespace: "kube-system", Status: addonStatus},
+		{Name: "prometheus", Namespace: "aegis-observability", Status: addonStatus},
+		{Name: "alertmanager", Namespace: "aegis-observability", Status: addonStatus},
+		{Name: "loki", Namespace: "aegis-logging", Status: addonStatus},
+		{Name: "fluentbit", Namespace: "aegis-logging", Status: addonStatus},
+		{Name: "tempo", Namespace: "aegis-tracing", Status: addonStatus},
+		{Name: "metrics-server", Namespace: "kube-system", Status: addonStatus},
+		{Name: "aegis-spoke", Namespace: "aegis-system", Status: addonStatus},
+	}
+	return addons
 }
 
 func (s *Server) maybeBootstrapWorkspaceDeps(ctx context.Context, w *aegis.Workload) {
@@ -593,6 +854,13 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	}
 
 	s.maybeBootstrapWorkspaceDeps(ctx, w)
+
+	// Workspaces are always interactive — users must be able to connect to them.
+	// The non-interactive case (batch compute) uses TrainingSpec, not WorkspaceSpec.
+	if ws := w.GetWorkspace(); ws != nil {
+		ws.Interactive = true
+	}
+
 	p := s.store.GetProject(w.ProjectId)
 	if p == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "unknown project %q", w.ProjectId)
@@ -648,6 +916,11 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 			zap.Float64("estimate_usd", estimateUSD),
 			zap.String("reason", reason),
 		)
+		s.audit(ctx, "workload.rejected", "workload", w.GetId(), "create", "denied", map[string]string{
+			"project_id":   w.GetProjectId(),
+			"reason":       reason,
+			"estimate_usd": fmt.Sprintf("%.2f", estimateUSD),
+		})
 		return nil, status.Error(codes.FailedPrecondition, "budget exceeded: "+reason)
 	}
 	if policy != "" {
@@ -703,10 +976,103 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 						zap.String("project_id", w.GetProjectId()),
 						zap.String("flavor", reqFlavor),
 						zap.Int("limit", limit))
+					s.audit(ctx, "workload.rejected", "workload", w.GetId(), "create", "denied", map[string]string{
+						"project_id": w.GetProjectId(),
+						"reason":     "quota_reached",
+						"flavor":     reqFlavor,
+					})
 					return nil, err
 				}
 			}
 		}
+	}
+
+	// ---- Compliance policy enforcement ----
+	// If the project has a PolicyDomain set, enforce region restrictions, data
+	// classification requirements, and egress policy before proceeding to placement.
+	if projectPD := p.GetPolicy(); projectPD != nil {
+		allowedRegions := normalizeStrings(projectPD.GetRegions())
+		requiredDataLevel := strings.TrimSpace(strings.ToUpper(projectPD.GetDataLevel()))
+
+		// For a pinned cluster, validate compliance constraints upfront.
+		if requestedCluster != "" {
+			pinCI := s.store.GetClusterInfo(requestedCluster)
+			if pinCI != nil {
+				// Region restriction check.
+				if len(allowedRegions) > 0 {
+					clusterRegion := strings.ToLower(strings.TrimSpace(pinCI.Region))
+					regionOK := false
+					for _, r := range allowedRegions {
+						if clusterRegion == r {
+							regionOK = true
+							break
+						}
+					}
+					if !regionOK {
+						s.log.Warn("compliance: cluster region not in allowed regions",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("cluster_region", pinCI.Region),
+							zap.Strings("allowed_regions", allowedRegions),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster region %q not in allowed regions %v",
+							pinCI.Region, allowedRegions)
+					}
+				}
+
+				// Data classification check.
+				if requiredDataLevel != "" {
+					clusterIL := strings.TrimSpace(strings.ToUpper(pinCI.ILLevel))
+					if clusterIL == "" {
+						// Also check the well-known label as fallback.
+						if v, ok := pinCI.Labels["aegis.yourorg.dev/ilLevel"]; ok {
+							clusterIL = strings.TrimSpace(strings.ToUpper(v))
+						}
+					}
+					if clusterIL == "" {
+						s.log.Warn("compliance: cluster has no IL level for data classification check",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("required_data_level", requiredDataLevel),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster %q has no data classification level; project requires %s",
+							requestedCluster, requiredDataLevel)
+					}
+					if !dataLevelSatisfied(requiredDataLevel, clusterIL) {
+						s.log.Warn("compliance: cluster IL level does not satisfy project requirement",
+							zap.String("workload_id", w.GetId()),
+							zap.String("project_id", w.GetProjectId()),
+							zap.String("cluster_id", requestedCluster),
+							zap.String("cluster_il_level", clusterIL),
+							zap.String("required_data_level", requiredDataLevel),
+						)
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"policy violation: cluster %q classification %q does not satisfy required level %q",
+							requestedCluster, clusterIL, requiredDataLevel)
+					}
+				}
+			}
+			// If pinCI is nil the cluster will be caught as "not registered" below.
+		}
+
+		// Egress policy: record the constraint (actual network policy enforcement
+		// happens at the K8s level; the API logs that this policy is active).
+		if projectPD.GetDenyEgressByDefault() {
+			s.log.Info("compliance: deny-egress-by-default active for workload",
+				zap.String("workload_id", w.GetId()),
+				zap.String("project_id", w.GetProjectId()),
+			)
+		}
+	}
+
+	// Derive the project's required data level once so we can filter candidates.
+	var projectRequiredDataLevel string
+	if pd := p.GetPolicy(); pd != nil {
+		projectRequiredDataLevel = strings.TrimSpace(strings.ToUpper(pd.GetDataLevel()))
 	}
 
 	// Build candidates from current cluster snapshots
@@ -723,6 +1089,28 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 				zap.String("cluster_id", ci.ID),
 				zap.Time("last_heartbeat", ci.LastHeartbeat),
 			)
+			continue
+		}
+		// Data classification filter: skip clusters that don't satisfy the project's required level.
+		if projectRequiredDataLevel != "" {
+			clusterIL := strings.TrimSpace(strings.ToUpper(ci.ILLevel))
+			if clusterIL == "" {
+				if v, ok := ci.Labels["aegis.yourorg.dev/ilLevel"]; ok {
+					clusterIL = strings.TrimSpace(strings.ToUpper(v))
+				}
+			}
+			if !dataLevelSatisfied(projectRequiredDataLevel, clusterIL) {
+				s.log.Debug("skipping cluster: data classification insufficient",
+					zap.String("cluster_id", ci.ID),
+					zap.String("cluster_il_level", clusterIL),
+					zap.String("required_data_level", projectRequiredDataLevel),
+				)
+				continue
+			}
+		}
+		// Kubeconfig availability filter: skip clusters we can't reach.
+		if kubeClientProviderConfigured(s.kubeClients) && !s.kubeClients.HasKubeconfig(ci.ID) {
+			s.log.Debug("skipping cluster: no kubeconfig available", zap.String("cluster_id", ci.ID))
 			continue
 		}
 		cands = append(cands, placement.Candidate{
@@ -755,6 +1143,10 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		}
 		if !clusterReady(requestedInfo, now) {
 			return nil, status.Errorf(codes.FailedPrecondition, "cluster %q not ready", requestedCluster)
+		}
+		if kubeClientProviderConfigured(s.kubeClients) && !s.kubeClients.HasKubeconfig(requestedCluster) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cluster %q has no kubeconfig configured; import one via ImportCluster API", requestedCluster)
 		}
 		pinned := make([]placement.Candidate, 0, 1)
 		for _, cand := range cands {
@@ -816,7 +1208,7 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 	kubeClient, err := s.kubeClients.ClientFor(chosen)
 	if err != nil {
 		s.log.Error("submit workload failed: kube client", zap.String("cluster_id", chosen), zap.Error(err))
-		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+		return nil, status.Errorf(codes.Internal, "failed to resolve cluster client for %q: %v", chosen, err)
 	}
 
 	var workspacePayload *unstructuredapi.Unstructured
@@ -835,51 +1227,28 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		}
 	}
 
+	// Ensure target namespace exists on the remote cluster
+	if err := s.ensureNamespace(ctx, kubeClient, targetNS, w.GetProjectId()); err != nil {
+		s.log.Error("failed to ensure namespace on target cluster",
+			zap.String("namespace", targetNS),
+			zap.String("cluster_id", chosen),
+			zap.Error(err),
+		)
+		// Non-fatal: proceed with CR creation — it may already exist
+	}
+
+	var crObj client.Object
+	crKind := "AegisWorkload"
 	if workspacePayload != nil {
-		if err := kubeClient.Create(ctx, workspacePayload); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				s.log.Error("failed to create workspace CR",
-					zap.String("workload_id", w.GetId()),
-					zap.String("cluster_id", chosen),
-					zap.String("namespace", targetNS),
-					zap.Error(err),
-				)
-				return nil, status.Error(codes.Internal, "failed to create Workspace in target cluster")
-			}
-			s.log.Info("workspace CR already exists",
-				zap.String("workload_id", w.GetId()),
-				zap.String("cluster_id", chosen),
-				zap.String("namespace", targetNS),
-			)
-		} else {
-			s.log.Info("workspace CR created",
-				zap.String("workload_id", w.GetId()),
-				zap.String("cluster_id", chosen),
-				zap.String("namespace", targetNS),
-			)
-		}
+		crObj = workspacePayload
+		crKind = "Workspace"
 	} else if workloadPayload != nil {
-		if err := kubeClient.Create(ctx, workloadPayload); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				s.log.Error("failed to create aegis workload CR",
-					zap.String("workload_id", w.GetId()),
-					zap.String("cluster_id", chosen),
-					zap.String("namespace", targetNS),
-					zap.Error(err),
-				)
-				return nil, status.Error(codes.Internal, "failed to create AegisWorkload in target cluster")
-			}
-			s.log.Info("aegis workload CR already exists",
-				zap.String("workload_id", w.GetId()),
-				zap.String("cluster_id", chosen),
-				zap.String("namespace", targetNS),
-			)
-		} else {
-			s.log.Info("aegis workload CR created",
-				zap.String("workload_id", w.GetId()),
-				zap.String("cluster_id", chosen),
-				zap.String("namespace", targetNS),
-			)
+		crObj = workloadPayload
+	}
+
+	if crObj != nil {
+		if err := s.createCRWithRetry(ctx, chosen, crObj, crKind, w.GetId(), targetNS); err != nil {
+			return nil, err
 		}
 	}
 
@@ -894,7 +1263,130 @@ func (s *Server) SubmitWorkload(ctx context.Context, req *aegis.SubmitWorkloadRe
 		zap.String("status", w.GetStatus()),
 		zap.String("namespace", targetNS),
 	)
+	s.audit(ctx, "workload.submitted", "workload", w.GetId(), "create", "success", map[string]string{
+		"project_id": w.GetProjectId(),
+		"cluster_id": w.GetClusterId(),
+		"flavor":     reqFlavor,
+	})
 	return w, nil
+}
+
+// GetClusterAuthInfo implements kubeclients.ClusterAuthProvider. It combines
+// cluster metadata (endpoint, CA, region) from the store with project
+// credentials (RoleARN, ExternalID) to enable programmatic EKS token auth.
+func (s *Server) GetClusterAuthInfo(clusterID string) (*kubeclients.ClusterAuthInfo, error) {
+	info := s.store.GetClusterInfo(clusterID)
+	if info == nil {
+		return nil, fmt.Errorf("cluster %q not found", clusterID)
+	}
+	if info.ClusterEndpoint == "" {
+		return nil, fmt.Errorf("cluster %q has no endpoint stored", clusterID)
+	}
+
+	result := &kubeclients.ClusterAuthInfo{
+		Endpoint:    info.ClusterEndpoint,
+		CAData:      info.ClusterCA,
+		Region:      info.Region,
+		ClusterName: clusterID,
+	}
+
+	// Resolve project credentials for role assumption
+	if info.ProjectID != "" {
+		if project := s.store.GetProject(info.ProjectID); project != nil {
+			creds := resolveProjectCredentials(project)
+			if !IsDevMode() && creds.RoleARN != "" {
+				result.RoleARN = creds.RoleARN
+				result.ExternalID = creds.ExternalID
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// createCRWithRetry attempts to create a CR on the target cluster with retry
+// for transient errors (connection refused, deadline exceeded, unauthorized).
+// On unauthorized, it evicts the cached client to force credential refresh.
+func (s *Server) createCRWithRetry(ctx context.Context, clusterID string, obj client.Object, kind, workloadID, namespace string) error {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		kubeClient, err := s.kubeClients.ClientFor(clusterID)
+		if err != nil {
+			s.log.Error("failed to resolve cluster client for retry",
+				zap.String("cluster_id", clusterID), zap.Int("attempt", attempt), zap.Error(err))
+			lastErr = err
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+		err = kubeClient.Create(ctx, obj)
+		if err == nil {
+			s.log.Info(fmt.Sprintf("%s CR created", kind),
+				zap.String("workload_id", workloadID),
+				zap.String("cluster_id", clusterID),
+				zap.String("namespace", namespace),
+			)
+			return nil
+		}
+		if apierrors.IsAlreadyExists(err) {
+			s.log.Info(fmt.Sprintf("%s CR already exists", kind),
+				zap.String("workload_id", workloadID),
+				zap.String("cluster_id", clusterID),
+				zap.String("namespace", namespace),
+			)
+			return nil
+		}
+		// Permanent failures — don't retry
+		if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) || apierrors.IsNotFound(err) {
+			s.log.Error(fmt.Sprintf("failed to create %s CR (permanent)", kind),
+				zap.String("workload_id", workloadID),
+				zap.String("cluster_id", clusterID),
+				zap.String("namespace", namespace),
+				zap.Error(err),
+			)
+			return status.Errorf(codes.Internal, "failed to create %s in target cluster: %v", kind, err)
+		}
+		// Transient failure — evict client and retry
+		s.log.Warn(fmt.Sprintf("retryable %s CR creation failure", kind),
+			zap.String("workload_id", workloadID),
+			zap.String("cluster_id", clusterID),
+			zap.Int("attempt", attempt),
+			zap.Error(err),
+		)
+		if apierrors.IsUnauthorized(err) {
+			s.kubeClients.EvictClient(clusterID)
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	s.log.Error(fmt.Sprintf("failed to create %s CR after retries", kind),
+		zap.String("workload_id", workloadID),
+		zap.String("cluster_id", clusterID),
+		zap.String("namespace", namespace),
+		zap.Error(lastErr),
+	)
+	return status.Errorf(codes.Internal, "failed to create %s in target cluster after %d attempts", kind, maxAttempts)
+}
+
+// ensureNamespace creates the target namespace on the remote cluster if it doesn't exist.
+func (s *Server) ensureNamespace(ctx context.Context, kubeClient client.Client, namespace, projectID string) error {
+	ns := &corev1.Namespace{}
+	err := kubeClient.Get(ctx, client.ObjectKey{Name: namespace}, ns)
+	if err == nil {
+		return nil // already exists
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	ns = &corev1.Namespace{}
+	ns.Name = namespace
+	ns.Labels = map[string]string{
+		"aegis.yourorg.dev/projectId": projectID,
+		"aegis.yourorg.dev/managed":   "true",
+	}
+	return kubeClient.Create(ctx, ns)
 }
 
 func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest) (*aegis.Workload, error) {
@@ -905,7 +1397,7 @@ func (s *Server) GetWorkload(ctx context.Context, req *aegis.GetWorkloadRequest)
 	}
 	w := s.store.GetWorkload(req.Id)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("workload not found", zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -928,7 +1420,7 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 	workloadID := strings.TrimSpace(req.GetId())
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 		s.log.Warn("resume workload failed", zap.Error(err), zap.String("workload_id", workloadID))
 		return nil, err
 	}
@@ -950,7 +1442,7 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 	kubeClient, err := s.kubeClients.ClientFor(clusterID)
 	if err != nil {
 		s.log.Error("resume workload failed: kube client", zap.String("cluster_id", clusterID), zap.Error(err))
-		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+		return nil, status.Errorf(codes.Internal, "failed to resolve cluster client for %q: %v", clusterID, err)
 	}
 
 	targetNS := s.namespaceForProject(w.GetProjectId())
@@ -960,7 +1452,7 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 		return nil, status.Error(codes.Internal, "failed to locate workload job")
 	}
 	if job == nil {
-		return nil, status.Error(codes.NotFound, "workload job not found")
+		return nil, status.Errorf(codes.NotFound, "workload job not found for workload %q", workloadID)
 	}
 
 	orig := job.DeepCopy()
@@ -999,6 +1491,10 @@ func (s *Server) ResumeWorkload(ctx context.Context, req *aegis.ResumeWorkloadRe
 		zap.String("cluster_id", updated.GetClusterId()),
 		zap.Int32("resume_count", updated.GetResumeCount()),
 	)
+	s.audit(ctx, "workload.resumed", "workload", updated.GetId(), "update", "success", map[string]string{
+		"cluster_id":   updated.GetClusterId(),
+		"resume_count": fmt.Sprintf("%d", updated.GetResumeCount()),
+	})
 	return updated, nil
 }
 
@@ -1014,7 +1510,7 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 		s.log.Warn("terminate workload failed", zap.Error(err), zap.String("workload_id", workloadID))
 		return nil, err
 	}
@@ -1040,7 +1536,7 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 	kubeClient, err := s.kubeClients.ClientFor(clusterID)
 	if err != nil {
 		s.log.Error("terminate workload failed: kube client", zap.String("cluster_id", clusterID), zap.Error(err))
-		return nil, status.Error(codes.Internal, "failed to resolve cluster client")
+		return nil, status.Errorf(codes.Internal, "failed to resolve cluster client for %q: %v", clusterID, err)
 	}
 
 	updated, err := s.store.TerminateWorkload(workloadID, reason)
@@ -1145,6 +1641,10 @@ func (s *Server) TerminateWorkload(ctx context.Context, req *aegis.TerminateWork
 		zap.String("cluster_id", updated.GetClusterId()),
 		zap.String("reason", reason),
 	)
+	s.audit(ctx, "workload.terminated", "workload", updated.GetId(), "delete", "success", map[string]string{
+		"cluster_id": updated.GetClusterId(),
+		"reason":     reason,
+	})
 	return updated, nil
 }
 
@@ -1231,6 +1731,10 @@ func (s *Server) CreateConnectionSession(ctx context.Context, req *aegis.CreateC
 	}
 
 	s.auditSession("session.create", session, nil)
+	s.audit(ctx, "session.created", "session", session.SessionID, "create", "success", map[string]string{
+		"workload_id": session.WorkloadID,
+		"client":      session.Client,
+	})
 	return sessionToProto(session), nil
 }
 
@@ -1245,7 +1749,7 @@ func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewCon
 
 	existing, ok := s.store.ConnectionSession(sessionID)
 	if !ok {
-		err := status.Error(codes.NotFound, "session not found")
+		err := status.Errorf(codes.NotFound, "session %q not found", sessionID)
 		s.auditSession("session.renew", nil, err, zap.String("session_id", sessionID))
 		return nil, err
 	}
@@ -1333,6 +1837,9 @@ func (s *Server) RenewConnectionSession(ctx context.Context, req *aegis.RenewCon
 	}
 
 	s.auditSession("session.renew", updated, nil)
+	s.audit(ctx, "session.renewed", "session", updated.SessionID, "update", "success", map[string]string{
+		"workload_id": updated.WorkloadID,
+	})
 	return sessionToProto(updated), nil
 }
 
@@ -1347,7 +1854,7 @@ func (s *Server) RevokeConnectionSession(ctx context.Context, req *aegis.RevokeC
 
 	existing, ok := s.store.ConnectionSession(sessionID)
 	if !ok {
-		err := status.Error(codes.NotFound, "session not found")
+		err := status.Errorf(codes.NotFound, "session %q not found", sessionID)
 		s.auditSession("session.revoke", nil, err, zap.String("session_id", sessionID))
 		return nil, err
 	}
@@ -1382,6 +1889,9 @@ func (s *Server) RevokeConnectionSession(ctx context.Context, req *aegis.RevokeC
 	}
 
 	s.auditSession("session.revoke", updated, nil)
+	s.audit(ctx, "session.revoked", "session", updated.SessionID, "delete", "success", map[string]string{
+		"workload_id": updated.WorkloadID,
+	})
 	return &emptypb.Empty{}, nil
 }
 
@@ -1424,15 +1934,25 @@ func (s *Server) enrichWorkloadUI(ctx context.Context, cache map[string]client.C
 
 	var jobList batchv1.JobList
 	targetNS := s.namespaceForProject(w.GetProjectId())
-	if err := cli.List(ctx, &jobList, client.InNamespace(targetNS), client.MatchingLabels{labelWorkloadID: w.GetId()}); err != nil {
-		s.log.Debug("skip ui enrichment; listing jobs failed",
-			zap.String("workload_id", w.GetId()),
-			zap.String("namespace", targetNS),
-			zap.Error(err),
-		)
-		return
+	for _, labelValue := range []string{w.GetId(), "aegis-" + w.GetId()} {
+		if err := cli.List(ctx, &jobList, client.InNamespace(targetNS), client.MatchingLabels{labelWorkloadID: labelValue}); err != nil {
+			s.log.Debug("skip ui enrichment; listing jobs failed",
+				zap.String("workload_id", w.GetId()),
+				zap.String("namespace", targetNS),
+				zap.String("label_value", labelValue),
+				zap.Error(err),
+			)
+			continue
+		}
+		if len(jobList.Items) > 0 {
+			break
+		}
 	}
 	if len(jobList.Items) == 0 {
+		if w.GetStatus() == statusRunning || w.GetStatus() == statusPlaced {
+			w.UiStatus = "LOST"
+			w.Message = "Workspace not found on target cluster"
+		}
 		return
 	}
 
@@ -1550,7 +2070,9 @@ func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, 
 		Port:         ctxData.port,
 		SSHConfig:    sshConfig,
 		ProxyURL:     ctxData.proxyURL,
-		VSCodeURI:    buildVSCodeURI(ctxData.alias),
+		ProxyCAPem:    ctxData.proxyCAPem,
+		WorkspaceRoot: ctxData.workspaceRoot,
+		VSCodeURI:     buildVSCodeURI(ctxData.alias),
 		ExpiresAt:    expiresAt,
 		OneTime:      true,
 		Used:         false,
@@ -1565,7 +2087,7 @@ func (s *Server) mintConnectionSession(ctx context.Context, workloadID, client, 
 func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*sessionContext, error) {
 	w := s.store.GetWorkload(workloadID)
 	if w == nil {
-		return nil, status.Error(codes.NotFound, "workload not found")
+		return nil, status.Errorf(codes.NotFound, "workload %q not found", workloadID)
 	}
 
 	wk, ok := w.GetKind().(*aegis.Workload_Workspace)
@@ -1588,44 +2110,54 @@ func (s *Server) buildSessionContext(ctx context.Context, workloadID string) (*s
 	internalHost := fmt.Sprintf("%s.%s%s", alias, targetNS, svcClusterDomainSuffix)
 	dest := fmt.Sprintf("%s:%d", internalHost, port)
 
-	// Determine proxy URL: use spoke proxy if cluster reports one, otherwise use hub proxy
+	// Determine proxy URL and CA: use spoke proxy if cluster reports one, otherwise use hub proxy
 	proxyBaseURL := s.proxyBaseURL
+	var proxyCAPem string
 	clusterID := w.GetClusterId()
 	if clusterID != "" {
 		if clusterInfo := s.store.GetClusterInfo(clusterID); clusterInfo != nil {
+			proxyCAPem = clusterInfo.ProxyCAPem
+			// Heartbeat freshness guard: reject early if the spoke agent appears down
+			if !clusterInfo.LastHeartbeat.IsZero() && time.Since(clusterInfo.LastHeartbeat) > 2*time.Minute {
+				return nil, status.Errorf(codes.Unavailable,
+					"cluster %s has not sent a heartbeat in %s; the spoke agent may be down",
+					clusterID, time.Since(clusterInfo.LastHeartbeat).Round(time.Second))
+			}
 			if clusterInfo.ProxyURL != "" {
 				proxyBaseURL = clusterInfo.ProxyURL
 				s.log.Debug("using spoke proxy for cluster", zap.String("cluster_id", clusterID), zap.String("proxy_url", proxyBaseURL))
 			} else {
-				// Cluster is registered but has no proxy_url - this likely means spoke-proxy
-				// is not deployed on the remote cluster. Return a clear error instead of
-				// silently falling back to the hub proxy which won't work for remote clusters.
-				s.log.Warn("cluster has no proxy_url configured; spoke-proxy may not be deployed",
+				// Cluster has no spoke proxy URL — fall back to hub proxy.
+				// This is expected for co-located spokes (spoke on same cluster as hub)
+				// and works when the hub proxy has EnforceClusterMatch=false.
+				s.log.Info("cluster has no spoke proxy URL; using hub proxy as fallback",
 					zap.String("cluster_id", clusterID),
 					zap.String("workload_id", workloadID),
-					zap.String("fallback_proxy", proxyBaseURL),
+					zap.String("hub_proxy", proxyBaseURL),
 				)
-				// Only error if the cluster appears to be remote (not a local dev cluster)
-				// Local clusters typically don't register or use in-cluster kubeconfig
-				if clusterInfo.Provider != "" && clusterInfo.Provider != "local" {
-					return nil, status.Errorf(codes.FailedPrecondition,
-						"cluster %s has no proxy URL configured; the spoke-proxy may not be deployed. "+
-							"Deploy the spoke chart with proxy.enabled=true or set AEGIS_PROXY_INGRESS_HOST on the k8s-agent",
-						clusterID)
-				}
 			}
 		}
 	}
 	proxyURL := fmt.Sprintf("%s/proxy/%s", proxyBaseURL, w.GetId())
 
+	// Resolve workspace root from env vars or use default
+	wsRoot := "/home/aegis/work"
+	if env := wk.Workspace.GetEnv(); env != nil {
+		if v, ok := env["WORKSPACE_ROOT"]; ok && v != "" {
+			wsRoot = v
+		}
+	}
+
 	return &sessionContext{
-		workload:     w,
-		workspace:    wk.Workspace,
-		port:         port,
-		alias:        alias,
-		internalHost: internalHost,
-		dest:         dest,
-		proxyURL:     proxyURL,
+		workload:      w,
+		workspace:     wk.Workspace,
+		port:          port,
+		alias:         alias,
+		internalHost:  internalHost,
+		dest:          dest,
+		proxyURL:      proxyURL,
+		proxyCAPem:    proxyCAPem,
+		workspaceRoot: wsRoot,
 	}, nil
 }
 
@@ -1654,6 +2186,8 @@ func sessionToProto(session *store.ConnectionSession) *aegis.ConnectionSession {
 		ProxyUrl:     session.ProxyURL,
 		ExpiresAtUtc: session.ExpiresAt.UTC().Format(time.RFC3339),
 		OneTime:      session.OneTime,
+		ProxyCaPem:    session.ProxyCAPem,
+		WorkspaceRoot: session.WorkspaceRoot,
 	}
 }
 
@@ -1679,6 +2213,30 @@ func (s *Server) auditSession(action string, session *store.ConnectionSession, e
 		return
 	}
 	s.log.Info("connection session event", fields...)
+}
+
+// audit records a structured audit event capturing who did what, to which resource, and the outcome.
+func (s *Server) audit(ctx context.Context, eventType, resourceType, resourceID, action, outcome string, details map[string]string) {
+	subject := subjectFromContext(ctx)
+	sourceIP := ""
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		sourceIP = p.Addr.String()
+	}
+	event := &store.AuditEvent{
+		ID:           "aud-" + RandID(),
+		EventType:    eventType,
+		Timestamp:    time.Now().UTC(),
+		Subject:      subject,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Outcome:      outcome,
+		Details:      details,
+		SourceIP:     sourceIP,
+	}
+	if err := s.store.PutAuditEvent(event); err != nil {
+		s.log.Error("failed to write audit event", zap.Error(err), zap.String("event_type", eventType))
+	}
 }
 
 func normalizeClient(raw string) (string, error) {
@@ -1727,6 +2285,65 @@ func deriveSSHUser(workspace *aegis.WorkspaceSpec, subject string) string {
 		}
 	}
 	return buildSSHUser(subject)
+}
+
+// handleDiscovery serves the platform discovery document — public metadata
+// for client auto-configuration. No authentication required.
+//
+// Security model:
+//   - Returns only public metadata: DNS-resolvable endpoint URLs, auth issuer, and root CA PEM.
+//   - The root CA is a public key (trust anchor). Knowing it does not help an attacker —
+//     they cannot forge certificates without the CA's private key. This is the same model
+//     as OIDC .well-known/openid-configuration including JWKS (public keys) inline.
+//   - No secrets, credentials, tokens, or internal state is exposed.
+func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
+	grpcEndpoint := os.Getenv("AEGIS_DISCOVERY_GRPC_ENDPOINT")
+	if grpcEndpoint == "" {
+		// Auto-derive from OIDC issuer URL domain pattern.
+		// If keycloak is at keycloak.aegis-platform.tech, platform-api is at platform-api.aegis-platform.tech.
+		if issuer := os.Getenv("OIDC_ISSUER_URL"); issuer != "" {
+			if u, err := url.Parse(issuer); err == nil && u.Host != "" {
+				host := u.Hostname()
+				// Replace keycloak prefix with platform-api
+				if strings.HasPrefix(host, "keycloak.") {
+					domain := strings.TrimPrefix(host, "keycloak.")
+					grpcEndpoint = "platform-api." + domain + ":8081"
+				}
+			}
+		}
+	}
+	if grpcEndpoint == "" {
+		// Final fallback: use request Host
+		grpcEndpoint = r.Host
+		if !strings.Contains(grpcEndpoint, ":") {
+			grpcEndpoint += ":8081"
+		}
+	}
+
+	authAuthority := os.Getenv("OIDC_ISSUER_URL")
+	authClientID := os.Getenv("AEGIS_DISCOVERY_AUTH_CLIENT_ID")
+	if authClientID == "" {
+		authClientID = "vscode-extension"
+	}
+
+	pkiData := map[string]string{}
+	if rootCA, err := s.loadRootCA(); err == nil && rootCA != "" {
+		pkiData["root_ca_pem"] = rootCA
+	}
+
+	discovery := map[string]interface{}{
+		"platform_version": "1.0.0",
+		"grpc_endpoint":    grpcEndpoint,
+		"auth": map[string]string{
+			"authority": authAuthority,
+			"client_id": authClientID,
+		},
+		"pki": pkiData,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	json.NewEncoder(w).Encode(discovery)
 }
 
 func sanitizeSSHUser(raw string) string {
@@ -1925,7 +2542,7 @@ func (s *Server) StartWorkload(ctx context.Context, req *aegis.StartWorkloadRequ
 
 	w := s.store.GetWorkload(req.GetId())
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("start workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -1972,6 +2589,19 @@ func (s *Server) StartWorkload(ctx context.Context, req *aegis.StartWorkloadRequ
 		}
 	}
 
+	// Auto-populate workspace URL from cluster proxy_url.
+	if updated.GetUrl() == "" {
+		if ci := s.store.GetClusterInfo(updated.GetClusterId()); ci != nil && ci.ProxyURL != "" {
+			wsURL := fmt.Sprintf("%s/proxy/%s", strings.TrimRight(ci.ProxyURL, "/"), updated.GetId())
+			s.store.SetWorkloadURL(updated.GetId(), wsURL)
+			updated.Url = wsURL
+			s.log.Info("auto-set workspace URL",
+				zap.String("workload_id", updated.GetId()),
+				zap.String("url", wsURL),
+			)
+		}
+	}
+
 	idempotent := !observed && wait == 0
 	s.log.Info("workload start acknowledged",
 		zap.String("workload_id", updated.GetId()),
@@ -1996,7 +2626,7 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 	}
 	w := s.store.GetWorkload(req.GetId())
 	if w == nil {
-		err := status.Error(codes.NotFound, "workload not found")
+		err := status.Errorf(codes.NotFound, "workload %q not found", req.GetId())
 		s.log.Warn("ack workload failed", zap.Error(err), zap.String("workload_id", req.GetId()))
 		return nil, err
 	}
@@ -2009,7 +2639,7 @@ func (s *Server) AckWorkload(ctx context.Context, req *aegis.AckWorkloadRequest)
 		)
 		return nil, err
 	}
-	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus(), req.GetUrl())
+	updated, err := s.store.AckWorkload(req.GetId(), req.GetStatus(), req.GetUrl(), req.GetSuspendReason(), req.GetMessage())
 	if err != nil {
 		s.log.Error("ack workload store update failed",
 			zap.Error(err),
@@ -2143,7 +2773,7 @@ func (s *Server) GetBudget(ctx context.Context, req *aegis.GetBudgetRequest) (*a
 		b = s.store.GetBudgetExact(req.GetProjectId(), "")
 	}
 	if b == nil {
-		return nil, status.Error(codes.NotFound, "budget not found")
+		return nil, status.Errorf(codes.NotFound, "budget not found for project %q", req.GetProjectId())
 	}
 	view, _ := s.store.UsageView(b.GetProjectId(), b.GetQueue())
 	resp := &aegis.GetBudgetResponse{Budget: b, Usage: &aegis.BudgetUsage{
@@ -2223,6 +2853,12 @@ func Run(ctx context.Context, log *zap.Logger, addrGRPC, addrHTTP string, svc *S
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
 	}))
+	root.Handle("/api/v1/platform/config", http.HandlerFunc(handleGetPlatformConfig))
+	root.Handle("/api/v1/discovery", http.HandlerFunc(svc.handleDiscovery))
+	// Extension endpoints are unauthenticated — users download VSIX and setup script without a token.
+	root.Handle("/api/v1/extension/metadata", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionMetadata(w, r) }))
+	root.Handle("/api/v1/extension/vsix", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionVSIX(w, r) }))
+	root.Handle("/api/v1/extension/setup-script", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { svc.handleGetExtensionSetupScript(w, r) }))
 	root.Handle("/", authenticator.HTTPMiddleware(mux))
 	root.Handle("/metrics", promhttp.Handler())
 	httpSrv := &http.Server{Addr: addrHTTP, Handler: root}
@@ -2289,6 +2925,19 @@ func grpcServerOptionsFromEnv(log *zap.Logger) ([]grpc.ServerOption, error) {
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
+	}
+	// FIPS 140-2 cipher suite enforcement (SC-13): when AEGIS_FIPS_ENABLED is set,
+	// restrict to FIPS-approved AEAD cipher suites only.
+	if os.Getenv("AEGIS_FIPS_ENABLED") == "true" {
+		tlsConfig.CipherSuites = []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		}
+		tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384}
+		log.Info("gRPC TLS FIPS cipher suites enforced")
 	}
 	if caPath := os.Getenv("AEGIS_GRPC_TLS_CLIENT_CA"); caPath != "" {
 		caPEM, err := os.ReadFile(caPath)
@@ -2318,7 +2967,7 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 	case *aegis.Workload_Workspace:
 		ws := wk.Workspace
 		if ws != nil {
-			spec.Workspace = &aegisv1alpha1.WorkspaceSpec{
+			wsSpec := &aegisv1alpha1.WorkspaceSpec{
 				Flavor:      ws.GetFlavor(),
 				Image:       ws.GetImage(),
 				Env:         cloneStringMap(ws.GetEnv()),
@@ -2326,6 +2975,16 @@ func buildAegisWorkloadCR(w *aegis.Workload, namespace string) *aegisv1alpha1.Ae
 				Interactive: ws.GetInteractive(),
 				Ports:       cloneInt32Slice(ws.GetPorts()),
 			}
+			if st := ws.GetStorage(); st != nil {
+				wsSpec.Storage = &aegisv1alpha1.WorkspaceStorageSpec{
+					Persistent:        st.GetPersistent(),
+					StorageClass:      st.GetStorageClass(),
+					Size:              st.GetSize(),
+					MountPath:         st.GetMountPath(),
+					ExistingClaimName: st.GetExistingClaimName(),
+				}
+			}
+			spec.Workspace = wsSpec
 		}
 	case *aegis.Workload_Training:
 		tr := wk.Training
@@ -2524,6 +3183,36 @@ func normalizeStrings(in []string) []string {
 	return out
 }
 
+// dataLevelSatisfied returns true when the cluster's impact level meets or
+// exceeds the project's required level. Levels are compared numerically:
+// IL2 < IL4 < IL5 < IL6. If the cluster has no level set it is treated as
+// non-compliant (returns false). Unknown formats are compared lexicographically
+// as a safe fallback.
+func dataLevelSatisfied(required, clusterLevel string) bool {
+	if clusterLevel == "" {
+		return false
+	}
+	reqNum := ilLevelNumber(required)
+	clusterNum := ilLevelNumber(clusterLevel)
+	if reqNum > 0 && clusterNum > 0 {
+		return clusterNum >= reqNum
+	}
+	// Fallback: exact (case-insensitive) match for non-standard levels.
+	return strings.EqualFold(required, clusterLevel)
+}
+
+// ilLevelNumber extracts the numeric portion from common IL-level strings
+// (e.g. "IL4" -> 4, "IL5" -> 5). Returns 0 for unrecognised formats.
+func ilLevelNumber(level string) int {
+	level = strings.TrimSpace(strings.ToUpper(level))
+	level = strings.TrimPrefix(level, "IL")
+	n, err := strconv.Atoi(level)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 func (s *Server) applyDefaultFlavor(policy placement.ProjectPolicy, w *aegis.Workload) {
 	defaultFlavor := strings.TrimSpace(policy.DefaultFlavor)
 	if defaultFlavor == "" || w == nil {
@@ -2691,6 +3380,103 @@ func (s *Server) GetClusterJobStatus(ctx context.Context, req *aegis.GetClusterJ
 	return &aegis.GetClusterJobStatusResponse{Job: jobFromInfra(infra, req.GetJobId())}, nil
 }
 
+func (s *Server) DestroyCluster(ctx context.Context, req *aegis.DestroyClusterRequest) (*aegis.DestroyClusterResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request required")
+	}
+	if s.infraClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster provisioning is not configured")
+	}
+	clusterID := strings.TrimSpace(req.GetClusterId())
+	projectID := strings.TrimSpace(req.GetProjectId())
+	if clusterID == "" {
+		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
+	}
+	if projectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id is required")
+	}
+	if err := s.authorize(ctx, projectID, "", "destroyCluster"); err != nil {
+		return nil, err
+	}
+
+	// Find the ProjectInfra CRD that owns this cluster.
+	infra, err := s.findInfraForCluster(ctx, clusterID, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	phase := strings.ToLower(strings.TrimSpace(infra.Status.Phase))
+	if phase == "destroying" {
+		return nil, status.Error(codes.FailedPrecondition, "cluster is already being destroyed")
+	}
+	if phase == "destroyed" {
+		return nil, status.Error(codes.FailedPrecondition, "cluster is already destroyed")
+	}
+
+	// Patch mode to Destroy — this triggers the controller reconcile loop.
+	patched := infra.DeepCopy()
+	if patched.Spec.Aws == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster has no AWS spec; cannot destroy")
+	}
+	patched.Spec.Aws.Mode = infraapi.AWSProvisionModeDestroy
+	if err := s.infraClient.Patch(ctx, patched, client.MergeFrom(infra)); err != nil {
+		return nil, status.Errorf(codes.Internal, "patch projectinfra mode: %v", err)
+	}
+
+	// If the infra was in Error state (e.g. failed prior destroy), reset phase
+	// so the controller re-enters reconciliation.
+	if phase == "error" {
+		statusPatched := patched.DeepCopy()
+		statusPatched.Status.Phase = ""
+		statusPatched.Status.Conditions = nil
+		if err := s.infraClient.Status().Patch(ctx, statusPatched, client.MergeFrom(patched)); err != nil {
+			s.log.Warn("failed to reset error phase for destroy retry", zap.Error(err))
+		}
+	}
+
+	if s.store != nil {
+		s.store.ClearProvisioningLogs(infra.Name)
+	}
+
+	s.log.Info("cluster destroy initiated",
+		zap.String("cluster", clusterID),
+		zap.String("project", projectID),
+		zap.String("job", infra.Name))
+
+	return &aegis.DestroyClusterResponse{Job: jobFromInfra(patched, infra.Name)}, nil
+}
+
+// findInfraForCluster finds the ProjectInfra CRD that owns the given cluster.
+func (s *Server) findInfraForCluster(ctx context.Context, clusterID, projectID string) (*infraapi.ProjectInfra, error) {
+	var list infraapi.ProjectInfraList
+	if err := s.infraClient.List(ctx, &list, client.InNamespace(s.infraNamespace)); err != nil {
+		return nil, status.Errorf(codes.Internal, "list projectinfra: %v", err)
+	}
+	for i := range list.Items {
+		infra := &list.Items[i]
+		if strings.TrimSpace(infra.Spec.ProjectID) != projectID {
+			continue
+		}
+		// Check annotation first (most reliable).
+		if infra.Annotations != nil {
+			if strings.TrimSpace(infra.Annotations["aegis.yourorg.dev/clusterId"]) == clusterID {
+				return infra, nil
+			}
+		}
+		// Check spec.aws.clusterName.
+		if infra.Spec.Aws != nil && strings.TrimSpace(infra.Spec.Aws.ClusterName) == clusterID {
+			return infra, nil
+		}
+		// Check status outputs.
+		for _, out := range infra.Status.Outputs {
+			if strings.TrimSpace(out.ClusterID) == clusterID || strings.TrimSpace(out.Name) == clusterID {
+				return infra, nil
+			}
+		}
+	}
+	return nil, status.Errorf(codes.NotFound, "no infrastructure found for cluster %q in project %q", clusterID, projectID)
+}
+
 func isWorkloadActive(status string) bool {
 	switch {
 	case strings.EqualFold(status, statusPlaced):
@@ -2779,8 +3565,8 @@ func defaultFlavorForName(name string) *aegis.Flavor {
 	case "cpu-small":
 		return &aegis.Flavor{
 			Name:               name,
-			CpuCoresRequest:    "2",
-			MemoryRequest:      "4Gi",
+			CpuCoresRequest:    "500m",
+			MemoryRequest:      "512Mi",
 			GpuCount:           0,
 			PriceUsdPerGpuHour: 0,
 		}
@@ -2882,6 +3668,33 @@ func (s *Server) applyWorkspaceDefaults(ws *aegis.WorkspaceSpec) {
 		ws.Env = nil
 	} else {
 		ws.Env = mergedEnv
+	}
+
+	// Apply default persistent storage if not specified by the user.
+	if ws.GetStorage() == nil {
+		ws.Storage = &aegis.WorkspaceStorage{
+			Persistent: true,
+			Size:       "50Gi",
+			MountPath:  "/home/coder",
+		}
+	}
+
+	// Set the default workspace image if none was provided, or override
+	// DockerHub images with the configured production image.
+	if s.defaultWorkspaceImage != "" {
+		image := ws.GetImage()
+		if image == "" {
+			ws.Image = s.defaultWorkspaceImage
+		} else {
+			isDockerHub := !strings.Contains(image, ".") || strings.HasPrefix(image, "docker.io/")
+			if isDockerHub {
+				s.log.Warn("overriding DockerHub workspace image with production default",
+					zap.String("submitted_image", image),
+					zap.String("override_image", s.defaultWorkspaceImage),
+				)
+				ws.Image = s.defaultWorkspaceImage
+			}
+		}
 	}
 }
 

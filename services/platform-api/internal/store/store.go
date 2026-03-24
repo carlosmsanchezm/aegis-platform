@@ -37,7 +37,9 @@ type ConnectionSession struct {
 	Port         int32
 	SSHConfig    string
 	ProxyURL     string
-	VSCodeURI    string
+	ProxyCAPem    string
+	VSCodeURI     string
+	WorkspaceRoot string
 	ExpiresAt    time.Time
 	OneTime      bool
 	Used         bool
@@ -75,6 +77,31 @@ type ProvisioningRun struct {
 	UpdatedAt   time.Time
 }
 
+// AuditEvent represents a single auditable action within the platform.
+type AuditEvent struct {
+	ID           string
+	EventType    string    // e.g. "workload.submitted", "workload.rejected", "session.created"
+	Timestamp    time.Time
+	Subject      string    // user identity from auth token
+	ResourceType string    // "workload", "project", "cluster", "session", "budget"
+	ResourceID   string
+	Action       string    // "create", "read", "update", "delete"
+	Outcome      string    // "success", "failure", "denied"
+	Details      map[string]string
+	SourceIP     string
+}
+
+// AuditEventFilter defines optional criteria for listing audit events.
+type AuditEventFilter struct {
+	EventType    string
+	Subject      string
+	ResourceType string
+	ResourceID   string
+	StartTime    time.Time
+	EndTime      time.Time
+	Limit        int
+}
+
 // ProvisioningLogSink exposes the minimal interface required to persist provisioning log lines.
 type ProvisioningLogSink interface {
 	AppendProvisioningLog(entry ProvisioningLogEntry)
@@ -107,10 +134,11 @@ type Store interface {
 	GetWorkload(id string) *aegis.Workload
 	ListWorkloads(projectID string) []*aegis.Workload
 	StartWorkload(id string) (*aegis.Workload, time.Duration, bool, error)
-	AckWorkload(id, nextStatus, url string) (*aegis.Workload, error)
+	AckWorkload(id, nextStatus, url, suspendReason, message string) (*aegis.Workload, error)
 	ResumeWorkload(id string) (*aegis.Workload, error)
 	TerminateWorkload(id, reason string) (*aegis.Workload, error)
 	RollbackTerminateWorkload(id, previousStatus string) (*aegis.Workload, error)
+	SetWorkloadURL(id, url string)
 	MarkPlaced(id string)
 	GetPlacedAt(id string) (time.Time, bool)
 	ClearPlacedAt(id string)
@@ -143,7 +171,7 @@ type Store interface {
 	// PreRegisterCluster creates a placeholder cluster row during provisioning,
 	// before the k8s-agent connects. This ensures project_id and proxy_url are set
 	// when the agent's RegisterCluster call updates the row.
-	PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error
+	PreRegisterCluster(clusterID, projectID, provider, region, proxyURL, endpoint, ca string) error
 	UpsertClusterFromRegister(*aegis.ClusterRegisterRequest)
 	UpdateClusterFromHeartbeat(*aegis.ClusterHeartbeat)
 	UpsertClusterImport(ClusterImport) error
@@ -152,10 +180,24 @@ type Store interface {
 	ListClusterInfos() []*ClusterInfo
 	ListClustersByProject(projectID string) []*ClusterInfo // Multi-tenancy: list clusters for a specific project
 	SetClusterProjectID(clusterID, projectID string)
+	SetClusterLabel(clusterID, key, value string)
 	DeleteCluster(clusterID string)
 	// CleanupStaleClusters soft-deletes clusters with heartbeats older than the threshold.
 	// Returns the number of clusters cleaned up.
 	CleanupStaleClusters(staleThreshold string) int64
+
+	// TerminateWorkloadsByCluster terminates all non-terminal workloads on the
+	// given cluster. Used for immediate cleanup when a cluster is deleted.
+	TerminateWorkloadsByCluster(clusterID string) int64
+
+	// TerminateOrphanedWorkloads terminates all non-terminal workloads whose
+	// cluster has been soft-deleted. Returns the number of workloads terminated.
+	TerminateOrphanedWorkloads() int64
+
+	// TerminateStaleWorkloads terminates workloads stuck in RUNNING/PLACED
+	// state longer than the given PostgreSQL interval threshold (e.g. "24 hours").
+	// Returns the number of workloads terminated.
+	TerminateStaleWorkloads(staleThreshold string) int64
 
 	// provisioning logs
 	AppendProvisioningLog(entry ProvisioningLogEntry)
@@ -165,4 +207,8 @@ type Store interface {
 	UpsertProvisioningRun(run ProvisioningRun)
 	GetProvisioningRun(jobID string) (*ProvisioningRun, bool)
 	ListProvisioningRuns(projectID string) []*ProvisioningRun // List runs for a project (or all if empty)
+
+	// audit events
+	PutAuditEvent(event *AuditEvent) error
+	ListAuditEvents(filter AuditEventFilter) ([]*AuditEvent, error)
 }

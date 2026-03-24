@@ -139,7 +139,7 @@ func (s *PostgresStore) ListWorkloads(projectID string) []*aegis.Workload {
 	}
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
-	rows, err := s.pool.Query(ctx, workloadSelect("WHERE project_id=$1 ORDER BY created_at DESC"), projectID)
+	rows, err := s.pool.Query(ctx, workloadSelect("WHERE project_id=$1 AND (status != 'TERMINATED' OR terminated_at > now() - interval '7 days') ORDER BY created_at DESC"), projectID)
 	if err != nil {
 		s.logExecError("list_workloads", err, zap.String("project_id", projectID))
 		return nil
@@ -166,7 +166,7 @@ func (s *PostgresStore) ListClusterWorkloadIDs(clusterID string) ([]string, erro
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id FROM workloads WHERE cluster_id=$1 ORDER BY id`, clusterID)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM workloads WHERE cluster_id=$1 AND status != 'TERMINATED' ORDER BY id`, clusterID)
 	if err != nil {
 		s.logExecError("list_cluster_workload_ids_query", err, zap.String("cluster_id", clusterID))
 		return nil, err
@@ -187,6 +187,16 @@ func (s *PostgresStore) ListClusterWorkloadIDs(clusterID string) ([]string, erro
 		return nil, rowsErr
 	}
 	return ids, nil
+}
+
+func (s *PostgresStore) SetWorkloadURL(id, url string) {
+	if id == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	_, err := s.pool.Exec(ctx, `UPDATE workloads SET url = NULLIF($2, ''), updated_at = now() WHERE id=$1`, id, url)
+	s.logExecError("set_workload_url", err, zap.String("workload_id", id))
 }
 
 func (s *PostgresStore) MarkPlaced(id string) {
@@ -366,7 +376,7 @@ func (s *PostgresStore) StartWorkload(id string) (*aegis.Workload, time.Duration
 	return w, wait, true, nil
 }
 
-func (s *PostgresStore) AckWorkload(id, nextStatus, url string) (*aegis.Workload, error) {
+func (s *PostgresStore) AckWorkload(id, nextStatus, url, suspendReason, message string) (*aegis.Workload, error) {
 	if id == "" {
 		return nil, fmt.Errorf("workload id required")
 	}
@@ -394,6 +404,10 @@ func (s *PostgresStore) AckWorkload(id, nextStatus, url string) (*aegis.Workload
 	if strings.EqualFold(nextStatus, statusRunning) {
 		_, err = tx.Exec(ctx, `UPDATE workloads SET url = NULLIF($2, ''), updated_at = now() WHERE id=$1`, id, url)
 	} else if strings.EqualFold(nextStatus, statusSuspended) {
+		reason := suspendReason
+		if reason == "" {
+			reason = "idle_timeout"
+		}
 		_, err = tx.Exec(ctx, `UPDATE workloads
 SET status=$2,
     url = NULLIF($3, ''),
@@ -402,7 +416,7 @@ SET status=$2,
     suspended_at = now(),
     suspend_reason = $4,
     updated_at = now()
-WHERE id=$1`, id, nextStatus, url, "idle_timeout")
+WHERE id=$1`, id, nextStatus, url, reason)
 	} else {
 		_, err = tx.Exec(ctx, `UPDATE workloads
 SET status=$2,
@@ -801,6 +815,74 @@ func (s *PostgresStore) scanWorkload(row rowScanner) (*aegis.Workload, error) {
 	}
 
 	return w, nil
+}
+
+func (s *PostgresStore) TerminateWorkloadsByCluster(clusterID string) int64 {
+	if clusterID == "" {
+		return 0
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	tag, err := s.pool.Exec(ctx, `
+UPDATE workloads
+SET status = 'TERMINATED',
+    runtime_seconds = runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))), 0)::BIGINT,
+    started_at = NULL,
+    terminated_at = now(),
+    terminate_reason = 'cluster_deleted',
+    updated_at = now()
+WHERE cluster_id = $1
+  AND status NOT IN ('TERMINATED')
+`, clusterID)
+	if err != nil {
+		s.logExecError("terminate_workloads_by_cluster", err, zap.String("cluster_id", clusterID))
+		return 0
+	}
+	return tag.RowsAffected()
+}
+
+func (s *PostgresStore) TerminateOrphanedWorkloads() int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	tag, err := s.pool.Exec(ctx, `
+UPDATE workloads w
+SET status = 'TERMINATED',
+    runtime_seconds = w.runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - w.started_at))), 0)::BIGINT,
+    started_at = NULL,
+    terminated_at = now(),
+    terminate_reason = 'cluster_deleted',
+    updated_at = now()
+FROM clusters c
+WHERE w.cluster_id = c.id
+  AND c.deleted_at IS NOT NULL
+  AND w.status NOT IN ('TERMINATED')
+`)
+	if err != nil {
+		s.logExecError("terminate_orphaned_workloads", err)
+		return 0
+	}
+	return tag.RowsAffected()
+}
+
+func (s *PostgresStore) TerminateStaleWorkloads(staleThreshold string) int64 {
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+	tag, err := s.pool.Exec(ctx, `
+UPDATE workloads
+SET status = 'TERMINATED',
+    runtime_seconds = runtime_seconds + COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))), 0)::BIGINT,
+    started_at = NULL,
+    terminated_at = now(),
+    terminate_reason = 'stale_timeout',
+    updated_at = now()
+WHERE status IN ('RUNNING', 'PLACED')
+  AND updated_at < NOW() - $1::interval
+`, staleThreshold)
+	if err != nil {
+		s.logExecError("terminate_stale_workloads", err)
+		return 0
+	}
+	return tag.RowsAffected()
 }
 
 func bytesOrNil(in []byte) interface{} {

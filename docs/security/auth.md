@@ -1,8 +1,26 @@
 # Backstage Authentication Posture
 
+**Authoritative for:** current Backstage/Keycloak cloud auth contract, production SSO failure modes, and cloud auth operational checks.
+
+**Not authoritative for:** full product workflow validation after login, hybrid relay setup, or deployment sequencing.
+
+**See also:** `AGENT_DEPLOYMENT_GUIDE.md` for rollout order and `docs/keycloak-auth-readme.md` for broader auth/workspace architecture.
+
 This Backstage deployment now relies on Keycloak-backed SSO. The control
 implementation aligns with NIST SP 800-171r3 and FedRAMP Moderate guidance
 for identity, transport protection, and audit logging.
+
+## Current Verified Cloud Scope
+
+The current production-cloud validation for this document is intentionally narrow:
+
+- `https://ui.aegis-platform.tech` loads over HTTPS
+- `https://keycloak.aegis-platform.tech` serves the expected OIDC discovery document
+- Backstage redirects to Keycloak and completes the popup callback successfully
+- successful SSO lands the user in the cloud UI with a real `backstageIdentity`
+
+Do not treat workload submission, workspace connectivity, or other post-login product
+flows as production-validated based on this document alone.
 
 ## Identity & Authentication
 
@@ -71,8 +89,24 @@ must be tightened for production.
 ## Session Authenticity
 
 - **Cookie Hardening (SC-23)** – Session cookies are marked `Secure`,
-  `HttpOnly`, and `SameSite=Lax` at the ingress/controller layer. Backstage’s
-  backend sessions are signed with `BACKEND_SECRET`, ensuring integrity.
+  `HttpOnly`, and `SameSite=Lax` for the cloud UI path. `backend.trustProxy`
+  must stay enabled behind Cloudflare/ingress-nginx so Backstage treats the
+  request as HTTPS and emits the correct cookie flags.
+- **Backstage Identity Issuance** – The Keycloak provider must declare
+  `auth.providers.keycloak.<env>.signIn.resolvers`. Without a configured
+  sign-in resolver, the popup callback can complete successfully at the IdP
+  and still return only `profile`/`providerInfo` instead of a
+  `backstageIdentity`, which leaves the UI stuck on `Authentication failed.
+  Please try again.` after login.
+- **Auth State Persistence** – Backstage OIDC request state is stored in the
+  plugin-scoped auth database (`backstage_plugin_auth`), not in the shared
+  `aegis_platform` application database. Do not create or troubleshoot auth
+  session tables in `aegis_platform`; inspect `backstage_plugin_auth.sessions`
+  instead.
+- **Redirect Boundary** – The cloud deployment preloads a small Backstage auth
+  patch that explicitly saves the session before redirecting to Keycloak. This
+  avoids losing OIDC state on the `/start` → IdP redirect path behind the
+  ingress proxy chain.
 - **Workspace Session TTL** – Platform API connection sessions issue one-time
   tokens with a five-minute default TTL (`AEGIS_PROXY_TOKEN_TTL_SECONDS`),
   capped at five minutes even if callers request longer durations. Renewals
@@ -101,8 +135,14 @@ must be tightened for production.
 3. Set the environment variables above via Helm values or secret managers –
    never commit credentials.
 4. Ensure all ingress controllers enforce TLS 1.2+ and HSTS.
-5. Forward Backstage backend logs to the compliance logging pipeline and
+5. Ensure the Backstage Keycloak provider config includes
+   `signIn.resolvers` for every deployed environment (`development`,
+   `production`, or both).
+6. Forward Backstage backend logs to the compliance logging pipeline and
    verify the presence of `auth-event` entries during smoke tests.
+7. Treat `GET /api/auth/keycloak/refresh?... -> 401 Missing session cookie`
+   before login as expected. It only indicates there is no existing browser
+   session yet; it is not a deployment failure by itself.
 
 ## Preview CI behaviour
 
@@ -206,7 +246,7 @@ replicate the workflow end-to-end:
 4. **Exercise the Platform API using the token**
 
    ```bash
-   GRPC_HOST=platform-api-grpc.aegist.dev
+   GRPC_HOST=platform-api.aegis-platform.tech
    GRPC_PORT=443
    CA_CERT=/path/to/aegis-platform-api-ca.crt   # download from workflow artifact
 
@@ -229,7 +269,7 @@ replicate the workflow end-to-end:
    {
      "aegis.remote": {
        "platform": {
-         "grpcEndpoint": "platform-api-grpc.aegist.dev:443",
+         "grpcEndpoint": "platform-api.aegis-platform.tech:443",
          "projectId": "p-e2e-manual",
          "namespace": "aegis-workloads",
          "authScope": "aegis-platform",

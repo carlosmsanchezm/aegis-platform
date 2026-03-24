@@ -43,10 +43,12 @@ func (s *PostgresStore) UpsertClusterImport(req store.ClusterImport) error {
   imported_at,
   kubeconfig_secret_ref,
   assume_role_arn,
+  cluster_endpoint,
+  cluster_ca,
   created_at,
   updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 ON CONFLICT (id) DO UPDATE SET
   provider=EXCLUDED.provider,
   region=EXCLUDED.region,
@@ -54,6 +56,8 @@ ON CONFLICT (id) DO UPDATE SET
   imported_at=EXCLUDED.imported_at,
   kubeconfig_secret_ref=EXCLUDED.kubeconfig_secret_ref,
   assume_role_arn=EXCLUDED.assume_role_arn,
+  cluster_endpoint=COALESCE(NULLIF(EXCLUDED.cluster_endpoint, ''), clusters.cluster_endpoint),
+  cluster_ca=COALESCE(NULLIF(EXCLUDED.cluster_ca, ''), clusters.cluster_ca),
   deleted_at=NULL,
   deleted_by=NULL,
   deletion_reason=NULL,
@@ -65,6 +69,8 @@ ON CONFLICT (id) DO UPDATE SET
 		nullableTime(&req.ImportedAt),
 		nullableString(req.KubeconfigSecretRef),
 		nullableString(req.AssumeRoleARN),
+		nullableString(req.ClusterEndpoint),
+		nullableString(req.ClusterCA),
 	); err != nil {
 		return fmt.Errorf("upsert cluster %q: %w", clusterID, err)
 	}
@@ -155,17 +161,22 @@ func (s *PostgresStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequ
 
 	// Insert or update cluster, including proxy_url and project_id if provided.
 	// Use COALESCE to handle empty proxy_url gracefully (column has NOT NULL constraint with default '').
+	// Clear deleted_at and stale_since so re-provisioned clusters are resurrected.
 	proxyURL := strings.TrimSpace(req.GetProxyUrl())
-	if _, err := tx.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, created_at, updated_at)
-VALUES ($1, $5, $2, $3, COALESCE(NULLIF($4, ''), ''), now(), now())
+	proxyCAPem := strings.TrimSpace(req.GetProxyCaPem())
+	_, err = tx.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, proxy_ca_pem, created_at, updated_at)
+VALUES ($1, $5, $2, $3, COALESCE(NULLIF($4, ''), ''), COALESCE(NULLIF($6, ''), ''), now(), now())
 ON CONFLICT (id) DO UPDATE SET
     provider = COALESCE(NULLIF(EXCLUDED.provider, ''), clusters.provider),
     region = COALESCE(NULLIF(EXCLUDED.region, ''), clusters.region),
     project_id = COALESCE(EXCLUDED.project_id, clusters.project_id),
     proxy_url = CASE WHEN $4 <> '' THEN $4 ELSE clusters.proxy_url END,
+    proxy_ca_pem = CASE WHEN $6 <> '' THEN $6 ELSE clusters.proxy_ca_pem END,
     deleted_at = NULL,
+    stale_since = NULL,
     updated_at = now()`,
-		req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion()), proxyURL, projectID); err != nil {
+		req.GetClusterId(), nullableString(req.GetProvider()), nullableString(req.GetRegion()), proxyURL, projectID, proxyCAPem)
+	if err != nil {
 		s.logExecError("cluster_register_upsert", err, zap.String("cluster_id", req.GetClusterId()))
 		return
 	}
@@ -185,6 +196,16 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`, req.GetClusterId(), k
 		}
 	}
 
+	// Persist IL level as a label so it survives round-trips through the DB.
+	if ilLevel := strings.TrimSpace(req.GetIlLevel()); ilLevel != "" {
+		if _, err := tx.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+			req.GetClusterId(), "aegis.yourorg.dev/ilLevel", strings.ToUpper(ilLevel)); err != nil {
+			s.logExecError("cluster_register_insert_il_level", err, zap.String("cluster_id", req.GetClusterId()))
+			return
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		s.logExecError("cluster_register_commit", err, zap.String("cluster_id", req.GetClusterId()))
 	}
@@ -193,7 +214,7 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`, req.GetClusterId(), k
 // PreRegisterCluster creates a placeholder cluster row during provisioning.
 // This is called by the Pulumi runner after cluster creation but before the k8s-agent connects.
 // The k8s-agent's RegisterCluster call will then update this row rather than failing.
-func (s *PostgresStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error {
+func (s *PostgresStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL, endpoint, ca string) error {
 	if clusterID == "" {
 		return nil
 	}
@@ -201,15 +222,20 @@ func (s *PostgresStore) PreRegisterCluster(clusterID, projectID, provider, regio
 	defer cancel()
 
 	// Use ON CONFLICT to handle race conditions if cluster already exists
-	_, err := s.pool.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, created_at, updated_at)
-VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), COALESCE(NULLIF($5, ''), ''), now(), now())
+	_, err := s.pool.Exec(ctx, `INSERT INTO clusters (id, project_id, provider, region, proxy_url, cluster_endpoint, cluster_ca, created_at, updated_at)
+VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), COALESCE(NULLIF($5, ''), ''), NULLIF($6, ''), NULLIF($7, ''), now(), now())
 ON CONFLICT (id) DO UPDATE SET
     project_id = COALESCE(clusters.project_id, EXCLUDED.project_id),
     provider = COALESCE(NULLIF(EXCLUDED.provider, ''), clusters.provider),
     region = COALESCE(NULLIF(EXCLUDED.region, ''), clusters.region),
     proxy_url = CASE WHEN EXCLUDED.proxy_url <> '' THEN EXCLUDED.proxy_url ELSE clusters.proxy_url END,
+    cluster_endpoint = COALESCE(NULLIF(EXCLUDED.cluster_endpoint, ''), clusters.cluster_endpoint),
+    cluster_ca = COALESCE(NULLIF(EXCLUDED.cluster_ca, ''), clusters.cluster_ca),
+    deleted_at = NULL,
+    stale_since = NULL,
     updated_at = now()`,
-		clusterID, projectID, provider, region, proxyURL)
+		clusterID, projectID, provider, region, proxyURL, endpoint, ca)
+	// Note: proxy_ca_pem is populated later via RegisterCluster when the k8s-agent sends it.
 	if err != nil {
 		s.logExecError("cluster_pre_register", err, zap.String("cluster_id", clusterID), zap.String("project_id", projectID))
 		return err
@@ -250,11 +276,14 @@ func (s *PostgresStore) UpdateClusterFromHeartbeat(hb *aegis.ClusterHeartbeat) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Update TTFG metric, proxy URL, and last heartbeat timestamp; do not resurrect soft-deleted clusters.
+	// Update TTFG metric, proxy URL, and last heartbeat timestamp.
+	// Clear stale_since so the two-phase cleanup won't delete this cluster.
+	// Do not resurrect soft-deleted clusters.
 	res, err := tx.Exec(ctx, `UPDATE clusters
 SET ttf_gpu_seconds_p50=$1,
     proxy_url = CASE WHEN $3 <> '' THEN $3 ELSE proxy_url END,
     last_heartbeat=now(),
+    stale_since=NULL,
     updated_at=now()
 WHERE id=$2 AND deleted_at IS NULL`,
 		hb.GetTtfGpuSecondsP50(), hb.GetClusterId(), strings.TrimSpace(hb.GetProxyUrl()))
@@ -298,19 +327,22 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
 	defer cancel()
 
 	var (
-		id           string
-		projectID    sql.NullString
-		provider     string
-		region       string
-		importMethod string
-		importedAt   sql.NullTime
-		kubeconfig   sql.NullString
-		assumeRole   sql.NullString
-		ttf          float64
-		proxyURL     sql.NullString
-		heartbeat    sql.NullTime
-		createdAt    time.Time
-		deletedAt    sql.NullTime
+		id              string
+		projectID       sql.NullString
+		provider        string
+		region          string
+		importMethod    string
+		importedAt      sql.NullTime
+		kubeconfig      sql.NullString
+		assumeRole      sql.NullString
+		clusterEndpoint sql.NullString
+		clusterCA       sql.NullString
+		ttf             float64
+		proxyURL        sql.NullString
+		proxyCAPem      sql.NullString
+		heartbeat       sql.NullTime
+		createdAt       time.Time
+		deletedAt       sql.NullTime
 	)
 	err := s.pool.QueryRow(ctx, `SELECT
   id,
@@ -321,8 +353,11 @@ func (s *PostgresStore) GetClusterInfo(clusterID string) *store.ClusterInfo {
   imported_at,
   kubeconfig_secret_ref,
   assume_role_arn,
+  cluster_endpoint,
+  cluster_ca,
   ttf_gpu_seconds_p50,
   COALESCE(proxy_url, ''),
+  COALESCE(proxy_ca_pem, ''),
   last_heartbeat,
   created_at,
   deleted_at
@@ -335,8 +370,11 @@ FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(
 		&importedAt,
 		&kubeconfig,
 		&assumeRole,
+		&clusterEndpoint,
+		&clusterCA,
 		&ttf,
 		&proxyURL,
+		&proxyCAPem,
 		&heartbeat,
 		&createdAt,
 		&deletedAt,
@@ -363,6 +401,12 @@ FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(
 	if assumeRole.Valid {
 		info.AssumeRoleARN = assumeRole.String
 	}
+	if clusterEndpoint.Valid {
+		info.ClusterEndpoint = clusterEndpoint.String
+	}
+	if clusterCA.Valid {
+		info.ClusterCA = clusterCA.String
+	}
 	if projectID.Valid {
 		info.ProjectID = projectID.String
 	}
@@ -372,10 +416,30 @@ FROM clusters WHERE id=$1 AND deleted_at IS NULL`, clusterID).Scan(
 	if proxyURL.Valid {
 		info.ProxyURL = proxyURL.String
 	}
+	if proxyCAPem.Valid {
+		info.ProxyCAPem = proxyCAPem.String
+	}
 	if deletedAt.Valid {
 		t := deletedAt.Time.UTC()
 		info.DeletedAt = &t
 	}
+
+	// Load labels for the cluster.
+	labelRows, lErr := s.pool.Query(ctx, `SELECT k, v FROM cluster_labels WHERE cluster_id=$1`, clusterID)
+	if lErr == nil {
+		defer labelRows.Close()
+		for labelRows.Next() {
+			var k, v string
+			if err := labelRows.Scan(&k, &v); err != nil {
+				break
+			}
+			info.Labels[k] = v
+			if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+				info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+			}
+		}
+	}
+
 	return info
 }
 
@@ -392,8 +456,11 @@ func (s *PostgresStore) ListClusterInfos() []*store.ClusterInfo {
   imported_at,
   kubeconfig_secret_ref,
   assume_role_arn,
+  cluster_endpoint,
+  cluster_ca,
   ttf_gpu_seconds_p50,
   COALESCE(proxy_url, ''),
+  COALESCE(proxy_ca_pem, ''),
   last_heartbeat,
   created_at
 FROM clusters WHERE deleted_at IS NULL`)
@@ -406,20 +473,23 @@ FROM clusters WHERE deleted_at IS NULL`)
 	clusters := map[string]*store.ClusterInfo{}
 	for rows.Next() {
 		var (
-			id           string
-			projectID    sql.NullString
-			provider     string
-			region       string
-			importMethod string
-			importedAt   sql.NullTime
-			kubeconfig   sql.NullString
-			assumeRole   sql.NullString
-			ttf          float64
-			proxyURL     sql.NullString
-			heartbeat    sql.NullTime
-			createdAt    time.Time
+			id              string
+			projectID       sql.NullString
+			provider        string
+			region          string
+			importMethod    string
+			importedAt      sql.NullTime
+			kubeconfig      sql.NullString
+			assumeRole      sql.NullString
+			clusterEndpoint sql.NullString
+			clusterCA       sql.NullString
+			ttf             float64
+			proxyURL        sql.NullString
+			proxyCAPem      sql.NullString
+			heartbeat       sql.NullTime
+			createdAt       time.Time
 		)
-		if err := rows.Scan(&id, &projectID, &provider, &region, &importMethod, &importedAt, &kubeconfig, &assumeRole, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
+		if err := rows.Scan(&id, &projectID, &provider, &region, &importMethod, &importedAt, &kubeconfig, &assumeRole, &clusterEndpoint, &clusterCA, &ttf, &proxyURL, &proxyCAPem, &heartbeat, &createdAt); err != nil {
 			s.logExecError("cluster_list_scan", err)
 			return nil
 		}
@@ -442,6 +512,12 @@ FROM clusters WHERE deleted_at IS NULL`)
 		if assumeRole.Valid {
 			info.AssumeRoleARN = assumeRole.String
 		}
+		if clusterEndpoint.Valid {
+			info.ClusterEndpoint = clusterEndpoint.String
+		}
+		if clusterCA.Valid {
+			info.ClusterCA = clusterCA.String
+		}
 		if projectID.Valid {
 			info.ProjectID = projectID.String
 		}
@@ -450,6 +526,9 @@ FROM clusters WHERE deleted_at IS NULL`)
 		}
 		if proxyURL.Valid {
 			info.ProxyURL = proxyURL.String
+		}
+		if proxyCAPem.Valid {
+			info.ProxyCAPem = proxyCAPem.String
 		}
 		clusters[id] = info
 	}
@@ -469,6 +548,10 @@ FROM clusters WHERE deleted_at IS NULL`)
 			}
 			if info, ok := clusters[id]; ok {
 				info.Labels[k] = v
+				// Hydrate ILLevel from the well-known label.
+				if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+					info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+				}
 			}
 		}
 	} else {
@@ -508,7 +591,7 @@ func (s *PostgresStore) ListClustersByProject(projectID string) []*store.Cluster
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, `SELECT id, project_id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), last_heartbeat, created_at FROM clusters WHERE project_id = $1 AND deleted_at IS NULL`, projectID)
+	rows, err := s.pool.Query(ctx, `SELECT id, project_id, COALESCE(provider, ''), COALESCE(region, ''), ttf_gpu_seconds_p50, COALESCE(proxy_url, ''), cluster_endpoint, cluster_ca, last_heartbeat, created_at FROM clusters WHERE project_id = $1 AND deleted_at IS NULL`, projectID)
 	if err != nil {
 		s.logExecError("cluster_list_by_project", err, zap.String("project_id", projectID))
 		return nil
@@ -518,16 +601,18 @@ func (s *PostgresStore) ListClustersByProject(projectID string) []*store.Cluster
 	clusters := map[string]*store.ClusterInfo{}
 	for rows.Next() {
 		var (
-			id        string
-			projID    sql.NullString
-			provider  string
-			region    string
-			ttf       float64
-			proxyURL  sql.NullString
-			heartbeat sql.NullTime
-			createdAt time.Time
+			id              string
+			projID          sql.NullString
+			provider        string
+			region          string
+			ttf             float64
+			proxyURL        sql.NullString
+			clusterEndpoint sql.NullString
+			clusterCA       sql.NullString
+			heartbeat       sql.NullTime
+			createdAt       time.Time
 		)
-		if err := rows.Scan(&id, &projID, &provider, &region, &ttf, &proxyURL, &heartbeat, &createdAt); err != nil {
+		if err := rows.Scan(&id, &projID, &provider, &region, &ttf, &proxyURL, &clusterEndpoint, &clusterCA, &heartbeat, &createdAt); err != nil {
 			s.logExecError("cluster_list_by_project_scan", err)
 			return nil
 		}
@@ -548,6 +633,12 @@ func (s *PostgresStore) ListClustersByProject(projectID string) []*store.Cluster
 		}
 		if proxyURL.Valid {
 			info.ProxyURL = proxyURL.String
+		}
+		if clusterEndpoint.Valid {
+			info.ClusterEndpoint = clusterEndpoint.String
+		}
+		if clusterCA.Valid {
+			info.ClusterCA = clusterCA.String
 		}
 		clusters[id] = info
 	}
@@ -570,6 +661,9 @@ func (s *PostgresStore) ListClustersByProject(projectID string) []*store.Cluster
 				}
 				if info, ok := clusters[id]; ok {
 					info.Labels[k] = v
+					if k == "aegis.yourorg.dev/ilLevel" && strings.TrimSpace(v) != "" {
+						info.ILLevel = strings.ToUpper(strings.TrimSpace(v))
+					}
 				}
 			}
 		}
@@ -632,6 +726,20 @@ ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
 	}
 }
 
+func (s *PostgresStore) SetClusterLabel(clusterID, key, value string) {
+	if clusterID == "" || key == "" {
+		return
+	}
+	ctx, cancel := s.withTimeout(context.Background())
+	defer cancel()
+
+	if _, err := s.pool.Exec(ctx, `INSERT INTO cluster_labels (cluster_id, k, v) VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, k) DO UPDATE SET v = EXCLUDED.v`,
+		clusterID, key, value); err != nil {
+		s.logExecError("set_cluster_label", err, zap.String("cluster_id", clusterID), zap.String("key", key))
+	}
+}
+
 func (s *PostgresStore) DeleteCluster(clusterID string) {
 	if clusterID == "" {
 		return
@@ -644,18 +752,46 @@ func (s *PostgresStore) DeleteCluster(clusterID string) {
 	}
 }
 
-// CleanupStaleClusters soft-deletes clusters that haven't sent a heartbeat in the specified duration.
-// This prevents stale clusters from accumulating in the database.
+// CleanupStaleClusters uses two-phase detection to avoid false positives during
+// hub pod restarts (when spokes temporarily can't heartbeat).
+//
+// Phase 1 — Mark: clusters whose last_heartbeat is older than the threshold AND
+// that are not yet marked get stale_since set to now(). This starts the grace clock.
+//
+// Phase 2 — Delete: clusters that have been continuously stale (stale_since is set
+// AND stale_since itself is older than the threshold) get soft-deleted.
+//
+// If a heartbeat arrives between Phase 1 and Phase 2 (see UpdateClusterFromHeartbeat),
+// stale_since is cleared and the cluster survives.
 func (s *PostgresStore) CleanupStaleClusters(staleThreshold string) int64 {
 	ctx, cancel := s.withTimeout(context.Background())
 	defer cancel()
 
-	// Default to 1 hour if not specified
 	if staleThreshold == "" {
 		staleThreshold = "1 hour"
 	}
 
-	result, err := s.pool.Exec(ctx, `UPDATE clusters SET deleted_at=now(), updated_at=now(), deleted_by='system', deletion_reason='stale heartbeat' WHERE deleted_at IS NULL AND last_heartbeat IS NOT NULL AND last_heartbeat < NOW() - $1::interval`, staleThreshold)
+	// Phase 1: Mark newly stale clusters (heartbeat old, not yet marked).
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE clusters
+		 SET stale_since = now(), updated_at = now()
+		 WHERE deleted_at IS NULL
+		   AND stale_since IS NULL
+		   AND last_heartbeat IS NOT NULL
+		   AND last_heartbeat < NOW() - $1::interval`,
+		staleThreshold); err != nil {
+		s.logExecError("mark_stale_clusters", err)
+	}
+
+	// Phase 2: Delete clusters that have been stale for the full threshold.
+	result, err := s.pool.Exec(ctx,
+		`UPDATE clusters
+		 SET deleted_at = now(), updated_at = now(),
+		     deleted_by = 'system', deletion_reason = 'stale heartbeat'
+		 WHERE deleted_at IS NULL
+		   AND stale_since IS NOT NULL
+		   AND stale_since < NOW() - $1::interval`,
+		staleThreshold)
 	if err != nil {
 		s.logExecError("cleanup_stale_clusters", err)
 		return 0

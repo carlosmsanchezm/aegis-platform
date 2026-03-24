@@ -22,10 +22,20 @@ type Config struct {
 	// If non-empty, at least one SAN in the client certificate must end with one of these suffixes.
 	// Controlled by the AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX environment variable (comma-separated).
 	ClientCertSanSuffixAllowList []string
+	// EnforceClusterMatch controls whether the proxy rejects tokens whose cluster
+	// claim doesn't match AEGIS_PROXY_CLUSTER. Set to false for hub proxies that
+	// route to workloads on any registered cluster. Set to true (default) for spoke
+	// proxies that only serve their own cluster.
+	EnforceClusterMatch bool
 	// PrivilegedSessionTimeout is the inactivity timeout for privileged user sessions (SC-10).
 	PrivilegedSessionTimeout time.Duration
 	// StandardSessionTimeout is the inactivity timeout for standard user sessions (SC-10).
 	StandardSessionTimeout time.Duration
+}
+
+// TLSEnabled returns true when both TLS certificate and key paths are configured.
+func (c Config) TLSEnabled() bool {
+	return c.TLSCertFile != "" && c.TLSKeyFile != ""
 }
 
 func LoadConfig() (Config, error) {
@@ -51,11 +61,10 @@ func LoadConfig() (Config, error) {
 			ttlSeconds = val
 		}
 	}
+	// TLS cert/key are optional. When omitted, the proxy listens on plain HTTP
+	// (for deployments where TLS terminates at the ingress/NLB layer).
 	certFile := os.Getenv("AEGIS_PROXY_TLS_CERT")
 	keyFile := os.Getenv("AEGIS_PROXY_TLS_KEY")
-	if certFile == "" || keyFile == "" {
-		return Config{}, fmt.Errorf("AEGIS_PROXY_TLS_CERT and AEGIS_PROXY_TLS_KEY must be set")
-	}
 
 	// Load client cert SAN suffix allow-list from env var
 	var sanSuffixAllowList []string
@@ -95,6 +104,10 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("AEGIS_PROXY_STANDARD_TIMEOUT must be positive")
 	}
 
+	// EnforceClusterMatch defaults to true. Hub proxies should set
+	// AEGIS_PROXY_ENFORCE_CLUSTER_MATCH=false to allow routing to any cluster.
+	enforceCluster := os.Getenv("AEGIS_PROXY_ENFORCE_CLUSTER_MATCH") != "false"
+
 	return Config{
 		ListenAddr:                   listen,
 		JWTSecret:                    []byte(secret),
@@ -102,6 +115,7 @@ func LoadConfig() (Config, error) {
 		DestSuffix:                   suffix,
 		TokenReuseTTL:                time.Duration(ttlSeconds) * time.Second,
 		Cluster:                      os.Getenv("AEGIS_PROXY_CLUSTER"),
+		EnforceClusterMatch:          enforceCluster,
 		IngressHost:                  os.Getenv("AEGIS_PROXY_PUBLIC_HOST"),
 		TLSCertFile:                  certFile,
 		TLSKeyFile:                   keyFile,

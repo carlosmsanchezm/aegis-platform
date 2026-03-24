@@ -2,30 +2,31 @@
 # Apply on top of values.yaml (and any region-specific values) when pointing
 # the spoke at the remote platform-api and Keycloak endpoints.
 #
-# Architecture:
-#   - gRPC: NLB tunnel (Cloudflare doesn't handle gRPC streaming properly)
-#   - Keycloak: Cloudflare (HTTPS works fine)
+# Architecture — all traffic through one NLB relay:
+#   - gRPC:     NLB :8081 → SSH tunnel → local platform-api
+#   - Keycloak: NLB :8443 → SSH tunnel → local keycloak
 #   - Spoke Proxy: Enabled for multi-cluster workspace connectivity
 
 k8sAgent:
   image:
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
     pullPolicy: Always
     tag: "dev"
   env:
     # gRPC to platform-api via AWS NLB (TCP passthrough, preserves HTTP/2)
-    # NOTE: Do NOT use Cloudflare for gRPC - it doesn't handle streaming properly
     AEGIS_CP_GRPC: "aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8081"
     AEGIS_CP_GRPC_INSECURE: "false"
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
     AEGIS_CP_GRPC_SERVER_NAME: ""
     AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
-    AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+    AEGIS_DEFAULT_IMAGE: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+    # For Iron Bank deployments, set to: registry1.dso.mil/ironbank/aegis/vscode-reh-init:<tag>
+    AEGIS_VSCODE_REH_INIT_IMAGE: ""
 
-    # OIDC via Cloudflare (HTTPS works fine through Cloudflare tunnels)
-    # NOTE: Do NOT use NLB for Keycloak - port 8443 tunnel often fails
-    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
+    # OIDC via AWS NLB (TCP passthrough to local Keycloak)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://aegis-dev-relay-nlb-353e7f4c0ac5c4be.elb.us-east-1.amazonaws.com:8443/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
-    AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+    AEGIS_CP_OIDC_CLIENT_SECRET: ""  # REQUIRED: Set via --set or values override
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
     AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"
 
@@ -34,23 +35,40 @@ k8sAgent:
     AEGIS_CP_OIDC_CA_B64: ""
 
 # Spoke proxy configuration for multi-cluster workspace connectivity
+# Uses LoadBalancer Service (auto-creates an AWS NLB with stable DNS).
+# The k8s-agent auto-discovers the NLB hostname — no manual URL needed.
 proxy:
   enabled: true
   image:
-    repository: carlosmsanchez/aegis-proxy
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
     pullPolicy: Always
     tag: "dev"
   service:
-    type: NodePort
+    type: LoadBalancer
     port: 443
-    nodePort: 31484
-  # Full URL for heartbeat reporting (supports NodePort with custom port)
-  url: "wss://spoke-proxy.107.22.50.137.nip.io:31484"
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "external"
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+  # url is intentionally empty — agent auto-discovers from LoadBalancer Service
+  url: ""
   ingress:
     enabled: false
-    # Hostname for ingress (no port - only used when ingress.enabled=true)
-    hostname: "spoke-proxy.107.22.50.137.nip.io"
-  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+    hostname: ""
+  # REQUIRED: Must be set during provisioning (Pulumi or --set).
+  # Must match AEGIS_PROXY_JWT_SECRET on the hub's platform-api.
+  jwtSecret: ""
   tls:
     terminateAtIngress: false
     # Certs provided via --set-file during helm install
+
+workspaceClasses:
+  custom:
+    defaults:
+      execution:
+        image: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+        interactive: true
+        ports:
+          - 11111
+      storage:
+        mode: ephemeral

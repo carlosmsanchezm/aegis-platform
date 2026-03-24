@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,38 +37,43 @@ func main() {
 
 	logger.Info("PLATFORM_API_BUILD_VERSION_20251216_2030_RECONCILE_FIX")
 
+	// FIPS 140-2 startup verification (SC-13)
+	checkFIPSMode(logger)
+
 	grpcAddr := getenv("GRPC_ADDR", ":8081")
 	httpAddr := getenv("HTTP_ADDR", ":8080")
 
 	// Initialize store based on AEGIS_STORE_BACKEND environment variable
 	var st store.Store
-	storeBackend := getenv("AEGIS_STORE_BACKEND", "memory")
+	storeBackend := getenv("AEGIS_STORE_BACKEND", "postgres")
 	if storeBackend == "postgres" {
 		dsn := buildPostgresDSN()
 		var err error
-		st, err = postgres.New(dsn, logger)
+		maxRetries := 5
+		for i := 0; i < maxRetries; i++ {
+			st, err = postgres.New(dsn, logger)
+			if err == nil {
+				break
+			}
+			logger.Warn("failed to connect to postgres, retrying...",
+				zap.Int("attempt", i+1),
+				zap.Int("max_retries", maxRetries),
+				zap.Error(err))
+			time.Sleep(time.Duration(1<<uint(i)) * time.Second) // exponential backoff: 1s, 2s, 4s, 8s, 16s
+		}
 		if err != nil {
-			logger.Fatal("failed to initialize postgres store", zap.Error(err))
+			logger.Fatal("failed to connect to postgres after retries", zap.Error(err))
 		}
 		logger.Info("using PostgreSQL store", zap.String("backend", "postgres"))
 
-		// Cleanup stale clusters on startup and periodically
-		staleThreshold := getenv("AEGIS_CLUSTER_STALE_THRESHOLD", "1 hour")
-		if cleaned := st.CleanupStaleClusters(staleThreshold); cleaned > 0 {
-			logger.Info("cleaned up stale clusters on startup", zap.Int64("count", cleaned))
-		}
-		go func() {
-			ticker := time.NewTicker(15 * time.Minute)
-			defer ticker.Stop()
-			for range ticker.C {
-				if cleaned := st.CleanupStaleClusters(staleThreshold); cleaned > 0 {
-					logger.Info("cleaned up stale clusters", zap.Int64("count", cleaned))
-				}
-			}
-		}()
+		// Stale cluster cleanup uses two-phase detection (mark → delete)
+		// to avoid false positives during pod restarts. Configured via
+		// AEGIS_STALE_CLUSTER_THRESHOLD and AEGIS_CLEANUP_INTERVAL env vars.
+		// Started below after context is created.
 	} else {
 		st = store.NewMemStore()
-		logger.Info("using in-memory store", zap.String("backend", "memory"))
+		logger.Warn("WARNING: using in-memory store — data will not persist across restarts. Set AEGIS_STORE_BACKEND=postgres for production use.",
+			zap.String("backend", "memory"))
 	}
 
 	scheme := runtime.NewScheme()
@@ -167,7 +173,20 @@ func main() {
 	kubeconfigsDir := getenv("KUBECONFIGS_DIR", "/tmp/kubeconfigs")
 	targetNamespace := getenv("AEGIS_NAMESPACE", "default")
 	kubeClientManager := kubeclients.New(kubeconfigsDir)
+	if infraClient != nil {
+		secretName := getenv("AEGIS_KUBECONFIG_SECRET_NAME", "aegis-kubeconfigs")
+		secretNS := getenv("AEGIS_KUBECONFIG_SECRET_NAMESPACE", "aegis-system")
+		kubeClientManager.WithSecretFallback(infraClient, secretName, secretNS)
+		logger.Info("kubeclients: Secret fallback enabled",
+			zap.String("secret", secretNS+"/"+secretName))
+	}
 	svc := server.New(logger, st, kubeClientManager, targetNamespace, overlay, infraClient, infraNamespace)
+	kubeClientManager.WithAuthProvider(svc)
+	logger.Info("kubeclients: EKS token auth provider enabled")
+
+	// Start two-phase stale cluster cleanup (mark stale → delete after grace period).
+	cleanup := controllers.DefaultCleanupConfig(logger, st)
+	go cleanup.Start(ctx)
 
 	logger.Info("starting platform API", zap.String("grpc_addr", grpcAddr), zap.String("http_addr", httpAddr))
 
@@ -197,6 +216,21 @@ func buildPostgresDSN() string {
 
 	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		user, encodedPassword, host, port, dbname, sslmode)
+}
+
+// checkFIPSMode verifies BoringCrypto is active at startup (SC-13 FIPS 140-2).
+// When AEGIS_FIPS_ENABLED=true but BoringCrypto is not linked, the process
+// exits immediately (fail-closed).
+func checkFIPSMode(logger *zap.Logger) {
+	boringActive := strings.Contains(goruntime.Version(), "boringcrypto")
+	if boringActive {
+		logger.Info("FIPS mode: enabled (BoringCrypto)", zap.String("go_version", goruntime.Version()))
+	} else {
+		logger.Info("FIPS mode: disabled (standard Go crypto)", zap.String("go_version", goruntime.Version()))
+	}
+	if os.Getenv("AEGIS_FIPS_ENABLED") == "true" && !boringActive {
+		logger.Fatal("AEGIS_FIPS_ENABLED=true but BoringCrypto is not active; binary must be built with GOEXPERIMENT=boringcrypto")
+	}
 }
 
 func getenvBool(key string, def bool) bool {

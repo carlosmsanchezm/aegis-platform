@@ -16,10 +16,11 @@ import (
 // - Purging expired connection sessions
 // - Future: orphaned provisioning logs, stale budget records, etc.
 type CleanupController struct {
-	Log                   *zap.Logger
-	Store                 store.Store
-	StaleClusterThreshold string        // PostgreSQL interval string, e.g., "1 hour"
-	CleanupInterval       time.Duration // How often to run cleanup
+	Log                    *zap.Logger
+	Store                  store.Store
+	StaleClusterThreshold  string        // PostgreSQL interval string, e.g., "1 hour"
+	StaleWorkloadThreshold string        // PostgreSQL interval string, e.g., "24 hours"
+	CleanupInterval        time.Duration // How often to run cleanup
 }
 
 // DefaultCleanupConfig returns a CleanupController with sensible defaults.
@@ -30,6 +31,11 @@ func DefaultCleanupConfig(log *zap.Logger, s store.Store) *CleanupController {
 		threshold = "1 hour"
 	}
 
+	workloadThreshold := os.Getenv("AEGIS_STALE_WORKLOAD_THRESHOLD")
+	if workloadThreshold == "" {
+		workloadThreshold = "24 hours"
+	}
+
 	interval := 15 * time.Minute
 	if v := os.Getenv("AEGIS_CLEANUP_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -38,10 +44,11 @@ func DefaultCleanupConfig(log *zap.Logger, s store.Store) *CleanupController {
 	}
 
 	return &CleanupController{
-		Log:                   log.Named("cleanup"),
-		Store:                 s,
-		StaleClusterThreshold: threshold,
-		CleanupInterval:       interval,
+		Log:                    log.Named("cleanup"),
+		Store:                  s,
+		StaleClusterThreshold:  threshold,
+		StaleWorkloadThreshold: workloadThreshold,
+		CleanupInterval:        interval,
 	}
 }
 
@@ -90,10 +97,27 @@ func (c *CleanupController) runCleanup(ctx context.Context) {
 	// 2. Purge expired connection sessions
 	c.Store.PurgeExpiredSessions(time.Now())
 
+	// 3. Terminate workloads orphaned by soft-deleted clusters
+	orphaned := c.Store.TerminateOrphanedWorkloads()
+	if orphaned > 0 {
+		c.Log.Info("terminated orphaned workloads",
+			zap.Int64("count", orphaned))
+	}
+
+	// 4. Terminate workloads stuck in non-terminal state too long
+	stale := c.Store.TerminateStaleWorkloads(c.StaleWorkloadThreshold)
+	if stale > 0 {
+		c.Log.Info("terminated stale workloads",
+			zap.Int64("count", stale),
+			zap.String("threshold", c.StaleWorkloadThreshold))
+	}
+
 	// Log completion
 	c.Log.Debug("cleanup cycle completed",
 		zap.Duration("duration", time.Since(start)),
-		zap.Int64("stale_clusters", staleClusters))
+		zap.Int64("stale_clusters", staleClusters),
+		zap.Int64("orphaned_workloads", orphaned),
+		zap.Int64("stale_workloads", stale))
 }
 
 // RunOnce executes cleanup tasks once and returns.

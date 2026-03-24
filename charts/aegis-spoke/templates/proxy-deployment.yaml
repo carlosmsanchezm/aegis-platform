@@ -11,6 +11,7 @@ metadata:
     {{- include "aegis-spoke.labels" . | nindent 4 }}
     app.kubernetes.io/component: proxy
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.proxy.replicaCount }}
   selector:
     matchLabels:
@@ -42,6 +43,10 @@ spec:
               readOnly: true
 {{- end }}
           env:
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
             - name: AEGIS_PROXY_JWT_SECRET
               valueFrom:
                 secretKeyRef:

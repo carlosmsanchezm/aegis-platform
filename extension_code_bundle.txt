@@ -9058,7 +9058,7 @@ const (
 	DefaultPasswordAccess = "true"
 	DefaultUserName       = "aegis"
 	DefaultUserPassword   = "aegis123"
-	DefaultWorkspaceImage = "567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+	DefaultWorkspaceImage = "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
 )
 
 // DefaultEnv returns a writable map containing the baseline VS Code server
@@ -17628,7 +17628,7 @@ set -e
 
 AWS_PROFILE=${AWS_PROFILE:-myclaude}
 AWS_REGION=${AWS_REGION:-us-east-1}
-ECR_REGISTRY="567751785679.dkr.ecr.${AWS_REGION}.amazonaws.com"
+ECR_REGISTRY="195714074609.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Image tags (should match terraform/generate-helm-values.sh)
 PLATFORM_API_TAG="v1.0.6-tls2"
@@ -17880,7 +17880,7 @@ set -e
 CLUSTER_NAME="aegis-spoke-prod"
 REGION="us-east-1"
 AWS_PROFILE="${AWS_PROFILE:-myclaude}"
-ACCOUNT_ID="567751785679"
+ACCOUNT_ID="195714074609"
 PLATFORM_API_ENDPOINT="${PLATFORM_API_ENDPOINT:-YOUR_PLATFORM_API_ENDPOINT:8081}"
 
 echo "🚀 Deploying Aegis to AWS"

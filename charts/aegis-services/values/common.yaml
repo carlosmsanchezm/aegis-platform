@@ -1,6 +1,11 @@
 # AEGIS Services Helm Chart Values
 # FedRAMP Moderate Compliance Configuration
 
+# Hardening profile: dev | standard
+# dev: No network policies, relaxed security contexts, FIPS off
+# standard: Network policies (ingress + egress deny-by-default), security contexts enforced, FIPS, mTLS
+hardeningProfile: dev
+
 # Ingress Controller (ingress-nginx) settings
 ingressController:
   enabled: false
@@ -17,10 +22,13 @@ ingress-nginx:
     watchIngressWithoutClass: false
 
 # Platform API Configuration
+# Image registry strategy:
+#   - local.yaml overrides to DockerHub (carlosmsanchez/aegis-platform-api:dev), pullPolicy: IfNotPresent
+#   - cloud.yaml overrides to ECR (195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api), pullPolicy: Always
 platformApi:
   image:
-    repository: aegis-platform-api
-    tag: 8afb9e0-vscode-dynamic
+    repository: carlosmsanchez/aegis-platform-api
+    tag: "dev"
     pullPolicy: IfNotPresent
 
   pulumi:
@@ -123,6 +131,9 @@ platformApi:
   env:
     OIDC_ISSUER_URL: "https://keycloak.example.com/realms/aegis"
     OIDC_AUDIENCE: "aegis-platform"
+    # Discovery endpoint: public gRPC endpoint for VS Code extension auto-configuration.
+    # Set in cloud.yaml to the public DNS name. Empty = derived from request host.
+    AEGIS_DISCOVERY_GRPC_ENDPOINT: ""
     REQUIRE_PHISHING_RESISTANT_MFA: "true"
     ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
   envFromSecret:
@@ -133,7 +144,8 @@ platformApi:
         {
           "clients": [
             "backstage",
-            "vscode-extension"
+            "vscode-extension",
+            "spoke-agent"
           ],
           "roles": [
             "workspace-admin"
@@ -148,10 +160,13 @@ platformApi:
       ]
 
 # Proxy Configuration
+# Image registry strategy:
+#   - local.yaml overrides to DockerHub (carlosmsanchez/aegis-proxy:dev), pullPolicy: IfNotPresent
+#   - cloud.yaml overrides to ECR (195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy), pullPolicy: Always
 proxy:
   image:
-    repository: aegis-proxy
-    tag: "16"
+    repository: carlosmsanchez/aegis-proxy
+    tag: "dev"
     pullPolicy: IfNotPresent
   
   replicas: 3
@@ -267,6 +282,55 @@ backstage:
   service:
     type: ClusterIP
     port: 7007
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+  tls:
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+  appConfig:
+    appBaseUrl: ""
+    backendBaseUrl: ""
+    aegisApiUrl: ""
+  postgres:
+    host: ""
+    port: "5432"
+    user: "aegis_platform"
+    database: "aegis_platform"
+    existingSecret: ""
+    existingSecretPasswordKey: "db-password"
+  keycloak:
+    baseUrl: ""
+    realm: aegis
+    clientId: backstage
+    issuer: ""
+    metadataUrl: ""
+    jwksUrl: ""
+    signIn:
+      enabled: true
+      resolver: emailLocalPartMatchingUserEntityName
+      dangerouslyAllowSignInWithoutUserInCatalog: true
+    clientSecret:
+      secretName: ""
+      key: clientSecret
+  secrets:
+    create: false
+    name: ""
+    backendSecret: ""
   env: {}
   envFromSecrets: []
   caBundle:
@@ -501,7 +565,7 @@ keycloak:
       usernameKey: username
       passwordKey: password
       username: admin
-      password: change-me
+      password: ""  # REQUIRED: Set via --set or values override
   database:
     vendor: postgres
     host: ""
@@ -513,7 +577,7 @@ keycloak:
       usernameKey: username
       passwordKey: password
       username: keycloak
-      password: supersecure
+      password: ""  # REQUIRED: Set via --set or values override
   postgres:
     enabled: true
     initChown: true
@@ -677,70 +741,33 @@ podSecurity:
       drop:
         - ALL
 
-# PKI Configuration (Step-CA + cert-manager)
+# PKI Configuration
 # SC-12: Cryptographic Key Establishment and Management
+# PKI stack (cert-manager, step-ca, step-issuer) is ALWAYS installed externally
+# by scripts/install-internal-pki.sh into dedicated namespaces.
+# This chart only consumes PKI resources; it never installs them.
 pki:
-  # Enable all PKI components (cert-manager, step-ca, step-issuer)
   enabled: false
+  mode: "external"  # external | cloud
 
-  # ClusterIssuer name that cert-manager will use
+  external:
+    namespace: aegis-pki
+    releaseName: step-certificates
+    provisionerName: aegis
+    servicePort: 443
+
   clusterIssuerName: aegis-internal
-
-  # Trust bundle secret name (distributed to namespaces)
   trustBundleSecretName: aegis-trust-bundle
-
-  # Namespaces to distribute trust bundle to
   trustBundleNamespaces:
     - aegis-system
     - keycloak
 
-  # cert-manager subchart configuration
-  certManager:
-    enabled: false
-    # Install CRDs with cert-manager
-    installCRDs: true
-    # Additional cert-manager values passed to subchart
-    # See: https://artifacthub.io/packages/helm/cert-manager/cert-manager
+  spokeProxyCa:
+    autoGenerate: true
+    secretName: spoke-proxy-ca
 
-  # step-ca subchart configuration
-  stepCa:
-    enabled: false
-    namespace: ""  # Empty means use Release.Namespace
-    releaseName: step-certificates
-
-    # CA configuration
-    ca:
-      name: "Aegis Internal CA"
-      provisioner:
-        name: aegis
-        # JWK provisioner for cert-manager integration
-        type: JWK
-      # Certificate validity claims
-      claims:
-        minTLSCertDuration: 5m
-        maxTLSCertDuration: 2160h
-        defaultTLSCertDuration: 2160h
-      # Database persistence
-      db:
-        persistent: true
-
-    # Service configuration
-    service:
-      type: ClusterIP
-      port: 443
-
-    # Bootstrap job (runs on first install)
-    bootstrap:
-      enabled: true
-
-    # Additional step-certificates values passed to subchart
-    # See: https://artifacthub.io/packages/helm/smallstep/step-certificates
-
-  # step-issuer subchart configuration
-  stepIssuer:
-    enabled: false
-    # Additional step-issuer values passed to subchart
-    # See: https://artifacthub.io/packages/helm/smallstep/step-issuer
+  oidcCa:
+    source: "trustBundle"  # trustBundle | inline | external
 
 # Global Configuration
 global:

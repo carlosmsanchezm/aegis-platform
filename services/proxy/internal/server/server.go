@@ -186,7 +186,7 @@ func (s *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.cfg.Cluster != "" && claims.Cluster != "" && claims.Cluster != s.cfg.Cluster {
+	if s.cfg.EnforceClusterMatch && s.cfg.Cluster != "" && claims.Cluster != "" && claims.Cluster != s.cfg.Cluster {
 		s.deny(w, r, claims, wid, "cluster_mismatch", errors.New("token cluster mismatch"))
 		return
 	}
@@ -570,6 +570,31 @@ func isWebSocketRequest(r *http.Request) bool {
 }
 
 func (s *ProxyServer) Start() error {
+	listener, err := net.Listen("tcp", s.cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer listener.Close()
+
+	server := &http.Server{
+		Addr:              s.cfg.ListenAddr,
+		Handler:           s,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	if !s.cfg.TLSEnabled() {
+		if len(s.cfg.ClientCertSanSuffixAllowList) > 0 {
+			s.log.Warn("ClientCertSanSuffixAllowList is configured but TLS is disabled; client cert verification will not be enforced")
+		}
+		s.log.Info("proxy listening (TLS terminates upstream)", zap.String("addr", s.cfg.ListenAddr))
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+
 	cert, err := tls.LoadX509KeyPair(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("load tls certificate: %w", err)
@@ -620,20 +645,7 @@ func (s *ProxyServer) Start() error {
 		}
 	}
 
-	server := &http.Server{
-		Addr:              s.cfg.ListenAddr,
-		Handler:           s,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		ReadHeaderTimeout: 15 * time.Second,
-		TLSConfig:         tlsConfig,
-	}
-
-	listener, err := net.Listen("tcp", s.cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	defer listener.Close()
+	server.TLSConfig = tlsConfig
 
 	s.log.Info("proxy listening", zap.String("addr", s.cfg.ListenAddr), zap.String("tls_cert", s.cfg.TLSCertFile))
 	if err := server.Serve(tls.NewListener(listener, tlsConfig)); err != nil && !errors.Is(err, http.ErrServerClosed) {

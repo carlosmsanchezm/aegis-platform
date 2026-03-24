@@ -9,6 +9,17 @@ GO_CACHE_DIR := $(abspath ./.gocache)
 GO_MOD_CACHE := $(abspath ./.gomodcache)
 ALLOW_NET ?= 0
 ALLOW_SOCKETS ?= 0
+
+# FIPS 140-2 toggle: set FIPS=1 for production builds with BoringCrypto.
+# Default (FIPS=0) keeps dev builds fast with CGO_ENABLED=0.
+FIPS ?= 0
+ifeq ($(FIPS),1)
+  GO_CGO    := CGO_ENABLED=1
+  GO_EXPERIMENT := GOEXPERIMENT=boringcrypto
+else
+  GO_CGO    := CGO_ENABLED=0
+  GO_EXPERIMENT :=
+endif
 GRPC_ADDR ?= :8081
 HTTP_ADDR ?= :8080
 AEGIS_CP_GRPC ?= localhost:8081
@@ -17,7 +28,9 @@ AEGIS_REGION ?= us-local
 AEGIS_PROVIDER ?= DEV
 AEGIS_DISABLE_KUEUE ?= 1
 HEALTH_PROBE_BIND_ADDRESS ?= :8081
-AEGIS_FLAVORS ?= 
+AEGIS_FLAVORS ?=
+HARDENING ?= dev
+DEPLOY_SPOKE ?= false
 
 PF_PLATFORM_HTTP_PORT ?= 10080
 PF_PLATFORM_GRPC_PORT ?= 10081
@@ -48,8 +61,8 @@ endif
 build:
 ifeq ($(ALLOW_NET),1)
 	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_CACHE)
-	@cd $(API_MOD) && GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
-	@cd $(AGENT_MOD) && GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
+	@cd $(API_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
+	@cd $(AGENT_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE) go build ./...
 else
 	@echo "ALLOW_NET=0: skipping build"
 endif
@@ -73,7 +86,7 @@ verify:
 
 run-api:
 ifeq ($(ALLOW_SOCKETS),1)
-	@cd $(API_MOD) && GRPC_ADDR=$(GRPC_ADDR) HTTP_ADDR=$(HTTP_ADDR) go run ./...
+	@cd $(API_MOD) && $(GO_CGO) $(GO_EXPERIMENT) GRPC_ADDR=$(GRPC_ADDR) HTTP_ADDR=$(HTTP_ADDR) go run ./...
 else
 	@echo "ALLOW_SOCKETS=0: disabled here"
 endif
@@ -81,6 +94,7 @@ endif
 run-operator:
 ifeq ($(ALLOW_SOCKETS),1)
 	@cd $(AGENT_MOD) && \
+	$(GO_CGO) $(GO_EXPERIMENT) \
 	AEGIS_CP_GRPC=$(AEGIS_CP_GRPC) \
 	AEGIS_CLUSTER_ID=$(AEGIS_CLUSTER_ID) \
 	AEGIS_REGION=$(AEGIS_REGION) \
@@ -114,8 +128,8 @@ platform-api-docker-push:
 .PHONY: build-platform
 build-platform:
 	@echo "Building platform-api image $(PLATFORM_API_IMAGE)"
-	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE)
-	@$(MAKE) kind-load-platform
+	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE) $(if $(BUILDX_OUTPUT),BUILDX_OUTPUT=$(BUILDX_OUTPUT)) $(if $(PLATFORMS),PLATFORMS=$(PLATFORMS))
+	@if [ "$(BUILDX_OUTPUT)" != "--push" ]; then $(MAKE) kind-load-platform; fi
 
 .PHONY: kind-load-platform
 kind-load-platform:
@@ -130,8 +144,12 @@ kind-load-platform:
 .PHONY: build-agent
 build-agent:
 	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
+ifeq ($(BUILDX_OUTPUT),--push)
+	@cd agents/k8s-agent && docker buildx build --no-cache --platform $(or $(PLATFORMS),linux/amd64) --tag $(K8S_AGENT_IMAGE) --push -f Dockerfile ../..
+else
 	@$(MAKE) -C agents/k8s-agent docker-build IMG=$(K8S_AGENT_IMAGE)
 	@$(MAKE) kind-load-agent
+endif
 
 .PHONY: build-agent-multi
 build-agent-multi:
@@ -165,6 +183,62 @@ build-proxy:
 		-f services/proxy/Dockerfile \
 		.
 
+.PHONY: build-proxy-local
+build-proxy-local:
+	@echo "Building proxy image $(PROXY_IMAGE) for local platform"
+	@docker build -f services/proxy/Dockerfile -t $(PROXY_IMAGE) \
+		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
+		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
+		.
+
+PULUMI_VERSION ?= 3.226.0
+
+.PHONY: stage-build-deps
+stage-build-deps:
+	@HOST_ARCH=$$(uname -m); \
+	if [ "$$HOST_ARCH" = "arm64" ] || [ "$$HOST_ARCH" = "aarch64" ]; then \
+		ARCH=aarch64; GOARCH=arm64; JQ_ARCH=arm64; PULUMI_ARCH=arm64; \
+	else \
+		ARCH=x86_64; GOARCH=amd64; JQ_ARCH=amd64; PULUMI_ARCH=x64; \
+	fi; \
+	echo "Staging Iron Bank build dependencies for linux/$$ARCH..."; \
+	if [ ! -f awscli.zip ]; then \
+		echo "  Downloading AWS CLI v2 ($$ARCH)..."; \
+		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$$ARCH.zip" -o awscli.zip; \
+	fi; \
+	if [ ! -f kubectl ]; then \
+		echo "  Downloading kubectl ($$GOARCH)..."; \
+		KUBE_VER=$$(curl -fsSL https://dl.k8s.io/release/stable.txt); \
+		curl -fsSL "https://dl.k8s.io/release/$${KUBE_VER}/bin/linux/$$GOARCH/kubectl" -o kubectl; \
+	fi; \
+	if [ ! -f jq ]; then \
+		echo "  Downloading jq ($$JQ_ARCH)..."; \
+		curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-$$JQ_ARCH" -o jq; \
+	fi; \
+	if [ ! -f pulumi-linux-x64.tar.gz ]; then \
+		echo "  Downloading Pulumi v$(PULUMI_VERSION) ($$PULUMI_ARCH)..."; \
+		curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v$(PULUMI_VERSION)-linux-$$PULUMI_ARCH.tar.gz" -o pulumi-linux-x64.tar.gz; \
+	fi; \
+	echo "All build dependencies staged."
+
+.PHONY: build-platform-local
+build-platform-local: stage-build-deps
+	@echo "Building platform-api image $(PLATFORM_API_IMAGE) for local platform (native arch)"
+	@$(MAKE) -C services/platform-api docker-load IMG=$(PLATFORM_API_IMAGE)
+
+.PHONY: build-agent-local
+build-agent-local:
+	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE) for local platform (native arch)"
+	@docker build -f agents/k8s-agent/Dockerfile -t $(K8S_AGENT_IMAGE) \
+		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
+		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
+		.
+
+.PHONY: build-local-all
+build-local-all: build-platform-local build-proxy-local build-agent-local
+	@echo "All local images built. Use 'kubectl rollout restart' to pick up changes."
+
+# Build all 4 images for multi-arch (platform-api + agent loaded into kind; proxy + workspace pushed to DockerHub)
 .PHONY: build-images
 build-images: build-platform build-agent build-proxy build-workspace
 
@@ -200,20 +274,23 @@ RHBK_USERNAME ?= un1cornsl4yer69
 RHBK_PASSWORD ?= P1rac1cab@16love
 RHBK_EMAIL ?= aegis@local.test
 
-AWS_ECR_REGISTRY ?= 567751785679.dkr.ecr.us-east-1.amazonaws.com
-CLOUD_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+AWS_ECR_REGISTRY ?= 195714074609.dkr.ecr.us-east-1.amazonaws.com
+CLOUD_IMAGE_TAG := $(or $(CLOUD_IMAGE_TAG),$(shell git rev-parse --short HEAD))
 CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
 CLOUD_PROXY_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/proxy:$(CLOUD_IMAGE_TAG)
 CLOUD_K8S_AGENT_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/k8s-agent:$(CLOUD_IMAGE_TAG)
 CLOUD_WORKSPACE_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:$(CLOUD_IMAGE_TAG)
+CLOUD_UI_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/ui:$(CLOUD_IMAGE_TAG)
+AEGIS_UI_DIR ?= $(HOME)/code/aegis-ui
 
 .PHONY: push-cloud-images
 push-cloud-images:
 	@echo "Building and pushing cloud images with tag $(CLOUD_IMAGE_TAG) to $(AWS_ECR_REGISTRY)"
-	@$(MAKE) PLATFORM_API_IMAGE=$(CLOUD_PLATFORM_API_IMAGE) build-platform
+	@$(MAKE) PLATFORM_API_IMAGE=$(CLOUD_PLATFORM_API_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-platform
 	@$(MAKE) PROXY_IMAGE=$(CLOUD_PROXY_IMAGE) build-proxy
-	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) build-agent
+	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-agent
 	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) build-workspace
+	@$(MAKE) CLOUD_UI_IMAGE=$(CLOUD_UI_IMAGE) AEGIS_UI_DIR=$(AEGIS_UI_DIR) push-ui-cloud
 ifeq ($(PUSH_LATEST),1)
 	@echo "Promoting images to :latest"
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/platform-api:latest $(CLOUD_PLATFORM_API_IMAGE)
@@ -221,6 +298,16 @@ ifeq ($(PUSH_LATEST),1)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/k8s-agent:latest $(CLOUD_K8S_AGENT_IMAGE)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
 endif
+
+.PHONY: build-ui-cloud
+build-ui-cloud:
+	@echo "Building Docker image $(CLOUD_UI_IMAGE) (multi-stage, linux/amd64)..."
+	docker build --platform linux/amd64 -t $(CLOUD_UI_IMAGE) -f $(AEGIS_UI_DIR)/packages/backend/Dockerfile.cloud $(AEGIS_UI_DIR)
+
+.PHONY: push-ui-cloud
+push-ui-cloud: build-ui-cloud
+	@echo "Pushing $(CLOUD_UI_IMAGE) to ECR..."
+	docker push $(CLOUD_UI_IMAGE)
 
 .PHONY: clean-webhook
 clean-webhook:
@@ -262,132 +349,33 @@ deploy-local: setup-local clean-webhook
 		  --set platformApi.image.tag=$$PLATFORM_API_TAG \
 		  --namespace aegis-system --create-namespace \
 		  --wait --timeout 5m; \
-		echo "Deploying Aegis spoke locally (no TLS)..."; \
-		helm upgrade --install aegis-spoke charts/aegis-spoke \
-		  -f charts/aegis-spoke/values.yaml \
-		  -f charts/aegis-spoke/values-local.yaml \
-		  --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
-		  --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
-		  --set k8sAgent.image.pullPolicy=Always \
-		  --namespace aegis-system --create-namespace; \
-		echo "✅ Deployed local stack without TLS"; \
+		if [ "$(DEPLOY_SPOKE)" = "true" ]; then \
+		  echo "Deploying Aegis spoke locally (no TLS)..."; \
+		  helm upgrade --install aegis-spoke charts/aegis-spoke \
+		    -f charts/aegis-spoke/values.yaml \
+		    -f charts/aegis-spoke/values-local.yaml \
+		    --set k8sAgent.image.repository=$$K8S_AGENT_REPO \
+		    --set k8sAgent.image.tag=$$K8S_AGENT_TAG \
+		    --set k8sAgent.image.pullPolicy=Always \
+		    --namespace aegis-system --create-namespace; \
+		  echo "✅ Deployed local stack without TLS (with spoke)"; \
+		else \
+		  echo "⏭️  Skipping aegis-spoke (DEPLOY_SPOKE=false). Set DEPLOY_SPOKE=true to include it."; \
+		  echo "✅ Deployed local hub stack without TLS"; \
+		fi; \
 		echo "   Platform API gRPC: platform-api-grpc.localtest.me:80"; \
 		echo "   Proxy: http://proxy.localtest.me"
 
 .PHONY: deploy-local-tls
 deploy-local-tls: setup-local clean-webhook
-	@ \
-	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)"; \
-	if [[ "$$PLATFORM_API_IMAGE" == *":"* ]]; then \
-	  PLATFORM_API_REPO="$${PLATFORM_API_IMAGE%:*}"; \
-	  PLATFORM_API_TAG="$${PLATFORM_API_IMAGE##*:}"; \
-	else \
-	  PLATFORM_API_REPO="$$PLATFORM_API_IMAGE"; \
-	  PLATFORM_API_TAG="latest"; \
-	fi; \
-	K8S_AGENT_IMAGE="$(K8S_AGENT_IMAGE)"; \
-	if [[ "$$K8S_AGENT_IMAGE" == *":"* ]]; then \
-	  K8S_AGENT_REPO="$${K8S_AGENT_IMAGE%:*}"; \
-	  K8S_AGENT_TAG="$${K8S_AGENT_IMAGE##*:}"; \
-	else \
-	  K8S_AGENT_REPO="$$K8S_AGENT_IMAGE"; \
-	  K8S_AGENT_TAG="latest"; \
-	fi; \
-		echo "Using k8s-agent image $$K8S_AGENT_IMAGE"; \
-		echo "Using platform-api image $$PLATFORM_API_IMAGE"; \
-		echo "Ensuring chart dependencies (ingress-nginx) are up to date..."; \
-		helm dependency update charts/aegis-services >/dev/null; \
-		if [[ -n "$(RHBK_USERNAME)" && -n "$(RHBK_PASSWORD)" ]]; then \
-		  echo "Configuring registry.redhat.io pull secret in keycloak namespace"; \
-		  if kubectl get namespace keycloak >/dev/null 2>&1; then \
-		    phase=$$(kubectl get namespace keycloak -o jsonpath='{.status.phase}'); \
-		    if [[ "$$phase" == "Terminating" ]]; then \
-		      echo "Waiting for keycloak namespace to finish terminating"; \
-		      kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true; \
-		    fi; \
-		  fi; \
-		  kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
-		  kubectl delete secret redhat-pull-secret -n keycloak --ignore-not-found >/dev/null; \
-		  kubectl create secret docker-registry redhat-pull-secret \
-		    --namespace keycloak \
-		    --docker-server=registry.redhat.io \
-		    --docker-username="$(RHBK_USERNAME)" \
-		    --docker-password="$(RHBK_PASSWORD)" \
-		    --docker-email="$(RHBK_EMAIL)" >/dev/null; \
-		else \
-		  echo "RHBK_USERNAME/RHBK_PASSWORD not set; skipping redhat-pull-secret creation (Keycloak pods must already have access)."; \
-		fi; \
-		echo "Installing internal PKI (cert-manager + step-ca + step-issuer)..."; \
-		PKI_NAMESPACE=aegis-pki CERT_MANAGER_NAMESPACE=cert-manager TRUST_BUNDLE_NAMESPACES=aegis-system,keycloak ./scripts/install-internal-pki.sh; \
-		echo "Deploying Aegis services locally with TLS..."; \
-		helm upgrade --install aegis-services charts/aegis-services \
-		  -f charts/aegis-services/values/common.yaml \
-		  -f charts/aegis-services/values/local.yaml \
-		  -f charts/aegis-services/values/local-pki.yaml \
-		  -f charts/aegis-services/values/local-tls.yaml \
-		  -f charts/aegis-services/values/local-pki.yaml \
-		  --set platformApi.image.repository=$$PLATFORM_API_REPO \
-		  --set platformApi.image.tag=$$PLATFORM_API_TAG \
-		  --namespace aegis-system --create-namespace \
-		  --wait --timeout 5m; \
-
-	KEYCLOAK_HOST_RAW=$$(kubectl get keycloak aegis-services-keycloak -n keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || echo "keycloak.localtest.me"); \
-	KEYCLOAK_HOST=$${KEYCLOAK_HOST_RAW#https://}; \
-	KEYCLOAK_HOST=$${KEYCLOAK_HOST#http://}; \
-	KEYCLOAK_HOST=$${KEYCLOAK_HOST%/}; \
-	KEYCLOAK_TLS_SECRET=$$(kubectl get keycloak aegis-services-keycloak -n keycloak -o jsonpath='{.spec.http.tlsSecret}' 2>/dev/null || echo "keycloak-tls"); \
-	if [[ -n "$$KEYCLOAK_HOST" && -n "$$KEYCLOAK_TLS_SECRET" ]]; then \
-	  echo "Ensuring Keycloak ingress TLS routes $$KEYCLOAK_HOST with secret $$KEYCLOAK_TLS_SECRET"; \
-	  kubectl patch ingress aegis-services-keycloak-ingress -n keycloak --type merge -p "{\"spec\":{\"tls\":[{\"hosts\":[\"$$KEYCLOAK_HOST\"],\"secretName\":\"$$KEYCLOAK_TLS_SECRET\"}]}}" >/dev/null 2>&1 || true; \
-	fi; \
-	echo "Deploying Aegis spoke locally with TLS..."; \
-	success=0; \
-	for attempt in 1 2 3; do \
-	  if helm upgrade --install aegis-spoke charts/aegis-spoke \
-	    -f charts/aegis-spoke/values.yaml \
-	    -f charts/aegis-spoke/values-local.yaml \
-	    -f charts/aegis-spoke/values-local-tls.yaml \
-	    -f charts/aegis-spoke/values-local-pki.yaml \
-	    --set k8sAgent.image.repository=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f1) \
-	    --set k8sAgent.image.tag=$(shell echo $(K8S_AGENT_IMAGE) | cut -d: -f2) \
-	    --set k8sAgent.image.pullPolicy=Always \
-	    --namespace aegis-system --create-namespace; then \
-	      success=1; \
-	      break; \
-	  fi; \
-	  echo "Ingress webhook not ready (attempt $$attempt/3); waiting before retry"; \
-	  sleep 15; \
-	done; \
-	if [[ $$success -ne 1 ]]; then \
-	  echo "Failed to deploy aegis-spoke after retries"; \
-	  exit 1; \
-	fi; \
-	if [[ ! -f aegis-platform/.env ]]; then \
-	  cp aegis-platform/.env.development aegis-platform/.env; \
-	  echo "Created aegis-platform/.env from .env.development"; \
-	fi; \
-	echo "Syncing internal CA bundle to $$HOME/aegis-platform-api-ca.crt ..."; \
-	kubectl get secret aegis-trust-bundle -n aegis-system -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/aegis-platform-api-ca.crt"; \
-	chmod 0644 "$$HOME/aegis-platform-api-ca.crt"; \
-	echo "Syncing internal CA bundle to $$HOME/keycloak.localtest.me.crt ..."; \
-	kubectl get secret aegis-trust-bundle -n keycloak -o "jsonpath={.data.ca\.crt}" | base64 --decode > "$$HOME/keycloak.localtest.me.crt"; \
-	chmod 0644 "$$HOME/keycloak.localtest.me.crt"; \
-	cp "$$HOME/aegis-platform-api-ca.crt" "$$HOME/aegis-local-trust.pem"; \
-	chmod 0644 "$$HOME/aegis-local-trust.pem"; \
-	echo "   CA bundles refreshed."; \
-	echo "   Combined trust store: $$HOME/aegis-local-trust.pem"; \
-	echo "   To trust the platform API system-wide: sudo security add-trust -d -r trustRoot -k /Library/Keychains/System.keychain $$HOME/aegis-platform-api-ca.crt"; \
-	echo "   Launch VS Code with TLS trust:"; \
-	echo "     NODE_EXTRA_CA_CERTS=$$HOME/aegis-local-trust.pem /Applications/Visual\\ Studio\\ Code.app/Contents/MacOS/Electron --enable-proposed-api aegis.aegis-remote $$PWD"; \
-	echo "✅ Deployed with TLS using internal PKI (step-ca + cert-manager)"; \
-	echo "   Platform API gRPC: platform-api-grpc.localtest.me:443"; \
-	echo "   Platform API HTTPS: https://platform-api.localtest.me"; \
-	echo "   Proxy: https://proxy.localtest.me"; \
-	echo ""; \
-	echo "   For E2E tests with TLS:"; \
-	echo "   export GRPC_TLS=1"; \
-	echo "   export GRPC_TLS_SKIP_VERIFY=0"; \
-	echo "   ./scripts/e2e-platform-api.sh"
+	PLATFORM_API_IMAGE="$(PLATFORM_API_IMAGE)" \
+	K8S_AGENT_IMAGE="$(K8S_AGENT_IMAGE)" \
+	RHBK_USERNAME="$(RHBK_USERNAME)" \
+	RHBK_PASSWORD="$(RHBK_PASSWORD)" \
+	RHBK_EMAIL="$(RHBK_EMAIL)" \
+	HARDENING="$(HARDENING)" \
+	DEPLOY_SPOKE="$(DEPLOY_SPOKE)" \
+	./scripts/aegis.sh deploy --hardening $(HARDENING)
 
 
 .PHONY: sync-certs
@@ -415,6 +403,7 @@ port-forward:
 	@# AWS relay tunnel port-forwards (for remote spoke clusters to reach local platform-api)
 	@nohup kubectl --context docker-desktop -n aegis-system port-forward svc/aegis-services-platform-api 8081:8081 >/dev/null 2>&1 &
 	@nohup kubectl --context docker-desktop -n keycloak port-forward svc/aegis-services-keycloak-service 8443:8443 >/dev/null 2>&1 &
+	@nohup kubectl --context docker-desktop -n aegis-pki port-forward svc/step-certificates 9443:443 >/dev/null 2>&1 &
 	@sleep 3
 	@# Verify port-forwards are running
 	@if ! pgrep -f "kubectl.*port-forward.*aegis-services-platform-api.*$(PF_PLATFORM_HTTP_PORT)" >/dev/null; then \
@@ -426,7 +415,7 @@ port-forward:
 	@echo "  Platform API: http://localhost:$(PF_PLATFORM_HTTP_PORT) (HTTP) / localhost:$(PF_PLATFORM_GRPC_PORT) (gRPC)"
 	@echo "  Proxy: http://localhost:$(PF_PROXY_HTTP_PORT)"
 	@echo "  Keycloak: https://localhost:$(PF_KEYCLOAK_HTTPS_PORT)"
-	@echo "  AWS Relay: localhost:8081 (gRPC) / localhost:8443 (Keycloak)"
+	@echo "  AWS Relay: localhost:8081 (gRPC) / localhost:8443 (Keycloak) / localhost:9443 (step-ca)"
 	@echo ""
 	@# Quick connectivity test
 	@if curl -s --max-time 3 http://localhost:$(PF_PLATFORM_HTTP_PORT)/healthz >/dev/null 2>&1; then \
@@ -450,24 +439,35 @@ dev-backstage:
 
 dev-backstage-cloud:
 	@echo "Starting Backstage development server (cloud mode)..."
-	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@echo "   Backend: http://platform-api.aegis-platform.tech:8080"
 	@cd aegis-platform && yarn dev:cloud
 
 dev-backstage-cloud-tls:
 	@echo "Starting Backstage development server (cloud TLS mode)..."
-	@echo "   Backend: http://platform-api.aegist.dev:8080"
+	@echo "   Backend: http://platform-api.aegis-platform.tech:8080"
 	@cd aegis-platform && yarn dev:cloud-tls
 
 clean-local:
-	@for release in aegis-services aegis-spoke; do \
-		if helm status $$release -n aegis-system >/dev/null 2>&1; then \
-			echo "Uninstalling $$release..."; \
-			helm uninstall $$release -n aegis-system >/dev/null; \
-		else \
-			echo "Skipping $$release (not installed)"; \
-		fi; \
-	done
-	@echo "Cleaning up ingress-nginx admission webhook..."
-	@kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found >/dev/null 2>&1 || true
-	@kubectl delete namespace keycloak --ignore-not-found >/dev/null 2>&1 || true
-	@kubectl wait --for=delete namespace/keycloak --timeout=120s >/dev/null 2>&1 || true
+	./scripts/aegis.sh clean
+
+AWS_PROFILE ?= aegis-new
+AWS_REGION ?= us-east-1
+SKIP_DNS_UPDATE ?= 0
+
+.PHONY: ecr-login
+ecr-login:
+	@echo "Logging into ECR..."
+	aws ecr get-login-password --region $(AWS_REGION) --profile $(AWS_PROFILE) | \
+		docker login --username AWS --password-stdin $(AWS_ECR_REGISTRY)
+
+.PHONY: deploy-cloud
+deploy-cloud:
+	@echo "Applying Terraform (idempotent)..."
+	cd terraform && AWS_PROFILE=$(AWS_PROFILE) terraform apply -auto-approve
+	@echo "Deploying Aegis hub to cloud EKS..."
+	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_DNS_UPDATE=$(SKIP_DNS_UPDATE) \
+		PLATFORM_API_IMAGE_TAG=$(CLOUD_PLATFORM_API_IMAGE) \
+		PROXY_IMAGE_TAG=$(CLOUD_PROXY_IMAGE) \
+		K8S_AGENT_IMAGE_TAG=$(CLOUD_K8S_AGENT_IMAGE) \
+		UI_IMAGE_TAG=$(CLOUD_UI_IMAGE) \
+		./terraform/generate-cloud-deployment.sh --non-interactive

@@ -1,0 +1,108 @@
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if $backstage.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegis-services.backstage.startupPatchConfigName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+data:
+  auth-session-persistence.cjs: |
+    'use strict';
+
+    function patchExpressSession() {
+      try {
+        const resolved = require.resolve('express-session');
+        const original = require(resolved);
+        if (original.__aegisSessionFactoryPatched) {
+          return;
+        }
+
+        function patchedSession(options = {}) {
+          const cookie = {
+            ...(options.cookie ?? {}),
+          };
+          if (cookie.sameSite === undefined) {
+            cookie.sameSite = 'lax';
+          }
+          if (cookie.secure === undefined) {
+            cookie.secure = 'auto';
+          }
+
+          return original({
+            ...options,
+            cookie,
+          });
+        }
+
+        patchedSession.Store = original.Store;
+        patchedSession.Cookie = original.Cookie;
+        patchedSession.Session = original.Session;
+        patchedSession.MemoryStore = original.MemoryStore;
+        patchedSession.__aegisSessionFactoryPatched = true;
+        require.cache[resolved].exports = patchedSession;
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        process.stderr.write(`[aegis-auth-patch] skipped express-session patch: ${message}\n`);
+      }
+    }
+
+    function patchPassportHelpers(modulePath) {
+      try {
+        const resolved = require.resolve(modulePath);
+        const mod = require(resolved);
+        const helpers = mod.PassportHelpers;
+        if (!helpers || helpers.__aegisSessionPersistencePatched) {
+          return;
+        }
+
+        helpers.__aegisSessionPersistencePatched = true;
+        helpers.executeRedirectStrategy = async function executeRedirectStrategy(req, providerStrategy, options) {
+          return new Promise((resolve, reject) => {
+            const strategy = Object.create(providerStrategy);
+            strategy.error = error => {
+              reject(new Error(`Authentication failed, ${error.message ?? ''}`));
+            };
+            strategy.redirect = (url, status) => {
+              const finish = () => resolve({ url, status: status ?? undefined });
+              if (req && req.session && typeof req.session.save === 'function') {
+                req.session.save(err => {
+                  if (err) {
+                    reject(new Error(`Failed to persist auth session, ${err.message ?? err}`));
+                    return;
+                  }
+                  finish();
+                });
+                return;
+              }
+              const sessionStore = req && req.sessionStore;
+              const sessionId = req && req.sessionID;
+              if (sessionStore && sessionId && req && req.session && typeof sessionStore.set === 'function') {
+                sessionStore.set(sessionId, req.session, err => {
+                  if (err) {
+                    reject(new Error(`Failed to persist auth session, ${err.message ?? err}`));
+                    return;
+                  }
+                  finish();
+                });
+                return;
+              }
+              finish();
+            };
+            strategy.authenticate(req, { ...(options ?? {}) });
+          });
+        };
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        process.stderr.write(`[aegis-auth-patch] skipped ${modulePath}: ${message}\n`);
+      }
+    }
+
+    patchExpressSession();
+
+    [
+      '@backstage/plugin-auth-node/dist/passport/PassportHelpers.cjs.js',
+      '@backstage/plugin-auth-backend-module-oidc-provider/node_modules/@backstage/plugin-auth-node/dist/passport/PassportHelpers.cjs.js',
+    ].forEach(patchPassportHelpers);
+{{- end }}

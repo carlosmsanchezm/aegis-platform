@@ -58,7 +58,7 @@ GITHUB_OWNER=carlosmsanchezm GITHUB_REPOS=aegis-platform \
     ${VAULT_PATH}/soc2/${YEAR}/${QUARTER}/access-reviews/github/
 
 # Export AWS access
-AWS_PROFILE=myclaude \
+AWS_PROFILE=aegis-new \
     ./scripts/compliance/export_aws_security_baseline.sh \
     ${VAULT_PATH}/soc2/${YEAR}/${QUARTER}/access-reviews/aws/
 ```

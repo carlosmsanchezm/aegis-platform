@@ -7,6 +7,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aegis-services.backstage.labels" . | nindent 4 }}
+  {{- with $backstage.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ $backstage.service.type | default "ClusterIP" }}
   ports:

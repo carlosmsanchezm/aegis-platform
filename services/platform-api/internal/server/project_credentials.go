@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -225,4 +227,40 @@ func resolveProjectCredentials(project *aegis.Project) projectAWSCredentials {
 		RoleARN:    project.GetAws().GetRoleArn(),
 		ExternalID: project.GetAws().GetExternalId(),
 	}
+}
+
+type platformConfigResponse struct {
+	DevMode     bool              `json:"devMode"`
+	AwsDefaults *awsDefaultsView `json:"awsDefaults,omitempty"`
+}
+
+type awsDefaultsView struct {
+	AccountID  string `json:"accountId,omitempty"`
+	RoleArn    string `json:"roleArn,omitempty"`
+	ExternalID string `json:"externalId,omitempty"`
+}
+
+func handleGetPlatformConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	resp := platformConfigResponse{
+		DevMode: IsDevMode(),
+	}
+
+	envAccount := strings.TrimSpace(os.Getenv(envDefaultAWSAccountID))
+	envRole := strings.TrimSpace(os.Getenv(envDefaultAWSRoleARN))
+	envExternal := strings.TrimSpace(os.Getenv(envDefaultAWSExternalID))
+	if envAccount != "" || envRole != "" || envExternal != "" {
+		resp.AwsDefaults = &awsDefaultsView{
+			AccountID:  envAccount,
+			RoleArn:    envRole,
+			ExternalID: envExternal,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

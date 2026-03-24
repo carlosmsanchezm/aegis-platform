@@ -8,6 +8,7 @@ metadata:
     {{- include "aegis-services.labels" . | nindent 4 }}
     app.kubernetes.io/component: proxy
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.proxy.replicaCount }}
   selector:
     matchLabels:
@@ -29,9 +30,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
       {{- with .Values.proxy.securityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       containers:
         - name: proxy
@@ -70,9 +73,25 @@ spec:
             - name: AEGIS_PROXY_CLUSTER
               value: {{ .Values.proxy.cluster | quote }}
             {{- end }}
+            - name: AEGIS_PROXY_ENFORCE_CLUSTER_MATCH
+              value: {{ default "false" .Values.proxy.enforceClusterMatch | quote }}
             {{- if .Values.proxy.publicHost }}
             - name: AEGIS_PROXY_PUBLIC_HOST
               value: {{ .Values.proxy.publicHost | quote }}
+            {{- end }}
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
+            {{- if (.Values.proxy.tls).fipsMode }}
+            - name: AEGIS_FIPS_ENABLED
+              value: "true"
+            - name: AEGIS_TLS_MIN_VERSION
+              value: {{ (.Values.proxy.tls).minimumTLSVersion | default "1.2" | quote }}
+            {{- if (.Values.proxy.tls).cipherSuiteWhitelist }}
+            - name: AEGIS_TLS_CIPHER_SUITES
+              value: {{ join "," .Values.proxy.tls.cipherSuiteWhitelist | quote }}
+            {{- end }}
             {{- end }}
             {{- range $key, $value := .Values.proxy.env }}
             - name: {{ $key }}
@@ -111,9 +130,11 @@ spec:
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
           {{- with .Values.proxy.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- end }}
       {{- if or .Values.proxy.tls.enabled .Values.proxy.volumes }}
       volumes:

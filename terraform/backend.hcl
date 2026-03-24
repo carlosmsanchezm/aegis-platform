@@ -1,4 +1,4 @@
-bucket         = "aegis-platform-tf-state-bucket"
+bucket         = "aegis-tf-state-195714074609"
 key            = "aegis/prod/terraform.tfstate"
 region         = "us-east-1"
 encrypt        = true

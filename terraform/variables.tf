@@ -21,7 +21,19 @@ variable "environment" {
 variable "cluster_name_prefix" {
   description = "Prefix for EKS cluster name"
   type        = string
-  default     = "aegis-spoke"
+  default     = "aegis-hub"
+}
+
+variable "helm_release_name" {
+  description = "Helm release name for aegis-services (used to derive K8s service names)"
+  type        = string
+  default     = "aegis"
+}
+
+variable "k8s_namespace" {
+  description = "Kubernetes namespace for aegis-services deployment"
+  type        = string
+  default     = "aegis-system"
 }
 
 variable "cluster_version" {
@@ -47,19 +59,7 @@ variable "availability_zones" {
 variable "cpu_instance_type" {
   description = "Instance type for CPU workers"
   type        = string
-  default     = "t3.medium"
-}
-
-variable "gpu_instance_type" {
-  description = "Instance type for GPU workers"
-  type        = string
-  default     = "g4dn.xlarge"
-}
-
-variable "gpu_mig_instance_type" {
-  description = "Instance type for MIG-capable GPU workers"
-  type        = string
-  default     = "g5.xlarge"
+  default     = "t3.large"
 }
 
 variable "cpu_desired_capacity" {
@@ -68,96 +68,36 @@ variable "cpu_desired_capacity" {
   default     = 2
 }
 
-variable "gpu_desired_capacity" {
-  description = "Desired capacity for GPU worker nodes"
-  type        = number
-  default     = 0
-}
-
-variable "gpu_max_capacity" {
-  description = "Maximum capacity for GPU worker nodes"
-  type        = number
-  default     = 2
-}
-
-variable "gpu_mig_desired_capacity" {
-  description = "Desired capacity for MIG GPU worker nodes"
-  type        = number
-  default     = 0
-}
-
-variable "gpu_mig_max_capacity" {
-  description = "Maximum capacity for MIG GPU worker nodes"
-  type        = number
-  default     = 1
-}
-
-variable "use_spot_instances" {
-  description = "Use spot instances for cost optimization"
-  type        = bool
-  default     = true
-}
-
-# RDS Configuration
-variable "db_instance_class" {
-  description = "RDS instance class"
+# Database Configuration (in-cluster Postgres defaults; override for RDS)
+variable "db_host" {
+  description = "Database host. Leave empty for in-cluster Postgres (Helm managed)."
   type        = string
-  default     = "db.t3.micro"
+  default     = ""
 }
 
-variable "db_allocated_storage" {
-  description = "RDS allocated storage in GB"
-  type        = number
-  default     = 20
-}
-
-variable "db_max_allocated_storage" {
-  description = "RDS maximum allocated storage in GB"
-  type        = number
-  default     = 100
-}
-
-variable "db_postgres_version" {
-  description = "PostgreSQL version"
+variable "db_port" {
+  description = "Database port"
   type        = string
-  default     = "15.12"
+  default     = "5432"
 }
 
-variable "db_backup_retention" {
-  description = "Database backup retention period in days"
-  type        = number
-  default     = 7
-}
-
-variable "db_backup_window" {
-  description = "Database backup window"
+variable "db_name" {
+  description = "Database name"
   type        = string
-  default     = "03:00-04:00"
+  default     = "aegis_platform"
 }
 
-variable "db_maintenance_window" {
-  description = "Database maintenance window"
+variable "db_user" {
+  description = "Database username"
   type        = string
-  default     = "sun:04:00-sun:05:00"
-}
-
-variable "db_skip_final_snapshot" {
-  description = "Skip final snapshot when destroying database"
-  type        = bool
-  default     = false
-}
-
-variable "db_deletion_protection" {
-  description = "Enable deletion protection on the database"
-  type        = bool
-  default     = false
+  default     = "aegis_platform"
 }
 
 # ECR Configuration
 variable "ecr_repositories" {
   description = "List of ECR repositories to create"
   type        = list(string)
-  default     = ["aegis/k8s-agent", "aegis/proxy", "aegis/platform-api", "aegis/workspace-vscode"]
+  default     = ["aegis/k8s-agent", "aegis/proxy", "aegis/platform-api", "aegis/workspace-vscode", "aegis/vscode-reh-init", "aegis/ui"]
 }
 
 variable "manage_ecr_repositories" {
@@ -173,7 +113,7 @@ variable "create_secrets" {
   default     = true
 }
 
-# Route53 Configuration
+# DNS / Load Balancer Configuration
 variable "platform_api_lb_hostname" {
   description = "Platform API LoadBalancer hostname (populated after K8s deployment)"
   type        = string
@@ -184,4 +124,76 @@ variable "proxy_lb_hostname" {
   description = "Proxy LoadBalancer hostname (populated after K8s deployment)"
   type        = string
   default     = ""
+}
+
+variable "ui_lb_hostname" {
+  description = "Aegis UI LoadBalancer hostname (populated after K8s deployment)"
+  type        = string
+  default     = ""
+}
+
+variable "keycloak_lb_hostname" {
+  description = "Keycloak ingress LoadBalancer hostname (populated after K8s deployment)"
+  type        = string
+  default     = ""
+}
+
+# Cloudflare Configuration
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS management (sourced from CLOUDFLARE_API_TOKEN env var)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# Spoke project role (optional, for single-account dev/pilot testing)
+
+variable "create_spoke_project_role" {
+  description = "Create a spoke project IAM role in this account for dev/pilot testing"
+  type        = bool
+  default     = false
+}
+
+variable "spoke_project_id" {
+  description = "Project ID for the spoke role (e.g. 'e2e-pilot-test'). Only used when create_spoke_project_role = true."
+  type        = string
+  default     = "e2e-pilot-test"
+}
+
+variable "hub_platform_api_role_arn" {
+  description = "ARN of the hub account's platform-api IRSA role. Only used when create_spoke_project_role = true."
+  type        = string
+  default     = ""
+}
+
+variable "spoke_oidc_client_secret" {
+  description = "OIDC client secret for spoke-agent (must match Keycloak realm config)"
+  type        = string
+  default     = "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+  sensitive   = true
+}
+
+variable "default_project_id" {
+  description = "Default project ID for the co-located spoke cluster. Used in the cluster ID ({project}-{region}-{env}) and project bootstrap."
+  type        = string
+  default     = "default"
+}
+
+variable "spoke_external_id" {
+  description = "External ID for the spoke project role trust policy. Only used when create_spoke_project_role = true."
+  type        = string
+  default     = "aegis-pilot-2026"
+}
+
+# Spoke proxy NLB
+variable "enable_spoke_proxy_nlb" {
+  description = "Enable the spoke-proxy NLB for VS Code remote connections"
+  type        = bool
+  default     = true
+}
+
+variable "spoke_proxy_port" {
+  description = "Port for spoke-proxy service (NodePort in EKS)"
+  type        = number
+  default     = 31484
 }

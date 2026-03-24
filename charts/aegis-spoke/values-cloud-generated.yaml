@@ -1,19 +1,20 @@
 # Auto-generated from Terraform - aegis-spoke (Workload Cluster)
-# Cluster: aegis-spoke-prod
+# Cluster: aegis-hub-prod
 # Region: us-east-1
-# Generated: 2025-10-17T17:40:32Z
+# Generated: 2026-03-20T23:11:08Z
 
 k8sAgent:
   image:
-    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
-    tag: "latest"  # TODO: Use specific version tags
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
 
   env:
     AEGIS_CP_GRPC: "aegis-platform-api.aegis-system.svc.cluster.local:8081"
-    AEGIS_PROXY_INGRESS_HOST: "proxy.yourdomain.com"  # TODO: Update domain
-    AEGIS_CLUSTER_ID: "aws-us-east-1-prod"
-    AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
-    AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+    AEGIS_PROXY_INGRESS_HOST: "proxy.aegis-platform.tech"
+    AEGIS_CLUSTER_ID: "default-us-east-1-prod"
+    AEGIS_CP_OIDC_TOKEN_URL: "https://aegis-keycloak-service.aegis-system.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/token"
+    AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
+    AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
 
 proxy:
-  enabled: false  # Use aegis-services proxy for hub/spoke architecture
+  enabled: false

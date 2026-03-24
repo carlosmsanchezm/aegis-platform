@@ -8,7 +8,7 @@ set -e
 
 CLUSTER_NAME="aegis-spoke-prod"
 REGION="us-east-1"
-AWS_PROFILE="${AWS_PROFILE:-myclaude}"
+AWS_PROFILE="${AWS_PROFILE:-aegis-new}"
 
 echo "🔧 Selective AWS Aegis Infrastructure Teardown"
 echo "This script allows you to selectively remove costly resources while keeping others for faster redeployment."

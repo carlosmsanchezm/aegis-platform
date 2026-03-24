@@ -58,9 +58,15 @@ spec:
     - name: {{ .name }}
     {{- end }}
   {{- end }}
-  {{- if $additional }}
+  {{- $fipsOptions := list }}
+  {{- if ne (default "dev" $.Values.hardeningProfile) "dev" }}
+    {{- $fipsOptions = append $fipsOptions (dict "name" "fips-mode" "value" "strict") }}
+    {{- $fipsOptions = append $fipsOptions (dict "name" "JAVA_OPTS_APPEND" "value" "-Dcom.redhat.fips=true") }}
+  {{- end }}
+  {{- $allOptions := concat ($additional | default list) $fipsOptions }}
+  {{- if $allOptions }}
   additionalOptions:
-    {{- toYaml $additional | nindent 4 }}
+    {{- toYaml $allOptions | nindent 4 }}
   {{- end }}
   {{- if hasKey $kc "startOptimized" }}
   startOptimized: {{ $kc.startOptimized }}

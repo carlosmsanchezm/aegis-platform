@@ -103,6 +103,8 @@ func (s staticKubeClient) HasKubeconfig(clusterID string) bool {
 	return true // Test mock always has kubeconfig
 }
 
+func (s staticKubeClient) EvictClient(clusterID string) {}
+
 func (s staticKubeClient) Dir() string {
 	return "/tmp/test-kubeconfigs"
 }
@@ -750,7 +752,7 @@ func TestMaybeBootstrapWorkspaceDeps_CreatesCatalogWhenEnabled(t *testing.T) {
 	if flavor == nil {
 		t.Fatalf("expected flavor cpu-small to be bootstrapped")
 	}
-	if flavor.GetCpuCoresRequest() != "2" || flavor.GetMemoryRequest() != "4Gi" {
+	if flavor.GetCpuCoresRequest() != "500m" || flavor.GetMemoryRequest() != "512Mi" {
 		t.Fatalf("unexpected flavor defaults: cpu=%s mem=%s", flavor.GetCpuCoresRequest(), flavor.GetMemoryRequest())
 	}
 	// Ensure idempotency
@@ -951,5 +953,672 @@ func TestWizardHandlers_CreateWorkspace(t *testing.T) {
 	}
 	if stored := srv.store.GetWorkload(resp.ID); stored == nil {
 		t.Fatalf("expected workload %s to be persisted", resp.ID)
+	}
+}
+
+// ---- Project RPCs ----
+
+func TestCreateProject(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	proj := &aegis.Project{Id: "proj-new", DisplayName: "New Project", OwnerGroup: "team-alpha"}
+	resp, err := srv.CreateProject(ctx, &aegis.CreateProjectRequest{Project: proj})
+	if err != nil {
+		t.Fatalf("CreateProject returned error: %v", err)
+	}
+	if resp.GetId() != "proj-new" {
+		t.Fatalf("expected project id proj-new, got %s", resp.GetId())
+	}
+	if resp.GetDisplayName() != "New Project" {
+		t.Fatalf("expected display name 'New Project', got %s", resp.GetDisplayName())
+	}
+	stored := srv.store.GetProject("proj-new")
+	if stored == nil {
+		t.Fatal("expected project to be persisted in store")
+	}
+	if stored.GetOwnerGroup() != "team-alpha" {
+		t.Fatalf("expected owner_group team-alpha, got %s", stored.GetOwnerGroup())
+	}
+}
+
+func TestListProjects(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-a", DisplayName: "Alpha"})
+	srv.store.PutProject(&aegis.Project{Id: "proj-b", DisplayName: "Beta"})
+	srv.store.PutProject(&aegis.Project{Id: "proj-c", DisplayName: "Gamma"})
+
+	resp, err := srv.ListProjects(ctx, &aegis.ListProjectsRequest{})
+	if err != nil {
+		t.Fatalf("ListProjects returned error: %v", err)
+	}
+	if len(resp.GetItems()) != 3 {
+		t.Fatalf("expected 3 projects, got %d", len(resp.GetItems()))
+	}
+	ids := map[string]bool{}
+	for _, p := range resp.GetItems() {
+		ids[p.GetId()] = true
+	}
+	for _, expected := range []string{"proj-a", "proj-b", "proj-c"} {
+		if !ids[expected] {
+			t.Fatalf("expected project %s in list, got %v", expected, ids)
+		}
+	}
+}
+
+// ---- Budget RPCs ----
+
+func TestUpsertBudget(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+
+	budget := &aegis.Budget{ProjectId: "proj-1", Queue: "queue-a", LimitUsd: 500, PolicyMode: "HARD"}
+	resp, err := srv.UpsertBudget(ctx, &aegis.UpsertBudgetRequest{Budget: budget})
+	if err != nil {
+		t.Fatalf("UpsertBudget returned error: %v", err)
+	}
+	if resp.GetProjectId() != "proj-1" {
+		t.Fatalf("expected project_id proj-1, got %s", resp.GetProjectId())
+	}
+	if resp.GetLimitUsd() != 500 {
+		t.Fatalf("expected limit_usd 500, got %f", resp.GetLimitUsd())
+	}
+	if resp.GetPolicyMode() != "HARD" {
+		t.Fatalf("expected policy_mode HARD, got %s", resp.GetPolicyMode())
+	}
+	stored := srv.store.GetBudgetExact("proj-1", "queue-a")
+	if stored == nil {
+		t.Fatal("expected budget to be persisted in store")
+	}
+}
+
+func TestGetBudget(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "", LimitUsd: 1000, PolicyMode: "SOFT"})
+
+	resp, err := srv.GetBudget(ctx, &aegis.GetBudgetRequest{ProjectId: "proj-1"})
+	if err != nil {
+		t.Fatalf("GetBudget returned error: %v", err)
+	}
+	if resp.GetBudget().GetLimitUsd() != 1000 {
+		t.Fatalf("expected limit_usd 1000, got %f", resp.GetBudget().GetLimitUsd())
+	}
+	if resp.GetUsage() == nil {
+		t.Fatal("expected usage to be populated")
+	}
+	if resp.GetUsage().GetRemainingUsd() != 1000 {
+		t.Fatalf("expected remaining_usd 1000, got %f", resp.GetUsage().GetRemainingUsd())
+	}
+}
+
+func TestListBudgets(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "", LimitUsd: 1000, PolicyMode: "SOFT"})
+	srv.store.PutBudget(&aegis.Budget{ProjectId: "proj-1", Queue: "queue-a", LimitUsd: 500, PolicyMode: "HARD"})
+	srv.store.PutBudget(&aegis.Budget{ProjectId: "proj-2", Queue: "", LimitUsd: 2000, PolicyMode: "SOFT"})
+
+	resp, err := srv.ListBudgets(ctx, &aegis.ListBudgetsRequest{ProjectId: "proj-1"})
+	if err != nil {
+		t.Fatalf("ListBudgets returned error: %v", err)
+	}
+	if len(resp.GetItems()) != 2 {
+		t.Fatalf("expected 2 budgets for proj-1, got %d", len(resp.GetItems()))
+	}
+	for _, item := range resp.GetItems() {
+		if item.GetBudget().GetProjectId() != "proj-1" {
+			t.Fatalf("expected all budgets for proj-1, got %s", item.GetBudget().GetProjectId())
+		}
+		if item.GetUsage() == nil {
+			t.Fatal("expected usage to be populated on each budget")
+		}
+	}
+}
+
+// ---- Flavor/Queue RPCs ----
+
+func TestUpsertFlavor(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	flavor := &aegis.Flavor{Name: "gpu-a100", GpuCount: 8, PriceUsdPerGpuHour: 3.5, Chip: "A100", ResourceName: "nvidia.com/gpu"}
+	resp, err := srv.UpsertFlavor(ctx, &aegis.UpsertFlavorRequest{Flavor: flavor})
+	if err != nil {
+		t.Fatalf("UpsertFlavor returned error: %v", err)
+	}
+	if resp.GetName() != "gpu-a100" {
+		t.Fatalf("expected flavor name gpu-a100, got %s", resp.GetName())
+	}
+	if resp.GetGpuCount() != 8 {
+		t.Fatalf("expected gpu_count 8, got %d", resp.GetGpuCount())
+	}
+	stored := srv.store.GetFlavor("gpu-a100")
+	if stored == nil {
+		t.Fatal("expected flavor to be persisted in store")
+	}
+	if stored.GetPriceUsdPerGpuHour() != 3.5 {
+		t.Fatalf("expected price 3.5, got %f", stored.GetPriceUsdPerGpuHour())
+	}
+}
+
+func TestUpsertQueue(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small"})
+
+	queue := &aegis.Queue{Name: "queue-main", ProjectId: "proj-1", PriorityTier: "high", AllowedFlavors: []string{"cpu-small"}}
+	resp, err := srv.UpsertQueue(ctx, &aegis.UpsertQueueRequest{Queue: queue})
+	if err != nil {
+		t.Fatalf("UpsertQueue returned error: %v", err)
+	}
+	if resp.GetName() != "queue-main" {
+		t.Fatalf("expected queue name queue-main, got %s", resp.GetName())
+	}
+	if resp.GetProjectId() != "proj-1" {
+		t.Fatalf("expected project_id proj-1, got %s", resp.GetProjectId())
+	}
+	stored := srv.store.GetQueue("queue-main")
+	if stored == nil {
+		t.Fatal("expected queue to be persisted in store")
+	}
+	if stored.GetPriorityTier() != "high" {
+		t.Fatalf("expected priority_tier high, got %s", stored.GetPriorityTier())
+	}
+}
+
+// ---- Cluster RPCs ----
+
+func TestRegisterCluster(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("agent@cluster")
+
+	resp, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "cluster-new",
+		Provider:  "aws",
+		Region:    "us-east-1",
+		Labels:    map[string]string{"env": "production"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("expected ok=true, got %v", resp.GetOk())
+	}
+	ci := srv.store.GetClusterInfo("cluster-new")
+	if ci == nil {
+		t.Fatal("expected cluster to be persisted in store")
+	}
+	if ci.Provider != "aws" {
+		t.Fatalf("expected provider aws, got %s", ci.Provider)
+	}
+	if ci.Region != "us-east-1" {
+		t.Fatalf("expected region us-east-1, got %s", ci.Region)
+	}
+}
+
+func TestHeartbeat(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("agent@cluster")
+
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{
+		ClusterId: "cluster-hb",
+		Provider:  "aws",
+		Region:    "us-west-2",
+	})
+
+	resp, err := srv.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-hb",
+		TtfGpuSecondsP50: 12.5,
+		AvailableFlavors: []*aegis.Flavor{{Name: "gpu-a100"}, {Name: "cpu-small"}},
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat returned error: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("expected ok=true, got %v", resp.GetOk())
+	}
+	ci := srv.store.GetClusterInfo("cluster-hb")
+	if ci == nil {
+		t.Fatal("expected cluster to exist after heartbeat")
+	}
+	if ci.LastHeartbeat.IsZero() {
+		t.Fatal("expected last_heartbeat to be updated")
+	}
+	if !ci.AvailableFlavorSet["gpu-a100"] {
+		t.Fatalf("expected gpu-a100 in available flavors, got %v", ci.AvailableFlavorSet)
+	}
+}
+
+func TestListClusters(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin@example.com")
+
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "c-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{ClusterId: "c-1", AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}}})
+
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "c-2", Provider: "gcp", Region: "us-central1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{ClusterId: "c-2", AvailableFlavors: []*aegis.Flavor{{Name: "gpu-a100"}}})
+
+	resp, err := srv.ListClusters(ctx, &aegis.ListClustersRequest{})
+	if err != nil {
+		t.Fatalf("ListClusters returned error: %v", err)
+	}
+	if len(resp.GetItems()) != 2 {
+		t.Fatalf("expected 2 clusters, got %d", len(resp.GetItems()))
+	}
+	ids := map[string]bool{}
+	for _, c := range resp.GetItems() {
+		ids[c.GetId()] = true
+	}
+	if !ids["c-1"] || !ids["c-2"] {
+		t.Fatalf("expected clusters c-1 and c-2 in list, got %v", ids)
+	}
+}
+
+// ---- Workspace RPC ----
+
+func TestCreateWorkspace(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+	ctx := contextWithSubject("user@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small"})
+	srv.store.PutQueue(&aegis.Queue{Name: "default", ProjectId: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	resp, err := srv.CreateWorkspace(ctx, &aegis.CreateWorkspaceRequest{
+		ProjectId: "proj-1",
+		Queue:     "default",
+		Workspace: &aegis.WorkspaceSpec{
+			Flavor: "cpu-small",
+			Image:  "alpine:3.19",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace returned error: %v", err)
+	}
+	if resp.GetWorkload() == nil {
+		t.Fatal("expected workload in response")
+	}
+	wl := resp.GetWorkload()
+	if wl.GetId() == "" {
+		t.Fatal("expected workload id to be assigned")
+	}
+	if wl.GetProjectId() != "proj-1" {
+		t.Fatalf("expected project_id proj-1, got %s", wl.GetProjectId())
+	}
+	if wl.GetClusterId() != "cluster-1" {
+		t.Fatalf("expected cluster_id cluster-1, got %s", wl.GetClusterId())
+	}
+	if wl.GetStatus() != "PLACED" {
+		t.Fatalf("expected status PLACED, got %s", wl.GetStatus())
+	}
+	if stored := srv.store.GetWorkload(wl.GetId()); stored == nil {
+		t.Fatal("expected workload to be persisted in store")
+	}
+}
+
+// ---- Workload Lifecycle RPCs ----
+
+func TestLeaseWorkload(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+	ctx := contextWithSubject("user@example.com")
+
+	// Set up prerequisites and submit a workload
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small", GpuCount: 1, PriceUsdPerGpuHour: 1})
+	srv.store.PutQueue(&aegis.Queue{Name: "queue-a", ProjectId: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	submitted, err := srv.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-1",
+			Queue:     "queue-a",
+			ClusterId: "cluster-1",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{Flavor: "cpu-small", Image: "alpine:3.19"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkload returned error: %v", err)
+	}
+	if submitted.GetStatus() != "PLACED" {
+		t.Fatalf("expected PLACED status, got %s", submitted.GetStatus())
+	}
+
+	// Lease it
+	leaseResp, err := srv.LeaseWorkload(context.Background(), &aegis.LeaseWorkloadRequest{
+		ClusterId: "cluster-1",
+		Max:       10,
+	})
+	if err != nil {
+		t.Fatalf("LeaseWorkload returned error: %v", err)
+	}
+	if len(leaseResp.GetItems()) != 1 {
+		t.Fatalf("expected 1 leased workload, got %d", len(leaseResp.GetItems()))
+	}
+	leased := leaseResp.GetItems()[0]
+	if leased.GetId() != submitted.GetId() {
+		t.Fatalf("expected leased workload id %s, got %s", submitted.GetId(), leased.GetId())
+	}
+	if leased.GetStatus() != "RUNNING" {
+		t.Fatalf("expected RUNNING status after lease, got %s", leased.GetStatus())
+	}
+}
+
+func TestStartWorkload(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+	ctx := contextWithSubject("user@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small", GpuCount: 1, PriceUsdPerGpuHour: 1})
+	srv.store.PutQueue(&aegis.Queue{Name: "queue-a", ProjectId: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	submitted, err := srv.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-1",
+			Queue:     "queue-a",
+			ClusterId: "cluster-1",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{Flavor: "cpu-small", Image: "alpine:3.19"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkload returned error: %v", err)
+	}
+
+	// StartWorkload transitions from PLACED to RUNNING
+	startResp, err := srv.StartWorkload(context.Background(), &aegis.StartWorkloadRequest{
+		Id:        submitted.GetId(),
+		ClusterId: "cluster-1",
+	})
+	if err != nil {
+		t.Fatalf("StartWorkload returned error: %v", err)
+	}
+	if startResp.GetWorkload().GetStatus() != "RUNNING" {
+		t.Fatalf("expected RUNNING status after start, got %s", startResp.GetWorkload().GetStatus())
+	}
+	if startResp.GetWorkload().GetId() != submitted.GetId() {
+		t.Fatalf("expected workload id %s, got %s", submitted.GetId(), startResp.GetWorkload().GetId())
+	}
+}
+
+func TestAckWorkload(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+	ctx := contextWithSubject("user@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small", GpuCount: 1, PriceUsdPerGpuHour: 1})
+	srv.store.PutQueue(&aegis.Queue{Name: "queue-a", ProjectId: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	submitted, err := srv.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-1",
+			Queue:     "queue-a",
+			ClusterId: "cluster-1",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{Flavor: "cpu-small", Image: "alpine:3.19"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkload returned error: %v", err)
+	}
+
+	// Start the workload (PLACED -> RUNNING)
+	_, err = srv.StartWorkload(context.Background(), &aegis.StartWorkloadRequest{
+		Id:        submitted.GetId(),
+		ClusterId: "cluster-1",
+	})
+	if err != nil {
+		t.Fatalf("StartWorkload returned error: %v", err)
+	}
+
+	// Ack the workload (RUNNING -> SUCCEEDED)
+	ackResp, err := srv.AckWorkload(context.Background(), &aegis.AckWorkloadRequest{
+		Id:     submitted.GetId(),
+		Status: "SUCCEEDED",
+		Url:    "https://workload.example.com",
+	})
+	if err != nil {
+		t.Fatalf("AckWorkload returned error: %v", err)
+	}
+	if ackResp.GetWorkload().GetStatus() != "SUCCEEDED" {
+		t.Fatalf("expected SUCCEEDED status after ack, got %s", ackResp.GetWorkload().GetStatus())
+	}
+	if ackResp.GetWorkload().GetUrl() != "https://workload.example.com" {
+		t.Fatalf("expected url to be set, got %s", ackResp.GetWorkload().GetUrl())
+	}
+}
+
+// ---- Audit Events ----
+
+func TestAuditEventsOnSubmit(t *testing.T) {
+	srv := newTestServer(t)
+	srv.autoBootstrap = true
+	ctx := contextWithSubject("auditor@example.com")
+
+	srv.store.PutProject(&aegis.Project{Id: "proj-1"})
+	srv.store.PutFlavor(&aegis.Flavor{Name: "cpu-small", GpuCount: 1, PriceUsdPerGpuHour: 1})
+	srv.store.PutQueue(&aegis.Queue{Name: "queue-a", ProjectId: "proj-1"})
+	srv.store.UpsertClusterFromRegister(&aegis.ClusterRegisterRequest{ClusterId: "cluster-1", Provider: "aws", Region: "us-east-1"})
+	srv.store.UpdateClusterFromHeartbeat(&aegis.ClusterHeartbeat{
+		ClusterId:        "cluster-1",
+		AvailableFlavors: []*aegis.Flavor{{Name: "cpu-small"}},
+	})
+
+	submitted, err := srv.SubmitWorkload(ctx, &aegis.SubmitWorkloadRequest{
+		Workload: &aegis.Workload{
+			ProjectId: "proj-1",
+			Queue:     "queue-a",
+			ClusterId: "cluster-1",
+			Kind: &aegis.Workload_Workspace{
+				Workspace: &aegis.WorkspaceSpec{Flavor: "cpu-small", Image: "alpine:3.19"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkload returned error: %v", err)
+	}
+
+	events, err := srv.store.ListAuditEvents(store.AuditEventFilter{
+		EventType:  "workload.submitted",
+		ResourceID: submitted.GetId(),
+	})
+	if err != nil {
+		t.Fatalf("ListAuditEvents returned error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one audit event for workload.submitted")
+	}
+	ev := events[0]
+	if ev.Subject != "auditor@example.com" {
+		t.Fatalf("expected subject auditor@example.com, got %s", ev.Subject)
+	}
+	if ev.ResourceType != "workload" {
+		t.Fatalf("expected resource_type workload, got %s", ev.ResourceType)
+	}
+	if ev.Action != "create" {
+		t.Fatalf("expected action create, got %s", ev.Action)
+	}
+	if ev.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %s", ev.Outcome)
+	}
+	if ev.Details["project_id"] != "proj-1" {
+		t.Fatalf("expected details.project_id proj-1, got %s", ev.Details["project_id"])
+	}
+}
+
+// --- Auto-derivation tests ---
+
+func TestRegisterClusterAutoDerivesProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Create the project first so derivation succeeds
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Register cluster without project label
+	resp, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("expected ok=true, got false")
+	}
+
+	// Verify project ID was persisted
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "db-1" {
+		t.Fatalf("expected project_id=db-1, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestRegisterClusterExplicitLabelTakesPriority(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+	srv.store.PutProject(&aegis.Project{Id: "explicit-proj", OwnerGroup: "admin"})
+
+	// Register cluster WITH explicit project label (should override derivation)
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "explicit-proj"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "explicit-proj" {
+		t.Fatalf("expected project_id=explicit-proj, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestRegisterClusterProjectNotFoundSkipsDerivation(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Do NOT create the project — derivation should be skipped
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, _ := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if pid != "" {
+		t.Fatalf("expected empty project_id (project not found), got %q", pid)
+	}
+}
+
+func TestHeartbeatBackfillsProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	// Register cluster without project (project doesn't exist yet)
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	pid, _ := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if pid != "" {
+		t.Fatalf("expected empty project_id before project creation, got %q", pid)
+	}
+
+	// Now create the project
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Heartbeat should backfill
+	_, err = srv.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "db-1" {
+		t.Fatalf("expected project_id=db-1 after heartbeat, got %q (ok=%v)", pid, ok)
+	}
+}
+
+func TestHeartbeatDoesNotOverwriteExistingProjectID(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := contextWithSubject("admin")
+
+	srv.store.PutProject(&aegis.Project{Id: "original-proj", OwnerGroup: "admin"})
+	srv.store.PutProject(&aegis.Project{Id: "db-1", OwnerGroup: "admin"})
+
+	// Register cluster with explicit project
+	_, err := srv.RegisterCluster(ctx, &aegis.ClusterRegisterRequest{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+		Provider:  "aws",
+		Region:    "us-east-1",
+		Labels:    map[string]string{"aegis.yourorg.dev/projectId": "original-proj"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterCluster returned error: %v", err)
+	}
+
+	// Heartbeat should NOT overwrite the existing project ID
+	_, err = srv.Heartbeat(ctx, &aegis.ClusterHeartbeat{
+		ClusterId: "db-1-us-east-1-atlas-train-govcloud",
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat returned error: %v", err)
+	}
+
+	pid, ok := srv.store.GetClusterProjectID("db-1-us-east-1-atlas-train-govcloud")
+	if !ok || pid != "original-proj" {
+		t.Fatalf("expected project_id=original-proj (unchanged), got %q (ok=%v)", pid, ok)
 	}
 }

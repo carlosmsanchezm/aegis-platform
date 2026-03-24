@@ -93,6 +93,15 @@ resource "aws_security_group" "relay" {
     description = "HTTPS keycloak from VPC"
   }
 
+  # step-ca HTTPS port (forwarded from local)
+  ingress {
+    from_port   = 9443
+    to_port     = 9443
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+    description = "HTTPS step-ca from VPC"
+  }
+
   # Outbound
   egress {
     from_port   = 0
@@ -256,6 +265,26 @@ resource "aws_lb_target_group" "keycloak" {
   tags = local.relay_tags
 }
 
+# Target Group for step-ca (HTTPS)
+resource "aws_lb_target_group" "step_ca" {
+  name        = "${local.relay_name}-stepca"
+  port        = 9443
+  protocol    = "TCP"
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "instance"
+
+  health_check {
+    enabled             = true
+    protocol            = "TCP"
+    port                = 9443
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    interval            = 10
+  }
+
+  tags = local.relay_tags
+}
+
 # Register EC2 instance with target groups
 resource "aws_lb_target_group_attachment" "platform_api" {
   target_group_arn = aws_lb_target_group.platform_api.arn
@@ -267,6 +296,12 @@ resource "aws_lb_target_group_attachment" "keycloak" {
   target_group_arn = aws_lb_target_group.keycloak.arn
   target_id        = aws_instance.relay.id
   port             = 8443
+}
+
+resource "aws_lb_target_group_attachment" "step_ca" {
+  target_group_arn = aws_lb_target_group.step_ca.arn
+  target_id        = aws_instance.relay.id
+  port             = 9443
 }
 
 # NLB Listeners
@@ -296,6 +331,19 @@ resource "aws_lb_listener" "keycloak" {
   tags = local.relay_tags
 }
 
+resource "aws_lb_listener" "step_ca" {
+  load_balancer_arn = aws_lb.relay.arn
+  port              = 9443
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.step_ca.arn
+  }
+
+  tags = local.relay_tags
+}
+
 # Outputs
 output "relay_public_ip" {
   description = "Public IP of the relay instance (for SSH tunnel)"
@@ -317,9 +365,14 @@ output "relay_keycloak_endpoint" {
   value       = "${aws_lb.relay.dns_name}:8443"
 }
 
+output "relay_step_ca_endpoint" {
+  description = "Endpoint for step-ca (HTTPS)"
+  value       = "${aws_lb.relay.dns_name}:9443"
+}
+
 output "ssh_tunnel_command" {
   description = "Command to establish SSH reverse tunnel"
-  value       = "ssh -i ~/.ssh/aegis-relay -R 0.0.0.0:8081:localhost:8081 -R 0.0.0.0:8443:localhost:8443 -N ec2-user@${aws_eip.relay.public_ip}"
+  value       = "ssh -i ~/.ssh/aegis-relay -R 0.0.0.0:8081:localhost:8081 -R 0.0.0.0:8443:localhost:8443 -R 0.0.0.0:9443:localhost:9443 -N ec2-user@${aws_eip.relay.public_ip}"
 }
 
 # Render the spoke values file with the current NLB endpoints so we don't have to
@@ -345,6 +398,7 @@ resource "local_file" "aegis_spoke_values" {
 
     k8sAgent:
       image:
+        repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
         pullPolicy: Always
         tag: "dev"
       env:
@@ -354,7 +408,7 @@ resource "local_file" "aegis_spoke_values" {
         AEGIS_CP_GRPC_SKIP_VERIFY: "true"
         AEGIS_CP_GRPC_SERVER_NAME: ""
         AEGIS_FLAVORS: "cpu-small,gpu-standard"
-        AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+        AEGIS_DEFAULT_IMAGE: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
 
         # OIDC client credentials (Keycloak via AWS NLB)
         AEGIS_CP_OIDC_TOKEN_URL: "https://${aws_lb.relay.dns_name}:8443/realms/aegis/protocol/openid-connect/token"

@@ -720,12 +720,19 @@
       "secret": "${BACKSTAGE_CLIENT_SECRET}",
       "redirectUris": [
         "http://localhost:3000/*",
+        "http://localhost:3001/*",
         "http://localhost:7008/*",
-        "https://backstage.localtest.me/*"
+        "http://localhost:7009/*",
+        "https://backstage.localtest.me/*",
+        "http://ui.aegis-platform.tech:7007/*",
+        "https://ui.aegis-platform.tech/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "https://backstage.localtest.me"
+        "http://localhost:3001",
+        "https://backstage.localtest.me",
+        "http://ui.aegis-platform.tech:7007",
+        "https://ui.aegis-platform.tech"
       ],
       "notBefore": 0,
       "bearerOnly": false,
@@ -1024,7 +1031,7 @@
       "consentRequired": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": true,
       "frontchannelLogout": true,
@@ -2683,7 +2690,7 @@
     "saml.signature.algorithm": "",
     "parRequestUriLifespan": "60",
     "clientSessionMaxLifespan": "0",
-    "frontendUrl": "https://keycloak.aegis-platform.tech/",
+    "frontendUrl": "",
     "acr.loa.map": "{}"
   },
   "keycloakVersion": "26.2.10.redhat-00002",

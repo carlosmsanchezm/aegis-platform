@@ -1,0 +1,38 @@
+---
+apiVersion: v1
+
+name: "aegis/workspace"
+
+tags:
+  - "1.0.0"
+
+args:
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/opensource/nvidia/cuda"
+  BASE_TAG: "12.6"
+
+labels:
+  org.opencontainers.image.title: "aegis-workspace"
+  org.opencontainers.image.description: "Aegis GPU development workspace with CUDA runtime. VS Code server injected via init container."
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "workspace,gpu,cuda,development,aiml,aegis"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
+  mil.dso.ironbank.product.name: "aegis-workspace"
+
+resources:
+  # tini v0.19.0 init process manager (MIT license)
+  - filename: tini-amd64
+    url: https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64
+    validation:
+      type: sha256
+      value: 93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
+    cht_member: false

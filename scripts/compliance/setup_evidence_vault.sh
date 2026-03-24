@@ -281,7 +281,7 @@ EOF
     echo "  2. Run evidence collection:"
     echo "     cd ~/code/aegis-platform"
     echo "     ./scripts/compliance/export_github_security_baseline.sh ~/code/${REPO_NAME}/soc2/${CURRENT_YEAR}/${CURRENT_MONTH}/ci-cd-security"
-    echo "     AWS_PROFILE=myclaude ./scripts/compliance/export_aws_security_baseline.sh ~/code/${REPO_NAME}/soc2/${CURRENT_YEAR}/${CURRENT_MONTH}/access-reviews"
+    echo "     AWS_PROFILE=aegis-new ./scripts/compliance/export_aws_security_baseline.sh ~/code/${REPO_NAME}/soc2/${CURRENT_YEAR}/${CURRENT_MONTH}/access-reviews"
     echo ""
     echo "  3. Commit evidence to vault:"
     echo "     cd ~/code/${REPO_NAME}"

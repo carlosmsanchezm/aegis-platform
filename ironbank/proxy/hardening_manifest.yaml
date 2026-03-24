@@ -1,0 +1,41 @@
+---
+apiVersion: v1
+
+name: "aegis/proxy"
+
+tags:
+  - "1.0.0"
+
+args:
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/redhat/ubi/ubi9-minimal"
+  BASE_TAG: "9.7"
+  BUILDER_REGISTRY: "registry1.dso.mil"
+  BUILDER_IMAGE: "ironbank/google/golang/ubi9/golang-1.24"
+  BUILDER_TAG: "1.24.13"
+
+labels:
+  org.opencontainers.image.title: "aegis-proxy"
+  org.opencontainers.image.description: "Aegis Platform reverse proxy for secure WebSocket workspace tunneling"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "proxy,websocket,gpu,workspace,security"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
+  mil.dso.ironbank.product.name: "aegis-proxy"
+
+resources:
+  # Aegis Platform monorepo source (v1.0.0 release tarball)
+  - filename: aegis-platform-src.tar.gz
+    url: https://github.com/carlosmsanchezm/aegis-platform/archive/refs/tags/v1.0.0.tar.gz
+    validation:
+      type: sha256
+      value: 237b91b14fdc3a3f7d2f6504b31d8ffff9181f725e28170f369f2713b7f7e779
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
+    cht_member: false

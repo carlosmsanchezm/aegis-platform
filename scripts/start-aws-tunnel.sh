@@ -18,7 +18,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-TERRAFORM_DIR="${PROJECT_ROOT}/terraform/pulumi-stack"
+TERRAFORM_DIR="${PROJECT_ROOT}/terraform/dev-relay"
 
 # Colors
 RED='\033[0;31m'
@@ -73,9 +73,14 @@ start_port_forwards() {
     # Ensure we're using docker-desktop context
     kubectl config use-context docker-desktop
 
-    # Kill any existing port-forwards on these ports
+    # Kill ALL processes on our ports to avoid "address already in use"
+    # This handles port-forwards started by `make port-forward` or other scripts
     pkill -f "kubectl port-forward.*8081:8081" 2>/dev/null || true
     pkill -f "kubectl port-forward.*8443:8443" 2>/dev/null || true
+    pkill -f "kubectl port-forward.*9443:443" 2>/dev/null || true
+    lsof -ti:8081 | xargs kill -9 2>/dev/null || true
+    lsof -ti:8443 | xargs kill -9 2>/dev/null || true
+    lsof -ti:9443 | xargs kill -9 2>/dev/null || true
     sleep 1
 
     # Start platform-api port-forward (gRPC on 8081)
@@ -89,6 +94,12 @@ start_port_forwards() {
     PF_KEYCLOAK_PID=$!
     echo "$PF_KEYCLOAK_PID" > /tmp/aegis-aws-pf-keycloak.pid
     log_info "Keycloak port-forward started (localhost:8443)"
+
+    # Start step-ca port-forward (HTTPS on 9443 → 443)
+    kubectl port-forward svc/step-certificates -n aegis-pki 9443:443 &
+    PF_STEPCA_PID=$!
+    echo "$PF_STEPCA_PID" > /tmp/aegis-aws-pf-stepca.pid
+    log_info "Step-CA port-forward started (localhost:9443)"
 
     sleep 2
 }
@@ -111,6 +122,7 @@ start_ssh_tunnel() {
     ssh -i "$SSH_KEY" \
         -R 0.0.0.0:8081:localhost:8081 \
         -R 0.0.0.0:8443:localhost:8443 \
+        -R 0.0.0.0:9443:localhost:9443 \
         -N \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3 \
@@ -141,9 +153,9 @@ generate_helm_values() {
 # Auto-generated values for AWS relay-based connectivity
 # Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 #
-# Architecture:
-#   - gRPC: NLB tunnel (${NLB_DNS}:8081) - Cloudflare doesn't handle gRPC streaming
-#   - Keycloak: Cloudflare (keycloak.aegis-platform.tech) - HTTPS works fine
+# Architecture — all traffic through one NLB relay:
+#   - gRPC:     NLB (${NLB_DNS}:8081) → SSH tunnel → local platform-api
+#   - Keycloak: NLB (${NLB_DNS}:8443) → SSH tunnel → local keycloak
 #   - Spoke Proxy: Disabled by default (enable with --with-proxy flag)
 #
 # Usage:
@@ -156,21 +168,20 @@ generate_helm_values() {
 
 k8sAgent:
   image:
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
     pullPolicy: Always
     tag: "dev"
   env:
     # gRPC to platform-api via AWS NLB (TCP passthrough, preserves HTTP/2)
-    # NOTE: Do NOT use Cloudflare for gRPC - it doesn't handle streaming properly
     AEGIS_CP_GRPC: "${NLB_DNS}:8081"
     AEGIS_CP_GRPC_INSECURE: "false"
     AEGIS_CP_GRPC_SKIP_VERIFY: "true"
     AEGIS_CP_GRPC_SERVER_NAME: ""
     AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
-    AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+    AEGIS_DEFAULT_IMAGE: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
 
-    # OIDC via Cloudflare (HTTPS works fine through Cloudflare tunnels)
-    # NOTE: Do NOT use NLB for Keycloak - port 8443 tunnel often fails
-    AEGIS_CP_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
+    # OIDC via AWS NLB (TCP passthrough to local Keycloak)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://${NLB_DNS}:8443/realms/aegis/protocol/openid-connect/token"
     AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
     AEGIS_CP_OIDC_CLIENT_SECRET: "rEC99sBBWQAbRgg0xRQFBsMC8rt6pZOB"
     AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
@@ -185,7 +196,7 @@ k8sAgent:
 proxy:
   enabled: false
   image:
-    repository: carlosmsanchez/aegis-proxy
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
     pullPolicy: Always
     tag: "dev"
   service:
@@ -211,12 +222,10 @@ print_instructions() {
     echo -e "${GREEN}AWS tunnel is now running!${NC}"
     echo "=============================================="
     echo ""
-    echo "Connectivity architecture:"
-    echo "  gRPC (platform-api): ${NLB_DNS}:8081  (via NLB tunnel)"
-    echo "  Keycloak (OIDC):     keycloak.aegis-platform.tech  (via Cloudflare)"
-    echo ""
-    echo "NOTE: Cloudflare doesn't handle gRPC streaming properly, so we use"
-    echo "      the NLB tunnel for gRPC. Keycloak works fine via Cloudflare."
+    echo "Connectivity architecture (all via NLB relay):"
+    echo "  gRPC (platform-api): ${NLB_DNS}:8081"
+    echo "  OIDC (Keycloak):     ${NLB_DNS}:8443"
+    echo "  step-ca (PKI):       ${NLB_DNS}:9443"
     echo ""
     echo "To update the spoke agent in your AWS cluster, run:"
     echo ""
@@ -232,7 +241,7 @@ print_instructions() {
     echo "    --set k8sAgent.env.AEGIS_REGION=us-east-1 \\"
     echo "    --set k8sAgent.env.AEGIS_PROVIDER=aws"
     echo ""
-    echo "IMPORTANT: Always use --reset-values to avoid stale Cloudflare endpoints!"
+    echo "IMPORTANT: Always use --reset-values to avoid stale endpoints!"
     echo ""
     echo "To stop the tunnel, run:"
     echo "  ./scripts/stop-aws-tunnel.sh"
@@ -258,6 +267,10 @@ cleanup() {
     if [ -f /tmp/aegis-aws-pf-keycloak.pid ]; then
         kill $(cat /tmp/aegis-aws-pf-keycloak.pid) 2>/dev/null || true
         rm /tmp/aegis-aws-pf-keycloak.pid
+    fi
+    if [ -f /tmp/aegis-aws-pf-stepca.pid ]; then
+        kill $(cat /tmp/aegis-aws-pf-stepca.pid) 2>/dev/null || true
+        rm /tmp/aegis-aws-pf-stepca.pid
     fi
 
     log_info "Cleanup complete"

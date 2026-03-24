@@ -455,6 +455,11 @@ func (s *Server) resolveObservability(ctx context.Context, projectID, clusterID 
 		return nil, status.Error(codes.InvalidArgument, "projectId and clusterId are required")
 	}
 
+	// Authorization: verify caller has access to this project
+	if err := s.authorize(ctx, projectID, "", "getObservability"); err != nil {
+		return nil, err
+	}
+
 	var infra infraapi.ProjectInfraList
 	if err := s.infraClient.List(ctx, &infra, client.InNamespace(s.infraNamespace)); err != nil {
 		return nil, status.Errorf(codes.Internal, "list project infrastructure: %v", err)

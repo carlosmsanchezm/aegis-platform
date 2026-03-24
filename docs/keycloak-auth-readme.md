@@ -1,6 +1,12 @@
 # Aegis Identity, Cryptography, and Workspace Access Architecture
 
-This document explains how authentication, authorization, and encrypted transport work across the Aegis local stack. The same design applies in cloud environments; the only difference is which Kubernetes cluster or ingress endpoint you target. Use this as a reference for day‑to‑day development, onboarding new engineers, and supplying architectural detail to compliance reviewers.
+**Authoritative for:** auth, token, and workspace-access architecture across local and cloud environments.
+
+**Not authoritative for:** the current cloud deployment runbook, verified production SSO checks, or active cloud auth troubleshooting.
+
+**See also:** `docs/security/auth.md` for the live cloud Backstage/Keycloak contract and `AGENT_DEPLOYMENT_GUIDE.md` for deployment sequencing.
+
+This document explains how authentication, authorization, and encrypted transport work across Aegis. It is primarily an architecture reference. For the current production cloud UI rollout, the source of truth is the runtime config and Helm wiring in `aegis-platform`, not the external `aegis-ui` source tree.
 
 ---
 
@@ -9,7 +15,7 @@ This document explains how authentication, authorization, and encrypted transpor
 | Component | Purpose | Key Details |
 |-----------|---------|-------------|
 | **Keycloak (realm `aegis`)** | Identity Provider (IdP) and MFA enforcement. Issues OIDC tokens to any trusted client. | Clients: `backstage` (confidential), `vscode-extension` (public). Realm stores users, MFA required actions, and client scopes (includes `offline_access`). |
-| **Aegis Platform API** | Control plane for workspaces, exposed via gRPC/HTTPS (`platform-api.localtest.me`). | Validates Keycloak tokens, authorizes requests, provisions `AegisWorkload` CRDs, and mints short-lived proxy session tokens. |
+| **Aegis Platform API** | Control plane for workspaces, exposed via gRPC/HTTPS (`platform-api.localtest.me` locally, `platform-api.aegis-platform.tech` in full cloud). | Validates Keycloak tokens, authorizes requests, provisions `AegisWorkload` CRDs, and mints short-lived proxy session tokens. |
 | **Workspace Proxy** | Terminates HTTPS from clients and tunnels traffic to workspace pods. | Validates the Platform API session token and opens TCP streams to the pod (e.g., port 11111). |
 | **`aegis-connect`** | CLI/extension helper that handles proxy negotiation. | Receives the session token, opens the HTTPS tunnel to the proxy, and pipes SSH traffic through it. |
 | **Workspace Pod** | Runs the developer environment (OpenSSH + VS Code Remote Extension Host). | Built from `workspace-images/openssh-vscode`. Listens on SSH port 2222 and VS Code port 11111. |
@@ -32,7 +38,7 @@ This document explains how authentication, authorization, and encrypted transpor
 
 ### 2.2 Using the Access Token with the Platform API
 
-1. Clients call the gRPC endpoint (`platform-api.localtest.me:8443`).
+1. Clients call the gRPC endpoint (`platform-api.localtest.me:8443` locally or `platform-api.aegis-platform.tech:8081` in the current full-cloud deployment).
 2. The Platform API validates the access token by fetching Keycloak’s JWKS and verifying the RS256 signature.
 3. Identity claims (`sub`, `email`, realm roles) are extracted and attached to the request context.
 4. Authorization policies (group membership, realm roles, etc.) decide whether the action is allowed.
@@ -107,7 +113,7 @@ The November 2025 validation confirmed the following behaviours end to end:
 
 ### 3.1 TLS Everywhere
 
-- **Backstage/VS Code → Proxy** – HTTPS (`https://proxy.localtest.me`) with TLS 1.2+. Certificates are generated locally (`aegis-local-trust.pem`) or via a production CA in cloud environments. Satisfies NIST/FedRAMP SC-8/SC-12/SC-13 controls.
+- **Backstage/VS Code → Proxy** – HTTPS / WSS (`https://proxy.localtest.me` locally, `wss://proxy.aegis-platform.tech:8080` in full cloud) with TLS 1.2+. Certificates are generated locally (`aegis-local-trust.pem`) or via the production ingress/public endpoint chain in cloud environments. Satisfies NIST/FedRAMP SC-8/SC-12/SC-13 controls.
 - **Backstage/VS Code → Platform API** – Same certificate authority; gRPC with ALPN `h2` over TLS.
 - **Proxy → Workspace Pod** – TCP stream inside the cluster (unencrypted). Because this traffic never leaves Kubernetes, it is protected by the cluster network and the outer TLS tunnel.
 
@@ -170,8 +176,9 @@ The VS Code Remote Extension Host communicates using SSH semantics (the Microsof
 | Layer | Local (kind/Docker Desktop) | Cloud (Kubernetes / Managed) | Notes |
 |-------|------------------------------|------------------------------|-------|
 | Identity | Same Keycloak realm/export (Helm chart `charts/aegis-services/files/keycloak/aegis-realm.json`). | Same realm import, possibly hosted Keycloak. | Users/passwords preserved by realm export. |
-| Platform API | `platform-api.localtest.me` via port-forward | Public LoadBalancer / ingress (HTTPS) | TLS certificates from local CA vs. ACM/Let’s Encrypt. |
-| Proxy | `proxy.localtest.me` via port-forward | Public/Private ingress | Session token semantics identical. |
+| Platform API | `platform-api.localtest.me` via port-forward | Direct public service endpoint at `platform-api.aegis-platform.tech:8081` | TLS certificates from local CA vs. cloud public endpoint chain. |
+| Proxy | `proxy.localtest.me` via port-forward | Direct public service endpoint at `proxy.aegis-platform.tech:8080` | Session token semantics identical. |
+| UI / Keycloak | Local ingress on `*.localtest.me` | Shared public ingress on `ui.aegis-platform.tech` and `keycloak.aegis-platform.tech` | Cloud UI and Keycloak share the ingress-backed browser surface. |
 | Workspace Pods | `aegis-workloads-local` namespace, kind nodes. | Production cluster namespace with cloud storage, node pools. | Images must exist in the target registry; same entrypoint scripts run. |
 
 The architecture, token flow, and cryptographic protections remain identical across environments. Only the endpoints and certificate issuance change.
@@ -185,7 +192,7 @@ The architecture, token flow, and cryptographic protections remain identical acr
 3. **Workspace image** – `workspace-images/openssh-vscode` must be built and loaded into the cluster (`kind load` or push to registry). For kind, avoid the `:latest` tag to prevent `imagePullPolicy=Always`.
 4. **Port-forward (local dev)** – `make port-forward` for ports 10080/10081/10085.
 5. **Smoke test** – `scripts/test-workspace-connection.sh` validates gRPC, workspace spin-up, proxy token flow, and VS Code server readiness using real bearer tokens.
-6. **Backstage upstream** – Catalog must contain a `User` entity whose email matches the Keycloak account, otherwise the login resolver will fail.
+6. **Backstage sign-in resolver** – Keep `auth.providers.keycloak.<env>.signIn.resolvers` configured in the cloud runtime config. The current cloud path allows login without a matching catalog user (`dangerouslyAllowSignInWithoutUserInCatalog: true`), but removing the resolver will break SSO by returning no `backstageIdentity`.
 
 ---
 

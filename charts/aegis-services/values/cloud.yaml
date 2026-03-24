@@ -13,11 +13,23 @@ platformApi:
   enabled: true
   replicaCount: 1  # Single instance for resource constraints
   serviceAccountName: aegis-platform-api
+  # Set to an IAM role ARN to enable IRSA (IAM Roles for Service Accounts).
+  # When set, the pod receives temporary AWS credentials automatically via
+  # projected service account tokens — no static AWS_ACCESS_KEY_ID needed.
+  # Example: arn:aws:iam::123456789012:role/aegis-platform-api
+  irsaRoleArn: "arn:aws:iam::195714074609:role/aegis-platform-api"
+
+  # Trust the platform's internal CA so platform-api can verify Keycloak's TLS
+  # when fetching JWKS for JWT validation. Without this, all auth fails.
+  auth:
+    oidc:
+      caBundle:
+        secretName: aegis-trust-bundle
 
   image:
-    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
     tag: "8afb9e0-vscode-dynamic"  # VS Code port fix build with dynamic VS Code commit support
-    pullPolicy: IfNotPresent
+    pullPolicy: Always  # EKS must always pull from ECR to get latest image
 
   service:
     type: LoadBalancer
@@ -39,20 +51,49 @@ platformApi:
     LOG_LEVEL: "info"
     ENVIRONMENT: "production"
     AEGIS_STORE_BACKEND: "postgres"
+    # Auto-bootstrap workspace dependencies (flavors, queues, projects) on first reference
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    # Override DockerHub workspace images with the production ECR image
+    AEGIS_DEFAULT_WORKSPACE_IMAGE: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
     # Enable automatic observability stack deployment on spoke clusters
     AEGIS_OBSERVABILITY_ENABLED: "true"
     AEGIS_PROXY_BASE_URL: "wss://proxy.yourdomain.com:8080"
     # AEGIS_PROXY_BASE_URL is automatically set to the proxy service if proxy.enabled=true
     # For external proxy, set this to the public URL (e.g., "https://proxy.yourdomain.com")
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
-    DB_HOST: "aegis-prod-rds.cluster-xxxx.us-east-1.rds.amazonaws.com"
+    DB_HOST: "platform-postgres.aegis-system.svc.cluster.local"
     DB_PORT: "5432"
-    DB_NAME: "aegis"
-    DB_USER: "aegis_api"
-    DB_SSLMODE: "require"
+    DB_NAME: "aegis_platform"
+    DB_USER: "aegis_platform"
+    DB_SSLMODE: "disable"
     PG_MAX_OPEN_CONNS: "50"
     PG_MAX_IDLE_CONNS: "10"
     PG_CONN_MAX_LIFETIME: "30m"
+    OIDC_AUDIENCE: "backstage,aegis-platform"
+    REQUIRE_PHISHING_RESISTANT_MFA: "false"
+    AEGIS_INFRA_CONTROLLER: "true"
+    AEGIS_INFRA_NAMESPACE: "aegis-system"
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-195714074609/aegis/pulumi"
+    PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
+    AWS_REGION: "us-east-1"
+    AWS_DEFAULT_REGION: "us-east-1"
+    # --- Spoke provisioning: Pulumi runner reads these to configure spoke clusters ---
+    # Platform API endpoint that spokes connect to (gRPC).
+    # Set to the public Cloudflare hostname; override via deploy script if needed.
+    AEGIS_PLATFORM_API_ENDPOINT: "platform-api.aegis-platform.tech:8081"
+    AEGIS_PLATFORM_API_GRPC_INSECURE: "false"
+    # Spoke images: ECR registry for cloud-provisioned spokes
+    AEGIS_SPOKE_IMAGE_REPO: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent"
+    AEGIS_SPOKE_IMAGE_TAG: ""  # Set via deploy script override (git SHA)
+    # Spoke Helm chart values file for cloud deployments
+    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    # OIDC configuration for spoke agent authentication
+    AEGIS_SPOKE_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
+    AEGIS_SPOKE_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_SPOKE_OIDC_CLIENT_SECRET: ""  # Set via deploy script or --set
+    AEGIS_SPOKE_OIDC_AUDIENCE: "aegis-platform"
+    # Spoke-proxy: empty means agent auto-discovers from LoadBalancer Service
+    AEGIS_SPOKE_PROXY_HOST: ""
 
   # Production secrets (configure externally)
   # Note: AEGIS_PROXY_JWT_SECRET is automatically configured from proxy.jwtSecret when proxy.enabled=true
@@ -130,8 +171,15 @@ platformApi:
                     - platform-api
             topologyKey: topology.kubernetes.io/zone
 
+  postgres:
+    # Iron Bank PostgreSQL (requires registry1 auth):
+    #   repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
+    # Using public image until registry1 auth is configured:
+    storage:
+      className: ebs-gp3
+
   migrations:
-    enabled: false
+    enabled: false  # Disabled: GHCR rate-limited; migrations run via Step 6b (in-cluster psql)
     image:
       repository: ghcr.io/golang-migrate/migrate
       tag: v4.16.2
@@ -150,9 +198,9 @@ proxy:
   replicaCount: 1  # Until shared JTI backend is deployed
 
   image:
-    repository: 567751785679.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
+    repository: 195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
     tag: "no-client-cert"  # Updated to disable mTLS client cert requirement for VS Code
-    pullPolicy: IfNotPresent
+    pullPolicy: Always  # EKS must always pull from ECR to get latest image
 
   service:
     type: LoadBalancer
@@ -260,11 +308,21 @@ global:
 #################################################################
 # Keycloak Configuration - Cloud
 #################################################################
+backstage:
+  replicaCount: 1
+  # Trust the platform's internal CA so Backstage can verify Keycloak TLS
+  caBundle:
+    secretName: aegis-trust-bundle
+
 keycloak:
   enabled: true
   createNamespace: false
   namespace: null
   forceRender: true
+  # Iron Bank images for Keycloak (requires registry1.dso.mil auth):
+  #   operator.image: registry1.dso.mil/ironbank/opensource/keycloak/keycloak-operator:26.1
+  #   image: registry1.dso.mil/ironbank/opensource/keycloak/keycloak:26.1
+  # Using public images until registry1 auth is configured on cluster:
   http:
     httpEnabled: false
   ingress:
@@ -284,8 +342,14 @@ keycloak:
       name: keycloak-db-secret
       create: false
   postgres:
+    # Iron Bank PostgreSQL (requires registry1 auth):
+    #   repository: registry1.dso.mil/ironbank/opensource/postgres/postgresql16
+    # Using public image until registry1 auth is configured:
+    image:
+      repository: docker.io/postgres
+      tag: "16"
     storage:
-      className: gp2
+      className: ebs-gp3
   realm:
     importResources:
       requests:
@@ -300,3 +364,15 @@ keycloak:
     secret:
       name: keycloak-tls
       create: false
+
+#################################################################
+# Ingress NGINX - Iron Bank Image Override
+#################################################################
+# Iron Bank ingress-nginx (requires registry1.dso.mil auth):
+#   ingress-nginx:
+#     controller:
+#       image:
+#         registry: registry1.dso.mil
+#         image: ironbank/opensource/kubernetes/ingress-nginx/controller
+#         tag: "v1.11.3"
+# Using default public registry.k8s.io images until registry1 auth is configured.

@@ -43,6 +43,8 @@ type MemStore struct {
 	provisioningLogs map[string][]ProvisioningLogEntry
 	provisioningRuns map[string]*ProvisioningRun
 	provisioningSeq  int64
+
+	auditEvents []*AuditEvent
 }
 
 func NewMemStore() *MemStore {
@@ -403,13 +405,28 @@ func (s *MemStore) GetWorkload(id string) *aegis.Workload {
 func (s *MemStore) ListWorkloads(projectID string) []*aegis.Workload {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
 	out := []*aegis.Workload{}
 	for _, w := range s.workloads {
-		if w.ProjectId == projectID {
-			out = append(out, w)
+		if w.ProjectId != projectID {
+			continue
 		}
+		if w.GetStatus() == statusTerminated && w.GetTerminatedAtUtc() != "" {
+			if t, err := time.Parse(time.RFC3339Nano, w.GetTerminatedAtUtc()); err == nil && t.Before(cutoff) {
+				continue
+			}
+		}
+		out = append(out, w)
 	}
 	return out
+}
+
+func (s *MemStore) SetWorkloadURL(id, url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w, ok := s.workloads[id]; ok {
+		w.Url = url
+	}
 }
 
 func (s *MemStore) MarkPlaced(id string) {
@@ -498,8 +515,8 @@ func (s *MemStore) StartWorkload(id string) (*aegis.Workload, time.Duration, boo
 
 // -------- clusters --------
 
-func (s *MemStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL string) error {
-	s.cstate.preRegister(clusterID, projectID, provider, region, proxyURL)
+func (s *MemStore) PreRegisterCluster(clusterID, projectID, provider, region, proxyURL, endpoint, ca string) error {
+	s.cstate.preRegister(clusterID, projectID, provider, region, proxyURL, endpoint, ca)
 	return nil
 }
 func (s *MemStore) UpsertClusterFromRegister(req *aegis.ClusterRegisterRequest) {
@@ -588,12 +605,67 @@ func (s *MemStore) SetClusterProjectID(clusterID, projectID string) {
 	s.cstate.setProjectID(clusterID, projectID)
 }
 
+func (s *MemStore) SetClusterLabel(clusterID, key, value string) {
+	if clusterID == "" || key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ci, ok := s.cstate.clusters[clusterID]; ok {
+		if ci.Labels == nil {
+			ci.Labels = map[string]string{}
+		}
+		ci.Labels[key] = value
+	}
+}
+
 func (s *MemStore) DeleteCluster(clusterID string) {
 	s.cstate.delete(clusterID)
 }
 
 // CleanupStaleClusters is a no-op for memory store (no persistence).
 func (s *MemStore) CleanupStaleClusters(staleThreshold string) int64 {
+	return 0
+}
+
+// TerminateWorkloadsByCluster terminates all non-terminal workloads on the given cluster.
+func (s *MemStore) TerminateWorkloadsByCluster(clusterID string) int64 {
+	if clusterID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var count int64
+	now := time.Now().UTC()
+	for id, w := range s.workloads {
+		if w.GetClusterId() != clusterID || w.GetStatus() == statusTerminated {
+			continue
+		}
+		if w.GetStatus() == statusRunning {
+			if t0, ok := s.startedAt[id]; ok {
+				secs := int64(now.Sub(t0).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				s.runtime[id] += secs
+			}
+		}
+		delete(s.startedAt, id)
+		w.Status = statusTerminated
+		w.TerminatedAtUtc = now.Format(time.RFC3339Nano)
+		w.TerminateReason = "cluster_deleted"
+		count++
+	}
+	return count
+}
+
+// TerminateOrphanedWorkloads is a no-op for memory store (hard-deletes clusters, no deleted_at).
+func (s *MemStore) TerminateOrphanedWorkloads() int64 {
+	return 0
+}
+
+// TerminateStaleWorkloads is a no-op for memory store (no persistence).
+func (s *MemStore) TerminateStaleWorkloads(staleThreshold string) int64 {
 	return 0
 }
 
@@ -636,6 +708,9 @@ func (s *MemStore) ListClusterWorkloadIDs(clusterID string) ([]string, error) {
 		if w.GetClusterId() != clusterID {
 			continue
 		}
+		if w.GetStatus() == statusTerminated {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -643,7 +718,7 @@ func (s *MemStore) ListClusterWorkloadIDs(clusterID string) ([]string, error) {
 }
 
 // AckWorkload updates the workload status if currently RUNNING and stamps optional URL.
-func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis.Workload, error) {
+func (s *MemStore) AckWorkload(id string, nextStatus string, url string, suspendReason string, message string) (*aegis.Workload, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, ok := s.workloads[id]
@@ -666,7 +741,9 @@ func (s *MemStore) AckWorkload(id string, nextStatus string, url string) (*aegis
 	}
 	if strings.EqualFold(nextStatus, statusSuspended) {
 		w.SuspendedAtUtc = now.UTC().Format(time.RFC3339Nano)
-		if w.SuspendReason == "" {
+		if suspendReason != "" {
+			w.SuspendReason = suspendReason
+		} else if w.SuspendReason == "" {
 			w.SuspendReason = "idle_timeout"
 		}
 	}
@@ -1001,4 +1078,73 @@ func (s *MemStore) ListProvisioningRuns(projectID string) []*ProvisioningRun {
 		out = append(out, &copy)
 	}
 	return out
+}
+
+// -------- audit events --------
+
+// PutAuditEvent appends an audit event to the in-memory log.
+func (s *MemStore) PutAuditEvent(event *AuditEvent) error {
+	if event == nil {
+		return fmt.Errorf("audit event required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clone := *event
+	if clone.Details != nil {
+		clonedDetails := make(map[string]string, len(clone.Details))
+		for k, v := range clone.Details {
+			clonedDetails[k] = v
+		}
+		clone.Details = clonedDetails
+	}
+	s.auditEvents = append(s.auditEvents, &clone)
+	return nil
+}
+
+// ListAuditEvents returns audit events matching the provided filter, newest first.
+func (s *MemStore) ListAuditEvents(filter AuditEventFilter) ([]*AuditEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	out := make([]*AuditEvent, 0, limit)
+	// iterate in reverse for newest-first ordering
+	for i := len(s.auditEvents) - 1; i >= 0; i-- {
+		ev := s.auditEvents[i]
+		if filter.EventType != "" && !strings.EqualFold(ev.EventType, filter.EventType) {
+			continue
+		}
+		if filter.Subject != "" && !strings.EqualFold(ev.Subject, filter.Subject) {
+			continue
+		}
+		if filter.ResourceType != "" && !strings.EqualFold(ev.ResourceType, filter.ResourceType) {
+			continue
+		}
+		if filter.ResourceID != "" && ev.ResourceID != filter.ResourceID {
+			continue
+		}
+		if !filter.StartTime.IsZero() && ev.Timestamp.Before(filter.StartTime) {
+			continue
+		}
+		if !filter.EndTime.IsZero() && ev.Timestamp.After(filter.EndTime) {
+			continue
+		}
+		clone := *ev
+		if ev.Details != nil {
+			clonedDetails := make(map[string]string, len(ev.Details))
+			for k, v := range ev.Details {
+				clonedDetails[k] = v
+			}
+			clone.Details = clonedDetails
+		}
+		out = append(out, &clone)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }

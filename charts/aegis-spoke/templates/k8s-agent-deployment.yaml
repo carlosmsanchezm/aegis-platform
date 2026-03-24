@@ -8,6 +8,7 @@ metadata:
     {{- include "aegis-spoke.labels" . | nindent 4 }}
     app.kubernetes.io/component: k8s-agent
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.k8sAgent.replicaCount }}
   selector:
     matchLabels:
@@ -21,10 +22,12 @@ spec:
         {{- include "aegis-spoke.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: k8s-agent
     spec:
+      {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- end }}
       serviceAccountName: {{ .Values.rbac.serviceAccount.name }}
       terminationGracePeriodSeconds: 10
       containers:
@@ -36,10 +39,12 @@ spec:
             - --leader-elect
             - --health-probe-bind-address=:8081
           ports: []
+          {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -60,6 +65,16 @@ spec:
               cpu: 10m
               memory: 64Mi
           env:
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            - name: AEGIS_FIPS_ENABLED
+              value: "true"
+            - name: AEGIS_TLS_MIN_VERSION
+              value: "1.2"
+            - name: AEGIS_TLS_CIPHER_SUITES
+              value: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+            {{- end }}
             {{- $env := .Values.k8sAgent.env | default dict -}}
             {{- $trust := .Values.k8sAgent.trustBundle | default dict -}}
             {{- range $k, $v := $env }}
@@ -76,8 +91,10 @@ spec:
             - name: AEGIS_CP_OIDC_CA_FILE
               value: {{ printf "%s/%s" ($trust.mountPath | default "/etc/aegis/trust") ($trust.fileName | default "ca.crt") | quote }}
             {{- end }}
+            {{- if .Values.proxy.ingress.hostname }}
             - name: AEGIS_PROXY_INGRESS_HOST
               value: {{ .Values.proxy.ingress.hostname | quote }}
+            {{- end }}
             {{- if .Values.proxy.url }}
             - name: AEGIS_PROXY_URL
               value: {{ .Values.proxy.url | quote }}

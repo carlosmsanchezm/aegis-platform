@@ -221,13 +221,17 @@ collect_security_alerts() {
         medium=$(echo "${dependabot_json}" | jq '[.[] | select(.security_vulnerability.severity == "medium")] | length' 2>/dev/null || echo "0")
         low=$(echo "${dependabot_json}" | jq '[.[] | select(.security_vulnerability.severity == "low")] | length' 2>/dev/null || echo "0")
 
-        # Get secret scanning alerts count
+        # Get secret scanning alerts count (gh api may return error JSON for repos without secret scanning)
         local secrets_open=0
-        secrets_open=$(gh api "/repos/${full_repo}/secret-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+        secrets_open=$(gh api "/repos/${full_repo}/secret-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq 'if type == "array" then length else 0 end' 2>/dev/null | tail -1 || echo "0")
+        secrets_open="${secrets_open//[^0-9]/}"
+        secrets_open="${secrets_open:-0}"
 
-        # Get code scanning alerts count
+        # Get code scanning alerts count (gh api may return error JSON for repos without code scanning)
         local code_scan_open=0
-        code_scan_open=$(gh api "/repos/${full_repo}/code-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+        code_scan_open=$(gh api "/repos/${full_repo}/code-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq 'if type == "array" then length else 0 end' 2>/dev/null | tail -1 || echo "0")
+        code_scan_open="${code_scan_open//[^0-9]/}"
+        code_scan_open="${code_scan_open:-0}"
 
         cat >> "${alerts_file}" << EOF
   {

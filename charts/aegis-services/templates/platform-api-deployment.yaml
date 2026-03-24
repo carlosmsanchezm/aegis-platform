@@ -8,6 +8,7 @@ metadata:
     {{- include "aegis-services.labels" . | nindent 4 }}
     app.kubernetes.io/component: platform-api
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.platformApi.replicaCount }}
   selector:
     matchLabels:
@@ -24,10 +25,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- with .Values.platformApi.hostAliases }}
       hostAliases:
-      - ip: "10.96.91.6"
-        hostnames:
-        - "keycloak.aegis-platform.tech"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- $serveGrpc := true }}
       {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
       {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}
@@ -39,9 +40,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
       {{- with .Values.platformApi.securityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       {{- $platformEnv := .Values.platformApi.env | default dict }}
       {{- $oidcAuth := .Values.platformApi.auth | default dict }}
@@ -151,6 +154,20 @@ spec:
                   name: {{ include "aegis-services.proxy.secretName" . }}
                   key: jwt-secret
             {{- end }}
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
+            {{- if (.Values.platformApi.tls).fipsMode }}
+            - name: AEGIS_FIPS_ENABLED
+              value: "true"
+            - name: AEGIS_TLS_MIN_VERSION
+              value: {{ (.Values.platformApi.tls).minimumTLSVersion | default "1.2" | quote }}
+            {{- if (.Values.platformApi.tls).cipherSuiteWhitelist }}
+            - name: AEGIS_TLS_CIPHER_SUITES
+              value: {{ join "," .Values.platformApi.tls.cipherSuiteWhitelist | quote }}
+            {{- end }}
+            {{- end }}
             {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
             - name: AEGIS_GRPC_TLS_CERT
               value: "/etc/aegis-platform-api/tls/tls.crt"
@@ -189,9 +206,11 @@ spec:
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
           {{- with .Values.platformApi.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- end }}
       volumes:
         {{- if and .Values.platformApi.tls.enabled $serveGrpc }}

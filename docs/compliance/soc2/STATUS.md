@@ -1,7 +1,7 @@
 # SOC 2 Compliance Status
 
-**Last Updated:** 2026-01-17
-**Status:** ✅ AUDIT READY (4+ months of evidence collected)
+**Last Updated:** 2026-03-23
+**Status:** ✅ AUDIT READY (7+ months of evidence collected)
 
 ---
 
@@ -24,8 +24,8 @@
 | Metric | Value |
 |--------|-------|
 | **Start Date** | September 2025 |
-| **Current Date** | January 2026 |
-| **Duration** | **4+ months** |
+| **Current Date** | March 2026 |
+| **Duration** | **7+ months** |
 | **Minimum for Audit** | 3-6 months |
 | **Status** | ✅ **Ready for auditor engagement** |
 
@@ -51,20 +51,34 @@ See: `retroactive-evidence-summary.md` for full details.
 
 ### Vulnerability Remediation (CC7.1) ✅
 
-All vulnerabilities fixed across 3 repositories on 2026-01-17:
+**Round 2 — 2026-03-23:** 35 critical+high vulnerabilities remediated same-day across all 3 repos.
+
+| Repository | Critical | High | Method | Commit |
+|------------|----------|------|--------|--------|
+| aegis-platform | 3 (gRPC auth bypass) | 1 (OTel PATH hijack) | Go module upgrades | `a2708aa` |
+| aegis-ui | 1 (fast-xml-parser) | 10 (minimatch, tar, jws, node-forge, techdocs-node) | Yarn resolutions | `96b163d` |
+| sovran | 0 | 20 (serialize-js, minimatch, glob, jws, urllib3, mcp, starlette, python-multipart) | npm overrides + pip upgrades | `de15aa1` |
+| **Total** | **4** | **31** | | **All critical+high at 0** |
+
+Key packages updated (2026-03-23):
+- google.golang.org/grpc v1.79.3 (Critical — authorization bypass)
+- go.opentelemetry.io/otel/sdk v1.40.0 (High — PATH hijacking)
+- fast-xml-parser v4.5.4+ (Critical — regex injection via DOCTYPE)
+- serialize-javascript v7.0.3+ (High — RCE via RegExp.flags)
+- urllib3 v2.6.3 (High — decompression bomb bypass)
+- starlette v1.0.0 (High — O(n²) DoS via Range header)
+
+**Round 1 — 2026-01-17:** 55 vulnerabilities fixed (all at 0 after).
 
 | Repository | Vulns Fixed | Method |
 |------------|-------------|--------|
 | aegis-platform | 11 | Go module updates |
 | aegis-ui | 25 | Yarn resolutions |
 | sovran | 19 | npm overrides + Python deps |
-| **Total** | **55** | **All at 0** |
 
-Key packages updated:
-- docker/docker v28.5.2 (Critical)
-- containerd v1.7.30 (High)
-- golang-jwt v5.3.0 (High)
-- undici, tar, elliptic (Node - various)
+**Evidence:** Remediation report at `$EVIDENCE_VAULT/soc2/2026/2026-03/vuln-management/2026-03-23_vulnerability_remediation_report.md`
+
+**Remediation SLA demonstrated:** Critical vulnerabilities identified and patched within 24 hours (same-day), meeting CC7.1 requirements for timely vulnerability response.
 
 ---
 
@@ -98,8 +112,8 @@ Key packages updated:
 **Location:** `$EVIDENCE_VAULT` → `../aegis-compliance-evidence` (local git repository)
 **Status:** ✅ Created and operational
 **Retroactive Evidence:** Sept 2025 - Jan 2026
-**Ongoing Collection:** Monthly
-**Latest Commit:** `fd2d388` (2026-01-17)
+**Ongoing Collection:** Weekly + Monthly
+**Latest Commit:** `d06914b` (2026-03-23, vulnerability remediation evidence)
 
 ---
 
@@ -267,7 +281,7 @@ Key packages updated:
    - Authenticated and first export completed
 
 ~~3. **AWS CLI Configuration** - ✅ RESOLVED~~
-   - Using profile `myclaude`, first export completed
+   - Using profile `aegis-new`, first export completed
 
 **Current Blockers:** None
 
@@ -404,6 +418,7 @@ SOC 2 Type II requires **3-12 months of operating** controls before audit. You'r
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.4 | 2026-03-23 | Claude Opus 4.6 | Round 2 vuln remediation: 35 critical+high fixed same-day (CC7.1). Observation period now 7+ months. Evidence vault at d06914b |
 | 1.3 | 2026-01-17 | Claude Opus 4.5 | Added CI-required branch protection, baseline controls section, evidence commit fd2d388 |
 | 1.2 | 2026-01-17 | Claude (SOC2 Engineer) | Completed Step 3: Evidence vault created, first exports run |
 | 1.1 | 2025-01-17 | Claude (SOC2 Engineer) | Narrowed scope to Model B, Security only |

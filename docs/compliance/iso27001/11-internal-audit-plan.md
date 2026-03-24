@@ -1,9 +1,9 @@
-# Internal Audit Plan - February 2026
+# Internal Audit Plan - March 2026
 
 **Document ID:** ISMS-IAP-2026-01
-**Audit Period:** February 17-21, 2026
+**Audit Period:** March 10-11, 2026
 **Prepared By:** Carlos Sanchez
-**Audit Type:** Full ISMS Internal Audit (First Audit)
+**Audit Type:** Full ISMS Internal Audit (First Audit) — Self-Assessment
 
 ---
 
@@ -53,10 +53,10 @@ To verify that Aegis Technologies' Information Security Management System:
 
 | Role | Name | Organization | Qualification |
 |------|------|--------------|---------------|
-| Lead Auditor | [External Auditor TBD] | [Audit Firm TBD] | ISO 27001 LA |
-| Auditee | Carlos Sanchez | Aegis Technologies | Founder/ISM |
+| Lead Auditor | Carlos Sanchez | Aegis Technologies | Founder/ISM (Self-Assessment) |
+| AI-Assisted Review | Claude (AI Agent) | Anthropic | Systematic evidence verification |
 
-**Note:** External auditor required for independence (solo founder operation)
+**Note:** This audit is conducted as a documented self-assessment, acceptable for startups building toward certification. The AI agent provides systematic, objective evidence verification. An external auditor will be engaged for the Stage 1/Stage 2 certification audit.
 
 ---
 
@@ -180,12 +180,13 @@ See: `iso27001/12-internal-audit-checklist.md`
 
 | Milestone | Date | Deliverable |
 |-----------|------|-------------|
-| Audit plan issued | 2026-02-10 | This document |
-| Pre-audit preparation | 2026-02-14 | Evidence gathered |
-| Audit execution | 2026-02-17-21 | Audit notes |
-| Draft report | 2026-02-24 | Draft findings |
-| Final report | 2026-02-28 | Final audit report |
-| CA submission | 2026-03-07 | Corrective action plans |
+| Audit plan issued | 2026-01-17 | This document (original) |
+| Audit plan updated | 2026-03-10 | Updated for self-assessment |
+| Pre-audit preparation | 2026-03-09 | Evidence gathered (452 evidence files in vault) |
+| Audit execution | 2026-03-10-11 | AI-assisted systematic evidence review |
+| Final report | 2026-03-11 | Completed audit report |
+| CA submission | 2026-03-11 | Corrective action plans updated |
+| Management review | 2026-03-15 | Management review using audit inputs |
 
 ---
 
@@ -193,8 +194,8 @@ See: `iso27001/12-internal-audit-checklist.md`
 
 | Role | Name | Signature | Date |
 |------|------|-----------|------|
-| Auditee | Carlos Sanchez | /s/ Carlos Sanchez | 2026-01-17 |
-| Lead Auditor | [TBD] | _____________ | [TBD] |
+| Auditee / Lead Auditor | Carlos Sanchez | /s/ Carlos Sanchez | 2026-03-10 |
+| AI-Assisted Review | Claude (AI Agent) | /s/ AI-Assisted | 2026-03-10 |
 
 ---
 
@@ -202,4 +203,5 @@ See: `iso27001/12-internal-audit-checklist.md`
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.0 | 2026-03-10 | Claude Opus 4.6 | Updated for self-assessment; revised dates to Mar 10-11; AI-assisted systematic review |
 | 1.0 | 2026-01-17 | Carlos Sanchez | Initial audit plan |

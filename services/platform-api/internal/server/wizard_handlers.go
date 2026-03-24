@@ -170,7 +170,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	project := s.store.GetProject(projectID)
 	if project == nil {
-		writeWizardError(w, status.Error(codes.NotFound, "project not found"))
+		writeWizardError(w, status.Errorf(codes.NotFound, "project %q not found", projectID))
 		return
 	}
 	if err := s.authorize(ctx, projectID, "", "createWorkspace"); err != nil {
@@ -293,6 +293,11 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Status:    statusText,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+	s.audit(ctx, "workspace.created", "workload", res.GetId(), "create", "success", map[string]string{
+		"project_id": projectID,
+		"cluster_id": res.GetClusterId(),
+		"name":       name,
+	})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -457,6 +462,11 @@ func clusterProject(ci *store.ClusterInfo) string {
 	if ci == nil {
 		return ""
 	}
+	// 1. Direct ProjectID field (populated by auto-derivation at register/heartbeat)
+	if ci.ProjectID != "" {
+		return ci.ProjectID
+	}
+	// 2. Label lookup (backward compat)
 	for k, v := range ci.Labels {
 		key := strings.ToLower(strings.TrimSpace(k))
 		switch key {
@@ -466,17 +476,12 @@ func clusterProject(ci *store.ClusterInfo) string {
 			}
 		}
 	}
-	// Extract project ID from cluster ID format: {projectId}-{region}-{clusterId}
-	// e.g., "db-1-us-east-1-atlas-train-govcloud" -> "db-1"
-	// Look for common AWS region patterns to find the boundary
-	id := strings.TrimSpace(ci.ID)
-	regionPatterns := []string{"-us-east-", "-us-west-", "-eu-west-", "-eu-central-", "-ap-", "-sa-east-", "-ca-central-", "-me-south-", "-af-south-"}
-	for _, pattern := range regionPatterns {
-		if idx := strings.Index(id, pattern); idx > 0 {
-			return id[:idx]
-		}
+	// 3. Shared region-pattern derivation (read-only fallback for display)
+	if derived := store.DeriveProjectIDFromClusterID(ci.ID); derived != "" {
+		return derived
 	}
-	// Fallback: take first part before hyphen
+	// 4. First segment fallback (kept for non-AWS cluster IDs)
+	id := strings.TrimSpace(ci.ID)
 	if parts := strings.Split(id, "-"); len(parts) > 1 && parts[0] != "" {
 		return parts[0]
 	}

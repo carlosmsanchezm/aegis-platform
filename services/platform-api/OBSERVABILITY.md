@@ -246,7 +246,7 @@ These run alongside kube-prometheus defaults; heavy control-plane-only rules are
 ## How to validate in AWS (EKS)
 1. Point kube context to EKS with the provisioning role (example):
    ```bash
-   aws eks update-kubeconfig --name <cluster> --region <region> --role-arn arn:aws:iam::567751785679:role/aegis-platform --profile aegis
+   aws eks update-kubeconfig --name <cluster> --region <region> --role-arn arn:aws:iam::195714074609:role/aegis-platform --profile aegis
    ```
 2. Provision via ProjectInfra with `addons.observability: true` (default). The AWS runner installs metrics + logging to `aegis-observability` and `aegis-logging`.
 3. Validate:

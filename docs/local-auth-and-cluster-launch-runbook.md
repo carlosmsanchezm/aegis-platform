@@ -45,7 +45,7 @@ Terraform module `terraform/pulumi-stack` owns:
 If state drifts, run:
 ```bash
 cd terraform/pulumi-stack
-terraform apply -var aws_profile=myclaude
+terraform apply -var aws_profile=aegis-new
 ```
 
 ## 6) Common launch errors and fixes

@@ -55,7 +55,7 @@ CP-10,System Recovery,Yes,A1.2,A.5.30,Partial,Medium,Need recovery procedures
 IA-1,ID and Auth Policy,Yes,CC6.1,A.5.1,Implemented,High,Access control policy
 IA-2,Identification and Authentication,Yes,CC6.6,A.8.3,Implemented,High,OIDC/SAML/MFA
 IA-4,Identifier Management,Yes,CC6.2,A.5.16,Implemented,High,Unique identifiers
-IA-5,Authenticator Management,Yes,CC6.6,A.5.17,Implemented,High,Password policy
+IA-5,Authenticator Management,Yes,CC6.6,A.5.17,Partial,High,Password policy implemented; DISA K8s STIG V-242415 gap: secrets stored as env vars via secretKeyRef (18 usages) — migrate to volume mounts or external secret store
 IA-6,Authentication Feedback,Yes,CC6.6,A.8.3,Implemented,High,Masked passwords
 IA-7,Cryptographic Module Auth,Yes,CC6.6,A.8.24,Not Implemented,Low,FIPS 140 gap
 IA-8,ID and Auth (Non-Org Users),Conditional,CC6.6,A.5.16,Implemented,High,Customer IdP integration

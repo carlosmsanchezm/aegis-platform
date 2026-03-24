@@ -8,6 +8,7 @@ metadata:
     {{- include "aegis-services.labels" . | nindent 4 }}
     app.kubernetes.io/component: proxy
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.proxy.replicaCount }}
   selector:
     matchLabels:

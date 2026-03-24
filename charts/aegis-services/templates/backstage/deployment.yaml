@@ -50,6 +50,7 @@ metadata:
   labels:
     {{- include "aegis-services.backstage.labels" . | nindent 4 }}
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ $backstage.replicaCount | default $backstage.replicas | default 1 }}
   selector:
     matchLabels:

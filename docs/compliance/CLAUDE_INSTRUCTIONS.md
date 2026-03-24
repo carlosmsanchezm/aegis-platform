@@ -139,6 +139,52 @@ $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/vuln-management/
 
 ---
 
+## Weekly SBOM Generation (part of weekly cadence)
+
+After running the security check and remediation, generate SBOMs:
+
+```bash
+cd ~/code/aegis-platform
+chmod +x docs/compliance/sbom/generate-sbom.sh
+./docs/compliance/sbom/generate-sbom.sh
+```
+
+Copy SBOM outputs to the evidence vault:
+```bash
+mkdir -p $EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/vuln-management/sbom/
+cp docs/compliance/sbom/*-sbom.json $EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/vuln-management/sbom/
+```
+
+**Prerequisites:** `cyclonedx-gomod`, `cdxgen` (npm). If not installed, skip with a note — do not block the weekly run.
+
+**Controls:** SI-2 (Flaw Remediation), CM-8 (System Component Inventory), A.8.8
+
+---
+
+## Weekly Container Image Scanning (part of weekly cadence)
+
+Scan all Aegis container images for vulnerabilities using Grype or Trivy:
+
+```bash
+# Using grype (preferred)
+for image in carlosmsanchez/aegis-platform-api:dev carlosmsanchez/aegis-proxy:dev carlosmsanchez/aegis-k8s-agent:dev carlosmsanchez/aegis-workspace-vscode:latest; do
+  grype $image -o json > $EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/vuln-management/$(date +%Y-%m-%d)_$(echo $image | tr '/:' '_')_scan.json 2>/dev/null || echo "SKIP: grype not installed or image not available"
+done
+
+# Alternative: using trivy
+for image in ...; do
+  trivy image $image --format json --output $EVIDENCE_VAULT/...
+done
+```
+
+Report findings in the same table format as dependency alerts. If critical/high container vulnerabilities are found, remediate by updating base images or pinning fixed versions in Dockerfiles.
+
+**Prerequisites:** `grype` or `trivy`. If neither installed, skip with a note — do not block the weekly run.
+
+**Controls:** RA-5 (Vulnerability Monitoring and Scanning), A.8.7 (Protection against malware), Iron Bank readiness
+
+---
+
 ## Monthly Evidence Collection (1st of Month)
 
 ### Files to Read (in order)

@@ -8,6 +8,7 @@ metadata:
     {{- include "aegis-spoke.labels" . | nindent 4 }}
     app.kubernetes.io/component: k8s-agent
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.k8sAgent.replicaCount }}
   selector:
     matchLabels:

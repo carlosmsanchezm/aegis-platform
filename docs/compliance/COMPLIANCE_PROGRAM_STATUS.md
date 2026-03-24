@@ -1,7 +1,7 @@
 # Aegis Compliance Program Status
 
-**Last Updated:** 2026-03-23 (weekly security check + vulnerability remediation)
-**Evidence Vault Commit:** `17b169e`
+**Last Updated:** 2026-03-23 (full compliance run: remediation + management review + access review + STIG integration)
+**Evidence Vault Commit:** `118b68b`
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
 ---
@@ -152,10 +152,18 @@ Aegis is pursuing multi-framework compliance: **SOC 2 Type II**, **ISO 27001**, 
 
 - [x] ~~Complete ISO 27001 internal audit~~ ✅ Done Mar 10
 - [x] Run weekly check Monday Mar 23 ✅ Done (55 Dependabot, 4 critical, 0 secrets, 0 code scan)
-- [x] Remediate all 4 critical Dependabot alerts ✅ Done Mar 23 (grpc auth bypass in aegis-platform, fast-xml-parser in aegis-ui)
-- [x] Remediate all 31 high Dependabot alerts ✅ Done Mar 23 (otel, minimatch, tar, jws, node-forge, serialize-javascript, urllib3, mcp, starlette, python-multipart)
-- [ ] Conduct management review (CA-003) — **due Mar 31 (8 days)**
-- [ ] Update overdue risk treatments (CA-005) — **due Mar 31 (8 days)**
+- [x] Remediate all 4 critical Dependabot alerts ✅ Done Mar 23
+- [x] Remediate all 31 high Dependabot alerts ✅ Done Mar 23
+- [x] Draft management review output (CA-003) ✅ Done Mar 23 — awaiting Carlos approval
+- [x] Propose revised risk treatment dates (CA-005) ✅ Done Mar 23 — awaiting Carlos approval
+- [x] Execute Q1 access review (CA-004) ✅ Done Mar 23 — awaiting Carlos attestation
+- [x] Integrate DISA K8s STIG findings into tracking ✅ Done Mar 23
+- [x] Add SBOM + container scanning to weekly cadence ✅ Done Mar 23
+- [ ] **Carlos: Approve management review output** (CA-003, due Mar 31)
+- [ ] **Carlos: Approve revised risk treatment dates** (CA-005, due Mar 31)
+- [ ] **Carlos: Verify AWS root MFA** (critical finding from access review)
+- [ ] Merge security PRs to main (aegis-ui, sovran) — in progress
+- [ ] Remediate remaining ~20 medium/low alerts — in progress
 
 ### This Month
 

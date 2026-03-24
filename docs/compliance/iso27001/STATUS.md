@@ -10,10 +10,10 @@
 | Requirement | ISO Clause | Status |
 |-------------|------------|--------|
 | Internal Audit | Clause 9.2 | ✅ **COMPLETED** (Self-assessment, March 10-11, 2026) |
-| Management Review | Clause 9.3 | ⏳ **PENDING** (Inputs prepared, target Mar 15, 2026) |
+| Management Review | Clause 9.3 | ⏳ **OUTPUT DRAFTED** (2026-03-23, awaiting Carlos approval by Mar 31) |
 | Corrective Action Cycle | Clause 10.1 | ✅ **CA-001 CLOSED** + 3 new CAs from audit |
 
-**Current State:** Internal audit completed as self-assessment (AI-assisted). 0 major NCs, 2 minor NCs, 11 observations, 8 positive findings. Management review inputs prepared — Carlos to conduct formal review by Mar 31.
+**Current State:** Internal audit completed as self-assessment (AI-assisted). 0 major NCs, 2 minor NCs, 11 observations, 8 positive findings. Management review output drafted 2026-03-23 (updated with Week 13 remediation results). Q1 access review completed. Awaiting Carlos approval/signature for CA-003 closure.
 
 ### Internal Audit Results (ISMS-IAR-2026-01)
 

@@ -2,6 +2,8 @@
 
 **Purpose:** This file tells Claude exactly what to read and do for weekly, monthly, and quarterly compliance tasks.
 
+**Critical principle:** Compliance is not just recording — it is **detect, remediate, document**. Every task must attempt to FIX what it finds, not just report it.
+
 **Usage:** When asking Claude to run compliance tasks, reference this file:
 ```
 Read docs/compliance/CLAUDE_INSTRUCTIONS.md and execute the [weekly/monthly/quarterly] task.
@@ -19,14 +21,14 @@ Read docs/compliance/CLAUDE_INSTRUCTIONS.md and execute the [weekly/monthly/quar
 
 ---
 
-## Weekly Security Check (Every Monday)
+## Weekly Security Check + Remediation (Every Monday)
 
 ### Files to Read (in order)
 1. `docs/compliance/COMPLIANCE_PROGRAM_STATUS.md` - Current program status
 2. `docs/compliance/OPERATIONS_RUNBOOK.md` - Detailed procedures
 3. `scripts/compliance/run_weekly_checks.sh` - The script to run
 
-### Steps
+### Phase 1: Detect
 1. Read the files above to understand current state
 2. Verify environment:
    ```bash
@@ -35,14 +37,62 @@ Read docs/compliance/CLAUDE_INSTRUCTIONS.md and execute the [weekly/monthly/quar
    ```
 3. Run the weekly check:
    ```bash
-   cd ~/code/aegis-platform-observability-integration
+   cd ~/code/aegis-platform
    ./scripts/compliance/run_weekly_checks.sh
    ```
-4. Review output and report:
-   - Number of Dependabot alerts (critical/high/medium/low)
-   - Number of secret scanning alerts
-   - Number of code scanning alerts
-   - Any actions required
+4. Review output — note counts by severity:
+   - Dependabot alerts (critical/high/medium/low) per repo
+   - Secret scanning alerts
+   - Code scanning alerts
+
+### Phase 2: Remediate (REQUIRED — do not skip)
+
+For any critical or high findings, actively fix them:
+
+5. **Get alert details** — Use `gh api` to fetch specific alert info (package name, fixed version, manifest path) for each repo:
+   ```bash
+   gh api "/repos/carlosmsanchezm/REPO/dependabot/alerts?state=open&severity=critical,high" | jq '...'
+   ```
+6. **Fix vulnerabilities in aegis-platform** (this repo):
+   - Go deps: Update version in go.mod, run `go mod tidy`, verify with `go build ./...`
+   - If deps are already patched in go.mod but alerts persist, run `go mod tidy` to sync go.sum
+7. **Fix vulnerabilities in aegis-ui** (`~/code/aegis-ui/`):
+   - Check if direct or transitive dep
+   - Direct: `yarn upgrade <package>@<version>`
+   - Transitive: Add/update `resolutions` in package.json
+   - Run `yarn install`, verify with `yarn tsc` and `yarn build:backend`
+   - Commit on a `security/` branch
+8. **Fix vulnerabilities in sovran** (`~/code/sovran/`):
+   - NPM: Add `overrides` in package.json (both root and aegis-vscode-remote/extension/)
+   - Python: Update constraints in pyproject.toml, run `uv lock`
+   - Verify with `npm run build` and `uv sync`
+   - Commit on a `security/` branch
+9. **For findings that cannot be auto-fixed** (breaking API changes, vendor issues, human judgment needed):
+   - Flag clearly in the report with the reason
+   - If appropriate, open a corrective action in `docs/compliance/iso27001/09-corrective-actions-log.csv`
+
+### Phase 3: Document (REQUIRED — across ALL frameworks)
+
+10. **Write remediation evidence** to the vault:
+    ```
+    $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/vuln-management/YYYY-MM-DD_vulnerability_remediation_report.md
+    ```
+    Include: what was found, what was fixed, packages/versions, commits, build verification, and which controls are demonstrated.
+
+11. **Update ALL framework status docs** (not just the master):
+
+    | Doc | What to update |
+    |-----|---------------|
+    | `docs/compliance/COMPLIANCE_PROGRAM_STATUS.md` | Last Updated, vault commit, alert totals, This Week checklist, evidence timeline, document history |
+    | `docs/compliance/soc2/STATUS.md` | Vulnerability Remediation section (CC7.1), observation period, evidence vault commit |
+    | `docs/compliance/iso27001/STATUS.md` | Vulnerability Management section (A.8.8, A.8.25, A.8.28, A.8.32) |
+    | `docs/compliance/cmmc/STATUS.md` | Active Control Evidence section (SI.L2-3.14.1, RA.L2-3.11.2) |
+    | `docs/compliance/fedramp/STATUS.md` | Active Control Evidence section (SI-2, RA-5, CM-3, SA-11) |
+    | `docs/compliance/iso27001/04-risk-treatment-plan.csv` | RISK-001 (supply chain) completion evidence if vuln remediation performed |
+
+12. **Check corrective actions** — Read `docs/compliance/iso27001/09-corrective-actions-log.csv` for CAs approaching their due dates. Flag any due within 14 days in the report.
+
+13. **Commit** all changes with message: `compliance: weekly security check + remediation YYYY-MM-DD`
 
 ### Expected Output Location
 ```
@@ -50,25 +100,41 @@ $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/ci-cd-security/weekly/
 ├── YYYY-MM-DD_security_alerts.json
 ├── YYYY-MM-DD_weekly_review.md
 └── RUN_LOG_YYYY-MM-DD.txt
+
+$EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/vuln-management/
+└── YYYY-MM-DD_vulnerability_remediation_report.md   (if remediations performed)
 ```
 
 ### Sample Report Format
 ```
-## Weekly Security Check - YYYY-MM-DD
+## Weekly Security Check + Remediation - YYYY-MM-DD
 
 **Repositories Checked:** aegis-platform, aegis-ui, sovran
 
+### Detection
 | Metric | Count |
 |--------|-------|
-| Dependabot Alerts | X |
+| Dependabot Alerts (open) | X |
 | Critical | X |
 | High | X |
 | Secret Scanning | X |
 | Code Scanning | X |
 
-**Actions Required:** [None / List items]
+### Remediation
+| Repo | Critical Fixed | High Fixed | Method | Commit |
+|------|---------------|------------|--------|--------|
+| aegis-platform | X | X | Go mod upgrade | abc1234 |
+| aegis-ui | X | X | Yarn resolutions | def5678 |
+| sovran | X | X | npm overrides + pip | ghi9012 |
 
-**Evidence:** $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/ci-cd-security/weekly/
+### Controls Demonstrated
+- SOC 2 CC7.1, ISO A.8.8, CMMC SI.L2-3.14.1, FedRAMP SI-2/RA-5
+
+### Human Attention Required
+- [List items that could not be auto-fixed, with reasons]
+- [CAs approaching due date]
+
+**Evidence:** $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/
 ```
 
 ---
@@ -90,7 +156,7 @@ $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/ci-cd-security/weekly/
    ```
 3. Run the monthly evidence collection:
    ```bash
-   cd ~/code/aegis-platform-observability-integration
+   cd ~/code/aegis-platform
    ./scripts/compliance/run_monthly_evidence.sh
    ```
 4. If evidence vault is a git repo, commit and push:
@@ -100,10 +166,13 @@ $EVIDENCE_VAULT/soc2/YYYY/YYYY-MM/ci-cd-security/weekly/
    git commit -m "Monthly evidence: YYYY-MM (XX files)"
    git push origin main
    ```
-5. Update `COMPLIANCE_PROGRAM_STATUS.md`:
-   - Update "Last Updated" date
-   - Update "Evidence Vault Commit" hash
-   - Update "Total Files" count if needed
+5. **Run a weekly security check + remediation** (same as weekly Phase 1-2 above) to ensure the monthly snapshot includes fresh vulnerability data and any new alerts are fixed
+6. Update ALL status docs (same as weekly Phase 3, step 11):
+   - `COMPLIANCE_PROGRAM_STATUS.md` — Last Updated, vault commit, total files
+   - `soc2/STATUS.md` — Evidence vault commit, observation period
+   - `iso27001/STATUS.md` — Evidence section if remediation performed
+   - `cmmc/STATUS.md` — Active evidence if controls advanced
+   - `fedramp/STATUS.md` — Active evidence if controls advanced
 
 ### Expected Output Location
 ```
@@ -371,6 +440,7 @@ When new controls are implemented:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0 | 2026-03-23 | Major rewrite: Added Phase 2 (Remediate) and Phase 3 (Document across ALL frameworks) to weekly task. Fixed wrong repo paths. Added cross-framework status doc update requirements. Added remediation evidence template. Encoded detect→remediate→document principle. |
 | 1.2 | 2026-03-09 | Added CMMC section (key files, SPRS recalculation, control statement updates); updated FedRAMP docs with SSP + appendices |
 | 1.1 | 2026-01-17 | Added FedRAMP readiness tasks |
 | 1.0 | 2026-01-17 | Initial instructions |

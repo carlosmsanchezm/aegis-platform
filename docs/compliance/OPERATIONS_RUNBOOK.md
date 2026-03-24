@@ -1,9 +1,9 @@
 # Compliance Operations Runbook
 
-**Version:** 1.1
-**Last Updated:** 2026-01-17
+**Version:** 2.0
+**Last Updated:** 2026-03-23
 **Owner:** Carlos Sanchez
-**Applies To:** SOC 2 Type II + ISO 27001
+**Applies To:** SOC 2 Type II + ISO 27001 + CMMC + FedRAMP
 
 ---
 
@@ -82,27 +82,29 @@ echo "# Aegis Compliance Evidence Vault" > README.md
 git add . && git commit -m "Initialize evidence vault"
 
 # 2. Run first monthly evidence collection
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_monthly_evidence.sh
 ```
 
 ---
 
-## Weekly Tasks (30 min)
+## Weekly Tasks (1-2 hrs)
 
 ### When: Every Monday
 
-### What: Security Review
+### What: Security Review + Remediation
 
-1. Review Dependabot alerts across all repositories
-2. Review secret scanning alerts
-3. Review code scanning alerts
-4. Document any actions taken
+1. Run automated security check script
+2. Review Dependabot alerts across all repositories
+3. **Remediate all critical and high findings** — upgrade deps, apply patches across all 3 repos (aegis-platform, aegis-ui, sovran)
+4. Write remediation evidence to vault
+5. Update ALL framework status docs (SOC 2, ISO, CMMC, FedRAMP) — not just the master status
+6. Document any findings that could not be auto-fixed
 
 ### Command
 
 ```bash
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_weekly_checks.sh
 ```
 
@@ -161,7 +163,7 @@ $EVIDENCE_VAULT/
 ### Command
 
 ```bash
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_monthly_evidence.sh
 ```
 
@@ -416,7 +418,7 @@ aws sts get-caller-identity --profile "${AWS_PROFILE:-default}"
 mkdir -p "$EVIDENCE_VAULT"
 
 # Run first monthly evidence
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_monthly_evidence.sh
 
 # Verify
@@ -426,7 +428,7 @@ ls -la "$EVIDENCE_VAULT/soc2/$(date +%Y)/$(date +%Y-%m)/"
 ### Weekly Checks
 
 ```bash
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_weekly_checks.sh
 
 # With auto-push
@@ -439,7 +441,7 @@ cd ~/code/aegis-platform-observability-integration
 ### Monthly Evidence
 
 ```bash
-cd ~/code/aegis-platform-observability-integration
+cd ~/code/aegis-platform
 ./scripts/compliance/run_monthly_evidence.sh
 
 # With auto-push
@@ -574,4 +576,5 @@ No go.mod at /path/to/module, skipping
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.0 | 2026-03-23 | Claude Opus 4.6 | Added remediation to weekly tasks, fixed repo paths, expanded scope to all 4 frameworks, added cross-framework doc update requirements |
 | 1.0 | 2026-01-17 | Carlos Sanchez | Initial runbook |

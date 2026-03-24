@@ -1,6 +1,6 @@
 # CMMC Readiness Status
 
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-23
 **Status:** FOUNDATION BUILDING
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
@@ -221,6 +221,30 @@ Begin Level 2 preparation when a concrete DoD customer opportunity requires CUI 
 
 ---
 
+## Active Control Evidence
+
+### SI Family — Flaw Remediation (SI.L2-3.14.1)
+
+**2026-03-23:** Weekly automated scan identified 55 Dependabot alerts. All 35 critical and high severity vulnerabilities remediated same-day across 3 repositories.
+
+| Practice | Description | Evidence |
+|----------|-------------|----------|
+| **SI.L2-3.14.1** | Identify, report, and correct system flaws in a timely manner | 35 critical+high vulns identified and patched within 24 hours |
+| **SI.L2-3.14.2** | Provide protection from malicious code at designated locations | Dependabot + automated scanning active on all repos |
+| **SI.L2-3.14.3** | Monitor system security alerts/advisories | Weekly automated checks via `run_weekly_checks.sh` |
+| **RA.L2-3.11.2** | Remediate vulnerabilities in accordance with risk assessments | Critical/high remediated same-day; medium/low scheduled for next cycle |
+
+**Remediation details:**
+- aegis-platform: gRPC authorization bypass (critical), OTel PATH hijacking (high) — Go module upgrades
+- aegis-ui: fast-xml-parser regex injection (critical), 10 high-severity npm deps — yarn resolutions
+- sovran: 20 high-severity npm + Python deps — npm overrides + pip constraint upgrades
+
+**Evidence location:** `$EVIDENCE_VAULT/soc2/2026/2026-03/vuln-management/2026-03-23_vulnerability_remediation_report.md`
+
+**SPRS impact:** This remediation activity demonstrates active implementation of SI and RA family controls, supporting the current SPRS score and providing evidence for future score improvements.
+
+---
+
 ## Cross-Framework Synergies
 
 ### Shared Work with FedRAMP
@@ -282,4 +306,5 @@ The following gaps are shared between CMMC Level 2 and FedRAMP Low programs. Add
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.1 | 2026-03-23 | Claude Opus 4.6 | Added active control evidence section: SI family flaw remediation (35 critical+high vulns fixed same-day) |
 | 1.0 | 2026-03-09 | Carlos Sanchez | Initial CMMC readiness status document |

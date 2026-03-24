@@ -1,7 +1,7 @@
 # FedRAMP Readiness Status
 
-**Last Updated:** 2026-01-17
-**Status:** 🔴 NOT STARTED - ASSESSMENT PHASE
+**Last Updated:** 2026-03-23
+**Status:** 🔴 PRE-ASSESSMENT - RESEARCH & PLANNING
 **Document Owner:** Carlos Sanchez, Founder/CEO
 
 ---
@@ -194,6 +194,28 @@ If Aegis or customers deploy on AWS GovCloud, many controls are inherited:
 
 ---
 
+## Active Control Evidence (Pre-Assessment)
+
+Even though FedRAMP assessment has not begun, existing compliance operations provide evidence for several FedRAMP control families. This evidence will be referenced in the SSP when written.
+
+### SI-2: Flaw Remediation — Active
+
+**2026-03-23:** Automated vulnerability scanning identified 55 Dependabot alerts. All 35 critical and high severity vulnerabilities were remediated same-day.
+
+| Control | Requirement | Evidence |
+|---------|-------------|----------|
+| **SI-2** | Identify, report, and correct information system flaws | 35 critical+high vulns patched within 24 hours (commits: `a2708aa`, `96b163d`, `de15aa1`) |
+| **SI-2(2)** | Employ automated mechanisms to determine flaw remediation status | Dependabot + weekly `run_weekly_checks.sh` automation |
+| **RA-5** | Scan for vulnerabilities and remediate | Weekly automated scanning, same-day critical remediation demonstrated |
+| **RA-5(2)** | Update vulnerabilities to be scanned | Dependabot auto-updates vulnerability database |
+| **CM-3** | Configuration change control | All fixes via version-controlled commits with CI build verification |
+| **SA-11** | Developer security testing | Build verification (`go build`, `yarn tsc`, `yarn build:backend`, `npm run build`, `uv sync`) after all patches |
+
+**SSP sections this will support:** SI-2, RA-5, CM-3, SA-11
+**Evidence location:** `$EVIDENCE_VAULT/soc2/2026/2026-03/vuln-management/2026-03-23_vulnerability_remediation_report.md`
+
+---
+
 ## Roadmap to FedRAMP Ready
 
 ### Phase 1: Assessment (Current - Q1 2026)
@@ -362,4 +384,5 @@ If Aegis or customers deploy on AWS GovCloud, many controls are inherited:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.1 | 2026-03-23 | Claude Opus 4.6 | Added active control evidence: SI-2/RA-5 flaw remediation (35 critical+high vulns fixed same-day). Updated SSP sections this supports. |
 | 1.0 | 2026-01-17 | Carlos Sanchez | Initial FedRAMP assessment |

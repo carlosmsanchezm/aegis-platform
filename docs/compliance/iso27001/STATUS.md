@@ -1,6 +1,6 @@
 # ISO 27001 Compliance Status
 
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-03-23
 **Status:** 🟡 INTERNAL AUDIT COMPLETE - PENDING MANAGEMENT REVIEW
 
 ---
@@ -123,6 +123,32 @@ Existing SOC 2 evidence directly supports ISO 27001:
 | 4+ months evidence | All | All | evidence-vault/soc2/2025/ |
 
 **~85% control overlap between SOC 2 and ISO 27001**
+
+---
+
+## Vulnerability Management (A.8.8) — Active Evidence
+
+### 2026-03-23: Remediation Cycle 2
+
+Weekly security check identified 55 Dependabot alerts (4 critical, 31 high). All 35 critical+high remediated same-day:
+
+| Repository | Severity | Packages Fixed | Commit |
+|------------|----------|----------------|--------|
+| aegis-platform | 3 critical, 1 high | grpc v1.79.3 (auth bypass), otel/sdk v1.40.0 (PATH hijack) | `a2708aa` |
+| aegis-ui | 1 critical, 10 high | fast-xml-parser, minimatch, tar, jws, node-forge, techdocs-node | `96b163d` |
+| sovran | 20 high | serialize-javascript, minimatch, glob, jws, urllib3, mcp, starlette, python-multipart | `de15aa1` |
+
+**Controls demonstrated:**
+- **A.8.8** (Technical vulnerability management): Vulnerabilities identified via automated scanning, assessed for severity, and remediated within 24 hours for critical/high
+- **A.8.32** (Change management): All fixes committed via version control with build verification
+- **A.8.25** (Secure development lifecycle): Dependencies upgraded, builds re-verified before commit
+- **A.8.28** (Secure coding): Vulnerable dependency versions replaced with patched versions
+
+**Evidence:** `$EVIDENCE_VAULT/soc2/2026/2026-03/vuln-management/2026-03-23_vulnerability_remediation_report.md` (vault commit `d06914b`)
+
+### 2026-01-17: Remediation Cycle 1
+
+55 vulnerabilities fixed across all 3 repos (all at 0 after). See SOC 2 STATUS.md for details.
 
 ---
 
@@ -387,6 +413,7 @@ Combined SOC 2 + ISO audit can save 30-40%.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 3.1 | 2026-03-23 | Claude Opus 4.6 | Vulnerability remediation cycle 2: 35 critical+high fixed same-day across 3 repos. A.8.8 evidence documented. RISK-001 treatment updated. |
 | 3.0 | 2026-03-10 | Claude Opus 4.6 | Internal audit completed (self-assessment); 0 major NC, 2 minor NC, 11 obs; CA-003/004/005 opened; management review inputs prepared; status updated to Pending Management Review |
 | 2.2 | 2026-01-18 | Claude Opus 4.5 | CI fixes merged; RISK-018/019 added; CA-002 opened; evidence commit cf7cb73 |
 | 2.1 | 2026-01-17 | Claude Opus 4.5 | CA-001 closed, CI-required branch protection, evidence commit fd2d388 |

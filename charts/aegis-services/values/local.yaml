@@ -25,7 +25,7 @@ ingress-nginx:
 # Backstage Configuration - Local
 #################################################################
 backstage:
-  enabled: false
+  enabled: true
   replicaCount: 1
   image:
     repository: carlosmsanchez/aegis-ui
@@ -35,7 +35,17 @@ backstage:
     type: ClusterIP
     port: 7007
   ingress:
-    enabled: false
+    enabled: true
+    className: ingress-nginx
+    hosts:
+      - host: backstage.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - hosts:
+          - backstage.localtest.me
+        secretName: backstage-tls
   appConfig:
     appBaseUrl: "https://backstage.localtest.me"
     backendBaseUrl: "https://backstage.localtest.me"
@@ -128,6 +138,7 @@ platformApi:
     # DEV MODE: Skip IAM role assumption, use credentials directly
     # WARNING: Do not enable in production - breaks multi-tenancy isolation
     AEGIS_DEV_MODE: "true"
+    AEGIS_DEFAULT_WORKSPACE_IMAGE: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
     LOG_LEVEL: "debug"
     AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
     AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"

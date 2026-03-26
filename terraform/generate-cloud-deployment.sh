@@ -166,6 +166,9 @@ while [[ $# -gt 0 ]]; do
       echo "⚠️  --tls is deprecated; TLS is always enforced for cloud deployments."
       shift
       ;;
+    --non-interactive)
+      shift
+      ;;
     -h|--help)
       usage
       exit 0

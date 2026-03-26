@@ -47,10 +47,12 @@ spec:
         - name: migrate
           image: "{{ $m.image.repository }}:{{ $m.image.tag }}"
           imagePullPolicy: {{ $m.image.pullPolicy | default "IfNotPresent" }}
+          command: ["sh", "-c"]
           args:
-            {{- range $m.args }}
-            - {{ . | quote }}
-            {{- end }}
+            - >-
+              migrate -path /migrations
+              -database "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
+              up
           env:
             {{- range $key, $value := .Values.platformApi.env }}
             - name: {{ $key }}
@@ -63,8 +65,6 @@ spec:
                   name: {{ include "aegis-services.platformApi.secretName" $ }}
                   key: {{ $value }}
             {{- end }}
-            - name: DATABASE_URL
-              value: "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)"
           volumeMounts:
             - name: migrations
               mountPath: /migrations

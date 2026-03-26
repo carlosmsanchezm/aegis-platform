@@ -67,6 +67,43 @@ cmd_deploy() {
     sleep 2
   fi
 
+  # Ensure AWS dev-relay infrastructure exists (EC2 relay, NLB, default VPC)
+  # The relay enables local hub ↔ remote EKS spoke connectivity via SSH tunnel.
+  # The default VPC is required by the Pulumi provisioner for EKS cluster creation.
+  local relay_tf_dir="$ROOT_DIR/terraform/dev-relay"
+  if [[ -d "$relay_tf_dir" ]]; then
+    log_info "Ensuring AWS dev-relay infrastructure..."
+    # Ensure default VPC exists (Pulumi provisioner requires it)
+    if ! aws ec2 describe-vpcs --region us-east-1 --filters "Name=isDefault,Values=true" \
+         --query 'Vpcs[0].VpcId' --output text 2>/dev/null | grep -q "vpc-"; then
+      log_info "Creating default VPC (required by Pulumi provisioner)..."
+      aws ec2 create-default-vpc --region us-east-1 >/dev/null 2>&1 || true
+    fi
+    (cd "$relay_tf_dir" && terraform init -input=false >/dev/null 2>&1 && \
+     terraform apply -auto-approve -input=false) && \
+      log_ok "AWS dev-relay infrastructure ready" || \
+      log_fail "AWS dev-relay terraform failed (continuing without relay)"
+
+    # Start the SSH tunnel in the background so the NLB can route spoke traffic
+    # to local services. The tunnel must be running BEFORE any cluster provisioning.
+    # The script runs in foreground mode by default, so we background it and wait
+    # briefly for the tunnel to establish.
+    if [[ -x "$SCRIPT_DIR/start-aws-tunnel.sh" ]]; then
+      if pgrep -f "ssh.*aegis-relay.*-R.*8081" >/dev/null 2>&1; then
+        log_ok "AWS relay SSH tunnel already running"
+      else
+        log_info "Starting AWS relay SSH tunnel..."
+        nohup "$SCRIPT_DIR/start-aws-tunnel.sh" >/dev/null 2>&1 &
+        sleep 5
+        if pgrep -f "ssh.*aegis-relay.*-R.*8081" >/dev/null 2>&1; then
+          log_ok "AWS relay SSH tunnel started (background)"
+        else
+          log_fail "AWS relay SSH tunnel failed (spoke connectivity may not work)"
+        fi
+      fi
+    fi
+  fi
+
   # RHBK pull secret
   if [[ -n "$RHBK_USERNAME" && -n "$RHBK_PASSWORD" ]]; then
     log_info "Configuring registry.redhat.io pull secret in keycloak namespace..."
@@ -132,6 +169,44 @@ cmd_deploy() {
     log_info "Using relay overlay: $relay_overlay"
   fi
 
+  # Extract spoke-agent OIDC client secret from the Keycloak realm JSON.
+  # This is the authoritative source — the realm import creates the client with this secret.
+  local spoke_oidc_flag=""
+  local spoke_secret
+  spoke_secret=$(python3 -c "
+import json
+with open('$ROOT_DIR/charts/aegis-services/files/keycloak/aegis-realm.json') as f:
+    realm = json.load(f)
+for client in realm.get('clients', []):
+    if client.get('clientId') == 'spoke-agent':
+        print(client.get('secret', ''))
+        break
+" 2>/dev/null)
+  if [[ -n "$spoke_secret" ]]; then
+    spoke_oidc_flag="--set platformApi.env.AEGIS_SPOKE_OIDC_CLIENT_SECRET=$spoke_secret"
+    log_ok "Extracted spoke-agent OIDC client secret from realm JSON"
+  else
+    log_fail "Could not extract spoke-agent client secret from realm JSON (provisioning will fail)"
+  fi
+
+  # Inject AWS credentials from local profile for Pulumi provisioner.
+  # Credentials go into the K8s secret only — never committed to git.
+  local aws_flags=""
+  local aws_key_id aws_secret_key aws_account_id
+  aws_key_id=$(aws configure get aws_access_key_id --profile "${AWS_PROFILE:-aegis-new}" 2>/dev/null)
+  aws_secret_key=$(aws configure get aws_secret_access_key --profile "${AWS_PROFILE:-aegis-new}" 2>/dev/null)
+  if [[ -n "$aws_key_id" && -n "$aws_secret_key" ]]; then
+    aws_account_id=$(aws sts get-caller-identity --profile "${AWS_PROFILE:-aegis-new}" --query Account --output text 2>/dev/null || echo "")
+    aws_flags="--set-string platformApi.secrets.aws-access-key-id=$aws_key_id"
+    aws_flags="$aws_flags --set-string platformApi.secrets.aws-secret-access-key=$aws_secret_key"
+    if [[ -n "$aws_account_id" ]]; then
+      aws_flags="$aws_flags --set-string platformApi.secrets.AEGIS_DEFAULT_AWS_ACCOUNT_ID=$aws_account_id"
+    fi
+    log_ok "Injected AWS credentials from profile ${AWS_PROFILE:-aegis-new}"
+  else
+    log_fail "Could not read AWS credentials from profile ${AWS_PROFILE:-aegis-new} (Pulumi provisioning will fail)"
+  fi
+
   local success=0
   for attempt in 1 2 3; do
     if helm upgrade --install aegis-services "$ROOT_DIR/charts/aegis-services" \
@@ -143,6 +218,8 @@ cmd_deploy() {
       --set platformApi.image.repository="$platform_repo" \
       --set platformApi.image.tag="$platform_tag" \
       --set hardeningProfile="$HARDENING" \
+      $spoke_oidc_flag \
+      $aws_flags \
       --namespace "$NAMESPACE" --create-namespace \
       --wait --timeout 5m; then
         success=1

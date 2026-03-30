@@ -133,6 +133,12 @@ install_step_ca() {
     fi
   fi
 
+  # Build the ca.dns list: internal service name + any external names (NLB, etc.)
+  local dns_list="${STEP_CA_RELEASE}.${PKI_NAMESPACE}.svc.cluster.local,127.0.0.1"
+  if [[ -n "${STEP_CA_EXTERNAL_DNS_NAMES:-}" ]]; then
+    dns_list="${STEP_CA_EXTERNAL_DNS_NAMES},${dns_list}"
+  fi
+
   # The chart's bootstrap job is named after the release; keep release stable.
   helm upgrade --install "$STEP_CA_RELEASE" smallstep/step-certificates \
     --namespace "$PKI_NAMESPACE" \
@@ -141,6 +147,7 @@ install_step_ca() {
     --set "ca.name=${STEP_CA_NAME}" \
     --set "ca.provisioner.name=${STEP_CA_PROVISIONER_NAME}" \
     --set "ca.db.persistent=${db_persistent}" \
+    --set "ca.dns=${dns_list}" \
     --wait \
     --timeout 10m >/dev/null
 

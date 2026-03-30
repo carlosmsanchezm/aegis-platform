@@ -675,11 +675,59 @@ if [[ ! -x "${PKI_SCRIPT}" ]]; then
   exit 1
 fi
 
+# Create NLB for step-ca BEFORE installing it, so the NLB hostname
+# is included in step-ca's TLS certificate SANs at bootstrap time.
+# Spoke clusters on different EKS clusters need this external endpoint
+# to reach the hub's step-ca for certificate issuance.
+STEP_CA_SVC_NLB="step-certificates-nlb"
+kubectl create namespace "${PKI_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+if ! kubectl get svc "${STEP_CA_SVC_NLB}" -n "${PKI_NAMESPACE}" >/dev/null 2>&1; then
+  echo "   Creating NLB for step-ca external access..."
+  kubectl apply -f - <<EOSVC
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${STEP_CA_SVC_NLB}
+  namespace: ${PKI_NAMESPACE}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: step-certificates
+    app.kubernetes.io/instance: step-certificates
+  ports:
+    - name: https
+      port: 443
+      targetPort: 9000
+      protocol: TCP
+EOSVC
+fi
+echo "   ⏳ Waiting for step-ca NLB endpoint..."
+STEP_CA_NLB_HOST=""
+for i in $(seq 1 60); do
+  STEP_CA_NLB_HOST=$(kubectl get svc "${STEP_CA_SVC_NLB}" -n "${PKI_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+  if [[ -n "${STEP_CA_NLB_HOST}" ]]; then break; fi
+  sleep 5
+done
+if [[ -n "${STEP_CA_NLB_HOST}" ]]; then
+  export STEP_CA_EXTERNAL_URL="https://${STEP_CA_NLB_HOST}"
+  echo "   ✅ Step-CA NLB: ${STEP_CA_EXTERNAL_URL}"
+else
+  echo "   ⚠️  Step-CA NLB not ready after 5 min; spokes will use cluster-local URL (single-cluster only)"
+fi
+
+# Install step-ca with the NLB hostname in its TLS cert SANs.
+# STEP_CA_EXTERNAL_DNS_NAMES is read by install-internal-pki.sh and passed
+# to the helm chart's ca.dns value so the bootstrap job generates a cert
+# that includes both the internal service name and the NLB hostname.
 TRUST_BUNDLE_NAMESPACES="${K8S_NAMESPACE},${SPOKE_NAMESPACE}" \
 PKI_NAMESPACE="${PKI_NAMESPACE}" \
 CERT_MANAGER_NAMESPACE="${CERT_MANAGER_NAMESPACE}" \
 STEP_CA_DB_PERSISTENT=false \
 STEP_CA_REINSTALL_ON_MISMATCH=true \
+STEP_CA_EXTERNAL_DNS_NAMES="${STEP_CA_NLB_HOST}" \
   "${PKI_SCRIPT}"
 
 mkdir -p "$(dirname "${CA_BUNDLE}")"
@@ -742,7 +790,7 @@ OVERRIDE_FILE=$(mktemp)
   echo "    AEGIS_SPOKE_OIDC_CLIENT_ID: \"spoke-agent\""
   echo "    AEGIS_SPOKE_OIDC_CLIENT_SECRET: \"${SPOKE_OIDC_CLIENT_SECRET}\""
   echo "    AEGIS_SPOKE_OIDC_AUDIENCE: \"aegis-platform\""
-  echo "    AEGIS_SPOKE_VALUES_FILE: \"/root/charts/aegis-spoke/values-cloud-remote.yaml\""
+  echo "    AEGIS_SPOKE_VALUES_FILE: \"/home/aegis/charts/aegis-spoke/values-cloud-remote.yaml\""
   echo "  secrets:"
   echo "    db-password: \"${DB_PASSWORD}\""
   echo "    proxy-jwt-secret: \"${JWT_SECRET}\""

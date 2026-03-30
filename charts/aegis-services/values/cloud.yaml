@@ -86,7 +86,7 @@ platformApi:
     AEGIS_SPOKE_IMAGE_REPO: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent"
     AEGIS_SPOKE_IMAGE_TAG: ""  # Set via deploy script override (git SHA)
     # Spoke Helm chart values file for cloud deployments
-    AEGIS_SPOKE_VALUES_FILE: "/root/charts/aegis-spoke/values-cloud-remote.yaml"
+    AEGIS_SPOKE_VALUES_FILE: "/home/aegis/charts/aegis-spoke/values-cloud-remote.yaml"
     # OIDC configuration for spoke agent authentication
     AEGIS_SPOKE_OIDC_TOKEN_URL: "https://keycloak.aegis-platform.tech/realms/aegis/protocol/openid-connect/token"
     AEGIS_SPOKE_OIDC_CLIENT_ID: "spoke-agent"

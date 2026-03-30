@@ -734,6 +734,22 @@ mkdir -p "$(dirname "${CA_BUNDLE}")"
 kubectl get secret aegis-trust-bundle -n "${K8S_NAMESPACE}" -o "jsonpath={.data.ca\\.crt}" | base64 --decode > "${CA_BUNDLE}"
 echo "   ✅ Updated CA bundle: ${CA_BUNDLE}"
 
+# Extract step-ca provisioner credentials for spoke cert-manager integration.
+# The Pulumi runner needs these to configure StepClusterIssuer on spoke clusters
+# so spoke-proxy certs are issued by the same CA as the hub.
+STEP_PROV_KID=$(kubectl exec step-certificates-0 -n "${PKI_NAMESPACE}" -- \
+  cat /home/step/config/ca.json 2>/dev/null \
+  | grep -o '"kid"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+  | sed 's/.*"kid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "")
+STEP_PROV_PASS=$(kubectl get secret step-certificates-provisioner-password \
+  -n "${PKI_NAMESPACE}" -o jsonpath='{.data.password}' 2>/dev/null \
+  | base64 --decode || echo "")
+if [[ -n "${STEP_PROV_KID}" && -n "${STEP_PROV_PASS}" ]]; then
+  echo "   ✅ Extracted step-ca provisioner credentials (KID: ${STEP_PROV_KID:0:12}...)"
+else
+  echo "   ⚠️  Could not extract step-ca provisioner credentials (spoke proxy will use self-signed certs)"
+fi
+
 # Step 5: Ensure CRDs are present before Helm upgrades
 echo ""
 echo "5️⃣  Applying CRDs (k8s-agent) before Helm upgrade..."
@@ -791,6 +807,25 @@ OVERRIDE_FILE=$(mktemp)
   echo "    AEGIS_SPOKE_OIDC_CLIENT_SECRET: \"${SPOKE_OIDC_CLIENT_SECRET}\""
   echo "    AEGIS_SPOKE_OIDC_AUDIENCE: \"aegis-platform\""
   echo "    AEGIS_SPOKE_VALUES_FILE: \"/home/aegis/charts/aegis-spoke/values-cloud-remote.yaml\""
+  # cert-manager / step-ca env vars for spoke provisioning.
+  # The Pulumi runner reads these via certmanager.ResolveFromEnv() to configure
+  # StepClusterIssuer on spoke clusters so spoke-proxy gets CA-signed TLS certs.
+  if [[ -n "${STEP_CA_EXTERNAL_URL}" ]]; then
+    echo "    AEGIS_CERT_MANAGER_ENABLED: \"true\""
+    echo "    AEGIS_STEP_CA_URL: \"${STEP_CA_EXTERNAL_URL}\""
+    echo "    AEGIS_CLUSTER_ISSUER_NAME: \"aegis-internal\""
+    echo "    AEGIS_STEP_CA_ROOT_CA_FILE: \"/etc/aegis-platform-api/oidc/ca.crt\""
+  fi
+  if [[ -n "${STEP_PROV_KID}" ]]; then
+    echo "    AEGIS_STEP_PROVISIONER_KID: \"${STEP_PROV_KID}\""
+  fi
+  if [[ -n "${STEP_PROV_PASS}" ]]; then
+    echo "    AEGIS_STEP_PROVISIONER_PASSWORD: \"${STEP_PROV_PASS}\""
+  fi
+  # VS Code REH init image for workspace pods
+  if [[ -n "${K8S_AGENT_IMAGE_REPO}" ]]; then
+    echo "    AEGIS_VSCODE_REH_INIT_IMAGE: \"${K8S_AGENT_IMAGE_REPO%/k8s-agent}/vscode-reh-init:latest\""
+  fi
   echo "  secrets:"
   echo "    db-password: \"${DB_PASSWORD}\""
   echo "    proxy-jwt-secret: \"${JWT_SECRET}\""
@@ -969,6 +1004,8 @@ verify_pod_env "AEGIS_PLATFORM_API_ENDPOINT" "required"  || SPOKE_ENV_OK=false
 verify_pod_env "AEGIS_SPOKE_VALUES_FILE" "required"      || SPOKE_ENV_OK=false
 verify_pod_env "AEGIS_SPOKE_OIDC_TOKEN_URL" "optional"
 verify_pod_env "AEGIS_SPOKE_IMAGE_TAG" "optional"
+verify_pod_env "AEGIS_CERT_MANAGER_ENABLED" "required"   || SPOKE_ENV_OK=false
+verify_pod_env "AEGIS_STEP_CA_URL" "required"             || SPOKE_ENV_OK=false
 
 if [[ "${SPOKE_ENV_OK}" != "true" ]]; then
   echo "" >&2

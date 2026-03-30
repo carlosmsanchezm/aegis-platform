@@ -16,6 +16,7 @@ import (
 
 	aegis "github.com/yourorg/aegis/proto/aegis/v1"
 	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
+	"github.com/yourorg/aegis/services/platform-api/internal/spokeinstall"
 	"github.com/yourorg/aegis/services/platform-api/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -193,6 +194,14 @@ func (s *Server) ImportCluster(ctx context.Context, req *aegis.ImportClusterRequ
 		statusValue = "active"
 	}
 
+	// Automatically install the spoke agent on the remote cluster if credentials were provided.
+	// This runs in a background goroutine — the import response returns immediately with
+	// status "installing". The UI polls ListClusters to detect when the agent heartbeats.
+	if (importMethod == "kubeconfig" || importMethod == "assume_role") && s.kubeClients != nil {
+		statusValue = "installing"
+		go s.installSpokeOnImportedCluster(clusterID, projectID, provider, region)
+	}
+
 	helmEnv := map[string]string{
 		"AEGIS_CLUSTER_ID":       clusterID,
 		"AEGIS_PROVIDER":         provider,
@@ -358,4 +367,84 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// inferImportOIDCTokenURL derives the Keycloak token URL from the hub's own OIDC configuration.
+func inferImportOIDCTokenURL() string {
+	if v := strings.TrimSpace(os.Getenv("AEGIS_IMPORT_CP_OIDC_TOKEN_URL")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL")); v != "" {
+		return v + "/protocol/openid-connect/token"
+	}
+	return ""
+}
+
+// inferImportOIDCClientSecret derives the spoke OIDC client secret from environment.
+func inferImportOIDCClientSecret() string {
+	if v := strings.TrimSpace(os.Getenv("AEGIS_IMPORT_CP_OIDC_CLIENT_SECRET")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("AEGIS_SPOKE_OIDC_CLIENT_SECRET"))
+}
+
+// inferImportOIDCAudience derives the OIDC audience from environment.
+func inferImportOIDCAudience() string {
+	if v := strings.TrimSpace(os.Getenv("AEGIS_IMPORT_CP_OIDC_AUDIENCE")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("AEGIS_CP_OIDC_AUDIENCE"))
+}
+
+// installSpokeOnImportedCluster runs in a background goroutine after a cluster import
+// with kubeconfig or assume_role credentials. It connects to the remote cluster and
+// installs the aegis-spoke Helm chart using the spokeinstall package.
+func (s *Server) installSpokeOnImportedCluster(clusterID, projectID, provider, region string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	restCfg, err := s.kubeClients.RestConfigFor(clusterID)
+	if err != nil {
+		s.log.Error("import: failed to get kubeconfig for remote cluster",
+			zap.String("cluster_id", clusterID),
+			zap.Error(err))
+		return
+	}
+
+	chartPath := getenv("AEGIS_SPOKE_CHART_PATH", "charts/aegis-spoke")
+
+	cfg := spokeinstall.SpokeInstallConfig{
+		ClusterID:        clusterID,
+		Provider:         provider,
+		Region:           region,
+		HubGRPC:          getenv("AEGIS_IMPORT_CP_GRPC", defaultImportCPGRPC),
+		HubGRPCInsecure:  getenv("AEGIS_IMPORT_CP_GRPC_INSECURE", defaultImportCPGRPCInsecure) == "true",
+		OIDCTokenURL:     inferImportOIDCTokenURL(),
+		OIDCClientID:     getenv("AEGIS_IMPORT_CP_OIDC_CLIENT_ID", "spoke-agent"),
+		OIDCClientSecret: inferImportOIDCClientSecret(),
+		OIDCAudience:     inferImportOIDCAudience(),
+		CABundleB64:      strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_B64")),
+		ProxyJWTSecret:   strings.TrimSpace(os.Getenv("AEGIS_PROXY_JWT_SECRET")),
+		AgentImageRepo:   strings.TrimSpace(os.Getenv("AEGIS_IMPORT_AGENT_IMAGE_REPO")),
+		AgentImageTag:    strings.TrimSpace(os.Getenv("AEGIS_IMPORT_AGENT_IMAGE_TAG")),
+		ProxyImageRepo:   strings.TrimSpace(os.Getenv("AEGIS_IMPORT_PROXY_IMAGE_REPO")),
+		ProxyImageTag:    strings.TrimSpace(os.Getenv("AEGIS_IMPORT_PROXY_IMAGE_TAG")),
+		ProxyEnabled:     getenv("AEGIS_IMPORT_PROXY_ENABLED", "true") == "true",
+		Flavors:          getenv("AEGIS_IMPORT_DEFAULT_FLAVORS", defaultImportFlavors),
+	}
+
+	s.log.Info("import: starting spoke installation on remote cluster",
+		zap.String("cluster_id", clusterID),
+		zap.String("provider", provider),
+		zap.String("region", region))
+
+	if err := spokeinstall.Install(ctx, s.log, restCfg, chartPath, cfg); err != nil {
+		s.log.Error("import: spoke installation failed",
+			zap.String("cluster_id", clusterID),
+			zap.Error(err))
+		return
+	}
+
+	s.log.Info("import: spoke installation completed, waiting for agent heartbeat",
+		zap.String("cluster_id", clusterID))
 }

@@ -94,6 +94,13 @@ platformApi:
     AEGIS_SPOKE_OIDC_AUDIENCE: "aegis-platform"
     # Spoke-proxy: empty means agent auto-discovers from LoadBalancer Service
     AEGIS_SPOKE_PROXY_HOST: ""
+    # Import flow: image repos for auto-installing spoke on imported clusters
+    AEGIS_IMPORT_AGENT_IMAGE_REPO: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent"
+    AEGIS_IMPORT_AGENT_IMAGE_TAG: ""  # Set via deploy script (git SHA)
+    AEGIS_IMPORT_PROXY_IMAGE_REPO: "195714074609.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy"
+    AEGIS_IMPORT_PROXY_IMAGE_TAG: ""  # Set via deploy script (git SHA)
+    AEGIS_IMPORT_CP_GRPC: "platform-api.aegis-platform.tech:8081"
+    AEGIS_IMPORT_CP_GRPC_INSECURE: "false"
 
   # Production secrets (configure externally)
   # Note: AEGIS_PROXY_JWT_SECRET is automatically configured from proxy.jwtSecret when proxy.enabled=true

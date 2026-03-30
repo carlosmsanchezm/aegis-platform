@@ -140,6 +140,8 @@ install_step_ca() {
   fi
 
   # The chart's bootstrap job is named after the release; keep release stable.
+  # Claims are set at install time so step-ca is ready to issue long-lived certs
+  # immediately — no post-install patching needed.
   helm upgrade --install "$STEP_CA_RELEASE" smallstep/step-certificates \
     --namespace "$PKI_NAMESPACE" \
     --set image.repository=smallstep/step-ca \
@@ -148,6 +150,10 @@ install_step_ca() {
     --set "ca.provisioner.name=${STEP_CA_PROVISIONER_NAME}" \
     --set "ca.db.persistent=${db_persistent}" \
     --set "ca.dns=${dns_list}" \
+    --set "inject.config.files.ca\\.json.authority.claims.minTLSCertDuration=${STEP_CA_MIN_TLS_CERT_DURATION}" \
+    --set "inject.config.files.ca\\.json.authority.claims.maxTLSCertDuration=${STEP_CA_MAX_TLS_CERT_DURATION}" \
+    --set "inject.config.files.ca\\.json.authority.claims.defaultTLSCertDuration=${STEP_CA_DEFAULT_TLS_CERT_DURATION}" \
+    --set "inject.config.files.ca\\.json.authority.claims.disableRenewal=false" \
     --wait \
     --timeout 10m >/dev/null
 

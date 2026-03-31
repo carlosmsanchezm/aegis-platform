@@ -6,8 +6,10 @@ package spokeinstall
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -63,6 +65,18 @@ func Install(ctx context.Context, log *zap.Logger, restConfig *rest.Config, char
 	}
 	if cfg.ProxyNodePort == 0 {
 		cfg.ProxyNodePort = 31484
+	}
+
+	// If the restConfig uses exec-based auth (e.g., aws eks get-token), the Helm
+	// library's REST client wrapper doesn't always propagate the exec context correctly.
+	// Pre-fetch a bearer token and convert to static token auth.
+	if restConfig.ExecProvider != nil {
+		log.Info("restConfig uses exec-based auth, pre-fetching bearer token")
+		resolved, err := resolveBearerToken(restConfig)
+		if err != nil {
+			return fmt.Errorf("resolve bearer token from exec provider: %w", err)
+		}
+		restConfig = resolved
 	}
 
 	// Resolve chart path — look for the aegis-spoke chart
@@ -294,3 +308,69 @@ func (r *restClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 var _ genericclioptions.RESTClientGetter = (*restClientGetter)(nil)
 // Silence unused import warning for cli package
 var _ = cli.New
+
+// resolveBearerToken takes a restConfig with exec-based auth and pre-fetches
+// a bearer token, returning a new restConfig with static BearerToken auth.
+// This works around Helm's REST client wrapper not propagating exec contexts.
+func resolveBearerToken(original *rest.Config) (*rest.Config, error) {
+	// Use the original config to make a simple API call — this triggers the
+	// exec provider and caches the token in the transport.
+	dc, err := discovery.NewDiscoveryClientForConfig(original)
+	if err != nil {
+		return nil, fmt.Errorf("create discovery client: %w", err)
+	}
+	// Make a lightweight API call to trigger token fetch
+	_, err = dc.ServerVersion()
+	if err != nil {
+		return nil, fmt.Errorf("fetch server version (token exchange): %w", err)
+	}
+
+	// The exec provider caches the token. Extract it by creating a transport
+	// and reading the cached credential.
+	// Simpler approach: use the exec provider directly to get a token.
+	if original.ExecProvider != nil {
+		// Build the exec command and run it
+		args := original.ExecProvider.Args
+		cmd := original.ExecProvider.Command
+
+		// Run the exec command to get credentials
+		execCmd := execCommand(cmd, args, original.ExecProvider.Env)
+		output, err := execCmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("exec credential provider %q: %w", cmd, err)
+		}
+
+		// Parse the ExecCredential response
+		var cred struct {
+			Status struct {
+				Token string `json:"token"`
+			} `json:"status"`
+		}
+		if err := json.Unmarshal(output, &cred); err != nil {
+			return nil, fmt.Errorf("parse exec credential output: %w", err)
+		}
+		if cred.Status.Token == "" {
+			return nil, fmt.Errorf("exec credential provider returned empty token")
+		}
+
+		// Create a new config with the static bearer token
+		resolved := rest.CopyConfig(original)
+		resolved.ExecProvider = nil
+		resolved.BearerToken = cred.Status.Token
+		return resolved, nil
+	}
+
+	return original, nil
+}
+
+// execCommand creates an exec.Cmd from the exec provider config.
+func execCommand(command string, args []string, envVars []clientcmdapi.ExecEnvVar) *exec.Cmd {
+	cmd := exec.Command(command, args...)
+	// Inherit current environment
+	cmd.Env = os.Environ()
+	// Add exec provider env vars
+	for _, e := range envVars {
+		cmd.Env = append(cmd.Env, e.Name+"="+e.Value)
+	}
+	return cmd
+}

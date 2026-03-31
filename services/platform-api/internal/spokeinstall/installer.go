@@ -53,10 +53,14 @@ type SpokeInstallConfig struct {
 	ProxyImageTag    string
 	ProxyEnabled     bool
 	ProxyNodePort    int32
-	ProxyTLSCert     string // PEM-encoded spoke proxy cert (signed by hub step-ca)
-	ProxyTLSKey      string // PEM-encoded spoke proxy key
-	HubCABundle      string // Base64-encoded hub CA for agent to verify hub TLS
-	Flavors          string
+	ProxyTLSCert           string // PEM-encoded spoke proxy cert (only if not using cert-manager)
+	ProxyTLSKey            string // PEM-encoded spoke proxy key (only if not using cert-manager)
+	HubCABundle            string // Base64-encoded hub CA for agent to verify hub TLS
+	CertManagerEnabled     bool   // Use cert-manager + StepClusterIssuer for proxy TLS
+	CertManagerIssuerName  string // e.g., "aegis-internal"
+	CertManagerIssuerKind  string // e.g., "StepClusterIssuer"
+	CertManagerIssuerGroup string // e.g., "certmanager.step.sm"
+	Flavors                string
 }
 
 // Install installs the aegis-spoke Helm chart on a remote cluster.
@@ -221,7 +225,25 @@ func buildValues(cfg SpokeInstallConfig) map[string]interface{} {
 		if cfg.ProxyJWTSecret != "" {
 			proxy["jwtSecret"] = cfg.ProxyJWTSecret
 		}
-		if cfg.ProxyTLSCert != "" && cfg.ProxyTLSKey != "" {
+		if cfg.CertManagerEnabled && cfg.CertManagerIssuerName != "" {
+			// Use cert-manager for automatic TLS cert issuance from step-ca
+			proxy["tls"] = map[string]interface{}{
+				"terminateAtIngress": false,
+				"certManager": map[string]interface{}{
+					"enabled": true,
+					"issuerRef": map[string]interface{}{
+						"name":  cfg.CertManagerIssuerName,
+						"kind":  cfg.CertManagerIssuerKind,
+						"group": cfg.CertManagerIssuerGroup,
+					},
+					"dnsNames": []interface{}{
+						"*.nip.io",
+						fmt.Sprintf("spoke-proxy-%s.nip.io", sanitize(cfg.ClusterID)),
+					},
+				},
+			}
+		} else if cfg.ProxyTLSCert != "" && cfg.ProxyTLSKey != "" {
+			// Fallback: static TLS cert
 			proxy["tls"] = map[string]interface{}{
 				"cert": cfg.ProxyTLSCert,
 				"key":  cfg.ProxyTLSKey,

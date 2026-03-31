@@ -369,6 +369,34 @@ func getenv(key, def string) string {
 	return def
 }
 
+// readEnvOrFile reads a value from an env var, or from a file path env var.
+func readEnvOrFile(envKey, fileEnvKey string) string {
+	if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+		return v
+	}
+	if path := strings.TrimSpace(os.Getenv(fileEnvKey)); path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return ""
+}
+
+// readEnvOrFileB64 reads a base64-encoded value from env, or reads a file and base64-encodes it.
+func readEnvOrFileB64(envKey, fileEnvKey string) string {
+	if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+		return v
+	}
+	if path := strings.TrimSpace(os.Getenv(fileEnvKey)); path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return base64.StdEncoding.EncodeToString(data)
+		}
+	}
+	return ""
+}
+
 // inferImportOIDCTokenURL derives the Keycloak token URL from the hub's own OIDC configuration.
 func inferImportOIDCTokenURL() string {
 	if v := strings.TrimSpace(os.Getenv("AEGIS_IMPORT_CP_OIDC_TOKEN_URL")); v != "" {
@@ -433,21 +461,8 @@ func (s *Server) installSpokeOnImportedCluster(clusterID, projectID, provider, r
 		Flavors:          getenv("AEGIS_IMPORT_DEFAULT_FLAVORS", defaultImportFlavors),
 	}
 
-	// Request TLS cert from hub's step-ca for the spoke proxy
+	// Read hub CA for spoke agent TLS verification
 	if s.infraClient != nil {
-		certPEM, keyPEM, certErr := spokeinstall.RequestSpokeProxyCert(ctx, s.infraClient, clusterID, "aegis-system")
-		if certErr != nil {
-			s.log.Warn("import: failed to get spoke proxy cert from step-ca, spoke proxy will lack TLS",
-				zap.String("cluster_id", clusterID),
-				zap.Error(certErr))
-		} else {
-			cfg.ProxyTLSCert = certPEM
-			cfg.ProxyTLSKey = keyPEM
-			s.log.Info("import: spoke proxy cert issued by hub step-ca",
-				zap.String("cluster_id", clusterID))
-		}
-
-		// Read hub CA for spoke agent TLS verification
 		hubCA, caErr := spokeinstall.ReadHubCA(ctx, s.infraClient, "aegis-system")
 		if caErr != nil {
 			s.log.Warn("import: failed to read hub CA from trust bundle",
@@ -456,6 +471,41 @@ func (s *Server) installSpokeOnImportedCluster(clusterID, projectID, provider, r
 		} else {
 			cfg.HubCABundle = hubCA
 		}
+	}
+
+	// Install cert-manager + step-issuer on the remote cluster for production TLS
+	pkiCfg := spokeinstall.PKIConfig{
+		StepCAURL:           getenv("AEGIS_STEP_CA_URL", ""),
+		StepCARootCAB64:     readEnvOrFileB64("AEGIS_STEP_CA_ROOT_CA_B64", "AEGIS_STEP_CA_ROOT_CA_FILE"),
+		StepCATLSCAB64:      readEnvOrFileB64("AEGIS_STEP_CA_TLS_CA_B64", "AEGIS_STEP_CA_TLS_CA_FILE"),
+		ProvisionerName:     getenv("AEGIS_STEP_PROVISIONER_NAME", "aegis"),
+		ProvisionerKID:      strings.TrimSpace(os.Getenv("AEGIS_STEP_PROVISIONER_KID")),
+		ProvisionerPassword: readEnvOrFile("AEGIS_STEP_PROVISIONER_PASSWORD", "AEGIS_STEP_PROVISIONER_PASSWORD_FILE"),
+		ClusterIssuerName:   getenv("AEGIS_CLUSTER_ISSUER_NAME", "aegis-internal"),
+	}
+
+	if pkiCfg.StepCAURL != "" && pkiCfg.ProvisionerKID != "" && pkiCfg.ProvisionerPassword != "" {
+		s.log.Info("import: installing cert-manager + step-issuer on remote cluster",
+			zap.String("cluster_id", clusterID),
+			zap.String("step_ca_url", pkiCfg.StepCAURL))
+
+		if err := spokeinstall.InstallPKI(ctx, s.log, restCfg, pkiCfg); err != nil {
+			s.log.Error("import: PKI installation failed — spoke proxy will lack TLS",
+				zap.String("cluster_id", clusterID),
+				zap.Error(err))
+		} else {
+			// PKI installed — configure spoke chart to use cert-manager for TLS
+			cfg.CertManagerEnabled = true
+			cfg.CertManagerIssuerName = pkiCfg.ClusterIssuerName
+			cfg.CertManagerIssuerKind = "StepClusterIssuer"
+			cfg.CertManagerIssuerGroup = "certmanager.step.sm"
+			s.log.Info("import: PKI installed, spoke will use cert-manager for TLS",
+				zap.String("cluster_id", clusterID),
+				zap.String("issuer", pkiCfg.ClusterIssuerName))
+		}
+	} else {
+		s.log.Warn("import: step-ca not configured — spoke proxy will lack TLS. Set AEGIS_STEP_CA_URL, AEGIS_STEP_PROVISIONER_KID, and AEGIS_STEP_PROVISIONER_PASSWORD.",
+			zap.String("cluster_id", clusterID))
 	}
 
 	s.log.Info("import: starting spoke installation on remote cluster",

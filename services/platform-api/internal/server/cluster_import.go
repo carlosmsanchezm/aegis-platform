@@ -433,10 +433,37 @@ func (s *Server) installSpokeOnImportedCluster(clusterID, projectID, provider, r
 		Flavors:          getenv("AEGIS_IMPORT_DEFAULT_FLAVORS", defaultImportFlavors),
 	}
 
+	// Request TLS cert from hub's step-ca for the spoke proxy
+	if s.infraClient != nil {
+		certPEM, keyPEM, certErr := spokeinstall.RequestSpokeProxyCert(ctx, s.infraClient, clusterID, "aegis-system")
+		if certErr != nil {
+			s.log.Warn("import: failed to get spoke proxy cert from step-ca, spoke proxy will lack TLS",
+				zap.String("cluster_id", clusterID),
+				zap.Error(certErr))
+		} else {
+			cfg.ProxyTLSCert = certPEM
+			cfg.ProxyTLSKey = keyPEM
+			s.log.Info("import: spoke proxy cert issued by hub step-ca",
+				zap.String("cluster_id", clusterID))
+		}
+
+		// Read hub CA for spoke agent TLS verification
+		hubCA, caErr := spokeinstall.ReadHubCA(ctx, s.infraClient, "aegis-system")
+		if caErr != nil {
+			s.log.Warn("import: failed to read hub CA from trust bundle",
+				zap.String("cluster_id", clusterID),
+				zap.Error(caErr))
+		} else {
+			cfg.HubCABundle = hubCA
+		}
+	}
+
 	s.log.Info("import: starting spoke installation on remote cluster",
 		zap.String("cluster_id", clusterID),
 		zap.String("provider", provider),
-		zap.String("region", region))
+		zap.String("region", region),
+		zap.Bool("has_tls_cert", cfg.ProxyTLSCert != ""),
+		zap.Bool("has_hub_ca", cfg.HubCABundle != ""))
 
 	if err := spokeinstall.Install(ctx, s.log, restCfg, chartPath, cfg); err != nil {
 		s.log.Error("import: spoke installation failed",

@@ -53,6 +53,9 @@ type SpokeInstallConfig struct {
 	ProxyImageTag    string
 	ProxyEnabled     bool
 	ProxyNodePort    int32
+	ProxyTLSCert     string // PEM-encoded spoke proxy cert (signed by hub step-ca)
+	ProxyTLSKey      string // PEM-encoded spoke proxy key
+	HubCABundle      string // Base64-encoded hub CA for agent to verify hub TLS
 	Flavors          string
 }
 
@@ -183,6 +186,9 @@ func buildValues(cfg SpokeInstallConfig) map[string]interface{} {
 	if cfg.Flavors != "" {
 		env["AEGIS_FLAVORS"] = cfg.Flavors
 	}
+	if cfg.HubCABundle != "" {
+		env["AEGIS_PLATFORM_CA_B64"] = cfg.HubCABundle
+	}
 
 	k8sAgent := map[string]interface{}{
 		"env": env,
@@ -214,6 +220,12 @@ func buildValues(cfg SpokeInstallConfig) map[string]interface{} {
 		}
 		if cfg.ProxyJWTSecret != "" {
 			proxy["jwtSecret"] = cfg.ProxyJWTSecret
+		}
+		if cfg.ProxyTLSCert != "" && cfg.ProxyTLSKey != "" {
+			proxy["tls"] = map[string]interface{}{
+				"cert": cfg.ProxyTLSCert,
+				"key":  cfg.ProxyTLSKey,
+			}
 		}
 	}
 

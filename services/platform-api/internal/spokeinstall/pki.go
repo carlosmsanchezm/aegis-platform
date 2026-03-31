@@ -97,7 +97,7 @@ func installCertManager(ctx context.Context, log *zap.Logger, restConfig *rest.C
 	}
 
 	// Download chart
-	chartPath, err := downloadChart(settings, repoEntry, "jetstack/cert-manager", "")
+	chartPath, err := downloadChart(settings, repoEntry, "cert-manager", "")
 	if err != nil {
 		return fmt.Errorf("download cert-manager chart: %w", err)
 	}
@@ -151,7 +151,7 @@ func installStepIssuer(ctx context.Context, log *zap.Logger, restConfig *rest.Co
 		URL:  "https://smallstep.github.io/helm-charts",
 	}
 
-	chartPath, err := downloadChart(settings, repoEntry, "smallstep/step-issuer", "")
+	chartPath, err := downloadChart(settings, repoEntry, "step-issuer", "")
 	if err != nil {
 		return fmt.Errorf("download step-issuer chart: %w", err)
 	}
@@ -372,29 +372,25 @@ func createStepClusterIssuer(ctx context.Context, log *zap.Logger, restConfig *r
 
 // downloadChart downloads a Helm chart from a remote repository.
 func downloadChart(settings *helmcli.EnvSettings, repoEntry *repo.Entry, chartName, version string) (string, error) {
-	// Create a chart downloader
+	// Add repo to Helm's repo list so LocateChart can find it
 	providers := getter.All(settings)
+	r, err := repo.NewChartRepository(repoEntry, providers)
+	if err != nil {
+		return "", fmt.Errorf("create chart repository %s: %w", repoEntry.Name, err)
+	}
+	if _, err := r.DownloadIndexFile(); err != nil {
+		return "", fmt.Errorf("download repo index for %s: %w", repoEntry.Name, err)
+	}
 
-	chartDownloader := &action.ChartPathOptions{
+	// Use ChartPathOptions with RepoURL to locate and download the chart
+	chartPathOpts := action.ChartPathOptions{
 		RepoURL: repoEntry.URL,
 		Version: version,
 	}
 
-	cp, err := chartDownloader.LocateChart(chartName, settings)
+	cp, err := chartPathOpts.LocateChart(chartName, settings)
 	if err != nil {
-		// Fallback: add repo and retry
-		r, repoErr := repo.NewChartRepository(repoEntry, providers)
-		if repoErr != nil {
-			return "", fmt.Errorf("create chart repository: %w", repoErr)
-		}
-		if _, err := r.DownloadIndexFile(); err != nil {
-			return "", fmt.Errorf("download repo index: %w", err)
-		}
-
-		cp, err = chartDownloader.LocateChart(chartName, settings)
-		if err != nil {
-			return "", fmt.Errorf("locate chart %s: %w", chartName, err)
-		}
+		return "", fmt.Errorf("locate chart %s from %s: %w", chartName, repoEntry.URL, err)
 	}
 
 	return cp, nil

@@ -781,7 +781,13 @@ func (r *AegisWorkloadReconciler) discoverProxyNodePort() int32 {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Build service name candidates including the Helm release pattern used by cluster import
 	serviceNames := []string{"aegis-spoke-proxy", "spoke-proxy"}
+	if r.clusterID != "" {
+		// Import flow names the service: aegis-spoke-{clusterID}-aegis-spoke-proxy
+		importName := fmt.Sprintf("aegis-spoke-%s-aegis-spoke-proxy", builders.SanitizeName(r.clusterID))
+		serviceNames = append([]string{importName}, serviceNames...)
+	}
 	namespaces := []string{"aegis-system", "default"}
 
 	for _, ns := range namespaces {
@@ -802,7 +808,14 @@ func (r *AegisWorkloadReconciler) discoverProxyNodePort() int32 {
 			}
 		}
 	}
-	return 443
+
+	// Fall back to env var if configured, otherwise default NodePort
+	if v := os.Getenv("AEGIS_SPOKE_PROXY_NODEPORT"); v != "" {
+		if p, err := strconv.ParseInt(v, 10, 32); err == nil && p > 0 {
+			return int32(p)
+		}
+	}
+	return 31484
 }
 
 // discoverNodePublicIP attempts to discover the node's public IP address.

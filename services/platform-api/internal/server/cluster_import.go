@@ -31,7 +31,7 @@ const (
 	defaultImportKubeconfigSecretName      = "aegis-kubeconfigs"
 	defaultImportKubeconfigSecretNamespace = "aegis-system"
 	defaultImportCPGRPC                    = "aegis-services-platform-api.aegis-system.svc.cluster.local:8081"
-	defaultImportCPGRPCInsecure            = "true"
+	defaultImportCPGRPCInsecure            = "false"
 	defaultImportFlavors                   = "cpu-small,cpu-medium,cpu-large"
 	defaultImportInstallCommand            = "helm upgrade --install aegis-spoke ./charts/aegis-spoke -n aegis-system -f values.yaml"
 	defaultAgentScriptBaseURL              = "https://aegis.run/install-agent"
@@ -441,24 +441,42 @@ func (s *Server) installSpokeOnImportedCluster(clusterID, projectID, provider, r
 
 	chartPath := getenv("AEGIS_SPOKE_CHART_PATH", "charts/aegis-spoke")
 
+	hubGRPC := getenv("AEGIS_IMPORT_CP_GRPC", defaultImportCPGRPC)
+	if hubGRPC == defaultImportCPGRPC {
+		s.log.Warn("import: using internal K8s DNS for hub gRPC — this only works if spoke and hub share the same cluster or VPC. Set AEGIS_IMPORT_CP_GRPC for cross-network imports.",
+			zap.String("cluster_id", clusterID),
+			zap.String("hub_grpc", hubGRPC))
+	}
+
+	oidcTokenURL := inferImportOIDCTokenURL()
+	oidcClientSecret := inferImportOIDCClientSecret()
+	if oidcTokenURL == "" || oidcClientSecret == "" {
+		s.log.Error("import: OIDC credentials not configured — spoke agent will not be able to authenticate. Set OIDC_ISSUER_URL and AEGIS_SPOKE_OIDC_CLIENT_SECRET.",
+			zap.String("cluster_id", clusterID),
+			zap.Bool("has_token_url", oidcTokenURL != ""),
+			zap.Bool("has_client_secret", oidcClientSecret != ""))
+		return
+	}
+
 	cfg := spokeinstall.SpokeInstallConfig{
-		ClusterID:        clusterID,
-		Provider:         provider,
-		Region:           region,
-		HubGRPC:          getenv("AEGIS_IMPORT_CP_GRPC", defaultImportCPGRPC),
-		HubGRPCInsecure:  getenv("AEGIS_IMPORT_CP_GRPC_INSECURE", defaultImportCPGRPCInsecure) == "true",
-		OIDCTokenURL:     inferImportOIDCTokenURL(),
-		OIDCClientID:     getenv("AEGIS_IMPORT_CP_OIDC_CLIENT_ID", "spoke-agent"),
-		OIDCClientSecret: inferImportOIDCClientSecret(),
-		OIDCAudience:     inferImportOIDCAudience(),
-		CABundleB64:      strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_B64")),
-		ProxyJWTSecret:   strings.TrimSpace(os.Getenv("AEGIS_PROXY_JWT_SECRET")),
-		AgentImageRepo:   strings.TrimSpace(os.Getenv("AEGIS_IMPORT_AGENT_IMAGE_REPO")),
-		AgentImageTag:    strings.TrimSpace(os.Getenv("AEGIS_IMPORT_AGENT_IMAGE_TAG")),
-		ProxyImageRepo:   strings.TrimSpace(os.Getenv("AEGIS_IMPORT_PROXY_IMAGE_REPO")),
-		ProxyImageTag:    strings.TrimSpace(os.Getenv("AEGIS_IMPORT_PROXY_IMAGE_TAG")),
-		ProxyEnabled:     getenv("AEGIS_IMPORT_PROXY_ENABLED", "true") == "true",
-		Flavors:          getenv("AEGIS_IMPORT_DEFAULT_FLAVORS", defaultImportFlavors),
+		ClusterID:          clusterID,
+		Provider:           provider,
+		Region:             region,
+		HubGRPC:            hubGRPC,
+		HubGRPCInsecure:    getenv("AEGIS_IMPORT_CP_GRPC_INSECURE", defaultImportCPGRPCInsecure) == "true",
+		OIDCTokenURL:       oidcTokenURL,
+		OIDCClientID:       getenv("AEGIS_IMPORT_CP_OIDC_CLIENT_ID", "spoke-agent"),
+		OIDCClientSecret:   oidcClientSecret,
+		OIDCAudience:       inferImportOIDCAudience(),
+		CABundleB64:        strings.TrimSpace(os.Getenv("AEGIS_PLATFORM_CA_B64")),
+		ProxyJWTSecret:     strings.TrimSpace(os.Getenv("AEGIS_PROXY_JWT_SECRET")),
+		AgentImageRepo:     getenv("AEGIS_IMPORT_AGENT_IMAGE_REPO", strings.TrimSpace(os.Getenv("AEGIS_SPOKE_IMAGE_REPO"))),
+		AgentImageTag:      getenv("AEGIS_IMPORT_AGENT_IMAGE_TAG", strings.TrimSpace(os.Getenv("AEGIS_SPOKE_IMAGE_TAG"))),
+		ProxyImageRepo:     getenv("AEGIS_IMPORT_PROXY_IMAGE_REPO", strings.TrimSpace(os.Getenv("AEGIS_SPOKE_PROXY_IMAGE_REPO"))),
+		ProxyImageTag:      getenv("AEGIS_IMPORT_PROXY_IMAGE_TAG", strings.TrimSpace(os.Getenv("AEGIS_SPOKE_PROXY_IMAGE_TAG"))),
+		VscodeREHInitImage: getenv("AEGIS_IMPORT_VSCODE_REH_INIT_IMAGE", strings.TrimSpace(os.Getenv("AEGIS_VSCODE_REH_INIT_IMAGE"))),
+		ProxyEnabled:       getenv("AEGIS_IMPORT_PROXY_ENABLED", "true") == "true",
+		Flavors:            getenv("AEGIS_IMPORT_DEFAULT_FLAVORS", defaultImportFlavors),
 	}
 
 	// Read hub CA for spoke agent TLS verification

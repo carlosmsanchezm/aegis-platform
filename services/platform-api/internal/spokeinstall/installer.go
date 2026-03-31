@@ -60,6 +60,7 @@ type SpokeInstallConfig struct {
 	CertManagerIssuerName  string // e.g., "aegis-internal"
 	CertManagerIssuerKind  string // e.g., "StepClusterIssuer"
 	CertManagerIssuerGroup string // e.g., "certmanager.step.sm"
+	VscodeREHInitImage     string // ECR image for VS Code REH init container (e.g., aegis/vscode-reh-init:1.113.0)
 	Flavors                string
 }
 
@@ -192,6 +193,12 @@ func buildValues(cfg SpokeInstallConfig) map[string]interface{} {
 	}
 	if cfg.HubCABundle != "" {
 		env["AEGIS_PLATFORM_CA_B64"] = cfg.HubCABundle
+	}
+	if cfg.VscodeREHInitImage != "" {
+		env["AEGIS_VSCODE_REH_INIT_IMAGE"] = cfg.VscodeREHInitImage
+	}
+	if cfg.ProxyNodePort > 0 {
+		env["AEGIS_SPOKE_PROXY_NODEPORT"] = fmt.Sprintf("%d", cfg.ProxyNodePort)
 	}
 
 	k8sAgent := map[string]interface{}{

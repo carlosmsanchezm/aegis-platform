@@ -18,6 +18,8 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG FIPS_ENABLED=true
 
+USER 0
+
 # Install C compiler for CGO (FIPS/BoringCrypto requires CGO_ENABLED=1).
 # IB golang builder already has gcc; this handles public golang:slim images.
 RUN if ! command -v gcc >/dev/null 2>&1; then \

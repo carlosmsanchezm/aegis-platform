@@ -3,16 +3,16 @@ module github.com/yourorg/aegis/services/platform-api
 go 1.24.0
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.40.1
+	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.27.11
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.11
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.62.2
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.52.6
-	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.62.0
+	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.65.0
 	github.com/aws/aws-sdk-go-v2/service/eks v1.76.1
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.54.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.28.6
-	github.com/aws/smithy-go v1.24.0
+	github.com/aws/smithy-go v1.24.2
 	github.com/docker/go-connections v0.6.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
@@ -47,10 +47,10 @@ require (
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.1 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.15 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.15 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.7 // indirect

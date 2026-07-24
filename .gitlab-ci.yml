@@ -1,0 +1,168 @@
+# =============================================================================
+# Aegis Platform — GitLab CI (image builds on runner, not local Docker Desktop)
+#
+# Setup (GitLab project → Settings → CI/CD → Variables):
+#   AWS_ACCESS_KEY_ID       (masked)  IAM user/role keys for account 471147325433
+#   AWS_SECRET_ACCESS_KEY   (masked)
+#   AWS_DEFAULT_REGION      us-east-1  (or set below)
+#   AWS_ECR_REGISTRY        471147325433.dkr.ecr.us-east-1.amazonaws.com
+# Optional:
+#   AEGIS_UI_REPO_URL       git URL for aegis-ui (if UI lives in another repo)
+#   AEGIS_UI_REPO_TOKEN     deploy token if UI repo is private
+#   RUNNER_TAG              e.g. docker  (match your GitLab runner tag)
+#
+# After a green pipeline, deploy from laptop WITHOUT Docker:
+#   export CLOUD_IMAGE_TAG=<CI_COMMIT_SHORT_SHA>
+#   export AWS_PROFILE=aegis-lab
+#   ./scripts/hub-eks.sh up
+# (hub-eks never builds images by default — CI owns builds)
+#
+# See docs/CI-GITLAB-IMAGES.md
+# =============================================================================
+
+stages:
+  - build
+  - notify
+
+variables:
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_ECR_REGISTRY: "471147325433.dkr.ecr.us-east-1.amazonaws.com"
+  IMAGE_FLAVOR: "public"
+  DOCKER_TLS_CERTDIR: "/certs"
+  # Use Docker BuildKit
+  DOCKER_BUILDKIT: "1"
+  FF_NETWORK_PER_BUILD: "true"
+
+# ---------------------------------------------------------------------------
+# Build & push hub images to ECR (public bases — no Iron Bank)
+# ---------------------------------------------------------------------------
+build-images:
+  stage: build
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  # Uncomment and set to your runner tag if required:
+  # tags:
+  #   - docker
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_TAG == null
+      changes:
+        - services/**/*
+        - agents/**/*
+        - proto/**/*
+        - pkg/**/*
+        - workspace-images/**/*
+        - Makefile
+        - .gitlab-ci.yml
+        - charts/**/*
+    - if: $CI_COMMIT_TAG
+  before_script:
+    - |
+      set -euo pipefail
+      apk add --no-cache aws-cli git make bash curl go jq
+      echo "Docker info..."
+      docker info
+      echo "AWS identity..."
+      aws sts get-caller-identity
+      echo "ECR login ${AWS_ECR_REGISTRY}..."
+      aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" \
+        | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+      # Ensure buildx
+      docker buildx version || true
+      docker buildx create --use --name aegis-ci 2>/dev/null || docker buildx use aegis-ci || true
+  script:
+    - |
+      set -euo pipefail
+      export CLOUD_IMAGE_TAG="${CI_COMMIT_SHORT_SHA}"
+      export AWS_REGION="${AWS_DEFAULT_REGION}"
+      export IMAGE_FLAVOR="${IMAGE_FLAVOR:-public}"
+      export SKIP_UI="${SKIP_UI:-0}"
+
+      # Optional: clone UI repo for Backstage image
+      if [[ -n "${AEGIS_UI_REPO_URL:-}" ]]; then
+        echo "Cloning UI from ${AEGIS_UI_REPO_URL}..."
+        UI_CLONE="${CI_PROJECT_DIR}/.ci-aegis-ui"
+        rm -rf "${UI_CLONE}"
+        if [[ -n "${AEGIS_UI_REPO_TOKEN:-}" ]]; then
+          git clone --depth 1 \
+            "https://gitlab-ci-token:${AEGIS_UI_REPO_TOKEN}@${AEGIS_UI_REPO_URL#https://}" \
+            "${UI_CLONE}" || git clone --depth 1 "${AEGIS_UI_REPO_URL}" "${UI_CLONE}"
+        else
+          git clone --depth 1 "${AEGIS_UI_REPO_URL}" "${UI_CLONE}"
+        fi
+        export AEGIS_UI_DIR="${UI_CLONE}"
+      else
+        echo "AEGIS_UI_REPO_URL not set — building without UI (SKIP_UI=1)"
+        export SKIP_UI=1
+      fi
+
+      echo "Building/pushing tag=${CLOUD_IMAGE_TAG} flavor=${IMAGE_FLAVOR} skip_ui=${SKIP_UI}"
+      make print-image-flavor IMAGE_FLAVOR="${IMAGE_FLAVOR}"
+      make push-cloud-images \
+        AWS_ECR_REGISTRY="${AWS_ECR_REGISTRY}" \
+        AWS_REGION="${AWS_DEFAULT_REGION}" \
+        IMAGE_FLAVOR="${IMAGE_FLAVOR}" \
+        CLOUD_IMAGE_TAG="${CLOUD_IMAGE_TAG}" \
+        SKIP_UI="${SKIP_UI}" \
+        AEGIS_UI_DIR="${AEGIS_UI_DIR:-/nonexistent}" \
+        PUSH_LATEST=0
+
+      # dotenv for downstream jobs / manual deploy copy-paste
+      {
+        echo "CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG}"
+        echo "AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY}"
+        echo "PLATFORM_API_IMAGE=${AWS_ECR_REGISTRY}/aegis/platform-api:${CLOUD_IMAGE_TAG}"
+        echo "PROXY_IMAGE=${AWS_ECR_REGISTRY}/aegis/proxy:${CLOUD_IMAGE_TAG}"
+        echo "K8S_AGENT_IMAGE=${AWS_ECR_REGISTRY}/aegis/k8s-agent:${CLOUD_IMAGE_TAG}"
+        echo "WORKSPACE_IMAGE=${AWS_ECR_REGISTRY}/aegis/workspace-vscode:${CLOUD_IMAGE_TAG}"
+        if [[ "${SKIP_UI}" != "1" ]]; then
+          echo "UI_IMAGE=${AWS_ECR_REGISTRY}/aegis/ui:${CLOUD_IMAGE_TAG}"
+        fi
+      } | tee build.env
+
+      echo ""
+      echo "=========================================="
+      echo "Images pushed. Deploy from any machine WITHOUT Docker:"
+      echo ""
+      echo "  export AWS_PROFILE=aegis-lab"
+      echo "  export AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY}"
+      echo "  export CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG}"
+      echo "  ./scripts/hub-eks.sh up"
+      echo "=========================================="
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - build.env
+    expire_in: 14 days
+
+# Iron Bank path (manual only — needs registry1.dso.mil credentials on runner)
+build-images-ironbank:
+  extends: build-images
+  variables:
+    IMAGE_FLAVOR: "ironbank"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - when: never
+
+# Convenience job: print deploy command only (after build)
+print-deploy-command:
+  stage: notify
+  image: alpine:3.20
+  needs:
+    - job: build-images
+      artifacts: true
+  script:
+    - |
+      echo "Deploy without local Docker:"
+      echo "  export AWS_PROFILE=aegis-lab"
+      echo "  export AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY}"
+      echo "  export CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG}"
+      echo "  ./scripts/hub-eks.sh up"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_COMMIT_BRANCH

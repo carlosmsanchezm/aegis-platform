@@ -127,8 +127,11 @@ platform-api-docker-push:
 
 .PHONY: build-platform
 build-platform:
-	@echo "Building platform-api image $(PLATFORM_API_IMAGE)"
-	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE) $(if $(BUILDX_OUTPUT),BUILDX_OUTPUT=$(BUILDX_OUTPUT)) $(if $(PLATFORMS),PLATFORMS=$(PLATFORMS))
+	@echo "Building platform-api image $(PLATFORM_API_IMAGE) (IMAGE_FLAVOR=$(IMAGE_FLAVOR))"
+	@$(MAKE) -C services/platform-api docker-build IMG=$(PLATFORM_API_IMAGE) \
+		$(if $(BUILDX_OUTPUT),BUILDX_OUTPUT=$(BUILDX_OUTPUT)) \
+		$(if $(PLATFORMS),PLATFORMS=$(PLATFORMS)) \
+		BUILD_ARGS='$(DOCKER_BASE_ARGS)'
 	@if [ "$(BUILDX_OUTPUT)" != "--push" ]; then $(MAKE) kind-load-platform; fi
 
 .PHONY: kind-load-platform
@@ -143,11 +146,16 @@ kind-load-platform:
 
 .PHONY: build-agent
 build-agent:
-	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE)"
+	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE) (IMAGE_FLAVOR=$(IMAGE_FLAVOR))"
 ifeq ($(BUILDX_OUTPUT),--push)
-	@cd agents/k8s-agent && docker buildx build --no-cache --platform $(or $(PLATFORMS),linux/amd64) --tag $(K8S_AGENT_IMAGE) --push -f Dockerfile ../..
+	@cd agents/k8s-agent && docker buildx build --no-cache \
+		--platform $(or $(PLATFORMS),linux/amd64) \
+		--tag $(K8S_AGENT_IMAGE) --push \
+		$(DOCKER_BASE_ARGS) \
+		-f Dockerfile ../..
 else
-	@$(MAKE) -C agents/k8s-agent docker-build IMG=$(K8S_AGENT_IMAGE)
+	@docker build -f agents/k8s-agent/Dockerfile -t $(K8S_AGENT_IMAGE) \
+		$(DOCKER_BASE_ARGS) .
 	@$(MAKE) kind-load-agent
 endif
 
@@ -168,28 +176,29 @@ kind-load-agent:
 
 .PHONY: build-workspace
 build-workspace:
-	@echo "Building workspace image $(WORKSPACE_IMAGE)"
-	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
+	@echo "Building workspace image $(WORKSPACE_IMAGE) (IMAGE_FLAVOR=$(IMAGE_FLAVOR))"
+	@docker buildx build --no-cache --platform $(or $(PLATFORMS),linux/amd64) \
 		-t $(WORKSPACE_IMAGE) \
-		--push \
+		$(if $(filter --load,$(BUILDX_OUTPUT)),--load,--push) \
+		$(DOCKER_WORKSPACE_ARGS) \
 		workspace-images/openssh-vscode
 
 .PHONY: build-proxy
 build-proxy:
-	@echo "Building proxy image $(PROXY_IMAGE)"
-	@docker buildx build --no-cache --platform linux/amd64,linux/arm64 \
+	@echo "Building proxy image $(PROXY_IMAGE) (IMAGE_FLAVOR=$(IMAGE_FLAVOR))"
+	@docker buildx build --no-cache --platform $(or $(PLATFORMS),linux/amd64) \
 		-t $(PROXY_IMAGE) \
-		--push \
+		$(if $(filter --load,$(BUILDX_OUTPUT)),--load,--push) \
+		$(DOCKER_BASE_ARGS) \
 		-f services/proxy/Dockerfile \
 		.
 
 .PHONY: build-proxy-local
 build-proxy-local:
-	@echo "Building proxy image $(PROXY_IMAGE) for local platform"
-	@docker build -f services/proxy/Dockerfile -t $(PROXY_IMAGE) \
-		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
-		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
-		.
+	@echo "Building proxy image $(PROXY_IMAGE) for local platform (IMAGE_FLAVOR=public)"
+	@$(MAKE) IMAGE_FLAVOR=public PROXY_IMAGE=$(PROXY_IMAGE) BUILDX_OUTPUT=--load \
+		PLATFORMS=$$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || echo linux/arm64) \
+		build-proxy
 
 PULUMI_VERSION ?= 3.226.0
 
@@ -228,11 +237,10 @@ build-platform-local: stage-build-deps
 
 .PHONY: build-agent-local
 build-agent-local:
-	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE) for local platform (native arch)"
-	@docker build -f agents/k8s-agent/Dockerfile -t $(K8S_AGENT_IMAGE) \
-		--build-arg BUILDER_REGISTRY=docker.io --build-arg BUILDER_IMAGE=library/golang --build-arg BUILDER_TAG=1.24 \
-		--build-arg BASE_REGISTRY=registry.access.redhat.com --build-arg BASE_IMAGE=ubi9/ubi-minimal --build-arg BASE_TAG=9.7 \
-		.
+	@echo "Building k8s-agent image $(K8S_AGENT_IMAGE) for local platform (IMAGE_FLAVOR=public)"
+	@$(MAKE) IMAGE_FLAVOR=public K8S_AGENT_IMAGE=$(K8S_AGENT_IMAGE) BUILDX_OUTPUT=--load \
+		PLATFORMS=$$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || echo linux/arm64) \
+		build-agent
 
 .PHONY: build-local-all
 build-local-all: build-platform-local build-proxy-local build-agent-local
@@ -274,7 +282,8 @@ RHBK_USERNAME ?= un1cornsl4yer69
 RHBK_PASSWORD ?= P1rac1cab@16love
 RHBK_EMAIL ?= aegis@local.test
 
-AWS_ECR_REGISTRY ?= 195714074609.dkr.ecr.us-east-1.amazonaws.com
+# Default ECR for lab account 471147325433 (override for other accounts)
+AWS_ECR_REGISTRY ?= 471147325433.dkr.ecr.us-east-1.amazonaws.com
 CLOUD_IMAGE_TAG := $(or $(CLOUD_IMAGE_TAG),$(shell git rev-parse --short HEAD))
 CLOUD_PLATFORM_API_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/platform-api:$(CLOUD_IMAGE_TAG)
 CLOUD_PROXY_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/proxy:$(CLOUD_IMAGE_TAG)
@@ -283,14 +292,82 @@ CLOUD_WORKSPACE_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:$(CLOUD_IMAG
 CLOUD_UI_IMAGE ?= $(AWS_ECR_REGISTRY)/aegis/ui:$(CLOUD_IMAGE_TAG)
 AEGIS_UI_DIR ?= $(HOME)/code/aegis-ui
 
+# -----------------------------------------------------------------------------
+# Image base flavor: public (lab/demo) vs ironbank (gov customer / IB pipeline)
+#
+#   make push-cloud-images IMAGE_FLAVOR=public     # default for lab
+#   make push-cloud-images IMAGE_FLAVOR=ironbank   # registry1.dso.mil
+#
+# See docs/IMAGE-BASES.md
+# -----------------------------------------------------------------------------
+IMAGE_FLAVOR ?= public
+
+ifeq ($(IMAGE_FLAVOR),ironbank)
+  BUILDER_REGISTRY ?= registry1.dso.mil
+  BUILDER_IMAGE    ?= ironbank/google/golang/ubi9/golang-1.24
+  BUILDER_TAG      ?= 1.24.13
+  BASE_REGISTRY    ?= registry1.dso.mil
+  BASE_IMAGE       ?= ironbank/redhat/ubi/ubi9-minimal
+  BASE_TAG         ?= 9.7
+  WORKSPACE_BASE_REGISTRY ?= registry1.dso.mil
+  WORKSPACE_BASE_IMAGE    ?= ironbank/opensource/nvidia/cuda
+  WORKSPACE_BASE_TAG      ?= 12.6
+  FIPS_ENABLED     ?= true
+else ifeq ($(IMAGE_FLAVOR),public)
+  # Public registries — no Iron Bank login required (lab, commercial smoke, demos)
+  BUILDER_REGISTRY ?= docker.io
+  BUILDER_IMAGE    ?= library/golang
+  # Match go.work / module go version (needs >= 1.25)
+  BUILDER_TAG      ?= 1.25
+  BASE_REGISTRY    ?= registry.access.redhat.com
+  BASE_IMAGE       ?= ubi9/ubi-minimal
+  BASE_TAG         ?= latest
+  WORKSPACE_BASE_REGISTRY ?= docker.io
+  WORKSPACE_BASE_IMAGE    ?= nvidia/cuda
+  WORKSPACE_BASE_TAG      ?= 12.6.0-runtime-ubi9
+  FIPS_ENABLED     ?= false
+else
+  $(error IMAGE_FLAVOR must be 'public' or 'ironbank' (got '$(IMAGE_FLAVOR)'))
+endif
+
+# Passed to every service Dockerfile (platform-api, proxy, k8s-agent)
+DOCKER_BASE_ARGS = \
+	--build-arg BUILDER_REGISTRY=$(BUILDER_REGISTRY) \
+	--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
+	--build-arg BUILDER_TAG=$(BUILDER_TAG) \
+	--build-arg BASE_REGISTRY=$(BASE_REGISTRY) \
+	--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+	--build-arg BASE_TAG=$(BASE_TAG) \
+	--build-arg FIPS_ENABLED=$(FIPS_ENABLED)
+
+DOCKER_WORKSPACE_ARGS = \
+	--build-arg BASE_REGISTRY=$(WORKSPACE_BASE_REGISTRY) \
+	--build-arg BASE_IMAGE=$(WORKSPACE_BASE_IMAGE) \
+	--build-arg BASE_TAG=$(WORKSPACE_BASE_TAG)
+
+.PHONY: print-image-flavor
+print-image-flavor:
+	@echo "IMAGE_FLAVOR=$(IMAGE_FLAVOR)"
+	@echo "  builder: $(BUILDER_REGISTRY)/$(BUILDER_IMAGE):$(BUILDER_TAG)"
+	@echo "  runtime: $(BASE_REGISTRY)/$(BASE_IMAGE):$(BASE_TAG)"
+	@echo "  workspace: $(WORKSPACE_BASE_REGISTRY)/$(WORKSPACE_BASE_IMAGE):$(WORKSPACE_BASE_TAG)"
+	@echo "  FIPS_ENABLED=$(FIPS_ENABLED)"
+
 .PHONY: push-cloud-images
 push-cloud-images:
-	@echo "Building and pushing cloud images with tag $(CLOUD_IMAGE_TAG) to $(AWS_ECR_REGISTRY)"
+	@echo "Building and pushing cloud images with tag $(CLOUD_IMAGE_TAG) to $(AWS_ECR_REGISTRY) (IMAGE_FLAVOR=$(IMAGE_FLAVOR))"
+	@$(MAKE) print-image-flavor
 	@$(MAKE) PLATFORM_API_IMAGE=$(CLOUD_PLATFORM_API_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-platform
-	@$(MAKE) PROXY_IMAGE=$(CLOUD_PROXY_IMAGE) build-proxy
+	@$(MAKE) PROXY_IMAGE=$(CLOUD_PROXY_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-proxy
 	@$(MAKE) K8S_AGENT_IMAGE=$(CLOUD_K8S_AGENT_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-agent
-	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) build-workspace
+	@$(MAKE) WORKSPACE_IMAGE=$(CLOUD_WORKSPACE_IMAGE) BUILDX_OUTPUT=--push PLATFORMS=linux/amd64 build-workspace
+ifeq ($(SKIP_UI),1)
+	@echo "SKIP_UI=1 — not building UI image"
+else ifneq ($(wildcard $(AEGIS_UI_DIR)/packages/backend/Dockerfile.cloud),)
 	@$(MAKE) CLOUD_UI_IMAGE=$(CLOUD_UI_IMAGE) AEGIS_UI_DIR=$(AEGIS_UI_DIR) push-ui-cloud
+else
+	@echo "WARN: AEGIS_UI_DIR missing ($(AEGIS_UI_DIR)) — skipping UI (set SKIP_UI=1 to silence)"
+endif
 ifeq ($(PUSH_LATEST),1)
 	@echo "Promoting images to :latest"
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/platform-api:latest $(CLOUD_PLATFORM_API_IMAGE)
@@ -298,6 +375,14 @@ ifeq ($(PUSH_LATEST),1)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/k8s-agent:latest $(CLOUD_K8S_AGENT_IMAGE)
 	@docker buildx imagetools create --tag $(AWS_ECR_REGISTRY)/aegis/workspace-vscode:latest $(CLOUD_WORKSPACE_IMAGE)
 endif
+
+# Convenience aliases
+.PHONY: push-cloud-images-public push-cloud-images-ironbank
+push-cloud-images-public:
+	@$(MAKE) IMAGE_FLAVOR=public push-cloud-images
+
+push-cloud-images-ironbank:
+	@$(MAKE) IMAGE_FLAVOR=ironbank push-cloud-images
 
 .PHONY: build-ui-cloud
 build-ui-cloud:
@@ -450,9 +535,9 @@ dev-backstage-cloud-tls:
 clean-local:
 	./scripts/aegis.sh clean
 
-AWS_PROFILE ?= aegis-new
+AWS_PROFILE ?= aegis-lab
 AWS_REGION ?= us-east-1
-SKIP_DNS_UPDATE ?= 0
+SKIP_DNS_UPDATE ?= 1
 
 .PHONY: ecr-login
 ecr-login:
@@ -461,13 +546,37 @@ ecr-login:
 		docker login --username AWS --password-stdin $(AWS_ECR_REGISTRY)
 
 .PHONY: deploy-cloud
+# Prefer: make hub-up  (or ./scripts/hub-eks.sh up) — phased + logs
+# This target remains for older docs; same underlying hub-app deploy.
 deploy-cloud:
+	@echo "NOTE: Prefer './scripts/hub-eks.sh up' (see docs/HUB-EKS-DEPLOY.md)"
 	@echo "Applying Terraform (idempotent)..."
 	cd terraform && AWS_PROFILE=$(AWS_PROFILE) terraform apply -auto-approve
-	@echo "Deploying Aegis hub to cloud EKS..."
-	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_DNS_UPDATE=$(SKIP_DNS_UPDATE) \
+	@echo "Deploying Aegis hub (scripts/hub-app/deploy-app.sh)..."
+	SKIP_MIGRATION_PLACEHOLDER=1 SKIP_DNS_UPDATE=$(SKIP_DNS_UPDATE) REUSE_EXISTING=1 \
 		PLATFORM_API_IMAGE_TAG=$(CLOUD_PLATFORM_API_IMAGE) \
 		PROXY_IMAGE_TAG=$(CLOUD_PROXY_IMAGE) \
 		K8S_AGENT_IMAGE_TAG=$(CLOUD_K8S_AGENT_IMAGE) \
 		UI_IMAGE_TAG=$(CLOUD_UI_IMAGE) \
-		./terraform/generate-cloud-deployment.sh --non-interactive
+		AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
+		./scripts/hub-app/deploy-app.sh
+
+# -----------------------------------------------------------------------------
+# Deterministic hub-on-EKS (prefer over deploy-cloud for lab/prod hub)
+# See docs/HUB-EKS-DEPLOY.md
+# -----------------------------------------------------------------------------
+.PHONY: hub-preflight hub-up hub-down hub-status hub-images hub-app hub-verify
+hub-preflight:
+	./scripts/hub-eks.sh preflight
+hub-up:
+	./scripts/hub-eks.sh up
+hub-down:
+	./scripts/hub-eks.sh down
+hub-status:
+	./scripts/hub-eks.sh status
+hub-images:
+	./scripts/hub-eks.sh images
+hub-app:
+	./scripts/hub-eks.sh app
+hub-verify:
+	./scripts/hub-eks.sh verify

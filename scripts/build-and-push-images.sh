@@ -12,9 +12,10 @@
 
 set -e
 
-AWS_PROFILE=${AWS_PROFILE:-aegis-new}
+AWS_PROFILE=${AWS_PROFILE:-aegis-lab}
 AWS_REGION=${AWS_REGION:-us-east-1}
-ECR_REGISTRY="195714074609.dkr.ecr.${AWS_REGION}.amazonaws.com"
+# Lab account default; override via AWS_ECR_REGISTRY or full ECR_REGISTRY
+ECR_REGISTRY="${ECR_REGISTRY:-${AWS_ECR_REGISTRY:-471147325433.dkr.ecr.${AWS_REGION}.amazonaws.com}}"
 
 # Image tags -- default to git SHA; override via env vars if needed
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD)}"

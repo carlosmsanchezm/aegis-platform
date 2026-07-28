@@ -1,0 +1,175 @@
+# Build hub images on GitHub-hosted runners and push to GitHub Container Registry.
+# EKS (and local deploy) pull from ghcr.io — not ECR.
+#
+# Images:
+#   ghcr.io/<owner>/aegis/platform-api:<sha>
+#   ghcr.io/<owner>/aegis/proxy:<sha>
+#   ghcr.io/<owner>/aegis/k8s-agent:<sha>
+#   ghcr.io/<owner>/aegis/workspace-vscode:<sha>  (optional job)
+#
+# Deploy after green run:
+#   export IMAGE_REGISTRY=ghcr.io/carlosmsanchezm/aegis
+#   export CLOUD_IMAGE_TAG=<short_sha>
+#   ./scripts/hub-eks.sh up
+#
+# UI is built from the aegis-ui repo (own workflow) → ghcr.io/<owner>/aegis/ui:<tag>
+
+name: Build images (GHCR)
+
+on:
+  push:
+    branches: [main, feature/ironbank-compliance]
+    paths:
+      - "services/**"
+      - "agents/**"
+      - "proto/**"
+      - "pkg/**"
+      - "workspace-images/**"
+      - "Makefile"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+    inputs:
+      image_flavor:
+        description: "public (lab) or ironbank"
+        required: false
+        default: "public"
+      build_workspace:
+        description: "Also build workspace-vscode (large)"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_FLAVOR: ${{ github.event.inputs.image_flavor || 'public' }}
+  REGISTRY: ghcr.io
+  # Package root: ghcr.io/<owner>/aegis/<name>
+  IMAGE_OWNER: ${{ github.repository_owner }}
+  IMAGE_PREFIX: aegis
+
+jobs:
+  build-core:
+    name: Build platform-api / proxy / k8s-agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: platform-api
+            context: .
+            file: services/platform-api/Dockerfile
+          - name: proxy
+            context: .
+            file: services/proxy/Dockerfile
+          - name: k8s-agent
+            context: .
+            file: agents/k8s-agent/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          OWNER_LC="$(echo "${IMAGE_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE="${REGISTRY}/${OWNER_LC}/${IMAGE_PREFIX}/${{ matrix.name }}"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tags=${IMAGE}:${SHORT_SHA},${IMAGE}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tags=${IMAGE}:${SHORT_SHA},${IMAGE}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Building ${IMAGE}:${SHORT_SHA} flavor=${IMAGE_FLAVOR}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Public bases for lab (IMAGE_FLAVOR=public). Iron Bank needs extra secrets + network.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: false
+          build-args: |
+            BUILDER_REGISTRY=docker.io
+            BUILDER_IMAGE=library/golang
+            BUILDER_TAG=1.25
+            BASE_REGISTRY=registry.access.redhat.com
+            BASE_IMAGE=ubi9/ubi-minimal
+            BASE_TAG=latest
+            FIPS_ENABLED=false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Summary
+        run: |
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.short_sha }}\`\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build-workspace:
+    name: Build workspace-vscode
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_workspace == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push workspace
+        env:
+          OWNER_LC: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          OWNER="$(echo "${OWNER_LC}" | tr '[:upper:]' '[:lower:]')"
+          SHA="${GITHUB_SHA::7}"
+          docker buildx build --platform linux/amd64 --push \
+            -t "ghcr.io/${OWNER}/aegis/workspace-vscode:${SHA}" \
+            workspace-images/openssh-vscode
+
+  print-deploy:
+    name: Print deploy command
+    needs: [build-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy hint
+        run: |
+          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          SHA="${GITHUB_SHA::7}"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Deploy (laptop — no Docker)
+
+          \`\`\`bash
+          export AWS_PROFILE=aegis-lab
+          export IMAGE_REGISTRY=ghcr.io/\${OWNER_LC}/aegis
+          export CLOUD_IMAGE_TAG=${SHA}
+          # If packages are private:
+          # export GHCR_PULL_TOKEN=<PAT with read:packages>
+          ./scripts/hub-eks.sh up
+          \`\`\`
+
+          Images:
+          - \`ghcr.io/${OWNER_LC}/aegis/platform-api:${SHA}\`
+          - \`ghcr.io/${OWNER_LC}/aegis/proxy:${SHA}\`
+          - \`ghcr.io/${OWNER_LC}/aegis/k8s-agent:${SHA}\`
+          EOF

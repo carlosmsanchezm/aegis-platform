@@ -19,14 +19,13 @@ For **“stand up hub on EKS and prove it”**, use the phased CLI.
 ```bash
 cd ~/code/aegis-platform
 export AWS_PROFILE=aegis-lab
-export AWS_ECR_REGISTRY=471147325433.dkr.ecr.us-east-1.amazonaws.com
-# Tag from green GitLab build-images job (required — images never built on laptop by default)
-export CLOUD_IMAGE_TAG=<CI_COMMIT_SHORT_SHA>
+export IMAGE_REGISTRY=ghcr.io/carlosmsanchezm/aegis
+# Tag from green GitHub Actions "Build images (GHCR)" run
+export CLOUD_IMAGE_TAG=<short_sha>
+# If GHCR packages are private:
+# export GHCR_PULL_TOKEN=<pat with read:packages>
 
-# 1) Sanity
 ./scripts/hub-eks.sh preflight
-
-# 2) Full path: terraform → verify ECR tags → app → verify  (no local Docker)
 ./scripts/hub-eks.sh up
 
 # Or step by step:
@@ -34,42 +33,29 @@ export CLOUD_IMAGE_TAG=<CI_COMMIT_SHORT_SHA>
 ./scripts/hub-eks.sh app
 ./scripts/hub-eks.sh verify
 
-# Explicit local image build only if you really need it (needs Docker):
-# ./scripts/hub-eks.sh images
-# ./scripts/hub-eks.sh up --build-images
-
-# Resume after a failed terraform:
-./scripts/hub-eks.sh up --skip-terraform
-
 # Teardown
 ./scripts/hub-eks.sh down
 ./scripts/hub-eks.sh status
 ```
 
-### Image builds (GitLab CI — preferred)
+### Image builds (GitHub → GHCR — required)
 
-See `docs/CI-GITLAB-IMAGES.md`. Runners build and push; laptop only deploys.
-
-### Iron Bank builds (CI manual job or rare local)
-
-```bash
-# Prefer GitLab job build-images-ironbank
-# Local only if required:
-IMAGE_FLAVOR=ironbank ./scripts/hub-eks.sh images
-```
+See **`docs/CI-GHCR-IMAGES.md`**.  
+GitHub Actions builds `linux/amd64` and pushes to **ghcr.io**. Laptop never builds.  
+App images are **not** stored in ECR.
 
 ## Phases
 
 | Phase | What it does |
 |-------|----------------|
-| **preflight** | aws/terraform/kubectl/helm; `sts get-caller-identity` (Docker only if `--build-images`) |
+| **preflight** | aws/terraform/kubectl/helm; `sts get-caller-identity` (no Docker) |
 | **terraform** | `terraform init -reconfigure` + `apply`; kubeconfig |
-| **images** | **Opt-in only** (`images` cmd or `--build-images`): ECR login + `make push-cloud-images` |
-| **app** | Helm hub via `scripts/hub-app/deploy-app.sh` (expects tags already in ECR) |
+| **images** | **Disabled** — use GHCR CI |
+| **app** | Helm hub (image refs from `IMAGE_REGISTRY` / GHCR) |
 | **verify** | rollout status + port-forward `/healthz` |
-| **down** | helm uninstall + terraform destroy (+ ECR force-delete retry) |
+| **down** | helm uninstall + terraform destroy |
 
-On default `up`, after terraform the script **verifies ECR tags** for `CLOUD_IMAGE_TAG` instead of building.
+On `up`, after terraform the script **verifies GHCR tags** for `CLOUD_IMAGE_TAG`.
 
 ## Logs
 

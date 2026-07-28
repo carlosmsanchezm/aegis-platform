@@ -20,7 +20,7 @@ parse_image_ref() {
 
 require_image_ref() {
   local var_name="$1" value="$2"
-  [[ -n "${value}" ]] || hub_die "${var_name} must be set to repo:tag (e.g. 123.dkr.ecr.us-east-1.amazonaws.com/aegis/ui:abc1234)"
+  [[ -n "${value}" ]] || hub_die "${var_name} must be set to repo:tag (e.g. ghcr.io/carlosmsanchezm/aegis/ui:abc1234)"
   [[ "${value}" == *:* ]] || hub_die "${var_name} must include an explicit tag: ${value}"
 }
 
@@ -34,20 +34,74 @@ ecr_repo_name() {
   printf '%s' "${trimmed}"
 }
 
-verify_ecr_image() {
+# Verify image exists in GHCR (preferred) or legacy ECR. No local Docker.
+verify_registry_image() {
   local image_ref="$1"
-  local repo tag repo_name
+  local repo tag code
   IFS='|' read -r repo tag <<< "$(parse_image_ref "${image_ref}")"
-  repo_name="$(ecr_repo_name "${repo}")"
-  [[ -n "${repo_name}" && -n "${tag}" ]] || hub_die "Unable to parse ECR image: ${image_ref}"
-  aws ecr describe-images \
-    --repository-name "${repo_name}" \
-    --image-ids "imageTag=${tag}" \
-    --region "${AWS_REGION}" \
-    --profile "${AWS_PROFILE}" >/dev/null 2>&1 \
-    || hub_die "ECR image not found: ${image_ref}"
-  hub_log "  OK ECR ${image_ref}"
+  [[ -n "${repo}" && -n "${tag}" ]] || hub_die "Unable to parse image: ${image_ref}"
+
+  if [[ "$repo" == *.dkr.ecr.*.amazonaws.com/* || "$repo" == *".amazonaws.com/"* ]]; then
+    local repo_name
+    repo_name="$(ecr_repo_name "${repo}")"
+    [[ -n "${repo_name}" ]] || hub_die "Unable to parse ECR image: ${image_ref}"
+    aws ecr describe-images \
+      --repository-name "${repo_name}" \
+      --image-ids "imageTag=${tag}" \
+      --region "${AWS_REGION}" \
+      --profile "${AWS_PROFILE}" >/dev/null 2>&1 \
+      || hub_die "ECR image not found: ${image_ref}"
+    hub_log "  OK ECR ${image_ref}"
+    return 0
+  fi
+
+  if [[ "$repo" == ghcr.io/* ]]; then
+    if registry_image_exists "${image_ref}"; then
+      hub_log "  OK GHCR ${image_ref}"
+      return 0
+    fi
+    hub_die "GHCR image not found or not authorized: ${image_ref}. Run Actions 'Build images (GHCR)' or set GHCR_PULL_TOKEN / make package public. See docs/CI-GHCR-IMAGES.md"
+  fi
+
+  hub_log "  OK (skipped remote check) ${image_ref}"
 }
+
+# Soft check (no die): 0 if present, 1 if missing.
+registry_image_exists() {
+  local image_ref="$1"
+  local repo tag code
+  IFS='|' read -r repo tag <<< "$(parse_image_ref "${image_ref}")"
+  [[ -n "${repo}" && -n "${tag}" ]] || return 1
+  if [[ "$repo" == ghcr.io/* ]]; then
+    local path="${repo#ghcr.io/}"
+    local auth=()
+    if [[ -n "${GHCR_PULL_TOKEN:-}" ]]; then
+      auth=(-H "Authorization: Bearer ${GHCR_PULL_TOKEN}")
+    elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+      auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    fi
+    code="$(curl -sS -o /dev/null -w '%{http_code}' \
+      -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+      "${auth[@]}" \
+      "https://ghcr.io/v2/${path}/manifests/${tag}" 2>/dev/null || echo 000)"
+    [[ "$code" == "200" ]]
+    return $?
+  fi
+  if [[ "$repo" == *.dkr.ecr.*.amazonaws.com/* ]]; then
+    local repo_name
+    repo_name="$(ecr_repo_name "${repo}")"
+    aws ecr describe-images \
+      --repository-name "${repo_name}" \
+      --image-ids "imageTag=${tag}" \
+      --region "${AWS_REGION}" \
+      --profile "${AWS_PROFILE}" >/dev/null 2>&1
+    return $?
+  fi
+  return 0
+}
+
+# Back-compat
+verify_ecr_image() { verify_registry_image "$@"; }
 
 wait_for_lb_hostname() {
   local description="$1" resource="$2" namespace="$3" outvar="$4"

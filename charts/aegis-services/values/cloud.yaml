@@ -6,8 +6,10 @@
 # Platform API Configuration - Cloud
 #################################################################
 global:
+  # Lab default: pull app images from GitHub Container Registry (ghcr.io).
+  # Create secret with GHCR_PULL_TOKEN during deploy, or make packages public.
   imagePullSecrets:
-    - name: ecr-registry-secret
+    - name: ghcr-registry-secret
 
 platformApi:
   enabled: true
@@ -101,6 +103,19 @@ platformApi:
     AEGIS_IMPORT_PROXY_IMAGE_TAG: ""  # Set via deploy script (git SHA)
     AEGIS_IMPORT_CP_GRPC: "platform-api.aegis-platform.tech:8081"
     AEGIS_IMPORT_CP_GRPC_INSECURE: "false"
+    # cert-manager + step-ca configuration for spoke PKI during cluster import
+    # Set these via deploy script --set overrides:
+    #   AEGIS_STEP_CA_URL: https://<step-ca-nlb-dns>
+    #   AEGIS_STEP_PROVISIONER_KID: <kid from step-ca config>
+    #   AEGIS_STEP_PROVISIONER_PASSWORD: <provisioner password>
+    #   AEGIS_STEP_CA_ROOT_CA_B64: <base64 root CA PEM>
+    AEGIS_CERT_MANAGER_ENABLED: "true"
+    AEGIS_STEP_CA_URL: ""
+    AEGIS_STEP_PROVISIONER_NAME: "aegis"
+    AEGIS_STEP_PROVISIONER_KID: ""
+    AEGIS_STEP_PROVISIONER_PASSWORD: ""
+    AEGIS_STEP_CA_ROOT_CA_B64: ""
+    AEGIS_CLUSTER_ISSUER_NAME: "aegis-internal"
 
   # Production secrets (configure externally)
   # Note: AEGIS_PROXY_JWT_SECRET is automatically configured from proxy.jwtSecret when proxy.enabled=true

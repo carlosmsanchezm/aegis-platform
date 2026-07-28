@@ -7,26 +7,28 @@
 #
 # Usage:
 #   ./scripts/hub-eks.sh preflight
-#   ./scripts/hub-eks.sh up                 # terraform → app → verify (images from CI/ECR)
+#   ./scripts/hub-eks.sh up                 # terraform → app → verify (images from GHCR/CI)
 #   ./scripts/hub-eks.sh up --build-images  # rare: build on this machine (needs Docker)
 #   ./scripts/hub-eks.sh terraform|images|app|verify|status|down
 #
-# Images are NEVER built by default. Build on GitLab CI (or run `images` /
-# `--build-images` only when you explicitly want a local Docker build).
+# Images are NEVER built by default. GitHub Actions builds → ghcr.io.
+# Laptop only needs: aws, terraform, kubectl, helm (no Docker).
 #
-# Env (see docs/HUB-EKS-DEPLOY.md):
-#   AWS_PROFILE, AWS_REGION, AWS_ECR_REGISTRY, IMAGE_FLAVOR (public|ironbank),
-#   SKIP_DNS_UPDATE, CLOUD_IMAGE_TAG
+# Env (see docs/CI-GHCR-IMAGES.md):
+#   AWS_PROFILE, AWS_REGION, IMAGE_REGISTRY (ghcr.io/...), CLOUD_IMAGE_TAG,
+#   GHCR_PULL_TOKEN (if packages private), SKIP_DNS_UPDATE
 # =============================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Defaults — lab account; override via env
+# Defaults — lab account; images live on GitHub Container Registry (not ECR)
 export AWS_PROFILE="${AWS_PROFILE:-aegis-lab}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
-export AWS_ECR_REGISTRY="${AWS_ECR_REGISTRY:-471147325433.dkr.ecr.us-east-1.amazonaws.com}"
+# App images: GHCR. (AWS_ECR_REGISTRY kept only for legacy --build-images → ECR path.)
+export IMAGE_REGISTRY="${IMAGE_REGISTRY:-ghcr.io/carlosmsanchezm/aegis}"
+export AWS_ECR_REGISTRY="${AWS_ECR_REGISTRY:-${IMAGE_REGISTRY}}"
 export IMAGE_FLAVOR="${IMAGE_FLAVOR:-public}"
 export SKIP_DNS_UPDATE="${SKIP_DNS_UPDATE:-1}"
 export SKIP_MIGRATION_PLACEHOLDER="${SKIP_MIGRATION_PLACEHOLDER:-1}"
@@ -34,11 +36,11 @@ export SKIP_MIGRATION_PLACEHOLDER="${SKIP_MIGRATION_PLACEHOLDER:-1}"
 CLOUD_IMAGE_TAG="${CLOUD_IMAGE_TAG:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 export CLOUD_IMAGE_TAG
 
-PLATFORM_API_IMAGE="${PLATFORM_API_IMAGE:-${AWS_ECR_REGISTRY}/aegis/platform-api:${CLOUD_IMAGE_TAG}}"
-PROXY_IMAGE="${PROXY_IMAGE:-${AWS_ECR_REGISTRY}/aegis/proxy:${CLOUD_IMAGE_TAG}}"
-K8S_AGENT_IMAGE="${K8S_AGENT_IMAGE:-${AWS_ECR_REGISTRY}/aegis/k8s-agent:${CLOUD_IMAGE_TAG}}"
-WORKSPACE_IMAGE="${WORKSPACE_IMAGE:-${AWS_ECR_REGISTRY}/aegis/workspace-vscode:${CLOUD_IMAGE_TAG}}"
-UI_IMAGE="${UI_IMAGE:-${AWS_ECR_REGISTRY}/aegis/ui:${CLOUD_IMAGE_TAG}}"
+PLATFORM_API_IMAGE="${PLATFORM_API_IMAGE:-${IMAGE_REGISTRY}/platform-api:${CLOUD_IMAGE_TAG}}"
+PROXY_IMAGE="${PROXY_IMAGE:-${IMAGE_REGISTRY}/proxy:${CLOUD_IMAGE_TAG}}"
+K8S_AGENT_IMAGE="${K8S_AGENT_IMAGE:-${IMAGE_REGISTRY}/k8s-agent:${CLOUD_IMAGE_TAG}}"
+WORKSPACE_IMAGE="${WORKSPACE_IMAGE:-${IMAGE_REGISTRY}/workspace-vscode:${CLOUD_IMAGE_TAG}}"
+UI_IMAGE="${UI_IMAGE:-${IMAGE_REGISTRY}/ui:${CLOUD_IMAGE_TAG}}"
 
 LOG_DIR="${ROOT}/.deploy-logs"
 mkdir -p "$LOG_DIR"
@@ -81,38 +83,73 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
-# Confirm required tags already exist in ECR (used when not building locally).
-verify_ecr_images() {
-  local img repo tag
-  log "Verifying required image tags exist in ECR (CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG})..."
+# Confirm required tags exist in the registry (GHCR or legacy ECR). No local Docker.
+verify_registry_images() {
+  log "Verifying required image tags (CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG})..."
+  local img
   for img in "$PLATFORM_API_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE"; do
-    repo="${img#*.amazonaws.com/}"
-    repo="${repo%:*}"
-    tag="${img##*:}"
-    if ! aws ecr describe-images \
-      --repository-name "$repo" \
+    if ! verify_one_image "$img"; then
+      die "Image not found: ${img}. Run GitHub Actions workflow 'Build images (GHCR)', then set CLOUD_IMAGE_TAG to that SHA. See docs/CI-GHCR-IMAGES.md"
+    fi
+    log "  OK ${img}"
+  done
+  if verify_one_image "$UI_IMAGE"; then
+    log "  OK ${UI_IMAGE}"
+  else
+    log "  (optional UI not in registry: ${UI_IMAGE} — build from aegis-ui CI or omit UI)"
+  fi
+}
+
+# Returns 0 if image:tag is pullable/metadata-visible without docker.
+verify_one_image() {
+  local image_ref="$1"
+  local repo="${image_ref%:*}"
+  local tag="${image_ref##*:}"
+
+  # Legacy ECR path
+  if [[ "$repo" == *.dkr.ecr.*.amazonaws.com/* ]]; then
+    local ecr_name="${repo#*.amazonaws.com/}"
+    aws ecr describe-images \
+      --repository-name "$ecr_name" \
       --image-ids "imageTag=${tag}" \
       --region "$AWS_REGION" \
       --profile "$AWS_PROFILE" \
       --query 'imageDetails[0].imageSizeInBytes' \
-      --output text >/dev/null 2>&1; then
-      die "ECR missing ${img}. Build on GitLab CI (job build-images), set CLOUD_IMAGE_TAG to that pipeline SHA, then re-run. See docs/CI-GITLAB-IMAGES.md"
-    fi
-    log "  OK ${img}"
-  done
-  # UI is optional when CI skipped it
-  local ui_repo="${UI_IMAGE#*.amazonaws.com/}"
-  ui_repo="${ui_repo%:*}"
-  if aws ecr describe-images \
-    --repository-name "$ui_repo" \
-    --image-ids "imageTag=${UI_IMAGE##*:}" \
-    --region "$AWS_REGION" --profile "$AWS_PROFILE" \
-    --query 'imageDetails[0].imageSizeInBytes' --output text >/dev/null 2>&1; then
-    log "  OK ${UI_IMAGE}"
-  else
-    log "  (optional UI tag not in ECR: ${UI_IMAGE} — hub may run without Backstage UI)"
+      --output text >/dev/null 2>&1
+    return $?
   fi
+
+  # GHCR / other OCI: registry HTTP API (no Docker)
+  if [[ "$repo" == ghcr.io/* ]]; then
+    local path="${repo#ghcr.io/}"
+    local url="https://ghcr.io/v2/${path}/manifests/${tag}"
+    local auth=()
+    if [[ -n "${GHCR_PULL_TOKEN:-}" ]]; then
+      auth=(-H "Authorization: Bearer ${GHCR_PULL_TOKEN}")
+    elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+      auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    fi
+    local code
+    code="$(curl -sS -o /dev/null -w '%{http_code}' \
+      -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+      "${auth[@]}" \
+      "$url" 2>/dev/null || echo 000)"
+    # 200 = public or authorized; 401/403 often means private + no token (still may exist)
+    [[ "$code" == "200" ]] && return 0
+    if [[ "$code" == "401" || "$code" == "403" ]]; then
+      log "  WARN ${image_ref} needs auth (HTTP ${code}). Set GHCR_PULL_TOKEN (read:packages) or make package public."
+      # Treat as present if we have a token that got 401 (wrong token) vs missing 404
+      return 1
+    fi
+    return 1
+  fi
+
+  log "  WARN unknown registry for ${image_ref} — skipping remote verify"
+  return 0
 }
+
+# Back-compat name
+verify_ecr_images() { verify_registry_images; }
 
 # -----------------------------------------------------------------------------
 phase_preflight() {
@@ -128,17 +165,17 @@ phase_preflight() {
   if [[ "${BUILD_IMAGES:-0}" == "1" ]]; then
     need_cmd docker
     docker info >/dev/null 2>&1 \
-      || die "Docker daemon not running. Prefer GitLab CI builds (docs/CI-GITLAB-IMAGES.md); only use --build-images / 'images' with Docker."
-    log "BUILD_IMAGES=1 — will build/push on this machine"
+      || die "Docker daemon not running. Prefer GitHub Actions → GHCR (docs/CI-GHCR-IMAGES.md)."
+    log "BUILD_IMAGES=1 — will build/push on this machine (not the default path)"
   else
-    log "Images from ECR/CI (default) — Docker not required on this machine"
+    log "Images from GHCR/CI (default) — Docker not required on this machine"
   fi
   local acct
   acct="$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null)" \
     || die "AWS credentials failed for profile=${AWS_PROFILE}"
   log "AWS account=${acct} profile=${AWS_PROFILE} region=${AWS_REGION}"
   log "IMAGE_FLAVOR=${IMAGE_FLAVOR}  CLOUD_IMAGE_TAG=${CLOUD_IMAGE_TAG}"
-  log "ECR=${AWS_ECR_REGISTRY}"
+  log "IMAGE_REGISTRY=${IMAGE_REGISTRY}"
   log "Images:"
   log "  platform-api  ${PLATFORM_API_IMAGE}"
   log "  proxy         ${PROXY_IMAGE}"
@@ -174,38 +211,7 @@ phase_terraform() {
 }
 
 phase_images() {
-  log "ECR login..."
-  aws ecr get-login-password --region "$AWS_REGION" --profile "$AWS_PROFILE" \
-    | docker login --username AWS --password-stdin "$AWS_ECR_REGISTRY"
-
-  log "Building/pushing images (IMAGE_FLAVOR=${IMAGE_FLAVOR})..."
-  # Use make targets that already encode IMAGE_FLAVOR — but one phase = one log
-  make -C "$ROOT" print-image-flavor IMAGE_FLAVOR="$IMAGE_FLAVOR"
-  make -C "$ROOT" \
-    AWS_PROFILE="$AWS_PROFILE" \
-    AWS_REGION="$AWS_REGION" \
-    AWS_ECR_REGISTRY="$AWS_ECR_REGISTRY" \
-    IMAGE_FLAVOR="$IMAGE_FLAVOR" \
-    CLOUD_IMAGE_TAG="$CLOUD_IMAGE_TAG" \
-    PUSH_LATEST=0 \
-    push-cloud-images
-
-  log "Verifying images in ECR..."
-  local img repo tag
-  for img in "$PLATFORM_API_IMAGE" "$PROXY_IMAGE" "$K8S_AGENT_IMAGE" "$UI_IMAGE"; do
-    repo="${img#*.amazonaws.com/}"
-    repo="${repo%:*}"
-    tag="${img##*:}"
-    aws ecr describe-images \
-      --repository-name "$repo" \
-      --image-ids "imageTag=${tag}" \
-      --region "$AWS_REGION" \
-      --profile "$AWS_PROFILE" \
-      --query 'imageDetails[0].imageSizeInBytes' \
-      --output text >/dev/null \
-      || die "ECR missing after push: ${img}"
-    log "  OK ${img}"
-  done
+  die "Local image build is disabled by default. Use GitHub Actions → GHCR (docs/CI-GHCR-IMAGES.md). To force a local build anyway: IMAGE_REGISTRY=... with Docker, or re-enable make push-cloud-images manually."
 }
 
 phase_app() {
@@ -299,21 +305,22 @@ Aegis hub-on-EKS orchestrator (deterministic phases)
 
   $0 preflight              Check tools + AWS identity
   $0 terraform              terraform apply + kubeconfig
-  $0 images                 EXPLICIT local build/push (needs Docker; prefer CI)
-  $0 app                    helm deploy via generate-cloud-deployment.sh
+  $0 images                 disabled (use GitHub Actions → GHCR)
+  $0 app                    helm deploy
   $0 verify                 rollout + healthz via port-forward
-  $0 up                     preflight → terraform → app → verify  (ECR/CI images)
+  $0 up                     preflight → terraform → app → verify  (GHCR images)
   $0 down                   helm uninstall + terraform destroy
   $0 status                 cluster / pods snapshot
 
-Default: images are NEVER built on this machine. Build on GitLab CI, then:
+Default: images are NEVER built on this machine. Build on GitHub Actions → ghcr.io, then:
 
-  export CLOUD_IMAGE_TAG=<CI_COMMIT_SHORT_SHA>
+  export IMAGE_REGISTRY=ghcr.io/carlosmsanchezm/aegis
+  export CLOUD_IMAGE_TAG=<github_sha_short>
   $0 up
 
 Options (after command):
-  --build-images            with 'up': also build/push on this machine (needs Docker)
-  --skip-images             no-op (kept for old scripts; images already skipped by default)
+  --build-images            rejected (use GHCR CI)
+  --skip-images             no-op
   --skip-terraform          with 'up': skip terraform
   --skip-app                with 'up': skip helm
   --skip-verify             with 'up': skip health check
@@ -321,13 +328,13 @@ Options (after command):
 Environment:
   AWS_PROFILE          default: aegis-lab
   AWS_REGION           default: us-east-1
-  AWS_ECR_REGISTRY      default: 471147325433.dkr.ecr.us-east-1.amazonaws.com
-  IMAGE_FLAVOR         public (default) | ironbank
-  CLOUD_IMAGE_TAG      default: git short SHA (must match CI-built tag)
+  IMAGE_REGISTRY       default: ghcr.io/carlosmsanchezm/aegis
+  CLOUD_IMAGE_TAG      default: git short SHA (must match GHCR tag)
+  GHCR_PULL_TOKEN      PAT with read:packages if GHCR packages are private
   SKIP_DNS_UPDATE       default: 1
 
 Logs: ${LOG_DIR}/
-See also: docs/CI-GITLAB-IMAGES.md
+See also: docs/CI-GHCR-IMAGES.md
 EOF
 }
 
@@ -338,8 +345,8 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --build-images)   BUILD_IMAGES=1 ;;
-      --skip-images)    BUILD_IMAGES=0 ;;  # no-op default; kept so old scripts don't break
+      --build-images)   die "--build-images is disabled. Images are built by GitHub Actions and stored on ghcr.io (docs/CI-GHCR-IMAGES.md)." ;;
+      --skip-images)    BUILD_IMAGES=0 ;;  # no-op default
       --skip-terraform) SKIP_TERRAFORM=1 ;;
       --skip-app)       SKIP_APP=1 ;;
       --skip-verify)    SKIP_VERIFY=1 ;;
@@ -349,12 +356,7 @@ main() {
     shift
   done
 
-  # `images` command always means local build
-  if [[ "${cmd}" == "images" ]]; then
-    BUILD_IMAGES=1
-  fi
-
-  log "hub-eks run_id=${RUN_ID} cmd=${cmd:-help} BUILD_IMAGES=${BUILD_IMAGES}"
+  log "hub-eks run_id=${RUN_ID} cmd=${cmd:-help}"
   log "ROOT=${ROOT}"
 
   case "${cmd}" in
@@ -366,12 +368,11 @@ main() {
       run_phase terraform phase_terraform
       ;;
     images)
-      run_phase preflight phase_preflight
-      run_phase images phase_images
+      phase_images
       ;;
     app)
       run_phase preflight phase_preflight
-      verify_ecr_images
+      verify_registry_images
       run_phase app phase_app
       ;;
     verify)
@@ -380,11 +381,7 @@ main() {
     up)
       run_phase preflight phase_preflight
       [[ "$SKIP_TERRAFORM" == "1" ]] || run_phase terraform phase_terraform
-      if [[ "$BUILD_IMAGES" == "1" ]]; then
-        run_phase images phase_images
-      else
-        verify_ecr_images
-      fi
+      verify_registry_images
       [[ "$SKIP_APP" == "1" ]]       || run_phase app phase_app
       [[ "$SKIP_VERIFY" == "1" ]]    || run_phase verify phase_verify
       hr

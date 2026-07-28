@@ -1,13 +1,18 @@
-# GitLab CI — build images on runner (no local Docker Desktop)
+# GitLab CI — legacy (superseded for lab)
 
-## Goal
+> **Preferred model:** GitHub Actions → **ghcr.io** (see **`docs/CI-GHCR-IMAGES.md`**).  
+> App images live next to the GitHub repo, not in ECR. Laptop still never builds images.
+
+This file remains for teams that still push to **ECR from GitLab**. New lab work should use GHCR.
+
+## Goal (legacy)
 
 | Who | Does what |
 |-----|-----------|
 | **GitLab Runner** | `docker build` + push to **ECR** |
-| **You (laptop)** | `./scripts/hub-eks.sh up` — terraform + helm only (never builds images by default) |
+| **You (laptop)** | `./scripts/hub-eks.sh up` — terraform + helm only |
 
-No Docker Desktop required on your Mac for day-to-day hub deploys. Image builds only run if you explicitly pass `--build-images` or run `./scripts/hub-eks.sh images`.
+No Docker Desktop on the Mac for day-to-day deploys.
 
 ## One-time GitLab setup
 

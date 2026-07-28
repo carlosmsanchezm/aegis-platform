@@ -95,11 +95,16 @@ phase_preflight() {
     hub_log "SKIP_DNS_UPDATE=1 — private/lab mode (no Cloudflare required)"
   fi
 
-  hub_log "Verifying ECR images..."
-  verify_ecr_image "${PLATFORM_API_IMAGE_TAG}"
-  verify_ecr_image "${PROXY_IMAGE_TAG}"
-  verify_ecr_image "${K8S_AGENT_IMAGE_TAG}"
-  verify_ecr_image "${UI_IMAGE_TAG}"
+  hub_log "Verifying registry images (GHCR preferred)..."
+  verify_registry_image "${PLATFORM_API_IMAGE_TAG}"
+  verify_registry_image "${PROXY_IMAGE_TAG}"
+  verify_registry_image "${K8S_AGENT_IMAGE_TAG}"
+  # UI may be published by aegis-ui CI; warn only if missing
+  if registry_image_exists "${UI_IMAGE_TAG}"; then
+    hub_log "  OK GHCR ${UI_IMAGE_TAG}"
+  else
+    hub_log "WARN: UI image not found yet: ${UI_IMAGE_TAG} (hub may start without UI)"
+  fi
 
   IFS='|' read -r PLATFORM_API_IMAGE_REPO PLATFORM_API_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PLATFORM_API_IMAGE_TAG}")"
   IFS='|' read -r PROXY_IMAGE_REPO PROXY_IMAGE_TAG_VALUE <<< "$(parse_image_ref "${PROXY_IMAGE_TAG}")"
@@ -172,6 +177,21 @@ phase_secrets() {
     --from-literal=clientSecret="${KEYCLOAK_BACKSTAGE_CLIENT_SECRET}" \
     --namespace "${K8S_NAMESPACE}" \
     --dry-run=client -o yaml | kubectl apply -f -
+
+  # GHCR pull secret for EKS nodes (private packages). Prefer public packages.
+  if [[ -n "${GHCR_PULL_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
+    local gh_user="${GHCR_USERNAME:-${GITHUB_USER:-carlosmsanchezm}}"
+    local gh_tok="${GHCR_PULL_TOKEN:-${GITHUB_TOKEN}}"
+    kubectl create secret docker-registry ghcr-registry-secret \
+      --docker-server=ghcr.io \
+      --docker-username="${gh_user}" \
+      --docker-password="${gh_tok}" \
+      --namespace "${K8S_NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+    hub_log "Created/updated ghcr-registry-secret (imagePullSecrets)"
+  else
+    hub_log "No GHCR_PULL_TOKEN — assuming public GHCR packages (or set token for private)"
+  fi
 
   # Soft reset Keycloak storage so storage class changes apply (idempotent)
   kubectl delete pvc -n "${K8S_NAMESPACE}" -l app.kubernetes.io/component=keycloak-postgres --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -338,6 +358,13 @@ phase_helm() {
   OVERRIDE_FILE="$(mktemp)"
 
   {
+    echo "global:"
+    echo "  imagePullSecrets:"
+    if kubectl get secret ghcr-registry-secret -n "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+      echo "    - name: ghcr-registry-secret"
+    else
+      echo "    []"
+    fi
     echo "ingressController:"
     echo "  enabled: true"
     echo "ingress-nginx:"
@@ -350,6 +377,7 @@ phase_helm() {
     echo "  image:"
     [[ -n "${PLATFORM_API_IMAGE_REPO}" ]] && echo "    repository: ${PLATFORM_API_IMAGE_REPO}"
     [[ -n "${PLATFORM_API_IMAGE_TAG_VALUE}" ]] && echo "    tag: \"${PLATFORM_API_IMAGE_TAG_VALUE}\""
+    echo "  imagePullPolicy: Always"
     echo "  env:"
     echo "    DATABASE_URL: \"${DB_URL}\""
     echo "    OIDC_ISSUER_URL: \"https://${DNS_KEYCLOAK}/realms/aegis\""

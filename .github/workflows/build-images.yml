@@ -97,6 +97,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # platform-api Dockerfile expects pre-fetched binaries + VSIX in repo root
+      # (same as make stage-build-deps + local Makefile staging).
+      - name: Stage platform-api build context
+        if: matrix.name == 'platform-api'
+        env:
+          PULUMI_VERSION: "3.226.0"
+          VSIX_URL: https://github.com/carlosmsanchezm/sovran/releases/download/v1.0.0/aegis-remote.vsix
+        run: |
+          set -euo pipefail
+          echo "Staging linux/amd64 deps for platform-api..."
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscli.zip
+          KUBE_VER="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+          curl -fsSL "https://dl.k8s.io/release/${KUBE_VER}/bin/linux/amd64/kubectl" -o kubectl
+          curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-amd64" -o jq
+          curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" -o pulumi-linux-x64.tar.gz
+          if ! curl -fsSL "$VSIX_URL" -o aegis-remote.vsix; then
+            echo "WARN: could not download VSIX from release; creating empty placeholder is not allowed"
+            # Minimal zip that is a valid file so COPY succeeds; extension serve will be empty
+            # Prefer real artifact — fail hard so we notice.
+            echo "FATAL: aegis-remote.vsix missing at $VSIX_URL"
+            exit 1
+          fi
+          ls -lh awscli.zip kubectl jq pulumi-linux-x64.tar.gz aegis-remote.vsix
+          test -f scripts/aegis-setup-vscode.sh || { echo "missing scripts/aegis-setup-vscode.sh"; exit 1; }
+
       # Public bases for lab (IMAGE_FLAVOR=public). Iron Bank needs extra secrets + network.
       - name: Build and push
         uses: docker/build-push-action@v6

@@ -1,0 +1,11 @@
+apiVersion: aegis.yourorg.dev/v1alpha2
+kind: WorkspaceClass
+metadata:
+  name: vscode-python
+spec:
+  defaults:
+    execution:
+      image: ghcr.io/yourorg/workspace-vscode:latest
+      interactive: true
+    network:
+      isolationLevel: IL2

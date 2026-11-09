@@ -1,0 +1,15 @@
+{{- $kc := .Values.keycloak | default dict }}
+{{- $crdReady := or (.Capabilities.APIVersions.Has "k8s.keycloak.org/v2alpha1") ($kc.forceRender | default false) }}
+{{- if and ($kc.enabled | default true) $crdReady }}
+{{- $ns := include "aegis-services.keycloak.namespace" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aegis-services.keycloak.fullname" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis-services.keycloak.labels" . | nindent 4 }}
+spec:
+  type: ExternalName
+  externalName: {{ include "aegis-services.keycloak.serviceName" . }}-service.{{ $ns }}.svc.cluster.local
+{{- end }}

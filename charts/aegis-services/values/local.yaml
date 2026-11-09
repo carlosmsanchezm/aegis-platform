@@ -1,0 +1,464 @@
+# Local development values for aegis-services
+# This configuration is optimized for local development environments
+# such as minikube, kind, or Docker Desktop Kubernetes
+
+# Enable bundled ingress controller for local development
+ingressController:
+  enabled: true
+
+ingress-nginx:
+  controller:
+    extraArgs:
+      publish-status-address: localhost
+    ingressClassResource:
+      name: ingress-nginx
+      default: false
+    ingressClass: ingress-nginx
+    publishService:
+      enabled: false  # Avoid conflict with publish-status-address for local clusters
+    service:
+      type: LoadBalancer
+    metrics:
+      enabled: false
+
+#################################################################
+# Backstage Configuration - Local
+#################################################################
+backstage:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: carlosmsanchez/aegis-ui
+    tag: dev
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 7007
+  ingress:
+    enabled: true
+    className: ingress-nginx
+    hosts:
+      - host: backstage.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - hosts:
+          - backstage.localtest.me
+        secretName: backstage-tls
+  appConfig:
+    appBaseUrl: "https://backstage.localtest.me"
+    backendBaseUrl: "https://backstage.localtest.me"
+  postgres:
+    host: "platform-postgres.aegis-system.svc.cluster.local"
+    port: "5432"
+    user: "aegis_platform"
+    existingSecret: "aegis-services-platform-api-secret"
+    existingSecretPasswordKey: "db-password"
+  keycloak:
+    baseUrl: "https://keycloak.localtest.me"
+    realm: "aegis"
+    clientId: "backstage"
+    # Use external hostname (routed via hostAlias → ingress → Keycloak).
+    # Avoids Keycloak hostname redirect and keeps all OIDC URLs consistent.
+    metadataUrl: "https://keycloak.localtest.me/realms/aegis/.well-known/openid-configuration"
+    jwksUrl: "https://keycloak.localtest.me/realms/aegis/protocol/openid-connect/certs"
+    issuer: "https://keycloak.localtest.me/realms/aegis"
+    clientSecret:
+      secretName: "keycloak-backstage-client-secret"
+      key: "clientSecret"
+  secrets:
+    create: true
+    name: "aegis-backstage-secret"
+    backendSecret: "dev-secret"
+  # Local-only: skip TLS verification for internal Keycloak (self-signed CA).
+  # Cloud deployments use real ACM certs and do NOT set this.
+  env:
+    NODE_TLS_REJECT_UNAUTHORIZED: "0"
+  caBundle:
+    secretName: aegis-trust-bundle
+  # Map keycloak.localtest.me to ingress ClusterIP so OIDC callbacks work inside the pod.
+  # The INGRESS_CLUSTER_IP placeholder is replaced by deploy-local-tls at deploy time.
+  hostAliases:
+    - ip: "INGRESS_CLUSTER_IP"
+      hostnames:
+        - "keycloak.localtest.me"
+        - "backstage.localtest.me"
+        - "platform-api.localtest.me"
+
+#################################################################
+# Platform API Configuration - Local
+#################################################################
+platformApi:
+  enabled: true
+  replicaCount: 1
+  serviceAccountName: aegis-platform-api
+  postgres:
+    enabled: true
+    waitForReady: true  # Wait for postgres to be ready before starting platform-api
+    initChown: true
+    initImage: registry.access.redhat.com/ubi9/ubi-minimal:9.3
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: Always
+    storage:
+      size: 5Gi
+      className: ""
+  hostAliases:
+  - ip: "10.96.146.219"
+    hostnames:
+    - "keycloak.localtest.me"
+
+  image:
+    repository: carlosmsanchez/aegis-platform-api
+    tag: "dev"
+    pullPolicy: IfNotPresent  # Use local kind-loaded image; cloud.yaml uses Always
+
+  service:
+    type: ClusterIP
+    grpcPort: 8081
+    httpPort: 8080
+
+  ingress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
+
+  # Local development environment variables
+  env:
+    # DEV MODE: Skip IAM role assumption, use credentials directly
+    # WARNING: Do not enable in production - breaks multi-tenancy isolation
+    AEGIS_DEV_MODE: "true"
+    AEGIS_DEFAULT_WORKSPACE_IMAGE: "123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+    LOG_LEVEL: "debug"
+    AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
+    AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
+    AEGIS_STORE_BACKEND: "postgres"
+    # Enable automatic observability stack deployment on spoke clusters
+    AEGIS_OBSERVABILITY_ENABLED: "true"
+    # IMPORTANT: Issuer must match the "iss" claim in tokens.
+    # Local Keycloak hostname is keycloak.localtest.me, so tokens carry that as "iss".
+    OIDC_ISSUER_URL: "https://keycloak.localtest.me/realms/aegis"
+    # Use the service name that matches the TLS cert SAN (without -service suffix)
+    OIDC_JWKS_URL: "https://aegis-services-keycloak.keycloak.svc.cluster.local:8443/realms/aegis/protocol/openid-connect/certs"
+    OIDC_AUDIENCE: "backstage,aegis-platform"
+    REQUIRE_PHISHING_RESISTANT_MFA: "false"
+    ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    AEGIS_INFRA_CONTROLLER: "true"
+    AEGIS_INFRA_NAMESPACE: "aegis-system"
+    AEGIS_KUBECONFIG_SECRET_NAME: "aegis-kubeconfigs"
+    AEGIS_KUBECONFIG_SECRET_NAMESPACE: "aegis-system"
+    # AWS NLB relay endpoints — auto-populated by terraform/dev-relay via
+    # charts/aegis-services/values/local-relay.yaml overlay (do not hardcode here).
+    AEGIS_PLATFORM_API_ENDPOINT: ""
+    AEGIS_PLATFORM_API_CA_FILE: ""
+    AEGIS_PLATFORM_API_GRPC_INSECURE: "true"
+    AEGIS_SPOKE_IMAGE_REPO: "123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent"
+    AEGIS_SPOKE_IMAGE_TAG: "dev"
+    AEGIS_SPOKE_VALUES_FILE: "/home/aegis/charts/aegis-spoke/values-aws-relay.yaml"
+    # Spoke OIDC configuration for k8s-agent authentication (all four required together).
+    # AEGIS_SPOKE_OIDC_TOKEN_URL is set by the local-relay overlay.
+    AEGIS_SPOKE_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_SPOKE_OIDC_CLIENT_SECRET: ""
+    AEGIS_SPOKE_OIDC_AUDIENCE: "aegis-platform"
+    # Spoke-proxy CA for signing certs (fallback when cert-manager not enabled)
+    AEGIS_SPOKE_PROXY_CA_CERT: "/etc/spoke-proxy-ca/ca.crt"
+    AEGIS_SPOKE_PROXY_CA_KEY: "/etc/spoke-proxy-ca/ca.key"
+    # Spoke-proxy NLB configuration for stable proxy URL
+    # Target group ARN for attaching EKS node groups to the NLB
+    AEGIS_SPOKE_PROXY_TARGET_GROUP: ""
+    # NLB hostname passed to k8s-agent for proxy URL registration
+    # Empty — agent auto-discovers from LoadBalancer Service
+    AEGIS_SPOKE_PROXY_HOST: ""
+    # cert-manager + step-ca configuration for production-ready PKI
+    # AEGIS_STEP_CA_URL is auto-populated by terraform/dev-relay overlay.
+    AEGIS_CERT_MANAGER_ENABLED: "true"
+    AEGIS_STEP_CA_URL: ""
+    AEGIS_STEP_CA_ROOT_CA_FILE: "/etc/step-ca/root_ca.crt"
+    AEGIS_STEP_PROVISIONER_NAME: "aegis"
+    AEGIS_STEP_PROVISIONER_KID: "0T9QMX-qJc9L6ngJM3mP4UpCCUeufCH9dbLm-uxv4YI"
+    AEGIS_STEP_PROVISIONER_PASSWORD_FILE: "/etc/step-ca/provisioner-password"
+    AEGIS_CLUSTER_ISSUER_NAME: "aegis-internal"
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-123456789012/aegis/pulumi"
+    PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
+    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "123456789012"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: ""
+    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AWS_REGION: "us-east-1"
+    AWS_DEFAULT_REGION: "us-east-1"
+    DB_HOST: "platform-postgres.aegis-system.svc.cluster.local"
+    DB_PORT: "5432"
+    DB_NAME: "aegis_platform"
+    DB_USER: "aegis_platform"
+    DB_SSLMODE: "disable"
+    PG_MAX_OPEN_CONNS: "10"
+    PG_MAX_IDLE_CONNS: "5"
+    PG_CONN_MAX_LIFETIME: "30m"
+  envFromSecret:
+    AWS_ACCESS_KEY_ID: aws-access-key-id
+    AWS_SECRET_ACCESS_KEY: aws-secret-access-key
+    DB_PASSWORD: db-password
+  secrets:
+    aws-access-key-id: "REPLACE_WITH_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REPLACE_WITH_AWS_SECRET_ACCESS_KEY"
+    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "REPLACE_WITH_AWS_ACCOUNT_ID"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: "REPLACE_WITH_AWS_ROLE_ARN"
+    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "REPLACE_WITH_AWS_EXTERNAL_ID"
+    db-password: "REPLACE_WITH_DB_PASSWORD"
+    authz-role-bindings.json: |
+      [
+        {
+          "clients": ["backstage", "vscode-extension"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
+  migrations:
+    enabled: true
+    image:
+      repository: migrate/migrate
+      tag: v4.16.2
+      pullPolicy: IfNotPresent
+    ttlSecondsAfterFinished: 300
+    args:
+      - "-path=/migrations"
+      - "-database=$(DATABASE_URL)"
+      - "up"
+  tls:
+    enabled: true
+    serveGrpc: true
+    # cert and key are managed by cert-manager when using the local-pki overlay
+    # To use inline certs instead, provide PEM values here
+    cert: ""
+    key: ""
+  auth:
+    oidc:
+      skipTlsVerify: false
+      caBundle:
+        create: true
+        secretName: aegis-platform-api-oidc-ca
+        key: ca.crt
+        fileName: ca.crt
+        mountPath: /etc/aegis-platform-api/oidc
+        data: |
+          -----BEGIN CERTIFICATE-----
+          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
+          vEjdV98VYR87
+          -----END CERTIFICATE-----
+  # Local kubeconfig directory
+  kubeConfigsDir: "/tmp/kubeconfigs"
+  targetNamespace: "aegis-workloads-local"
+  clusters:
+    dev-local:
+      inCluster: true
+
+  securityContext: null
+  containerSecurityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: true
+
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+
+  # Disable health probes for local development (endpoints not implemented yet)
+  livenessProbe: null
+  readinessProbe: null
+  volumeMounts:
+    - name: kubeconfigs
+      mountPath: /tmp/kubeconfigs
+      readOnly: true
+    - name: spoke-proxy-ca
+      mountPath: /etc/spoke-proxy-ca
+      readOnly: true
+    - name: step-ca-root
+      mountPath: /etc/step-ca/root_ca.crt
+      subPath: root_ca.crt
+      readOnly: true
+    - name: step-ca-credentials
+      mountPath: /etc/step-ca/provisioner-password
+      subPath: provisioner-password
+      readOnly: true
+  volumes:
+    - name: kubeconfigs
+      secret:
+        secretName: aegis-kubeconfigs
+    - name: spoke-proxy-ca
+      secret:
+        secretName: spoke-proxy-ca
+    - name: step-ca-root
+      secret:
+        secretName: aegis-trust-bundle
+        items:
+          - key: ca.crt
+            path: root_ca.crt
+    - name: step-ca-credentials
+      secret:
+        secretName: step-ca-credentials
+        items:
+          - key: provisioner-password
+            path: provisioner-password
+
+#################################################################
+# Proxy Configuration - Local
+#################################################################
+proxy:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: carlosmsanchez/aegis-proxy
+    tag: "latest"
+    pullPolicy: IfNotPresent  # Docker Desktop shares daemon; no remote pull needed
+
+  service:
+    type: ClusterIP
+    port: 8085
+
+  ingress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: proxy.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+
+  # Local development JWT secret (32+ chars) - must match Platform API
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+  expectedAudience: "aegis-proxy"
+  allowedSuffix: ".svc.cluster.local"
+  publicHost: "proxy.localtest.me"
+
+  tls:
+    enabled: false
+
+  # Local development environment variables
+  env:
+    LOG_LEVEL: "debug"
+
+  securityContext: null
+  containerSecurityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: true
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+
+  # Relaxed probes for local development
+  livenessProbe:
+    tcpSocket:
+      port: 8085
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  readinessProbe:
+    tcpSocket:
+      port: 8085
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+#################################################################
+# PKI Configuration - Local (Step-CA + cert-manager)
+# Enable this to use automated certificate management
+#################################################################
+pki:
+  # Set to true to enable internal PKI for local development
+  enabled: false
+
+  clusterIssuerName: aegis-internal
+  trustBundleSecretName: aegis-trust-bundle
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+
+  # cert-manager subchart
+  certManager:
+    enabled: false
+    installCRDs: true
+
+  # step-ca subchart
+  stepCa:
+    enabled: false
+    ca:
+      name: "Aegis Internal CA"
+      provisioner:
+        name: aegis
+      db:
+        persistent: false  # Use ephemeral storage for local dev
+    service:
+      port: 443
+
+  # step-issuer subchart
+  stepIssuer:
+    enabled: false

@@ -1,0 +1,677 @@
+syntax = "proto3";
+package aegis.v1;
+option go_package = "github.com/yourorg/aegis/proto/aegis/v1;aegisv1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+
+// ---- Core resource messages ----
+message Project {
+  string id = 1;
+  string display_name = 2;
+  string owner_group = 3;
+  PolicyDomain policy = 4;
+  map<string, string> annotations = 5;
+  ProjectAwsCredentials aws = 6;
+}
+
+message ProjectAwsCredentials {
+  string account_id = 1;
+  string role_arn = 2;
+  string external_id = 3;
+}
+message PolicyDomain { repeated string regions = 1; string data_level = 2; bool deny_egress_by_default = 3; }
+
+message Budget {
+  string project_id = 1;
+  string queue = 2;
+  double limit_usd = 3;
+  string policy_mode = 4;
+}
+
+message Flavor {
+  string name = 1;
+  string chip = 2;
+  string mig_profile = 3;
+  bool rdma_required = 4;
+  string resource_name = 5;
+  int32 gpu_count = 6;
+  double memory_gib = 7;
+  double price_usd_per_gpu_hour = 8;
+  // Optional CPU request expressed in Kubernetes quantity format, e.g. "1" or "500m".
+  string cpu_cores_request = 9;
+  // Optional memory request expressed in Kubernetes quantity format, e.g. "4Gi" or "1024Mi".
+  string memory_request = 10;
+}
+
+message Queue {
+  string name = 1; string project_id = 2; string priority_tier = 3; // "prod"|"research"|"background"
+  repeated string allowed_flavors = 4;
+  int64 default_max_duration_seconds = 5;
+}
+
+// Workload
+message WorkspaceSpec {
+  string flavor = 1;
+  string image = 2;
+  map<string,string> env = 3;
+  repeated string command = 4;
+  int64 max_duration_seconds = 5;
+  bool interactive = 6;
+  repeated int32 ports = 7;
+  WorkspaceStorage storage = 8;
+}
+
+// WorkspaceStorage configures persistent storage for a workspace pod.
+// When persistent=true, the k8s-agent creates a PVC and mounts it into the
+// workspace container. Data survives workspace restarts within the same project.
+// When omitted, the platform-api applies defaults (persistent=true, 50Gi, /home/coder).
+message WorkspaceStorage {
+  bool persistent = 1;            // true = create/attach PVC, false = ephemeral only
+  string storage_class = 2;       // Kubernetes StorageClass name (e.g. "gp3"). Empty = cluster default.
+  string size = 3;                // Storage size as K8s quantity (e.g. "50Gi", "100Gi")
+  string mount_path = 4;          // Mount path inside the container. Default: "/home/coder"
+  string existing_claim_name = 5; // Reuse an existing PVC by name (for session continuity)
+}
+message TrainingSpec  { string flavor = 1; int32 workers = 2; int32 gpus_per_worker = 3; string image = 4; repeated string command = 5; bool gang = 6; int64 max_duration_seconds = 7; }
+
+message ResourceHints {
+  string resource_name = 1; // e.g. "nvidia.com/mig-1g.10gb" or "nvidia.com/gpu"
+  int32 gpu_count = 2;      // per container GPU count to request
+  // Optional CPU core quantity expressed as a Kubernetes quantity string.
+  string cpu_cores_request = 3;
+  // Optional memory quantity expressed as a Kubernetes quantity string.
+  string memory_request = 4;
+}
+
+message Workload {
+  string id = 1; string project_id = 2; string queue = 3; string cluster_id = 4; string status = 5; string url = 6;
+  oneof kind { WorkspaceSpec workspace = 10; TrainingSpec training = 11; }
+
+  ResourceHints hints = 12;
+  string ui_status = 13;
+  string message = 14;
+  string suspended_at_utc = 15;
+  string suspend_reason = 16;
+  int32 resume_count = 17;
+  string terminated_at_utc = 18;
+  string terminate_reason = 19;
+}
+
+message GetWorkspaceConnectionDetailsRequest {
+  string id = 1;
+}
+
+message GetWorkspaceConnectionDetailsResponse {
+  string proxy_url = 1;
+  string token = 2;
+  string ssh_host_alias = 3;
+  string ssh_username = 4;
+  string internal_host = 5;
+  int32 dest_port = 6;
+  string expires_at_utc = 7;
+}
+
+message CreateConnectionSessionRequest {
+  string workload_id = 1;
+  string client = 2; // "vscode" | "ssh" | "cli"
+}
+
+message ConnectionSession {
+  string session_id = 1;
+  string token = 2; // short-lived, single-use JWT
+  string ssh_user = 3; // e.g., "aegis-<uid>"
+  string ssh_host_alias = 4; // e.g., "aegis-w-123"
+  string vscode_uri = 5; // vscode://vscode-remote/ssh-remote+<alias>
+  string ssh_config = 6; // ephemeral config snippet
+  string proxy_url = 7; // https://proxy.cluster/proxy/<workload-id>
+  string expires_at_utc = 8;
+  bool one_time = 9;
+  string proxy_ca_pem = 10; // PEM-encoded CA cert for the spoke-proxy TLS certificate
+  string workspace_root = 11; // filesystem path for VS Code to open (e.g., "/home/aegis/work")
+}
+
+message RenewConnectionSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeConnectionSessionRequest {
+  string session_id = 1;
+}
+
+// Cluster handshake
+message ClusterRegisterRequest {
+  string cluster_id = 1;
+  string provider = 2;
+  string region = 3;
+  string il_level = 4;
+  map<string,string> labels = 5;
+  string proxy_url = 6; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+  string proxy_ca_pem = 7; // PEM-encoded spoke-proxy CA certificate
+}
+message ClusterRegisterResponse { bool ok = 1; string message = 2; }
+message ClusterHeartbeat {
+  string cluster_id = 1;
+  double ttf_gpu_seconds_p50 = 2;
+  repeated Flavor available_flavors = 3;
+  string proxy_url = 4; // spoke proxy URL for this cluster (e.g., "wss://proxy.cluster.example.com")
+}
+message ClusterHeartbeatAck {
+  bool ok = 1;
+  string suggested_proxy_url = 2; // Hub proxy URL for spokes that can't discover their own
+}
+
+// Cluster listing
+message ListClustersRequest {
+  string project_id = 1;
+  string region = 2;
+}
+
+message ClusterSummary {
+  string id = 1;
+  string name = 2;
+  string project_id = 3;
+  string provider = 4;
+  string region = 5;
+  string phase = 6;
+  string created_at = 7;
+  string last_heartbeat = 8;
+}
+
+message ListClustersResponse {
+  repeated ClusterSummary items = 1;
+}
+
+// Cluster detail
+message GetClusterRequest {
+  string cluster_id = 1;
+}
+
+message ClusterDetail {
+  string id = 1;
+  string name = 2;
+  string project_id = 3;
+  string provider = 4;
+  string region = 5;
+  string il_level = 6;
+  string phase = 7;
+  double ttf_gpu_seconds_p50 = 8;
+  repeated string available_flavors = 9;
+  map<string, string> labels = 10;
+  string created_at = 11;
+  string last_heartbeat = 12;
+  string cluster_endpoint = 13;
+  string proxy_url = 14;
+  repeated ClusterNodePool node_pools = 15;
+  repeated ClusterCondition conditions = 16;
+  repeated ClusterAddon addons = 17;
+  ClusterObservabilityConfig observability = 18;
+  string provisioning_job_id = 19;
+}
+
+message ClusterNodePool {
+  string name = 1;
+  string instance_type = 2;
+  int32 min_size = 3;
+  int32 max_size = 4;
+  int32 desired_size = 5;
+  bool gpu = 6;
+}
+
+message ClusterCondition {
+  string type = 1;
+  string status = 2;
+  string message = 3;
+  string last_transition = 4;
+}
+
+message ClusterAddon {
+  string name = 1;
+  string namespace = 2;
+  string version = 3;
+  string status = 4;
+}
+
+message ClusterObservabilityConfig {
+  string loki_endpoint = 1;
+  string prometheus_endpoint = 2;
+  string tempo_endpoint = 3;
+  string alertmanager_endpoint = 4;
+}
+
+// Cluster import
+message ImportClusterRequest {
+  string cluster_id = 1;
+  string project_id = 2;
+  string provider = 3;
+  string region = 4;
+  string name = 5;
+  map<string, string> labels = 6;
+  // provisioned | kubeconfig | assume_role | agent_only
+  string import_method = 7;
+  // Base64 encoded kubeconfig when using import_method=kubeconfig.
+  string kubeconfig = 8;
+  // Required when using import_method=assume_role.
+  string assume_role_arn = 9;
+}
+
+message K8sAgentHelmValues {
+  map<string, string> env = 1;
+}
+
+message HelmValues {
+  K8sAgentHelmValues k8s_agent = 1;
+}
+
+message ImportClusterResponse {
+  string cluster_id = 1;
+  // pending_agent | active
+  string status = 2;
+  HelmValues helm_values = 3;
+  string install_command = 4;
+  string agent_script_url = 5;
+  repeated string warnings = 6;
+}
+
+// Requests
+message CreateProjectRequest { Project project = 1; }
+message UpsertBudgetRequest { Budget budget = 1; }
+message UpsertFlavorRequest { Flavor flavor = 1; }
+message UpsertQueueRequest  { Queue queue = 1; }
+message SubmitWorkloadRequest { Workload workload = 1; }
+message GetWorkloadRequest { string id = 1; }
+message ListWorkloadsRequest { string project_id = 1; }
+message ListWorkloadsResponse { repeated Workload items = 1; }
+message ResumeWorkloadRequest { string id = 1; }
+message TerminateWorkloadRequest { string id = 1; string reason = 2; }
+
+message LeaseWorkloadRequest {
+  string cluster_id = 1;
+  int32 max = 2;
+}
+
+message LeaseWorkloadResponse {
+  repeated Workload items = 1;
+}
+
+message ListClusterWorkloadIDsRequest {
+  string cluster_id = 1;
+}
+
+message ListClusterWorkloadIDsResponse {
+  repeated string workload_ids = 1;
+}
+
+message AckWorkloadRequest {
+  string id = 1;
+  string status = 2;
+  string url = 3;
+  string backend = 4;
+  string suspend_reason = 5; // "idle_timeout", "budget_exceeded", "admin_action", "pod_failure"
+  string message = 6;        // Human-readable diagnostic (e.g. "ImagePullBackOff: image not found")
+}
+
+message AckWorkloadResponse {
+  Workload workload = 1;
+}
+
+message StartWorkloadRequest {
+  string id = 1;
+  string cluster_id = 2;
+}
+
+message StartWorkloadResponse {
+  Workload workload = 1;
+}
+
+message GetBudgetRequest { string project_id = 1; string queue = 2; }
+message BudgetUsage {
+  double actual_usd = 1;
+  double reserved_usd = 2;
+  double remaining_usd = 3;
+  string period_start_utc = 4;
+  string period_end_utc = 5;
+}
+message GetBudgetResponse { Budget budget = 1; BudgetUsage usage = 2; }
+
+message ListBudgetsRequest { string project_id = 1; }
+message BudgetWithUsage { Budget budget = 1; BudgetUsage usage = 2; }
+message ListBudgetsResponse { repeated BudgetWithUsage items = 1; }
+
+// Service
+message CreateWorkspaceRequest {
+  string project_id = 1;
+  string workspace_id = 2;
+  string queue = 3;
+  WorkspaceSpec workspace = 4;
+}
+
+message CreateWorkspaceResponse {
+  Workload workload = 1;
+}
+
+message ClusterProfileReference {
+  string id = 1;
+  string version = 2;
+  map<string, string> parameters = 3;
+}
+
+message CreateClusterRequest {
+  string project_id = 1;
+  string cluster_id = 2;
+  string provider = 3;
+  string region = 4;
+  ClusterProfileReference profile = 5;
+}
+
+message CreateClusterResponse {
+  Job job = 1;
+}
+
+message GetClusterJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetClusterJobStatusResponse {
+  Job job = 1;
+}
+
+message Job {
+  string id = 1;
+  string status = 2;
+  int32 progress = 3;
+  string error = 4;
+}
+
+message DestroyClusterRequest {
+  string cluster_id = 1;
+  string project_id = 2;
+}
+
+message DestroyClusterResponse {
+  Job job = 1;
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project items = 1;
+}
+
+message CloudWatchMetricSample {
+  string name = 1;
+  double value = 2;
+  string unit = 3;
+  int32 period_seconds = 4;
+  string statistic = 5;
+  bool found = 6;
+}
+
+message ControlPlaneLogEntry {
+  string timestamp = 1;
+  string stream = 2;
+  string message = 3;
+}
+
+message ControlPlaneSignals {
+  string status = 1;
+  string status_message = 2;
+  bool logging_enabled = 3;
+  string log_group = 4;
+  CloudWatchMetricSample api_server_latency_p99 = 5;
+  CloudWatchMetricSample api_server_5xx_rate = 6;
+  repeated ControlPlaneLogEntry log_samples = 7;
+  repeated string missing = 8;
+}
+
+message ScalingEvent {
+  string description = 1;
+  string status = 2;
+  string time = 3;
+}
+
+message NodegroupSignal {
+  string name = 1;
+  string status = 2;
+  int32 desired = 3;
+  int32 current = 4;
+  int32 ready = 5;
+  string asg_name = 6;
+  repeated string issues = 7;
+  repeated ScalingEvent scaling_events = 8;
+  bool gpu = 9;
+  string gpu_flavor = 10;
+  string instance_type = 11;
+}
+
+message TargetGroupHealth {
+  string arn = 1;
+  string name = 2;
+  int32 healthy = 3;
+  int32 unhealthy = 4;
+}
+
+message LoadBalancerAccessLog {
+  bool enabled = 1;
+  string bucket = 2;
+  string prefix = 3;
+}
+
+message LoadBalancerSignal {
+  string arn = 1;
+  string name = 2;
+  string type = 3;
+  string scheme = 4;
+  string state = 5;
+  double request_count = 6;
+  double target_4xx = 7;
+  double target_5xx = 8;
+  CloudWatchMetricSample latency_p99 = 9;
+  int32 healthy_targets = 10;
+  int32 unhealthy_targets = 11;
+  repeated TargetGroupHealth target_groups = 12;
+  LoadBalancerAccessLog access_logs = 13;
+}
+
+message GetAwsSignalsRequest {
+  string project_id = 1;
+  string cluster_id = 2;
+  string region = 3;
+  int64 lookback_minutes = 4;
+}
+
+message GetAwsSignalsResponse {
+  string cluster_id = 1;
+  string region = 2;
+  ControlPlaneSignals control_plane = 3;
+  repeated NodegroupSignal nodegroups = 4;
+  repeated LoadBalancerSignal load_balancers = 5;
+  repeated string warnings = 6;
+}
+
+// Service
+service AegisPlatform {
+  rpc CreateProject(CreateProjectRequest) returns (Project) {
+    option (google.api.http) = {
+      post: "/api/v1/projects"
+      body: "*"
+    };
+  }
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects"
+    };
+  }
+  rpc UpsertBudget(UpsertBudgetRequest) returns (Budget) {
+    option (google.api.http) = {
+      put: "/api/v1/projects/{budget.project_id}/budgets"
+      body: "*"
+    };
+  }
+  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/budgets"
+    };
+  }
+  rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/budgets/list"
+    };
+  }
+  rpc UpsertFlavor(UpsertFlavorRequest) returns (Flavor) {
+    option (google.api.http) = {
+      put: "/api/v1/flavors"
+      body: "*"
+    };
+  }
+  rpc UpsertQueue(UpsertQueueRequest) returns (Queue) {
+    option (google.api.http) = {
+      put: "/api/v1/queues"
+      body: "*"
+    };
+  }
+
+  rpc SubmitWorkload(SubmitWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads"
+      body: "*"
+    };
+  }
+  rpc GetWorkload(GetWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      get: "/api/v1/workloads/{id}"
+    };
+  }
+  rpc ResumeWorkload(ResumeWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/resume"
+      body: "*"
+      additional_bindings { post: "/v1/workloads/{id}/resume" body: "*" }
+    };
+  }
+  rpc TerminateWorkload(TerminateWorkloadRequest) returns (Workload) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/terminate"
+      body: "*"
+      additional_bindings { post: "/v1/workloads/{id}/terminate" body: "*" }
+    };
+  }
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/workloads"
+    };
+  }
+
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workspaces"
+      body: "*"
+    };
+  }
+
+  rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters"
+      body: "*"
+    };
+  }
+
+  rpc ImportCluster(ImportClusterRequest) returns (ImportClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/import"
+      body: "*"
+    };
+  }
+
+  rpc DestroyCluster(DestroyClusterRequest) returns (DestroyClusterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/{cluster_id}/destroy"
+      body: "*"
+    };
+  }
+
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters"
+    };
+  }
+
+  rpc GetCluster(GetClusterRequest) returns (ClusterDetail) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/{cluster_id}"
+    };
+  }
+
+  rpc GetClusterJobStatus(GetClusterJobStatusRequest) returns (GetClusterJobStatusResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/jobs/{job_id}/status"
+    };
+  }
+
+  rpc GetWorkspaceConnectionDetails(GetWorkspaceConnectionDetailsRequest) returns (GetWorkspaceConnectionDetailsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/workloads/{id}/connection_details"
+    };
+  }
+
+  rpc CreateConnectionSession(CreateConnectionSessionRequest) returns (ConnectionSession) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions"
+      body: "*"
+    };
+  }
+  rpc RenewConnectionSession(RenewConnectionSessionRequest) returns (ConnectionSession) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions/{session_id}/renew"
+      body: "*"
+    };
+  }
+  rpc RevokeConnectionSession(RevokeConnectionSessionRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/api/v1/connection_sessions/{session_id}/revoke"
+      body: "*"
+    };
+  }
+
+  rpc LeaseWorkload(LeaseWorkloadRequest) returns (LeaseWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/lease"
+      body: "*"
+    };
+  }
+  rpc ListClusterWorkloadIDs(ListClusterWorkloadIDsRequest) returns (ListClusterWorkloadIDsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/clusters/{cluster_id}/workloads/ids"
+    };
+  }
+  rpc StartWorkload(StartWorkloadRequest) returns (StartWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/start"
+      body: "*"
+    };
+  }
+  rpc AckWorkload(AckWorkloadRequest) returns (AckWorkloadResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/workloads/{id}/ack"
+      body: "*"
+    };
+  }
+
+  rpc RegisterCluster(ClusterRegisterRequest) returns (ClusterRegisterResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/register"
+      body: "*"
+    };
+  }
+  rpc Heartbeat(ClusterHeartbeat) returns (ClusterHeartbeatAck) {
+    option (google.api.http) = {
+      post: "/api/v1/clusters/heartbeat"
+      body: "*"
+    };
+  }
+  rpc GetAwsClusterSignals(GetAwsSignalsRequest) returns (GetAwsSignalsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/projects/{project_id}/clusters/{cluster_id}/aws/signals"
+    };
+  }
+}

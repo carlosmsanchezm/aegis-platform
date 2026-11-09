@@ -1,0 +1,40 @@
+---
+apiVersion: v1
+
+name: "aegis/vscode-reh-init"
+
+tags:
+  - "1.0.0"
+  - "latest"
+
+args:
+  BASE_REGISTRY: "registry1.dso.mil"
+  BASE_IMAGE: "ironbank/redhat/ubi/ubi9-minimal"
+  BASE_TAG: "9.7"
+
+labels:
+  org.opencontainers.image.title: "aegis-vscode-reh-init"
+  org.opencontainers.image.description: "Init container that injects VS Code Remote Extension Host into Aegis workspace pods"
+  org.opencontainers.image.vendor: "Aegis Platform"
+  org.opencontainers.image.licenses: "Proprietary"
+  org.opencontainers.image.version: "1.0.0"
+  mil.dso.ironbank.image.keywords: "vscode,init-container,workspace,remote-development"
+  mil.dso.ironbank.image.type: "commercial"
+  org.opencontainers.image.url: "https://aegis-platform.tech"
+  mil.dso.ironbank.product.name: "aegis-vscode-reh-init"
+
+resources:
+  # VS Code Remote Extension Host (REH) server binary
+  # Pinned commit: ce099c1ed25d9eb3076c11e4a280f3eb52b4fbeb
+  - filename: vscode-server-linux-x64.tar.gz
+    url: https://vscode.download.prss.microsoft.com/dbazure/download/stable/ce099c1ed25d9eb3076c11e4a280f3eb52b4fbeb/vscode-server-linux-x64.tar.gz
+    validation:
+      type: sha256
+      value: d1f1324b9fc5b5405513a27c3468212884ed22ae98ca4ca2e55b7c4b6d0834ff
+
+maintainers:
+  - name: "Carlos Sanchez"
+    username: "cms553"
+    email: "carlos@aegis-platform.tech"
+    company: "Aegis Platform LLC"
+    cht_member: false

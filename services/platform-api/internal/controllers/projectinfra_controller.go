@@ -1,0 +1,1291 @@
+package controllers
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	aegis "github.com/yourorg/aegis/proto/aegis/v1"
+	infraapi "github.com/yourorg/aegis/services/platform-api/api/v1alpha1"
+	"github.com/yourorg/aegis/services/platform-api/internal/kubeclients"
+	"github.com/yourorg/aegis/services/platform-api/internal/provisioning"
+	"github.com/yourorg/aegis/services/platform-api/internal/store"
+)
+
+const (
+	projectInfraFinalizer = "infra.aegis.yourorg.dev/finalizer"
+	conditionReady        = "Ready"
+)
+
+// ProjectInfraReconciler handles ProjectInfra lifecycle orchestration.
+type ProjectInfraReconciler struct {
+	client.Client
+	APIReader                 client.Reader // Uncached reader for critical reads
+	Scheme                    *runtime.Scheme
+	Log                       *zap.Logger
+	Provisioner               provisioning.AWSProvisioner
+	Store                     store.Store
+	KubeconfigSecretName      string
+	KubeconfigSecretNamespace string
+	LocalLocks                map[string]*sync.Mutex
+	LocalLocksMu              sync.Mutex
+	HolderIdentity            string
+}
+
+func (r *ProjectInfraReconciler) recordProvisioningStatus(infra *infraapi.ProjectInfra, phase string, completed bool) {
+	if r == nil || r.Store == nil || infra == nil {
+		return
+	}
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	start := time.Time{}
+	if !completed {
+		start = now
+	}
+	run := store.ProvisioningRun{
+		JobID:     jobID,
+		ProjectID: strings.TrimSpace(infra.Spec.ProjectID),
+		ClusterID: provisioningClusterID(infra),
+		Phase:     strings.TrimSpace(phase),
+		StartedAt: start,
+	}
+	if existing, ok := r.Store.GetProvisioningRun(jobID); ok && existing != nil {
+		if existing.StartedAt.After(time.Time{}) {
+			run.StartedAt = existing.StartedAt
+		}
+		if run.ProjectID == "" {
+			run.ProjectID = existing.ProjectID
+		}
+		if run.ClusterID == "" {
+			run.ClusterID = existing.ClusterID
+		}
+		if run.Phase == "" {
+			run.Phase = existing.Phase
+		}
+		if completed {
+			run.CompletedAt = existing.CompletedAt
+		}
+	}
+	if completed {
+		ts := now
+		run.CompletedAt = &ts
+	}
+	r.Store.UpsertProvisioningRun(run)
+}
+
+func (r *ProjectInfraReconciler) recordProvisioningLog(infra *infraapi.ProjectInfra, phase, logType, message string) {
+	if r == nil || r.Store == nil || infra == nil {
+		return
+	}
+	jobID := strings.TrimSpace(infra.Name)
+	msg := strings.TrimSpace(message)
+	if jobID == "" || msg == "" {
+		return
+	}
+	if strings.TrimSpace(logType) == "" {
+		logType = store.LogTypeEvent
+	}
+	entry := store.ProvisioningLogEntry{
+		JobID:     jobID,
+		ProjectID: strings.TrimSpace(infra.Spec.ProjectID),
+		ClusterID: provisioningClusterID(infra),
+		Phase:     strings.TrimSpace(phase),
+		Type:      strings.TrimSpace(logType),
+		Message:   msg,
+		CreatedAt: time.Now().UTC(),
+	}
+	r.Store.AppendProvisioningLog(entry)
+}
+
+func provisioningClusterID(infra *infraapi.ProjectInfra) string {
+	if infra == nil {
+		return ""
+	}
+	if infra.Annotations != nil {
+		if v := strings.TrimSpace(infra.Annotations["aegis.yourorg.dev/clusterId"]); v != "" {
+			return v
+		}
+	}
+	if infra.Spec.Aws != nil {
+		if v := strings.TrimSpace(infra.Spec.Aws.ClusterName); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// SetupWithManager registers the reconciler with the manager.
+func (r *ProjectInfraReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&infraapi.ProjectInfra{}).
+		WithOptions(opts).
+		Complete(r)
+}
+
+// Reconcile implements the controller-runtime reconciliation contract.
+func (r *ProjectInfraReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := r.logger().With(zap.String("projectinfra", req.NamespacedName.String()))
+
+	var infra infraapi.ProjectInfra
+	if err := r.Get(ctx, req.NamespacedName, &infra); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	releaseLock, res, err := r.acquireStackLock(ctx, &infra)
+	if err != nil {
+		return res, err
+	}
+	// If we failed to acquire the lease, requeue instead of proceeding without coordination.
+	if res.Requeue || res.RequeueAfter > 0 {
+		if releaseLock != nil {
+			releaseLock()
+		}
+		return res, nil
+	}
+	if releaseLock != nil {
+		defer releaseLock()
+	}
+
+	// Re-read the object after acquiring the lock to get the latest status.
+	// This prevents race conditions where another reconcile completed between
+	// our initial read and lock acquisition.
+	// IMPORTANT: Use APIReader (uncached) to get the actual current state from the API server,
+	// not the potentially stale cached version. This is critical for detecting when another
+	// reconcile has already set the status to Ready.
+	reader := r.APIReader
+	usingAPIReader := reader != nil
+	if reader == nil {
+		reader = r.Client // Fallback to cached client if APIReader not configured
+	}
+	if err := reader.Get(ctx, req.NamespacedName, &infra); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	log.Info("re-read object after lock acquisition",
+		zap.Bool("using_api_reader", usingAPIReader),
+		zap.String("status_phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
+
+	if !infra.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, log, &infra)
+	}
+
+	if err := r.ensureFinalizer(ctx, &infra); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return r.reconcileNormal(ctx, log, &infra)
+}
+
+func (r *ProjectInfraReconciler) reconcileNormal(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// Ensure the project exists in the store for the workspace wizard to list.
+	r.syncProjectToStore(infra)
+
+	// Terminal state: infrastructure already destroyed.
+	if strings.EqualFold(infra.Status.Phase, "Destroyed") {
+		log.Info("skipping reconcile; infrastructure already destroyed")
+		return ctrl.Result{}, nil
+	}
+
+	// Route destroy mode before Ready/Error checks — a Ready cluster can be destroyed.
+	if infra.Spec.Aws != nil && strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeDestroy)) {
+		return r.handleAWSDestroy(ctx, log, infra)
+	}
+
+	// If already in Ready state, skip reconciliation. The infrastructure is provisioned.
+	if strings.EqualFold(infra.Status.Phase, "Ready") {
+		log.Info("skipping reconcile; infrastructure is already ready")
+		return ctrl.Result{}, nil
+	}
+
+	// If a prior run failed, avoid implicit retries. The UI will delete/recreate
+	// the ProjectInfra to retry, so keep the object idle in error state.
+	if strings.EqualFold(infra.Status.Phase, "Error") {
+		log.Info("skipping reconcile; infrastructure is in error state")
+		return ctrl.Result{}, nil
+	}
+
+	if infra.Spec.Aws != nil {
+		if strings.EqualFold(string(infra.Spec.Aws.Mode), string(infraapi.AWSProvisionModeImport)) {
+			return r.handleAWSImport(ctx, log, infra)
+		}
+	}
+	if infra.Spec.ImportKubeconfigSecretRef != nil {
+		return r.handleImport(ctx, log, infra)
+	}
+	if infra.Spec.Aws != nil {
+		return r.handleAWSProvision(ctx, log, infra)
+	}
+	reason := "InvalidSpec"
+	err := fmt.Errorf("spec.aws or spec.importKubeconfigSecretRef required")
+	cond := newCondition(metav1.ConditionFalse, reason, err.Error())
+	_ = r.setStatus(ctx, infra, "Error", &cond, nil, infra.Status.CostHintUSDPerHour)
+	return ctrl.Result{}, err
+}
+
+func (r *ProjectInfraReconciler) handleAWSImport(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	aws := infra.Spec.Aws
+	if aws == nil {
+		err := fmt.Errorf("aws spec required for import mode")
+		cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+	if len(aws.Imports) == 0 {
+		err := fmt.Errorf("spec.aws.imports must include at least one entry")
+		cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	kubeconfigData := map[string][]byte{}
+	outputs := make([]infraapi.ClusterOutput, 0, len(aws.Imports))
+
+	for _, imp := range aws.Imports {
+		clusterID := strings.TrimSpace(imp.ClusterID)
+		if clusterID == "" {
+			err := fmt.Errorf("spec.aws.imports requires clusterId")
+			cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+
+		ref := imp.KubeconfigSecretRef
+		secretName := strings.TrimSpace(ref.Name)
+		secretKey := strings.TrimSpace(ref.Key)
+		if secretName == "" || secretKey == "" {
+			err := fmt.Errorf("import %s missing kubeconfig secret reference", clusterID)
+			cond := newCondition(metav1.ConditionFalse, "InvalidSpec", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		secretNamespace := strings.TrimSpace(ref.Namespace)
+		if secretNamespace == "" {
+			secretNamespace = infra.Namespace
+		}
+
+		secret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNamespace}, secret); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		if secret.Data == nil {
+			err := fmt.Errorf("secret %s/%s missing data", secretNamespace, secretName)
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+		payload, ok := secret.Data[secretKey]
+		if !ok {
+			err := fmt.Errorf("secret %s/%s missing key %s", secretNamespace, secretName, secretKey)
+			cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+
+		aggregatedKey := fmt.Sprintf("%s.kubeconfig", clusterID)
+		kubeconfigData[aggregatedKey] = payload
+		outputs = append(outputs, infraapi.ClusterOutput{
+			ClusterID:           clusterID,
+			Name:                clusterID,
+			Region:              infra.Spec.Region,
+			KubeconfigSecretKey: aggregatedKey,
+		})
+	}
+
+	if err := r.writeKubeconfigs(ctx, kubeconfigData); err != nil {
+		cond := newCondition(metav1.ConditionFalse, "SecretSyncFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	for _, output := range outputs {
+		if err := r.ensureAegisCluster(ctx, infra, output); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ClusterSpecSyncFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+	}
+
+	condReady := newCondition(metav1.ConditionTrue, "Imported", "aws kubeconfig imports synchronized")
+	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, infra.Status.CostHintUSDPerHour); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("project infrastructure imports synchronized", zap.Int("clusters", len(outputs)))
+	return ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) handleImport(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	data, outputs, err := r.extractImportData(ctx, infra)
+	if err != nil {
+		cond := newCondition(metav1.ConditionFalse, "ImportFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	if err := r.writeKubeconfigs(ctx, data); err != nil {
+		cond := newCondition(metav1.ConditionFalse, "SecretSyncFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		return ctrl.Result{}, err
+	}
+
+	for _, output := range outputs {
+		if err := r.ensureAegisCluster(ctx, infra, output); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ClusterSpecSyncFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			return ctrl.Result{}, err
+		}
+	}
+
+	cond := newCondition(metav1.ConditionTrue, "Imported", "kubeconfig secret imported")
+	if err := r.setStatus(ctx, infra, "Ready", &cond, outputs, 0); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("project infrastructure imported", zap.Int("clusters", len(outputs)))
+	return ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) handleAWSProvision(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	if r.Provisioner == nil {
+		err := fmt.Errorf("aws provisioner not configured")
+		cond := newCondition(metav1.ConditionFalse, "ProvisionerUnavailable", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningStatus(infra, "Error", true)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		return ctrl.Result{}, err
+	}
+
+	// Clear old provisioning logs before starting new provisioning
+	// This prevents old logs from accumulating and mixing with new ones
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID != "" && r.Store != nil {
+		log.Info("clearing old provisioning logs", zap.String("job_id", jobID))
+		r.Store.ClearProvisioningLogs(jobID)
+	}
+
+	r.recordProvisioningStatus(infra, "Provisioning", false)
+	r.recordProvisioningLog(infra, "Provisioning", store.LogTypeEvent, "pulumi provisioning started")
+
+	condProvisioning := newCondition(metav1.ConditionFalse, "Provisioning", "provisioning in progress")
+	_ = r.setStatus(ctx, infra, "Provisioning", &condProvisioning, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+
+	// Pre-register cluster in store so it appears in the UI during provisioning.
+	// The full cluster ID (with hash suffix) will be updated by ensureAegisCluster
+	// after Provision succeeds. PreRegisterCluster is idempotent (ON CONFLICT DO UPDATE).
+	clusterName := strings.TrimSpace(infra.Spec.Aws.ClusterName)
+	if clusterName != "" && r.Store != nil {
+		r.Store.PreRegisterCluster(
+			clusterName,
+			strings.TrimSpace(infra.Spec.ProjectID),
+			"aws",
+			strings.TrimSpace(infra.Spec.Region),
+			"", "", "",
+		)
+		log.Info("pre-registered cluster in store", zap.String("cluster_name", clusterName))
+	}
+
+	result, err := r.Provisioner.Provision(ctx, infra, infra.Spec.Aws)
+	if err != nil {
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+
+		// Auto-cleanup: destroy any AWS resources Pulumi created before the failure.
+		// This prevents orphaned EKS clusters, IAM roles, etc. that the user cannot
+		// see in the UI. Safe because Destroy is a no-op if no stack/resources exist.
+		log.Warn("provisioning failed; attempting automatic cleanup of partial resources",
+			zap.Error(err))
+		r.recordProvisioningLog(infra, "Cleanup", store.LogTypeEvent,
+			"cleaning up partial AWS resources after provisioning failure")
+
+		var cleanupMsg string
+		if destroyErr := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); destroyErr != nil {
+			log.Error("auto-cleanup failed after provisioning error",
+				zap.Error(destroyErr), zap.NamedError("provision_error", err))
+			r.recordProvisioningLog(infra, "Cleanup", store.LogTypeError,
+				fmt.Sprintf("automatic cleanup failed: %s", destroyErr.Error()))
+			cleanupMsg = fmt.Sprintf("%s\n\nWARNING: automatic cleanup also failed: %s. Manual intervention may be required.", err.Error(), destroyErr.Error())
+		} else {
+			log.Info("auto-cleanup completed after provisioning failure")
+			r.recordProvisioningLog(infra, "Cleanup", store.LogTypeEvent,
+				"partial resources cleaned up successfully")
+			cleanupMsg = fmt.Sprintf("%s\n\nPartial resources have been automatically cleaned up.", err.Error())
+		}
+
+		// Soft-delete the pre-registered cluster so it doesn't linger in the UI.
+		if clusterName != "" && r.Store != nil {
+			r.Store.DeleteCluster(clusterName)
+			// Also clean up any partial outputs (e.g. full cluster ID with hash)
+			if result != nil {
+				for _, out := range result.Outputs {
+					if cid := strings.TrimSpace(out.ClusterID); cid != "" && cid != clusterName {
+						r.Store.DeleteCluster(cid)
+					}
+				}
+			}
+		}
+
+		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", cleanupMsg)
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningStatus(infra, "Error", true)
+		return ctrl.Result{}, nil
+	}
+
+	kubeconfigData := map[string][]byte{}
+	for clusterID, kubeconfig := range result.Kubeconfigs {
+		sanitized, warnings := kubeclients.SanitizeKubeconfig(kubeconfig)
+		for _, w := range warnings {
+			r.logger().Warn("kubeconfig sanitized", zap.String("cluster_id", clusterID), zap.String("warning", w))
+		}
+		key := fmt.Sprintf("%s.kubeconfig", clusterID)
+		kubeconfigData[key] = sanitized
+	}
+	if len(kubeconfigData) == 0 {
+		err := fmt.Errorf("provisioner returned no kubeconfigs")
+		cond := newCondition(metav1.ConditionFalse, "ProvisionFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		r.recordProvisioningStatus(infra, "Error", true)
+		return ctrl.Result{}, err
+	}
+
+	if err := r.writeKubeconfigs(ctx, kubeconfigData); err != nil {
+		cond := newCondition(metav1.ConditionFalse, "SecretSyncFailed", err.Error())
+		_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+		r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+		r.recordProvisioningStatus(infra, "Error", true)
+		return ctrl.Result{}, err
+	}
+
+	outputs := result.Outputs
+	if len(outputs) == 0 {
+		outputs = make([]infraapi.ClusterOutput, 0, len(kubeconfigData))
+		for key := range kubeconfigData {
+			clusterID := strings.TrimSuffix(key, ".kubeconfig")
+			outputs = append(outputs, infraapi.ClusterOutput{
+				ClusterID:           clusterID,
+				Name:                clusterID,
+				Region:              infra.Spec.Region,
+				KubeconfigSecretKey: key,
+			})
+		}
+	}
+	// Clean up the short-name placeholder now that we have the full cluster IDs
+	// from Pulumi. The placeholder was created with spec.aws.clusterName (e.g. "training-1")
+	// but the actual cluster ID includes the project prefix (e.g. "e2e-pilot-test-training-1").
+	if clusterName != "" && r.Store != nil {
+		for _, out := range outputs {
+			fullID := strings.TrimSpace(out.ClusterID)
+			if fullID != "" && fullID != clusterName {
+				r.Store.DeleteCluster(clusterName)
+				log.Info("removed pre-registration placeholder",
+					zap.String("placeholder", clusterName),
+					zap.String("full_id", fullID))
+				break
+			}
+		}
+	}
+
+	for i := range outputs {
+		if outputs[i].KubeconfigSecretKey == "" {
+			outputs[i].KubeconfigSecretKey = fmt.Sprintf("%s.kubeconfig", outputs[i].ClusterID)
+		}
+		if outputs[i].Region == "" {
+			outputs[i].Region = infra.Spec.Region
+		}
+		if err := r.ensureAegisCluster(ctx, infra, outputs[i]); err != nil {
+			cond := newCondition(metav1.ConditionFalse, "ClusterSpecSyncFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, infra.Status.CostHintUSDPerHour)
+			r.recordProvisioningLog(infra, "Error", "error", err.Error())
+			r.recordProvisioningStatus(infra, "Error", true)
+			return ctrl.Result{}, err
+		}
+	}
+
+	condReady := newCondition(metav1.ConditionTrue, "Provisioned", "aws infrastructure provisioned")
+	if err := r.setStatus(ctx, infra, "Ready", &condReady, outputs, result.CostHintUSDPerHour); err != nil {
+		log.Error("failed to set Ready status", zap.Error(err))
+		return ctrl.Result{}, err
+	}
+	log.Info("successfully set status to Ready",
+		zap.String("phase", infra.Status.Phase),
+		zap.String("resource_version", infra.ResourceVersion))
+	r.recordProvisioningLog(infra, "Ready", store.LogTypeEvent, "pulumi provisioning completed")
+	r.recordProvisioningStatus(infra, "Ready", true)
+	log.Info("project infrastructure provisioned", zap.Int("clusters", len(outputs)))
+	return ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) handleAWSDestroy(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	// Already destroyed — nothing to do.
+	if strings.EqualFold(infra.Status.Phase, "Destroyed") {
+		return ctrl.Result{}, nil
+	}
+	// Already in progress — don't double-run (the lock should prevent this, but be safe).
+	if strings.EqualFold(infra.Status.Phase, "Destroying") {
+		log.Info("skipping reconcile; destroy already in progress")
+		return ctrl.Result{}, nil
+	}
+
+	clusterIDs := collectClusterIDs(infra)
+	log.Info("handling destroy mode",
+		zap.String("name", infra.Name),
+		zap.String("project", infra.Spec.ProjectID),
+		zap.Strings("cluster_ids", clusterIDs))
+
+	// Clear old provisioning logs so the UI starts fresh.
+	jobID := strings.TrimSpace(infra.Name)
+	if jobID != "" && r.Store != nil {
+		r.Store.ClearProvisioningLogs(jobID)
+	}
+
+	// Set phase to Destroying.
+	condDestroying := newCondition(metav1.ConditionFalse, "Destroying", "infrastructure destroy in progress")
+	if err := r.setStatus(ctx, infra, "Destroying", &condDestroying, infra.Status.Outputs, 0); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "cluster destroy initiated")
+	r.recordProvisioningStatus(infra, "Destroying", false)
+
+	// Run Pulumi destroy. Logs are streamed via the existing ProvisioningLogSink.
+	if infra.Spec.Aws != nil && r.Provisioner != nil {
+		r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "running pulumi destroy")
+		if err := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); err != nil {
+			log.Error("aws destroy failed", zap.Error(err))
+			cond := newCondition(metav1.ConditionFalse, "DestroyFailed", err.Error())
+			_ = r.setStatus(ctx, infra, "Error", &cond, infra.Status.Outputs, 0)
+			r.recordProvisioningLog(infra, "Error", store.LogTypeError, err.Error())
+			r.recordProvisioningStatus(infra, "Error", true)
+			return ctrl.Result{}, nil // Don't auto-retry; user can retry via API.
+		}
+		r.recordProvisioningLog(infra, "Destroying", store.LogTypeEvent, "pulumi destroy completed")
+	} else if infra.Spec.Aws != nil && r.Provisioner == nil {
+		log.Warn("aws destroy skipped; provisioner not configured")
+	}
+
+	// Remove kubeconfigs from the shared secret.
+	if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+		log.Error("failed to remove kubeconfigs during destroy", zap.Error(err))
+	}
+	// Delete AegisCluster CRDs.
+	if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+		log.Error("failed to delete aegis clusters during destroy", zap.Error(err))
+	}
+	// Soft-delete clusters and terminate workloads in store.
+	if r.Store != nil {
+		for _, id := range clusterIDs {
+			r.Store.DeleteCluster(id)
+			if n := r.Store.TerminateWorkloadsByCluster(id); n > 0 {
+				log.Info("terminated workloads on destroyed cluster",
+					zap.String("cluster_id", id), zap.Int64("count", n))
+			}
+		}
+	}
+
+	// Set final status to Destroyed — CRD stays as an audit record.
+	condDestroyed := newCondition(metav1.ConditionTrue, "Destroyed", "infrastructure destroyed successfully")
+	if err := r.setStatus(ctx, infra, "Destroyed", &condDestroyed, nil, 0); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.recordProvisioningLog(infra, "Destroyed", store.LogTypeEvent, "cluster infrastructure destroyed")
+	r.recordProvisioningStatus(infra, "Destroyed", true)
+	log.Info("cluster infrastructure destroyed", zap.Strings("cluster_ids", clusterIDs))
+	return ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) reconcileDelete(ctx context.Context, log *zap.Logger, infra *infraapi.ProjectInfra) (ctrl.Result, error) {
+	clusterIDs := collectClusterIDs(infra)
+	log.Info("reconciling project infrastructure deletion",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+		zap.String("project", infra.Spec.ProjectID),
+		zap.String("region", infra.Spec.Region),
+		zap.Strings("cluster_ids", clusterIDs),
+	)
+
+	// If handleAWSDestroy already ran, skip kubeconfig/store/pulumi cleanup.
+	alreadyDestroyed := strings.EqualFold(infra.Status.Phase, "Destroyed")
+
+	if !alreadyDestroyed {
+		if err := r.removeKubeconfigs(ctx, clusterIDs); err != nil {
+			log.Error("failed to remove kubeconfigs", zap.Error(err))
+			return ctrl.Result{}, err
+		}
+		if err := r.deleteAegisClusters(ctx, clusterIDs); err != nil {
+			log.Error("failed to delete aegis clusters", zap.Error(err))
+			return ctrl.Result{}, err
+		}
+		if r.Store != nil {
+			for _, id := range clusterIDs {
+				r.Store.DeleteCluster(id)
+				if n := r.Store.TerminateWorkloadsByCluster(id); n > 0 {
+					log.Info("terminated workloads on deleted cluster", zap.String("cluster_id", id), zap.Int64("count", n))
+				}
+			}
+			log.Info("removed clusters from store", zap.Strings("cluster_ids", clusterIDs))
+		}
+	} else {
+		log.Info("skipping cleanup; infrastructure already destroyed via mode=Destroy")
+	}
+	if !alreadyDestroyed && infra.Spec.Aws != nil && r.Provisioner != nil {
+		log.Info("triggering aws destroy via pulumi",
+			zap.String("project", infra.Spec.ProjectID),
+			zap.String("region", infra.Spec.Region),
+			zap.Strings("cluster_ids", clusterIDs),
+		)
+		if err := r.Provisioner.Destroy(ctx, infra, infra.Spec.Aws); err != nil {
+			log.Error("aws destroy failed", zap.Error(err))
+			return ctrl.Result{}, err
+		}
+		log.Info("aws infrastructure destroy triggered", zap.Int("clusters", len(clusterIDs)))
+	} else if infra.Spec.Aws != nil && r.Provisioner == nil {
+		log.Warn("aws destroy skipped; provisioner not configured")
+	}
+
+	patched := infra.DeepCopy()
+	controllerutil.RemoveFinalizer(patched, projectInfraFinalizer)
+	if err := r.Patch(ctx, patched, client.MergeFrom(infra)); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	log.Info("project infrastructure deletion finalized",
+		zap.String("name", infra.Name),
+		zap.String("namespace", infra.Namespace),
+	)
+	return ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) ensureFinalizer(ctx context.Context, infra *infraapi.ProjectInfra) error {
+	if controllerutil.ContainsFinalizer(infra, projectInfraFinalizer) {
+		return nil
+	}
+	patched := infra.DeepCopy()
+	controllerutil.AddFinalizer(patched, projectInfraFinalizer)
+	if err := r.Patch(ctx, patched, client.MergeFrom(infra)); err != nil {
+		return err
+	}
+	infra.ObjectMeta = patched.ObjectMeta
+	return nil
+}
+
+func (r *ProjectInfraReconciler) extractImportData(ctx context.Context, infra *infraapi.ProjectInfra) (map[string][]byte, []infraapi.ClusterOutput, error) {
+	ref := infra.Spec.ImportKubeconfigSecretRef
+	if ref == nil {
+		return nil, nil, fmt.Errorf("import secret reference required")
+	}
+	namespace := ref.Namespace
+	if namespace == "" {
+		namespace = infra.Namespace
+	}
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: namespace}, secret); err != nil {
+		return nil, nil, err
+	}
+
+	resultData := map[string][]byte{}
+	outputs := []infraapi.ClusterOutput{}
+	for key, value := range secret.Data {
+		clusterID := ""
+		switch {
+		case strings.HasSuffix(key, ".kubeconfig"):
+			clusterID = strings.TrimSuffix(key, ".kubeconfig")
+		case strings.HasSuffix(key, ".yaml"):
+			clusterID = strings.TrimSuffix(key, ".yaml")
+		case strings.HasSuffix(key, ".yml"):
+			clusterID = strings.TrimSuffix(key, ".yml")
+		default:
+			continue
+		}
+		clusterID = strings.TrimSpace(clusterID)
+		if clusterID == "" {
+			continue
+		}
+		secretKey := fmt.Sprintf("%s.kubeconfig", clusterID)
+		resultData[secretKey] = value
+		outputs = append(outputs, infraapi.ClusterOutput{
+			ClusterID:           clusterID,
+			Name:                clusterID,
+			Region:              infra.Spec.Region,
+			KubeconfigSecretKey: secretKey,
+		})
+	}
+	if len(resultData) == 0 {
+		return nil, nil, fmt.Errorf("no kubeconfig data found in secret %s/%s", secret.Namespace, secret.Name)
+	}
+	return resultData, outputs, nil
+}
+
+func (r *ProjectInfraReconciler) writeKubeconfigs(ctx context.Context, entries map[string][]byte) error {
+	if len(entries) == 0 {
+		return fmt.Errorf("no kubeconfig entries provided")
+	}
+
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: r.kubeconfigSecretName(), Namespace: r.kubeconfigSecretNamespace()}
+	err := r.Get(ctx, key, secret)
+	if apierrors.IsNotFound(err) {
+		secret = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{},
+		}
+		for k, v := range entries {
+			secret.Data[k] = v
+		}
+		return r.Create(ctx, secret)
+	} else if err != nil {
+		return err
+	}
+
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+	}
+	mutated := false
+	for k, v := range entries {
+		if existing, ok := secret.Data[k]; !ok || !bytes.Equal(existing, v) {
+			secret.Data[k] = v
+			mutated = true
+		}
+	}
+	if !mutated {
+		return nil
+	}
+	return r.Update(ctx, secret)
+}
+
+func (r *ProjectInfraReconciler) removeKubeconfigs(ctx context.Context, clusterIDs []string) error {
+	if len(clusterIDs) == 0 {
+		return nil
+	}
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: r.kubeconfigSecretName(), Namespace: r.kubeconfigSecretNamespace()}
+	if err := r.Get(ctx, key, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if secret.Data == nil {
+		return nil
+	}
+	mutated := false
+	for _, id := range clusterIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s.kubeconfig", id)
+		if _, ok := secret.Data[key]; ok {
+			delete(secret.Data, key)
+			mutated = true
+		}
+	}
+	if !mutated {
+		return nil
+	}
+	if len(secret.Data) == 0 {
+		return r.Delete(ctx, secret)
+	}
+	return r.Update(ctx, secret)
+}
+
+func (r *ProjectInfraReconciler) ensureAegisCluster(ctx context.Context, infra *infraapi.ProjectInfra, output infraapi.ClusterOutput) error {
+	clusterID := strings.TrimSpace(output.ClusterID)
+	if clusterID == "" {
+		return fmt.Errorf("cluster ID required")
+	}
+
+	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+	provider := strings.TrimSpace(infra.Spec.Provider)
+	region := strings.TrimSpace(output.Region)
+
+	// Pre-register the cluster in the store so it exists before the k8s-agent tries to register.
+	// This ensures project_id and proxy_url are set when the agent's RegisterCluster call updates the row.
+	if r.Store != nil && projectID != "" {
+		// Get proxy URL from environment (set by operator for stable NLB-based URL)
+		proxyURL := ""
+		if host := strings.TrimSpace(os.Getenv("AEGIS_SPOKE_PROXY_HOST")); host != "" {
+			if !strings.HasPrefix(host, "wss://") && !strings.HasPrefix(host, "ws://") {
+				proxyURL = "wss://" + host
+			} else {
+				proxyURL = host
+			}
+		}
+		if err := r.Store.PreRegisterCluster(clusterID, projectID, provider, region, proxyURL, output.ClusterEndpoint, output.ClusterCA); err != nil {
+			r.Log.Warn("failed to pre-register cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.Error(err))
+			// Don't fail - k8s-agent will retry registration
+		} else {
+			r.Log.Info("pre-registered cluster in store",
+				zap.String("cluster_id", clusterID),
+				zap.String("project_id", projectID),
+				zap.String("proxy_url", proxyURL))
+		}
+
+		// Propagate the project's data classification level (e.g. IL4) to the cluster
+		// so workspace creation policy checks pass without waiting for k8s-agent registration.
+		if proj := r.Store.GetProject(projectID); proj != nil {
+			if dl := strings.TrimSpace(strings.ToUpper(proj.GetPolicy().GetDataLevel())); dl != "" {
+				r.Store.SetClusterLabel(clusterID, "aegis.yourorg.dev/ilLevel", dl)
+			}
+		}
+	}
+
+	spec := infraapi.AegisClusterSpec{
+		ClusterID: clusterID,
+		ProjectID: projectID,
+		Provider:  infra.Spec.Provider,
+		Region:    output.Region,
+	}
+
+	key := types.NamespacedName{Name: clusterID, Namespace: r.kubeconfigSecretNamespace()}
+	current := &infraapi.AegisCluster{}
+	err := r.Get(ctx, key, current)
+	if apierrors.IsNotFound(err) {
+		current = &infraapi.AegisCluster{
+			TypeMeta: metav1.TypeMeta{APIVersion: infraapi.GroupVersion.String(), Kind: "AegisCluster"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Spec: spec,
+		}
+		if key.Namespace == infra.Namespace {
+			if err := controllerutil.SetControllerReference(infra, current, r.Scheme); err != nil {
+				return err
+			}
+		}
+		return r.Create(ctx, current)
+	} else if err != nil {
+		return err
+	}
+
+	if current.Spec.ClusterID == spec.ClusterID && current.Spec.ProjectID == spec.ProjectID && current.Spec.Provider == spec.Provider && current.Spec.Region == spec.Region {
+		return nil
+	}
+
+	patched := current.DeepCopy()
+	patched.Spec = spec
+	if key.Namespace == infra.Namespace {
+		if err := controllerutil.SetControllerReference(infra, patched, r.Scheme); err != nil {
+			return err
+		}
+	}
+	return r.Patch(ctx, patched, client.MergeFrom(current))
+}
+
+func (r *ProjectInfraReconciler) deleteAegisClusters(ctx context.Context, clusterIDs []string) error {
+	for _, id := range clusterIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		cluster := &infraapi.AegisCluster{}
+		key := types.NamespacedName{Name: id, Namespace: r.kubeconfigSecretNamespace()}
+		if err := r.Get(ctx, key, cluster); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		if err := r.Delete(ctx, cluster); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func collectClusterIDs(infra *infraapi.ProjectInfra) []string {
+	ids := map[string]struct{}{}
+	for _, out := range infra.Status.Outputs {
+		id := strings.TrimSpace(out.ClusterID)
+		if id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	if len(ids) == 0 && infra.Spec.Aws != nil {
+		primary := strings.TrimSpace(infra.Spec.Aws.ClusterName)
+		if primary != "" {
+			ids[primary] = struct{}{}
+		}
+		for _, extra := range infra.Spec.Aws.AdditionalClusters {
+			if name := strings.TrimSpace(extra.ClusterName); name != "" {
+				ids[name] = struct{}{}
+			}
+		}
+	}
+	if infra.Spec.Aws != nil {
+		for _, imp := range infra.Spec.Aws.Imports {
+			if id := strings.TrimSpace(imp.ClusterID); id != "" {
+				ids[id] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	return result
+}
+
+func (r *ProjectInfraReconciler) setStatus(ctx context.Context, infra *infraapi.ProjectInfra, phase string, cond *metav1.Condition, outputs []infraapi.ClusterOutput, costHint float64) error {
+	patched := infra.DeepCopy()
+	patched.Status.Phase = phase
+	if outputs != nil {
+		patched.Status.Outputs = outputs
+	}
+	patched.Status.CostHintUSDPerHour = costHint
+	now := metav1.NewTime(time.Now())
+	patched.Status.LastSyncTime = &now
+	if cond != nil && cond.Type != "" {
+		mergeCondition(&patched.Status.Conditions, *cond)
+	}
+	if err := r.Status().Patch(ctx, patched, client.MergeFrom(infra)); err != nil {
+		return err
+	}
+	infra.Status = patched.Status
+	return nil
+}
+
+func newCondition(status metav1.ConditionStatus, reason, message string) metav1.Condition {
+	return metav1.Condition{
+		Type:               conditionReady,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(time.Now()),
+	}
+}
+
+func mergeCondition(conds *[]metav1.Condition, cond metav1.Condition) {
+	if conds == nil {
+		return
+	}
+	for i, existing := range *conds {
+		if existing.Type == cond.Type {
+			if existing.Status == cond.Status {
+				cond.LastTransitionTime = existing.LastTransitionTime
+			}
+			(*conds)[i] = cond
+			return
+		}
+	}
+	*conds = append(*conds, cond)
+}
+
+func (r *ProjectInfraReconciler) kubeconfigSecretName() string {
+	if strings.TrimSpace(r.KubeconfigSecretName) != "" {
+		return r.KubeconfigSecretName
+	}
+	return "aegis-kubeconfigs"
+}
+
+func (r *ProjectInfraReconciler) kubeconfigSecretNamespace() string {
+	if strings.TrimSpace(r.KubeconfigSecretNamespace) != "" {
+		return r.KubeconfigSecretNamespace
+	}
+	return "aegis-system"
+}
+
+func (r *ProjectInfraReconciler) logger() *zap.Logger {
+	if r.Log != nil {
+		return r.Log
+	}
+	return zap.NewNop()
+}
+
+// ----------------------------------------------------------------------------- //
+// Stack-level locking to avoid concurrent Pulumi runs for the same stack.
+
+func (r *ProjectInfraReconciler) acquireStackLock(ctx context.Context, infra *infraapi.ProjectInfra) (func(), ctrl.Result, error) {
+	stackKey := stackLockKey(infra)
+	unlockLocal := r.lockLocal(stackKey)
+	holder := r.holderIdentity()
+
+	leaseName := leaseNameForInfra(infra)
+	leaseNS := infra.Namespace
+
+	lease := &coordinationv1.Lease{}
+	err := r.Get(ctx, types.NamespacedName{Name: leaseName, Namespace: leaseNS}, lease)
+	now := metav1.NowMicro()
+	leaseDuration := int32(15 * 60) // 15 minutes
+
+	// Keepalive/renewal loop to hold the lease while reconcile is running.
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				_ = r.renewLease(context.Background(), leaseName, leaseNS, holder, leaseDuration)
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	release := func() {
+		close(stop)
+		// Best-effort delete only if we hold the lease.
+		r.releaseLease(ctx, leaseName, leaseNS, holder)
+		unlockLocal()
+	}
+
+	if apierrors.IsNotFound(err) {
+		newLease := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      leaseName,
+				Namespace: leaseNS,
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity:       ptr.To(holder),
+				LeaseDurationSeconds: ptr.To(leaseDuration),
+				AcquireTime:          &now,
+				RenewTime:            &now,
+			},
+		}
+		if createErr := r.Create(ctx, newLease); createErr != nil {
+			unlockLocal()
+			close(stop)
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, client.IgnoreNotFound(createErr)
+		}
+		return release, ctrl.Result{}, nil
+	} else if err != nil {
+		unlockLocal()
+		close(stop)
+		return nil, ctrl.Result{}, err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+	expired := false
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	} else {
+		expired = true
+	}
+
+	if existingHolder != "" && existingHolder != holder && !expired {
+		// Check if the holder pod still exists - if not, treat as expired
+		holderPodGone := r.isPodGone(ctx, existingHolder, leaseNS)
+		if !holderPodGone {
+			unlockLocal()
+			close(stop)
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// Holder pod is gone, we can take over the lease immediately
+		r.logger().Info("taking over stale lease from terminated pod",
+			zap.String("lease", leaseName),
+			zap.String("old_holder", existingHolder),
+			zap.String("new_holder", holder),
+		)
+	}
+
+	// Take over or renew the lease.
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.RenewTime = &now
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if err := r.Update(ctx, lease); err != nil {
+		unlockLocal()
+		if apierrors.IsConflict(err) {
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		return nil, ctrl.Result{}, err
+	}
+
+	return release, ctrl.Result{}, nil
+}
+
+func (r *ProjectInfraReconciler) releaseLease(ctx context.Context, name, namespace, holder string) {
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		return
+	}
+	if lease.Spec.HolderIdentity != nil && strings.TrimSpace(*lease.Spec.HolderIdentity) != holder {
+		return
+	}
+	_ = r.Delete(ctx, lease)
+}
+
+// renewLease refreshes the lease if we hold it, or if it is expired/unheld. Best-effort; ignores not found.
+func (r *ProjectInfraReconciler) renewLease(ctx context.Context, name, namespace, holder string, leaseDuration int32) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lease := &coordinationv1.Lease{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := r.Get(ctx, key, lease); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	existingHolder := ""
+	if lease.Spec.HolderIdentity != nil {
+		existingHolder = strings.TrimSpace(*lease.Spec.HolderIdentity)
+	}
+
+	expired := true
+	if lease.Spec.RenewTime != nil && lease.Spec.LeaseDurationSeconds != nil {
+		expiry := lease.Spec.RenewTime.Time.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second)
+		expired = time.Now().After(expiry)
+	}
+
+	// Only renew if we hold it or it is expired/unheld.
+	if existingHolder != "" && existingHolder != holder && !expired {
+		return nil
+	}
+
+	now := metav1.NowMicro()
+	lease.Spec.HolderIdentity = ptr.To(holder)
+	lease.Spec.LeaseDurationSeconds = ptr.To(leaseDuration)
+	if lease.Spec.AcquireTime == nil {
+		lease.Spec.AcquireTime = &now
+	}
+	lease.Spec.RenewTime = &now
+
+	return r.Update(ctx, lease)
+}
+
+// isPodGone checks if a pod with the given name no longer exists in the namespace.
+// This is used to detect stale leases held by terminated pods.
+func (r *ProjectInfraReconciler) isPodGone(ctx context.Context, podName, namespace string) bool {
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, pod)
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	if err != nil {
+		// On error, assume pod exists to be safe
+		return false
+	}
+	// Pod exists but might be terminating
+	return pod.DeletionTimestamp != nil
+}
+
+func (r *ProjectInfraReconciler) lockLocal(key string) func() {
+	if r.LocalLocks == nil {
+		r.LocalLocks = map[string]*sync.Mutex{}
+	}
+	r.LocalLocksMu.Lock()
+	m, ok := r.LocalLocks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		r.LocalLocks[key] = m
+	}
+	r.LocalLocksMu.Unlock()
+	m.Lock()
+	return func() {
+		m.Unlock()
+	}
+}
+
+func stackLockKey(infra *infraapi.ProjectInfra) string {
+	// Use infra name to create per-infra locks instead of shared project/region locks.
+	// This ensures deleting one ProjectInfra doesn't wait for provisions of others.
+	return fmt.Sprintf("%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), strings.TrimSpace(infra.Name))
+}
+
+func leaseNameForInfra(infra *infraapi.ProjectInfra) string {
+	// Use infra name in lease to isolate each ProjectInfra's lock.
+	// Truncate infra name to fit within 63 char limit for k8s names.
+	infraName := strings.TrimSpace(infra.Name)
+	if len(infraName) > 30 {
+		infraName = infraName[:30]
+	}
+	base := fmt.Sprintf("pi-%s-%s-%s", strings.TrimSpace(infra.Spec.ProjectID), strings.TrimSpace(infra.Spec.Region), infraName)
+	return sanitizeName(base, 63)
+}
+
+func sanitizeName(in string, maxLen int) string {
+	out := make([]rune, 0, len(in))
+	for _, r := range strings.ToLower(in) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			out = append(out, r)
+		} else {
+			out = append(out, '-')
+		}
+	}
+	name := strings.Trim(outStr(out), "-")
+	if len(name) > maxLen {
+		name = name[:maxLen]
+	}
+	if name == "" {
+		name = "pi-stack"
+	}
+	return name
+}
+
+func outStr(r []rune) string {
+	return string(r)
+}
+
+func (r *ProjectInfraReconciler) holderIdentity() string {
+	if s := strings.TrimSpace(r.HolderIdentity); s != "" {
+		return s
+	}
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "aegis-platform-api"
+}
+
+// syncProjectToStore ensures the project referenced by the ProjectInfra exists in the store.
+// This is required for the workspace wizard to list available projects.
+func (r *ProjectInfraReconciler) syncProjectToStore(infra *infraapi.ProjectInfra) {
+	if r.Store == nil {
+		return
+	}
+	projectID := strings.TrimSpace(infra.Spec.ProjectID)
+	if projectID == "" {
+		return
+	}
+	// Only create if missing - don't overwrite existing project data.
+	if existing := r.Store.GetProject(projectID); existing != nil {
+		return
+	}
+	annotations := make(map[string]string)
+	if infra.Spec.Aws != nil {
+		if infra.Spec.Aws.AccountID != "" {
+			annotations["aegis.yourorg.dev/aws-account-id"] = infra.Spec.Aws.AccountID
+		}
+		if infra.Spec.Aws.RoleARN != "" {
+			annotations["aegis.yourorg.dev/aws-role-arn"] = infra.Spec.Aws.RoleARN
+		}
+		if infra.Spec.Aws.ExternalID != "" {
+			annotations["aegis.yourorg.dev/aws-external-id"] = infra.Spec.Aws.ExternalID
+		}
+	}
+	r.Store.PutProject(&aegis.Project{
+		Id:          projectID,
+		DisplayName: projectID,
+		Annotations: annotations,
+	})
+}

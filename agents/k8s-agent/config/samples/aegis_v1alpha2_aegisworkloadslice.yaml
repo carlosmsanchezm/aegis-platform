@@ -1,0 +1,12 @@
+apiVersion: aegis.yourorg.dev/v1alpha2
+kind: AegisWorkloadSlice
+metadata:
+  name: sample-workload-slice
+spec:
+  items:
+  - template:
+      projectId: demo-project
+      queue: research
+      workspace:
+        image: alpine:3.19
+        interactive: true

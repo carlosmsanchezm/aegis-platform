@@ -1,0 +1,149 @@
+# Default values for aegis-spoke.
+
+# Hardening profile: dev | standard
+# dev: No network policies, relaxed security contexts
+# standard: Network policies enforced, security contexts hardened
+hardeningProfile: dev
+
+k8sAgent:
+  replicaCount: 1
+  image:
+    repository: carlosmsanchez/aegis-k8s-agent
+    pullPolicy: IfNotPresent
+    tag: "dev"
+
+  # Environment variables for the k8s-agent container
+  # These will connect the agent back to the central hub
+  env:
+    AEGIS_CLUSTER_ID: "dev-1"
+    AEGIS_CP_GRPC: "host.docker.internal:8081"
+    # OIDC client credentials for platform-api authentication (optional; recommended for production)
+    AEGIS_CP_OIDC_TOKEN_URL: ""
+    AEGIS_CP_OIDC_CLIENT_ID: ""
+    AEGIS_CP_OIDC_CLIENT_SECRET: ""
+    AEGIS_CP_OIDC_AUDIENCE: ""
+    AEGIS_CP_OIDC_CA_B64: ""
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: ""
+    AEGIS_PROXY_INGRESS_HOST: "" # Will be overridden from proxy.ingress.hostname at render time
+    AEGIS_DEFAULT_IMAGE: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+    # Iron Bank VS Code REH init container. When set, workspace pods get an init container
+    # that injects the pre-built VS Code server binary into a shared volume at /reh.
+    # Leave empty to use the workspace image's built-in VS Code server (current behavior).
+    # For Iron Bank deployments: registry1.dso.mil/ironbank/aegis/vscode-reh-init:<tag>
+    AEGIS_VSCODE_REH_INIT_IMAGE: ""
+
+    # Workload garbage collection (prevents orphaned Workspace CRDs from recreating Jobs)
+    AEGIS_WORKLOAD_GC_ENABLED: "true"
+    AEGIS_WORKLOAD_GC_INTERVAL: "30s"
+    AEGIS_WORKLOAD_GC_MAX_DELETIONS: "25"
+    AEGIS_WORKLOAD_GC_DRY_RUN: "false"
+
+    # Geographic metadata for workload placement
+    AEGIS_REGION: "us-east-1"  # AWS region where this cluster is deployed (us-east-1, us-west-2, eu-west-1, etc.)
+    AEGIS_PROVIDER: "aws"      # Cloud provider (aws, gcp, azure, on-prem, etc.)
+
+    # Compute flavors this cluster can support
+    # Comma-separated list of flavor names this cluster advertises
+    # Platform API uses these for workload placement decisions
+    # Examples: "cpu-small,cpu-large,gpu-a100,gpu-h100"
+    # Default to CPU-only; GPU flavors should be injected dynamically based on actual node pools/policy.
+    AEGIS_FLAVORS: "cpu-small"
+
+  # Optional: mount a shared trust bundle secret and point the agent at it.
+  # This avoids duplicating base64 CA strings in values files.
+  trustBundle:
+    enabled: false
+    secretName: aegis-trust-bundle
+    key: ca.crt
+    mountPath: /etc/aegis/trust
+    fileName: ca.crt
+
+  # Workspace persistent storage defaults.
+  # When a workspace is created with persistent storage, the k8s-agent creates a PVC
+  # using these defaults. Data survives workspace restarts within the same project.
+  workspace:
+    storage:
+      defaultEnabled: true       # Workspaces get persistent storage by default
+      defaultSize: "50Gi"        # Default PVC size
+      defaultStorageClass: ""    # Empty = cluster default. Set to "gp3" for EKS, "managed-premium" for AKS, etc.
+      defaultMountPath: "/home/coder"
+
+proxy:
+  # Enable spoke proxy by default. Remote spoke clusters MUST have a proxy to allow
+  # VS Code/SSH connections from external clients. Set to false only for local development
+  # where connections go through the hub proxy (proxy.localtest.me).
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: carlosmsanchez/aegis-proxy
+    pullPolicy: IfNotPresent
+    tag: "dev"
+
+  service:
+    type: ClusterIP
+    port: 8085
+    # NodePort to use when service.type is NodePort (configurable for multi-cluster deployments)
+    nodePort: 31484
+    # Annotations for the proxy Service (e.g., AWS NLB configuration for LoadBalancer type)
+    annotations: {}
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    # The public hostname for the proxy. This is a critical value.
+    # For local testing: "proxy.127.0.0.1.nip.io" or "proxy.localtest.me"
+    # In production, e.g.: "proxy.customer-a.aegis.dev"
+    hostname: "proxy.localtest.me"
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+
+  # Secret containing the JWT signing key for the proxy.
+  # WARNING: LOCAL DEV ONLY. Cloud/production deployments MUST override via Pulumi or --set.
+  # Must match AEGIS_PROXY_JWT_SECRET on the hub's platform-api.
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+
+  tls:
+    terminateAtIngress: false
+    cert: "" # Provide via --set-file proxy.tls.cert=/path/to/cert or external secret
+    key: ""  # Provide via --set-file proxy.tls.key=/path/to/key or external secret
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+      # Additional SANs for the spoke-proxy cert. The *.nip.io wildcard from the
+      # service name SAN covers dash-notation nip.io hostnames automatically
+      # (e.g. spoke-proxy-98-83-164-24.nip.io). Add entries here only for
+      # custom hostnames not covered by the wildcard.
+
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+
+# RBAC settings for the k8s-agent
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: "aegis-k8s-agent"
+
+# Default WorkspaceClass instances. "custom" is required by platform-api
+# (buildWorkspaceCR sets profileRef: "custom" on every workspace).
+workspaceClasses:
+  custom:
+    defaults:
+      execution:
+        image: "docker.io/carlosmsanchez/aegis-workspace-vscode:latest"
+        interactive: true
+        ports:
+          - 11111
+      storage:
+        mode: ephemeral

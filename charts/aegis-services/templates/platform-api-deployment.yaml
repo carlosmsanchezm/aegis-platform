@@ -1,0 +1,246 @@
+{{- if .Values.platformApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-services.platformApi.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+spec:
+  revisionHistoryLimit: 3
+  replicas: {{ .Values.platformApi.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aegis-services.platformApi.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.platformApi.secrets }}
+        checksum/secret: {{ include (print $.Template.BasePath "/platform-api-secret.yaml") . | sha256sum }}
+        {{- end }}
+      labels:
+        {{- include "aegis-services.platformApi.selectorLabels" . | nindent 8 }}
+        {{- with .Values.platformApi.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.platformApi.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $serveGrpc := true }}
+      {{- if and .Values.platformApi.tls (hasKey .Values.platformApi.tls "serveGrpc") }}
+      {{- $serveGrpc = .Values.platformApi.tls.serveGrpc }}
+      {{- end }}
+      {{- with .Values.platformApi.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with .Values.platformApi.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+      {{- with .Values.platformApi.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- $platformEnv := .Values.platformApi.env | default dict }}
+      {{- $oidcAuth := .Values.platformApi.auth | default dict }}
+      {{- $oidc := $oidcAuth.oidc | default dict }}
+      {{- $oidcCASecret := include "aegis-services.platformApi.oidcCASecretName" . }}
+      {{- $hasOIDCCA := gt (len (trim $oidcCASecret)) 0 }}
+      {{- $oidcCAMountPath := include "aegis-services.platformApi.oidcCAMountPath" . }}
+      {{- $oidcCAFileName := include "aegis-services.platformApi.oidcCAFileName" . }}
+      {{- $oidcCAKey := include "aegis-services.platformApi.oidcCAKey" . }}
+      {{- $pulumi := .Values.platformApi.pulumi | default dict }}
+      {{- $pulumiGh := $pulumi.githubTokenSecret | default dict }}
+      {{- $postgres := .Values.platformApi.postgres | default dict }}
+      {{- $pgHost := $postgres.host | default (printf "platform-postgres.%s.svc.cluster.local" .Release.Namespace) }}
+      {{- $pgPort := $postgres.port | default 5432 }}
+      {{- if and .Values.platformApi.postgres .Values.platformApi.postgres.waitForReady }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL at {{ $pgHost }}:{{ $pgPort }}..."
+              until nc -z {{ $pgHost }} {{ $pgPort }}; do
+                echo "PostgreSQL not ready, waiting..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready!"
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+      {{- end }}
+      containers:
+        - name: platform-api
+          image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.platformApi.image.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.platformApi.service.grpcPort }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.platformApi.service.httpPort }}
+              protocol: TCP
+          env:
+            - name: GRPC_ADDR
+              value: ":{{ .Values.platformApi.service.grpcPort }}"
+            - name: HTTP_ADDR
+              value: ":{{ .Values.platformApi.service.httpPort }}"
+            - name: KUBECONFIGS_DIR
+              value: {{ .Values.platformApi.kubeConfigsDir | quote }}
+            - name: AEGIS_NAMESPACE
+              value: {{ .Values.platformApi.targetNamespace | quote }}
+            {{- with $pulumi.backendUrl }}
+            - name: PULUMI_BACKEND_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $pulumi.secretsProvider }}
+            - name: PULUMI_SECRETS_PROVIDER
+              value: {{ $pulumi.secretsProvider | quote }}
+            {{- end }}
+            {{- if $pulumi.configPassphrase }}
+            - name: PULUMI_CONFIG_PASSPHRASE
+              value: {{ $pulumi.configPassphrase | quote }}
+            {{- end }}
+            {{- if and $pulumiGh.name $pulumiGh.key }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pulumiGh.name }}
+                  key: {{ $pulumiGh.key }}
+            {{- end }}
+            {{- if and .Values.proxy.enabled (not (hasKey .Values.platformApi.env "AEGIS_PROXY_BASE_URL")) }}
+            # Automatically set proxy base URL to internal service DNS
+            - name: AEGIS_PROXY_BASE_URL
+              value: "http://{{ include "aegis-services.proxy.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.proxy.service.port }}"
+            {{- end }}
+            {{- range $key, $value := $platformEnv }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.platformApi.envFromSecret }}
+            {{- if not (hasKey $platformEnv $key) }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aegis-services.platformApi.secretName" $ }}
+                  key: {{ $value }}
+            {{- end }}
+            {{- end }}
+            {{- if and $hasOIDCCA (not (hasKey $platformEnv "OIDC_CA_BUNDLE")) }}
+            - name: OIDC_CA_BUNDLE
+              value: {{ printf "%s/%s" $oidcCAMountPath $oidcCAFileName | quote }}
+            {{- end }}
+            {{- if and $oidc.skipTlsVerify (not (hasKey $platformEnv "OIDC_SKIP_TLS_VERIFY")) }}
+            - name: OIDC_SKIP_TLS_VERIFY
+              value: "true"
+            {{- end }}
+            {{- if .Values.proxy.enabled }}
+            # Reference the same JWT secret that the proxy uses
+            - name: AEGIS_PROXY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aegis-services.proxy.secretName" . }}
+                  key: jwt-secret
+            {{- end }}
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
+            {{- if (.Values.platformApi.tls).fipsMode }}
+            - name: AEGIS_FIPS_ENABLED
+              value: "true"
+            - name: AEGIS_TLS_MIN_VERSION
+              value: {{ (.Values.platformApi.tls).minimumTLSVersion | default "1.2" | quote }}
+            {{- if (.Values.platformApi.tls).cipherSuiteWhitelist }}
+            - name: AEGIS_TLS_CIPHER_SUITES
+              value: {{ join "," .Values.platformApi.tls.cipherSuiteWhitelist | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
+            - name: AEGIS_GRPC_TLS_CERT
+              value: "/etc/aegis-platform-api/tls/tls.crt"
+            - name: AEGIS_GRPC_TLS_KEY
+              value: "/etc/aegis-platform-api/tls/tls.key"
+            {{- if .Values.platformApi.tls.clientCA }}
+            - name: AEGIS_GRPC_TLS_CLIENT_CA
+              value: "/etc/aegis-platform-api/tls/ca.crt"
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
+            - name: platform-api-tls
+              mountPath: /etc/aegis-platform-api/tls
+              readOnly: true
+            {{- end }}
+            {{- if $hasOIDCCA }}
+            - name: platform-api-oidc-ca
+              mountPath: {{ $oidcCAMountPath }}
+              readOnly: true
+            {{- end }}
+            - name: platform-api-pulumi-backend
+              mountPath: /tmp/pulumi-backend
+            {{- with .Values.platformApi.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.platformApi.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.platformApi.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+          {{- with .Values.platformApi.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
+      volumes:
+        {{- if and .Values.platformApi.tls.enabled $serveGrpc }}
+        - name: platform-api-tls
+          secret:
+            secretName: {{ include "aegis-services.platformApi.tlsSecretName" . }}
+        {{- end }}
+        {{- if $hasOIDCCA }}
+        - name: platform-api-oidc-ca
+          secret:
+            secretName: {{ $oidcCASecret }}
+            items:
+              - key: {{ $oidcCAKey }}
+                path: {{ $oidcCAFileName }}
+        {{- end }}
+        - name: platform-api-pulumi-backend
+          emptyDir: {}
+        {{- with .Values.platformApi.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.platformApi.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.platformApi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

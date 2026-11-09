@@ -1,0 +1,212 @@
+# Local TLS overlay for aegis-services
+# Apply alongside local.yaml when testing TLS locally on Docker Desktop
+#
+# Usage:
+#   helm upgrade --install aegis-services charts/aegis-services \
+#     -f charts/aegis-services/values/common.yaml \
+#     -f charts/aegis-services/values/local.yaml \
+#     -f charts/aegis-services/values/local-tls.yaml \
+#     --namespace aegis-system --create-namespace
+
+ingress-nginx:
+  enabled: false
+  controller:
+    admissionWebhooks:
+      timeoutSeconds: 30
+
+backstage:
+  enabled: false
+  caBundle:
+    create: true
+
+platformApi:
+  ingress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPCS"
+      nginx.ingress.kubernetes.io/proxy-ssl-secret: "aegis-system/aegis-services-platform-api-tls"
+      nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+      nginx.ingress.kubernetes.io/proxy-ssl-server-name: "platform-api-grpc.localtest.me"
+      nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+      nginx.ingress.kubernetes.io/ssl-ciphers: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+      nginx.ingress.kubernetes.io/ssl-prefer-server-ciphers: "true"
+    tls:
+      - secretName: aegis-services-platform-api-tls
+        hosts:
+          - platform-api-grpc.localtest.me
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
+  tls:
+    enabled: true
+    serveGrpc: true
+    certManager:
+      enabled: true
+    # cert and key are managed by cert-manager when certManager.enabled=true
+    # To use inline certs instead, set certManager.enabled=false and provide PEM values
+    cert: ""
+    key: ""
+
+  auth:
+    oidc:
+      skipTlsVerify: false
+      caBundle:
+        create: true
+        secretName: aegis-platform-api-oidc-ca
+        key: ca.crt
+        fileName: ca.crt
+        mountPath: /etc/aegis-platform-api/oidc
+        data: ""
+  env:
+    # NLB relay endpoint for remote spoke clusters (gRPC + OIDC)
+    AEGIS_PLATFORM_API_ENDPOINT: "aegis-dev-relay-nlb-EXAMPLE.elb.us-east-1.amazonaws.com:8081"
+    AEGIS_PROXY_BASE_URL: "https://proxy.localtest.me"
+    AEGIS_AUTO_BOOTSTRAP_WORKSPACES: "true"
+    AEGIS_SPOKE_VALUES_FILE: "/home/aegis/charts/aegis-spoke/values-aws-relay.yaml"
+    # Authorization bindings - must include spoke-agent for k8s-agent to update workload status
+    AUTHZ_ROLE_BINDINGS_JSON: |-
+      [
+        {
+          "clients": ["backstage", "vscode-extension", "spoke-agent"],
+          "roles": ["workspace-admin"],
+          "projects": ["*"],
+          "queues": ["*"]
+        }
+      ]
+    PULUMI_BACKEND_URL: "s3://aegis-pulumi-state-123456789012/aegis/pulumi"
+    PULUMI_CONFIG_PASSPHRASE: "aegis-local-passphrase"
+    AEGIS_DEFAULT_AWS_ACCOUNT_ID: "123456789012"
+    AEGIS_DEFAULT_AWS_ROLE_ARN: ""
+    AEGIS_DEFAULT_AWS_EXTERNAL_ID: "na"
+    AEGIS_DEV_MODE: "true"
+    AWS_REGION: "us-east-1"
+    AWS_DEFAULT_REGION: "us-east-1"
+    # VS Code extension version (paths use built-in defaults)
+    AEGIS_EXTENSION_VERSION: "0.1.0"
+  envFromSecret:
+    AWS_ACCESS_KEY_ID: aws-access-key-id
+    AWS_SECRET_ACCESS_KEY: aws-secret-access-key
+  secrets:
+    aws-access-key-id: "REPLACE_WITH_AWS_ACCESS_KEY_ID"
+    aws-secret-access-key: "REPLACE_WITH_AWS_SECRET_ACCESS_KEY"
+  httpIngress:
+    enabled: true
+    className: "ingress-nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    tls:
+      - secretName: aegis-services-platform-api-tls
+        hosts:
+          - platform-api.localtest.me
+    hosts:
+      - host: platform-api.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+
+proxy:
+  ingress:
+    enabled: true
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+  tls:
+    enabled: true
+    certManager:
+      enabled: true
+    cert: ""
+    key: ""
+
+keycloak:
+  ingress:
+    enabled: false
+  enabled: true
+  forceRender: true
+  createNamespace: false
+  operator: {}
+  postgres:
+    enabled: true
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: IfNotPresent
+    storage:
+      size: 1Gi
+  http:
+    httpEnabled: false
+  networkPolicy:
+    enabled: false
+    http: []
+  admin:
+    secret:
+      create: true
+      name: keycloak-admin-secret
+      username: admin
+      password: REPLACE_WITH_ADMIN_PASSWORD
+  database:
+    secret:
+      create: true
+      name: keycloak-db-secret
+      username: keycloak
+      password: REPLACE_WITH_DB_PASSWORD
+  realm:
+    enabled: true
+    name: aegis
+    displayName: Aegis
+    client:
+      id: backstage
+      name: Backstage
+      serviceAccountsEnabled: true
+      redirectUris:
+        - http://localhost:7008/*
+        - https://backstage.localtest.me/*
+      webOrigins:
+        - http://localhost:3000
+        - https://backstage.localtest.me
+      secret:
+        create: true
+        name: keycloak-backstage-client-secret
+        value: local-dev-client-secret-change-me
+        placeholder: BACKSTAGE_CLIENT_SECRET
+    requiredActions:
+      - alias: CONFIGURE_TOTP
+        name: Configure OTP
+        providerId: CONFIGURE_TOTP
+        defaultAction: true
+        enabled: true
+  tls:
+    certManager:
+      enabled: true
+    secret:
+      create: false
+      name: keycloak-tls
+      cert: ""
+      key: ""
+  hostname:
+    hostname: https://keycloak.localtest.me
+    admin: ""
+    adminUrl: https://keycloak.localtest.me
+    strict: false
+  additionalOptions:
+    - name: hostname-admin
+      value: https://keycloak.localtest.me
+    - name: hostname-admin-url
+      value: https://keycloak.localtest.me/
+  ingress:
+    enabled: false
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  customIngress:
+    enabled: true
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"

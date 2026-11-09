@@ -1,0 +1,119 @@
+# CODEOWNERS - Aegis Platform
+# SOC 2 Control: CC8.1 (Change Management)
+#
+# This file defines code ownership for pull request reviews.
+# Each line is a file pattern followed by one or more owners.
+#
+# Order matters: later patterns override earlier ones.
+# Reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# =============================================================================
+# DEFAULT OWNER
+# =============================================================================
+# All files require review from the platform owner by default
+*                                   @carlosmsanchezm
+
+# =============================================================================
+# SECURITY-SENSITIVE FILES (CC6.1, CC6.6, CC8.1)
+# =============================================================================
+# These files have elevated security impact and require explicit review
+
+# Compliance and security documentation
+/docs/compliance/                   @carlosmsanchezm
+/docs/security/                     @carlosmsanchezm
+
+# Infrastructure as Code - high blast radius
+/terraform/                         @carlosmsanchezm
+/charts/                            @carlosmsanchezm
+/ops/                               @carlosmsanchezm
+
+# CI/CD pipelines - supply chain security
+/.github/                           @carlosmsanchezm
+/.github/workflows/                 @carlosmsanchezm
+
+# Authentication and authorization
+/services/auth/                     @carlosmsanchezm
+/services/keycloak/                 @carlosmsanchezm
+**/auth*.go                         @carlosmsanchezm
+**/rbac*.go                         @carlosmsanchezm
+
+# Cryptographic and secrets handling
+**/crypto/                          @carlosmsanchezm
+**/secrets/                         @carlosmsanchezm
+**/*secret*.yaml                    @carlosmsanchezm
+**/*secret*.yml                     @carlosmsanchezm
+
+# =============================================================================
+# CONFIGURATION FILES (CC8.1)
+# =============================================================================
+# Changes to configuration can affect security posture
+
+# Root configuration files
+/*.yaml                             @carlosmsanchezm
+/*.yml                              @carlosmsanchezm
+/*.json                             @carlosmsanchezm
+/Makefile                           @carlosmsanchezm
+
+# Helm values files
+**/values*.yaml                     @carlosmsanchezm
+**/values*.yml                      @carlosmsanchezm
+
+# =============================================================================
+# CORE PLATFORM SERVICES
+# =============================================================================
+
+# API Gateway
+/services/gateway/                  @carlosmsanchezm
+
+# Provisioner (creates customer resources)
+/services/provisioner/              @carlosmsanchezm
+
+# Workspace management
+/services/workspace-*/              @carlosmsanchezm
+
+# =============================================================================
+# DEPENDENCY MANAGEMENT (CC7.1)
+# =============================================================================
+# Changes to dependencies require security review
+
+go.mod                              @carlosmsanchezm
+go.sum                              @carlosmsanchezm
+go.work                             @carlosmsanchezm
+go.work.sum                         @carlosmsanchezm
+package.json                        @carlosmsanchezm
+package-lock.json                   @carlosmsanchezm
+**/requirements.txt                 @carlosmsanchezm
+**/Pipfile                          @carlosmsanchezm
+**/Pipfile.lock                     @carlosmsanchezm
+
+# =============================================================================
+# PROTO/API DEFINITIONS (CC8.1)
+# =============================================================================
+# API changes can break customers and have security implications
+
+/proto/                             @carlosmsanchezm
+**/*.proto                          @carlosmsanchezm
+
+# =============================================================================
+# SCRIPTS (CC8.1)
+# =============================================================================
+# Scripts can have elevated privileges
+
+/scripts/                           @carlosmsanchezm
+**/*.sh                             @carlosmsanchezm
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+# Ensure accuracy of public-facing docs
+
+/README.md                          @carlosmsanchezm
+/docs/                              @carlosmsanchezm
+
+# =============================================================================
+# FUTURE: Add team-specific ownership when team grows
+# =============================================================================
+# Example for future team structure:
+# /services/billing/               @carlosmsanchezm @billing-team
+# /services/analytics/             @carlosmsanchezm @data-team
+# /frontend/                       @carlosmsanchezm @frontend-team

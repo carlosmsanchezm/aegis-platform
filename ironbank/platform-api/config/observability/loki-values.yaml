@@ -1,0 +1,63 @@
+deploymentMode: SingleBinary
+
+fullnameOverride: aegis-logging-loki
+
+loki:
+  auth_enabled: false
+  analytics:
+    reporting_enabled: false
+  server:
+    http_listen_port: 3100
+  commonConfig:
+    replication_factor: 1
+  limits_config:
+    retention_period: 168h
+    ingestion_rate_mb: 16
+    ingestion_burst_size_mb: 32
+  useTestSchema: true
+  storage:
+    type: filesystem
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  service:
+    type: ClusterIP
+  extraVolumes:
+    - name: loki-data
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: loki-data
+      mountPath: /var/loki
+
+gateway:
+  enabled: false
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+
+# Ensure non-singleBinary targets stay disabled
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false

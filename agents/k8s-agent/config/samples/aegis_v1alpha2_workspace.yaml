@@ -1,0 +1,8 @@
+apiVersion: aegis.yourorg.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: sample-workspace
+spec:
+  projectRef: demo-project
+  profileRef: vscode-python
+  queue: research

@@ -1,0 +1,31 @@
+# Internal PKI overlay for local development.
+# Assumes install-internal-pki.sh has been run (installs cert-manager, step-ca, step-issuer externally).
+
+pki:
+  enabled: true
+  mode: external
+  external:
+    namespace: aegis-pki
+    releaseName: step-certificates
+    provisionerName: aegis
+    servicePort: 443
+  clusterIssuerName: aegis-internal
+  trustBundleSecretName: aegis-trust-bundle
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+  spokeProxyCa:
+    autoGenerate: true
+    secretName: spoke-proxy-ca
+  oidcCa:
+    source: trustBundle
+
+platformApi:
+  auth:
+    oidc:
+      caBundle:
+        create: false
+        secretName: aegis-platform-api-oidc-ca
+        key: ca.crt
+        fileName: ca.crt
+        mountPath: /etc/aegis-platform-api/oidc

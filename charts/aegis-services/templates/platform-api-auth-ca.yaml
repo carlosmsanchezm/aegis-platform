@@ -1,0 +1,24 @@
+{{- $platform := .Values.platformApi | default dict -}}
+{{- $auth := $platform.auth | default dict -}}
+{{- $oidc := $auth.oidc | default dict -}}
+{{- $ca := $oidc.caBundle | default dict -}}
+{{- $pki := .Values.pki | default dict -}}
+{{- $oidcCaSource := ($pki.oidcCa | default dict).source | default "" -}}
+{{- /* Skip when pki-secrets-init hook creates the OIDC CA from trust bundle */ -}}
+{{- if and $platform.enabled $ca.create (ne $oidcCaSource "trustBundle") -}}
+{{- $secretName := include "aegis-services.platformApi.oidcCASecretName" . -}}
+{{- $bundle := trim $ca.data -}}
+{{- if and $secretName $bundle -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+type: Opaque
+data:
+  {{ include "aegis-services.platformApi.oidcCAKey" . }}: {{ $bundle | b64enc }}
+{{- end }}
+{{- end }}

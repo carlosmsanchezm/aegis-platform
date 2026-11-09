@@ -1,0 +1,19 @@
+# Internal PKI overlay for local development.
+#
+# This overlay switches the k8s-agent to trust the shared bundle mounted from
+# the `aegis-trust-bundle` secret instead of embedding base64 CA strings in
+# values files.
+
+k8sAgent:
+  trustBundle:
+    enabled: true
+    secretName: aegis-trust-bundle
+    key: ca.crt
+    mountPath: /etc/aegis/trust
+    fileName: ca.crt
+  env:
+    # Clear legacy inline CA configuration so the agent uses AEGIS_PLATFORM_CA_FILE / AEGIS_CP_OIDC_CA_FILE.
+    AEGIS_PLATFORM_CA_B64: ""
+    AEGIS_PLATFORM_CA_PEM: ""
+    AEGIS_CP_OIDC_CA_B64: ""
+

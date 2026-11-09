@@ -1,0 +1,14 @@
+{{- if and .Values.networkPolicy.enabled (ne (default "dev" .Values.hardeningProfile) "dev") }}
+# 03.13.06 Deny-by-default egress for NIST 800-171 Rev 3 compliance
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-default-deny-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+{{- end }}

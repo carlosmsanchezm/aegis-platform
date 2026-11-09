@@ -1,0 +1,30 @@
+{{- if and .Values.networkPolicy.enabled (ne (default "dev" .Values.hardeningProfile) "dev") }}
+# Allow proxy egress to DNS, platform-api, and workload SSH
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis-services.fullname" . }}-proxy-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: proxy
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Platform API (gRPC-TLS) and workload SSH
+    - ports:
+        - port: 8443
+          protocol: TCP
+        - port: 22
+          protocol: TCP
+{{- end }}

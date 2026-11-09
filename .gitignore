@@ -1,0 +1,121 @@
+# Tool caches (match anywhere; entire dirs)
+**/.bufcache/
+**/.gocache/
+**/.gomodcache/
+
+# Also catch top-level variants just in case
+/.bufcache/
+/.gocache/
+/.gomodcache/
+
+# Local tooling binaries
+/bin/
+/.tools/
+/.tools/**
+
+# Editor / OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Node.js / Yarn / Frontend
+**/node_modules/
+**/dist/
+**/dist-types/
+**/build/
+**/.next/
+**/.turbo/
+**/.cache/
+**/.parcel-cache/
+**/.storybook/
+
+# Python
+**/__pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Package manager lockfiles (optional – keep if you want reproducibility)
+# yarn.lock (keep project-specific ones like aegis-platform/yarn.lock)
+/yarn.lock
+# package-lock.json
+# pnpm-lock.yaml
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Environment files
+.env
+.env.*
+
+# PKI / TLS secrets
+.pki/**/*.key
+.pki/**/*.crt
+
+# Misc frontend artifacts
+*.tsbuildinfo
+out
+.aegis
+policy
+third_party
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+plans/
+backups/
+CREDENTIALS-CHEATSHEET.md
+agents/__init__.py
+agents/__pycache__
+
+# Terraform-generated step-ca external DNS (NLB hostname)
+.step-ca-external-dns
+
+# Helm auto-generated values files (terraform/dev-relay generates these)
+charts/aegis-services/values-cloud-generated.yaml
+charts/aegis-services/values/local-relay.yaml
+charts/aegis-spoke/values-cloud-generated.yaml
+charts/aegis-spoke/values-aws-relay.yaml
+
+# Transient build artifacts (staged by Makefile for Docker builds)
+aegis-remote.vsix
+awscli.zip
+kubectl
+jq
+pulumi-linux-x64.tar.gz
+
+# Compliance evidence (stored in separate vault)
+compliance-evidence/
+terraform/tfplan
+terraform/dev-relay/tfplan
+terraform/pulumi-stack/tfplan
+pulumi-preview
+pilot-test-deploy.yaml
+
+# Secrets and state (never commit)
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*.kubeconfig
+kubeconfig*
+*.log
+*.bak
+*.backup
+realm-export.json

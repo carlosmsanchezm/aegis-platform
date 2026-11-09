@@ -1,0 +1,48 @@
+fullnameOverride: aegis-tracing-tempo
+
+# Minimal, single-binary Tempo tuned for dev/test clusters.
+replicas: 1
+
+tempo:
+  memBallastSizeMbs: 0
+  multitenancyEnabled: false
+  reportingEnabled: false
+  retention: 48h
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+  server:
+    http_listen_port: 3200
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+  metricsGenerator:
+    enabled: false
+
+service:
+  type: ClusterIP
+
+persistence:
+  enabled: false
+
+tempoQuery:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

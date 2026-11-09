@@ -1,0 +1,19 @@
+apiVersion: aegis.yourorg.dev/v1alpha1
+kind: AegisWorkload
+metadata:
+  name: sample-workspace
+spec:
+  projectId: demo-project
+  queue: research
+  workspace:
+    flavor: mig-1g.10gb
+    image: alpine:3.19
+    env:
+      NOTEBOOK_OWNER: demo
+    command:
+      - /bin/sh
+      - -c
+      - echo "Hello from workspace" && sleep 60
+  hints:
+    resourceName: nvidia.com/mig-1g.10gb
+    gpuCount: 1

@@ -1,0 +1,20 @@
+{{- if .Values.platformApi.enabled }}
+{{- if .Values.platformApi.targetNamespace }}
+---
+# Namespace for running workloads
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.platformApi.targetNamespace }}
+  labels:
+    {{- include "aegis-services.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workloads
+    aegis.yourorg.dev/managed-by: platform-api
+    {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+    {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,19 @@
+apiVersion: aegis.yourorg.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: ws-test-v1alpha2
+  namespace: default
+  labels:
+    aegis.aegis-remote/workspace: "true"
+    aegisRemote: "true"
+spec:
+  projectRef: p-demo
+  queue: default
+  profileRef: vscode-python
+  execution:
+    image: carlosmsanchez/aegis-workspace-vscode:latest
+    interactive: true
+    env:
+      VSCODE_QUALITY: stable
+  gpuProfile:
+    flavor: cpu-small

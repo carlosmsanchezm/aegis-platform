@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aegis-auth-proxy
+  namespace: default
+  labels:
+    app: aegis-auth-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aegis-auth-proxy
+  template:
+    metadata:
+      labels:
+        app: aegis-auth-proxy
+    spec:
+      containers:
+        - name: proxy
+          image: aegis-auth-proxy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AEGIS_PROXY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aegis-proxy-secret
+                  key: jwt-secret
+            - name: AEGIS_PROXY_EXPECTED_AUDIENCE
+              value: aegis-proxy
+            - name: AEGIS_PROXY_LISTEN
+              value: :8080
+            - name: AEGIS_PROXY_ALLOWED_SUFFIX
+              value: .svc.cluster.local
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: ""
+              # Comma-separated list of allowed SAN suffixes for client certificates. Example: ".trusted.example.com,.corp.local"
+              # If set, only clients with at least one SAN ending with an allowed suffix may connect. Supports NIST AC-17 compliance.
+            # SC-10 Network Disconnect: Inactivity timeout for privileged user sessions (default: 10m)
+            # Enforces FedRAMP Moderate baseline SC-10 requirement for automatic session termination
+            - name: AEGIS_PROXY_PRIVILEGED_TIMEOUT
+              value: "10m"
+            # SC-10 Network Disconnect: Inactivity timeout for standard user sessions (default: 15m)
+            # Enforces FedRAMP Moderate baseline SC-10 requirement for automatic session termination
+            - name: AEGIS_PROXY_STANDARD_TIMEOUT
+              value: "15m"
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20

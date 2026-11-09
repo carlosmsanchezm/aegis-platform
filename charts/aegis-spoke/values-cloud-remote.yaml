@@ -1,0 +1,74 @@
+# Remote cloud overlay for spoke agent using OIDC client credentials over TLS.
+# Apply on top of values.yaml (and any region-specific values) when pointing
+# the spoke at the remote platform-api and Keycloak endpoints.
+#
+# Architecture — all traffic through one NLB relay:
+#   - gRPC:     NLB :8081 → SSH tunnel → local platform-api
+#   - Keycloak: NLB :8443 → SSH tunnel → local keycloak
+#   - Spoke Proxy: Enabled for multi-cluster workspace connectivity
+
+k8sAgent:
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/k8s-agent
+    pullPolicy: Always
+    tag: "dev"
+  env:
+    # gRPC to platform-api via AWS NLB (TCP passthrough, preserves HTTP/2)
+    AEGIS_CP_GRPC: "aegis-dev-relay-nlb-EXAMPLE.elb.us-east-1.amazonaws.com:8081"
+    AEGIS_CP_GRPC_INSECURE: "false"
+    AEGIS_CP_GRPC_SKIP_VERIFY: "true"
+    AEGIS_CP_GRPC_SERVER_NAME: ""
+    AEGIS_FLAVORS: "cpu-small,cpu-medium,cpu-large,gpu-standard,gpu-large"
+    AEGIS_DEFAULT_IMAGE: "123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+    # For Iron Bank deployments, set to: registry1.dso.mil/ironbank/aegis/vscode-reh-init:<tag>
+    AEGIS_VSCODE_REH_INIT_IMAGE: ""
+
+    # OIDC via AWS NLB (TCP passthrough to local Keycloak)
+    AEGIS_CP_OIDC_TOKEN_URL: "https://aegis-dev-relay-nlb-EXAMPLE.elb.us-east-1.amazonaws.com:8443/realms/aegis/protocol/openid-connect/token"
+    AEGIS_CP_OIDC_CLIENT_ID: "spoke-agent"
+    AEGIS_CP_OIDC_CLIENT_SECRET: ""  # REQUIRED: Set via --set or values override
+    AEGIS_CP_OIDC_AUDIENCE: "aegis-platform"
+    AEGIS_CP_OIDC_SKIP_TLS_VERIFY: "true"
+
+    # Skip CA verification (self-signed certs through tunnel)
+    AEGIS_PLATFORM_CA_B64: ""
+    AEGIS_CP_OIDC_CA_B64: ""
+
+# Spoke proxy configuration for multi-cluster workspace connectivity
+# Uses LoadBalancer Service (auto-creates an AWS NLB with stable DNS).
+# The k8s-agent auto-discovers the NLB hostname — no manual URL needed.
+proxy:
+  enabled: true
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy
+    pullPolicy: Always
+    tag: "dev"
+  service:
+    type: LoadBalancer
+    port: 443
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "external"
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+  # url is intentionally empty — agent auto-discovers from LoadBalancer Service
+  url: ""
+  ingress:
+    enabled: false
+    hostname: ""
+  # REQUIRED: Must be set during provisioning (Pulumi or --set).
+  # Must match AEGIS_PROXY_JWT_SECRET on the hub's platform-api.
+  jwtSecret: ""
+  tls:
+    terminateAtIngress: false
+    # Certs provided via --set-file during helm install
+
+workspaceClasses:
+  custom:
+    defaults:
+      execution:
+        image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/workspace-vscode:latest"
+        interactive: true
+        ports:
+          - 11111
+      storage:
+        mode: ephemeral

@@ -1,0 +1,3 @@
+-- Down migration: no-op. Backfill is idempotent and non-destructive.
+-- project_id values set by this migration are correct associations
+-- that would have been set by the server going forward anyway.

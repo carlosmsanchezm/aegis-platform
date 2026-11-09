@@ -1,0 +1,87 @@
+{{- if .Values.proxy.enabled }}
+{{- $tls := .Values.proxy.tls | default dict -}}
+{{- $cm := $tls.certManager | default dict -}}
+{{- $podTLS := and (not ($tls.terminateAtIngress | default false)) (or ($cm.enabled | default false) (and $tls.cert $tls.key)) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-spoke.proxy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-spoke.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  revisionHistoryLimit: 3
+  replicas: {{ .Values.proxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aegis-spoke.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: proxy
+  template:
+    metadata:
+      annotations:
+        checksum/proxy-secret: {{ include (print $.Template.BasePath "/proxy-secret.yaml") . | sha256sum }}
+        {{- if .Values.proxy.tls.terminateAtIngress }}
+        checksum/proxy-tls-secret: {{ include (print $.Template.BasePath "/proxy-tls-secret.yaml") . | sha256sum }}
+        {{- end }}
+      labels:
+        {{- include "aegis-spoke.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: proxy
+    spec:
+      containers:
+        - name: proxy
+          image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+{{- $useCertManager := and (not .Values.proxy.tls.terminateAtIngress) ((.Values.proxy.tls.certManager).enabled | default false) }}
+{{- $useSelfSigned := and (not .Values.proxy.tls.terminateAtIngress) .Values.proxy.tls.cert .Values.proxy.tls.key }}
+{{- if or $useCertManager $useSelfSigned }}
+          volumeMounts:
+            - name: proxy-tls
+              mountPath: /etc/aegis-proxy
+              readOnly: true
+{{- end }}
+          env:
+            {{- if ne (default "dev" .Values.hardeningProfile) "dev" }}
+            - name: GODEBUG
+              value: "fips140=only"
+            {{- end }}
+            - name: AEGIS_PROXY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aegis-spoke.proxy.secretName" . }}
+                  key: jwt-secret
+            - name: AEGIS_PROXY_EXPECTED_AUDIENCE
+              value: "aegis-proxy"
+            - name: AEGIS_PROXY_LISTEN
+              value: ":8080"
+            - name: AEGIS_PROXY_ALLOWED_SUFFIX
+              value: ".svc.cluster.local"
+{{- if and .Values.proxy.clientCerts .Values.proxy.clientCerts.enabled (gt (len .Values.proxy.clientCerts.sanSuffixes) 0) }}
+            - name: AEGIS_PROXY_CLIENT_CERT_SAN_SUFFIX
+              value: {{ join "," .Values.proxy.clientCerts.sanSuffixes | quote }}
+{{- end }}
+{{- if or $useCertManager $useSelfSigned }}
+            - name: AEGIS_PROXY_TLS_CERT
+              value: "/etc/aegis-proxy/tls.crt"
+            - name: AEGIS_PROXY_TLS_KEY
+              value: "/etc/aegis-proxy/tls.key"
+{{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+{{- if or $useCertManager $useSelfSigned }}
+      volumes:
+        - name: proxy-tls
+          secret:
+            secretName: {{ include "aegis-spoke.proxy.tlsSecretName" . }}
+{{- end }}
+{{- end }}

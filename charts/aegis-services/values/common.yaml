@@ -1,0 +1,789 @@
+# AEGIS Services Helm Chart Values
+# FedRAMP Moderate Compliance Configuration
+
+# Hardening profile: dev | standard
+# dev: No network policies, relaxed security contexts, FIPS off
+# standard: Network policies (ingress + egress deny-by-default), security contexts enforced, FIPS, mTLS
+hardeningProfile: dev
+
+# Ingress Controller (ingress-nginx) settings
+ingressController:
+  enabled: false
+
+ingress-nginx:
+  controller:
+    ingressClassResource:
+      name: ingress-nginx
+      default: false
+    ingressClass: ingress-nginx
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Cluster
+    watchIngressWithoutClass: false
+
+# Platform API Configuration
+# Image registry strategy:
+#   - local.yaml overrides to DockerHub (carlosmsanchez/aegis-platform-api:dev), pullPolicy: IfNotPresent
+#   - cloud.yaml overrides to ECR (123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api), pullPolicy: Always
+platformApi:
+  image:
+    repository: carlosmsanchez/aegis-platform-api
+    tag: "dev"
+    pullPolicy: IfNotPresent
+
+  pulumi:
+    backendUrl: ""          # e.g., s3://aegis-pulumi-state-dev/aegis/pulumi
+    secretsProvider: ""      # e.g., awskms://arn:aws:kms:...
+    configPassphrase: ""     # optional fallback if secretsProvider is not set
+    githubTokenSecret:       # optional: { name: my-gh-token, key: token }
+      name: ""
+      key: ""
+  
+  replicas: 2
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  
+  # AU-3: Content of Audit Records
+  auditLogging:
+    enabled: true
+    level: info
+    format: json
+    destination: stdout
+    # AU-3 Enhancement: Structured audit record schema
+    schema:
+      mandatory:
+        - eventType
+        - timestamp
+        - source
+        - outcome
+        - identity
+        - location
+        - eventMetadata
+      timestampFormat: ISO8601
+      outcomeValues:
+        - success
+        - failure
+        - error
+      enforcementMode: strict  # Fail operations if audit logging fails
+    retention:
+      days: 90
+    
+  # SC-8, SC-13: Transmission Confidentiality and Cryptographic Protection
+  tls:
+    enabled: true
+    certPath: /etc/certs/tls.crt
+    keyPath: /etc/certs/tls.key
+    caPath: /etc/certs/ca.crt
+    # SC-13 Enhancement: FIPS 140-2 Compliance
+    fipsMode: true
+    validateCipherSuites: true
+    enforceTLS13: false
+    minimumTLSVersion: "1.2"
+    cipherSuiteWhitelist:
+      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      - TLS_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_RSA_WITH_AES_128_GCM_SHA256
+    # When enabled, cert-manager is responsible for creating the TLS secret that
+    # this chart mounts. The legacy static (values-injected) secret is disabled.
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+  
+  # AC-6: Least Privilege
+  serviceAccount:
+    create: true
+    name: aegis-platform-api
+    annotations: {}
+  
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10000
+    fsGroup: 10000
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
+  env:
+    OIDC_ISSUER_URL: "https://keycloak.example.com/realms/aegis"
+    OIDC_AUDIENCE: "aegis-platform"
+    # Discovery endpoint: public gRPC endpoint for VS Code extension auto-configuration.
+    # Set in cloud.yaml to the public DNS name. Empty = derived from request host.
+    AEGIS_DISCOVERY_GRPC_ENDPOINT: ""
+    REQUIRE_PHISHING_RESISTANT_MFA: "true"
+    ALLOWED_PHISHING_RESISTANT_AMR: "hwk,webauthn,piv,piv-cac"
+  envFromSecret:
+    AUTHZ_ROLE_BINDINGS_JSON: authz-role-bindings.json
+  secrets:
+    authz-role-bindings.json: |
+      [
+        {
+          "clients": [
+            "backstage",
+            "vscode-extension",
+            "spoke-agent"
+          ],
+          "roles": [
+            "workspace-admin"
+          ],
+          "projects": [
+            "*"
+          ],
+          "queues": [
+            "*"
+          ]
+        }
+      ]
+
+# Proxy Configuration
+# Image registry strategy:
+#   - local.yaml overrides to DockerHub (carlosmsanchez/aegis-proxy:dev), pullPolicy: IfNotPresent
+#   - cloud.yaml overrides to ECR (123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/proxy), pullPolicy: Always
+proxy:
+  image:
+    repository: carlosmsanchez/aegis-proxy
+    tag: "dev"
+    pullPolicy: IfNotPresent
+  
+  replicas: 3
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  
+  # AU-2, AU-3: Audit Events and Content
+  auditLogging:
+    enabled: true
+    level: info
+    format: json
+    destination: stdout
+    # AU-3 Enhancement: Structured audit record schema
+    schema:
+      mandatory:
+        - eventType
+        - timestamp
+        - source
+        - outcome
+        - identity
+        - location
+        - eventMetadata
+      timestampFormat: ISO8601
+      outcomeValues:
+        - success
+        - failure
+        - error
+      enforcementMode: strict
+    # Proxy-specific audit fields
+    proxyFields:
+      - clientIP
+      - method
+      - path
+      - statusCode
+      - duration
+      - jwtSubject
+      - tlsVersion
+      - cipherSuite
+    retention:
+      days: 90
+  
+  # SC-8, SC-13: Transmission Confidentiality and Cryptographic Protection
+  tls:
+    enabled: true
+    certPath: /etc/certs/tls.crt
+    keyPath: /etc/certs/tls.key
+    caPath: /etc/certs/ca.crt
+    # SC-13 Enhancement: FIPS 140-2 Compliance
+    fipsMode: true
+    validateCipherSuites: true
+    enforceTLS13: false
+    minimumTLSVersion: "1.2"
+    cipherSuiteWhitelist:
+      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      - TLS_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_RSA_WITH_AES_128_GCM_SHA256
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+
+
+  # IA-2: Identification and Authentication
+  jwt:
+    secretName: aegis-jwt-secret
+    algorithm: RS256
+    issuer: aegis-platform
+    audience: aegis-services
+  
+  # AC-6: Least Privilege
+  serviceAccount:
+    create: true
+    name: aegis-proxy
+    annotations: {}
+  
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10000
+    fsGroup: 10000
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
+
+# Backstage Configuration
+backstage:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: backstage
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 7007
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+  tls:
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+  appConfig:
+    appBaseUrl: ""
+    backendBaseUrl: ""
+    aegisApiUrl: ""
+  postgres:
+    host: ""
+    port: "5432"
+    user: "aegis_platform"
+    database: "aegis_platform"
+    existingSecret: ""
+    existingSecretPasswordKey: "db-password"
+  keycloak:
+    baseUrl: ""
+    realm: aegis
+    clientId: backstage
+    issuer: ""
+    metadataUrl: ""
+    jwksUrl: ""
+    signIn:
+      enabled: true
+      resolver: emailLocalPartMatchingUserEntityName
+      dangerouslyAllowSignInWithoutUserInCatalog: true
+    clientSecret:
+      secretName: ""
+      key: clientSecret
+  secrets:
+    create: false
+    name: ""
+    backendSecret: ""
+  env: {}
+  envFromSecrets: []
+  caBundle:
+    create: false
+    secretName: ""
+    data: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+  podAnnotations: {}
+  podLabels: {}
+  imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraVolumeMounts: []
+  extraVolumes: []
+  volumeMounts: []
+  volumes: []
+
+# SC-7: Boundary Protection
+networkPolicy:
+  enabled: true
+  defaultDenyAll: true  # SC-7 Enhancement
+  
+  platformApi:
+    ingress:
+      enabled: true
+      from:
+        - podSelector:
+            matchLabels:
+              app: aegis-proxy
+        - podSelector:
+            matchLabels:
+              app: aegis-k8s-agent
+      ports:
+        - protocol: TCP
+          port: 8443
+    egress:
+      enabled: true
+      to:
+        # DNS
+        - podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+          namespaceSelector:
+            matchLabels:
+              name: kube-system
+        # Kubernetes API
+        - ipBlock:
+            cidr: 10.0.0.0/8  # Adjust for cluster CIDR
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: UDP
+          port: 53
+  
+  proxy:
+    ingress:
+      enabled: true
+      from:
+        - namespaceSelector:
+            matchLabels:
+              ingress: allowed
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+    egress:
+      enabled: true
+      to:
+        - podSelector:
+            matchLabels:
+              app: aegis-platform-api
+        # DNS
+        - podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+          namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8443
+        - protocol: UDP
+          port: 53
+
+# SI-4: System Monitoring
+securityMonitoring:
+  enabled: true
+  # Falco integration for runtime security monitoring
+  falcoIntegration:
+    enabled: true
+    priorityLevel: warning
+    rules:
+      - file_integrity_monitoring
+      - process_execution_monitoring
+      - network_connection_monitoring
+      - privileged_container_detection
+  # Prometheus metrics for security events
+  prometheusMetrics:
+    enabled: true
+    securityEvents: true
+    port: 9090
+    path: /metrics
+    customMetrics:
+      - authentication_failures
+      - authorization_denials
+      - rate_limit_violations
+      - tls_handshake_failures
+      - suspicious_activity_detected
+  # Alerting configuration
+  alerting:
+    enabled: true
+    channels:
+      # Configure with actual webhook URLs
+      # - type: webhook
+      #   url: https://alertmanager.example.com/api/v1/alerts
+      # - type: pagerduty
+      #   integrationKey: <key>
+    thresholds:
+      criticalEvents: 10
+      warningEvents: 50
+      timeWindow: 5m
+  # Anomaly detection (ML-based)
+  anomalyDetection:
+    enabled: false
+    mlThreshold: 0.8
+    learningPeriod: 7d
+    features:
+      - request_patterns
+      - connection_sources
+      - resource_access_patterns
+
+# IA-5: Authenticator Management
+secretRotation:
+  enabled: true
+  schedule: "0 0 1 * *"  # Monthly
+  secrets:
+    - name: aegis-jwt-secret
+      type: rsa
+      keySize: 4096
+  # IA-5 Enhancement: Notification and audit
+  notificationChannels:
+    # Configure with actual webhook URLs
+    # - type: webhook
+    #   url: https://notification.example.com/secret-rotation
+    # - type: slack
+    #   webhookUrl: https://hooks.slack.com/services/XXX
+  encryptionAtRest: true
+  annotations:
+    storageclass.kubernetes.io/encryption: aes256
+  auditTrail: enabled
+  retention:
+    backupPreviousSecret: true
+    backupDays: 90
+  validation:
+    verifyStrength: true
+    minimumEntropy: 256
+  failurePolicy: Fail
+
+# SC-7: Boundary Protection - Ingress
+ingressSecurity:
+  enabled: true
+  allowedSourceRanges:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  rateLimiting:
+    enabled: true
+    requestsPerMinute: 1000
+    burstSize: 2000
+  ddosProtection:
+    enabled: true
+    maxConnectionsPerIP: 100
+
+# SI-2: Flaw Remediation
+imageSecurity:
+  scanning:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    registry: harbor.example.com
+    severity:
+      fail: critical,high
+      warn: medium
+  admission:
+    enabled: true
+    policy: enforce
+    allowedRegistries:
+      - harbor.example.com
+      - ghcr.io/aegis-project
+
+# Keycloak SSO deployment
+keycloak:
+  enabled: false
+  createNamespace: false
+  namespace: keycloak
+  instances: 1
+  forceRender: false
+  operator:
+    install: true
+    image: "quay.io/keycloak/keycloak-operator:26.1"
+    keycloakImage: "quay.io/keycloak/keycloak:26.1"
+    imagePullPolicy: IfNotPresent
+    annotations: {}
+    imagePullSecrets: []
+    resources:
+      limits:
+        cpu: 700m
+        memory: 450Mi
+      requests:
+        cpu: 300m
+        memory: 450Mi
+  image: "quay.io/keycloak/keycloak:26.1"
+  imagePullSecrets: []
+  admin:
+    secret:
+      name: keycloak-admin-secret
+      create: false
+      usernameKey: username
+      passwordKey: password
+      username: admin
+      password: ""  # REQUIRED: Set via --set or values override
+  database:
+    vendor: postgres
+    host: ""
+    port: 5432
+    database: keycloak
+    secret:
+      name: keycloak-db-secret
+      create: false
+      usernameKey: username
+      passwordKey: password
+      username: keycloak
+      password: ""  # REQUIRED: Set via --set or values override
+  postgres:
+    enabled: true
+    initChown: true
+    initImage: registry.access.redhat.com/ubi9/ubi-minimal:9.3
+    image:
+      repository: docker.io/postgres
+      tag: "16"
+      pullPolicy: Always
+    storage:
+      size: 5Gi
+      className: ""
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 999
+      fsGroup: 999
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 999
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  tls:
+    secret:
+      name: keycloak-tls
+      create: false
+      cert: ""
+      key: ""
+    certManager:
+      enabled: false
+      issuerRef:
+        name: aegis-internal
+        kind: StepClusterIssuer
+        group: certmanager.step.sm
+      duration: 2160h
+      renewBefore: 168h
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      dnsNames: []
+  http:
+    httpEnabled: false
+    httpsPort: 8443
+    annotations: {}
+    labels: {}
+  hostname:
+    hostname: https://keycloak.localtest.me
+    admin: https://keycloak.localtest.me
+    strict: true
+  ingress:
+    enabled: true
+    className: ingress-nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    labels: {}
+  networkPolicy:
+    enabled: true
+    http:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: aegis-system
+  features:
+    enabled:
+      - token-exchange
+  additionalOptions:
+    - name: metrics-enabled
+      value: "true"
+    - name: proxy
+      value: edge
+  startOptimized: false
+  theme:
+    enabled: true
+    name: aegis-vscode
+    configMap:
+      name: aegis-keycloak-theme
+      volumeName: keycloak-theme
+      mountPath: /opt/keycloak/themes/aegis-vscode
+      readOnly: true
+    files:
+      - key: login-theme.properties
+        file: keycloak/theme/aegis-vscode/login/theme.properties
+        path: login/theme.properties
+      - key: login-redirect.ftl
+        file: keycloak/theme/aegis-vscode/login/redirect.ftl
+        path: login/redirect.ftl
+      - key: messages-en.properties
+        file: keycloak/theme/aegis-vscode/messages/messages_en.properties
+        path: messages/messages_en.properties
+  realm:
+    enabled: true
+    source: file
+    file: keycloak/aegis-realm.json
+    configMap:
+      enabled: true
+      name: aegis-keycloak-realm
+      file: keycloak/aegis-realm.json
+      key: aegis-realm.json
+      mountPath: /opt/keycloak/data/import
+      volumeName: realm-config
+      readOnly: true
+    name: aegis
+    displayName: Aegis
+    accessTokenLifespan: 300
+    client:
+      id: backstage
+      name: Backstage
+      serviceAccountsEnabled: false
+      redirectUris:
+        - http://localhost:7008/*
+        - https://backstage.localtest.me/*
+      webOrigins:
+        - https://backstage.localtest.me
+        - http://localhost:3000
+      secret:
+        create: false
+        name: keycloak-backstage-client-secret
+        key: clientSecret
+        value: ""
+        placeholder: BACKSTAGE_CLIENT_SECRET
+      attributes: {}
+    otp:
+      type: totp
+      algorithm: HmacSHA1
+      digits: 6
+      period: 30
+    requiredActions: []
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  securityContext:
+    runAsNonRoot: true
+    fsGroup: 1000
+
+# PodSecurity Standards Enforcement
+podSecurity:
+  enabled: true
+  enforce: restricted
+  audit: restricted
+  warn: restricted
+  standards:
+    runAsNonRoot: true
+    seccompProfile: RuntimeDefault
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+# PKI Configuration
+# SC-12: Cryptographic Key Establishment and Management
+# PKI stack (cert-manager, step-ca, step-issuer) is ALWAYS installed externally
+# by scripts/install-internal-pki.sh into dedicated namespaces.
+# This chart only consumes PKI resources; it never installs them.
+pki:
+  enabled: false
+  mode: "external"  # external | cloud
+
+  external:
+    namespace: aegis-pki
+    releaseName: step-certificates
+    provisionerName: aegis
+    servicePort: 443
+
+  clusterIssuerName: aegis-internal
+  trustBundleSecretName: aegis-trust-bundle
+  trustBundleNamespaces:
+    - aegis-system
+    - keycloak
+
+  spokeProxyCa:
+    autoGenerate: true
+    secretName: spoke-proxy-ca
+
+  oidcCa:
+    source: "trustBundle"  # trustBundle | inline | external
+
+# Global Configuration
+global:
+  domain: aegis.example.com
+  environment: production
+  compliance:
+    fedramp:
+      enabled: true
+      baseline: moderate
+      controls:
+        - AC-6
+        - AU-2
+        - AU-3
+        - IA-5
+        - SC-7
+        - SC-8
+        - SC-13
+        - SI-2
+        - SI-4

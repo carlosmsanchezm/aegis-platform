@@ -1,0 +1,129 @@
+# Local development values for aegis-services
+# This configuration is optimized for local development environments
+# such as minikube, kind, or Docker Desktop Kubernetes
+
+#################################################################
+# Platform API Configuration - Local
+#################################################################
+platformApi:
+  enabled: true
+  replicaCount: 1
+  serviceAccountName: aegis-platform-api
+
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/aegis/platform-api
+    tag: "latest"
+    pullPolicy: IfNotPresent  # Use local images if available
+
+  service:
+    type: ClusterIP
+    grpcPort: 8081
+    httpPort: 8080
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: platform-api-grpc.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: grpc
+
+  # Local development environment variables
+  env:
+    LOG_LEVEL: "debug"
+    AEGIS_PROXY_EXPECTED_AUDIENCE: "aegis-proxy"
+    AEGIS_PROXY_BASE_URL: "http://proxy.localtest.me"
+    AUTH_STATIC_TOKEN: ""  # REQUIRED: Set via --set or values override
+    AUTH_STATIC_SUBJECT: "dev-user@example.com"
+
+  # Local kubeconfig directory
+  kubeConfigsDir: "/tmp/kubeconfigs"
+  targetNamespace: "aegis-workloads-local"
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+  # Disable health probes for local development (endpoints not implemented yet)
+  livenessProbe: null
+  readinessProbe: null
+
+#################################################################
+# Proxy Configuration - Local
+#################################################################
+proxy:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: aegis-proxy-local
+    tag: "latest"
+    pullPolicy: IfNotPresent  # Use local images if available
+
+  service:
+    type: ClusterIP
+    port: 8085
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    hosts:
+      - host: proxy.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+
+  # Local development JWT secret (32+ chars) - must match Platform API
+  jwtSecret: "a-very-secret-key-for-local-dev-must-be-32-chars"
+  expectedAudience: "aegis-proxy"
+  allowedSuffix: ".svc.cluster.local"
+  publicHost: "proxy.localtest.me"
+  clientCerts:
+    enabled: false
+    sanSuffixes: []
+
+  tls:
+    enabled: false
+
+  # Local development environment variables
+  env:
+    LOG_LEVEL: "debug"
+
+  # Resource constraints for local development
+  resources:
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+
+  # Relaxed probes for local development
+  livenessProbe:
+    tcpSocket:
+      port: 8085
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  readinessProbe:
+    tcpSocket:
+      port: 8085
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5

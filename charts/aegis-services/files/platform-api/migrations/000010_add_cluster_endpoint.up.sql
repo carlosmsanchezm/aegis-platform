@@ -1,0 +1,2 @@
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS cluster_endpoint TEXT;
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS cluster_ca TEXT;

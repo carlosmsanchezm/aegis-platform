@@ -1,0 +1,10 @@
+# Default values for the aegis-services chart.
+# Environment-specific defaults live under values/*.yaml.
+platformApi:
+  enabled: false
+
+proxy:
+  enabled: false
+
+keycloak:
+  enabled: false
